@@ -21,12 +21,12 @@ container('publish-images') {
 
                 def customImage = docker.build("${imageName}")
 
-                def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${env.DOKCER_REGISTRY_URL}/${imageName} 2>&1 > /dev/null")
+                def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${params.DOKCER_REGISTRY_URL}/${imageName} 2>&1 > /dev/null")
                 if (isExistTargeImage == 0) {
-                    def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${env.DOKCER_REGISTRY_URL}/${imageName}")
+                    def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${params.DOKCER_REGISTRY_URL}/${imageName}")
                 }
 
-                docker.withRegistry("https://${env.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
+                docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
                     customImage.push()
                 }
             } catch (exc) {
@@ -35,6 +35,11 @@ container('publish-images') {
                 def isExistSourceImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
                 if (isExistSourceImage == 0) {
                     def removeSourceImageStatus = sh(returnStatus: true, script: "docker rmi ${imageName}")
+                }
+
+                def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${params.DOKCER_REGISTRY_URL}/${imageName} 2>&1 > /dev/null")
+                if (isExistTargeImage == 0) {
+                    def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${params.DOKCER_REGISTRY_URL}/${imageName}")
                 }
             }
         } 
