@@ -27,7 +27,7 @@ class TestIndexBase:
         params=gen_index_params()
     )
     def get_index_params(self, request, args):
-        if "internal" in args:
+        if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
         return request.param
@@ -505,7 +505,7 @@ class TestIndexIP:
         params=gen_index_params()
     )
     def get_index_params(self, request, args):
-        if "internal" in args:
+        if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
         return request.param
