@@ -164,6 +164,9 @@ ExecutionEngineImpl::HybridLoad() const {
         quantizer_conf->mode = 1;
         quantizer_conf->gpu_id = best_device_id;
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        if (quantizer == nullptr) {
+            ENGINE_LOG_ERROR << "quantizer is nullptr";
+        }
         index_->SetQuantizer(quantizer);
         auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
         cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
