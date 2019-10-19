@@ -99,12 +99,12 @@
         <dependency>
             <groupId>io.milvus</groupId>
             <artifactId>milvus-sdk-java</artifactId>
-            <version>0.1.2-SNAPSHOT</version>
+            <version>0.2.0-SNAPSHOT</version>
         </dependency>
 
 <!--        <dependency>-->
 <!--            <groupId>io.grpc</groupId>-->
-<!--            <artifactId>grpc-netty-shaded</artifactId>-->
+<!--            <artifactId>grpc-netty-sher staded</artifactId>-->
 <!--            <scope>runtime</scope>-->
 <!--        </dependency>-->
 <!--        <dependency>-->
