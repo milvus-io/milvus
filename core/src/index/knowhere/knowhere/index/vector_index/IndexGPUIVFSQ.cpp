@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/index_factory.h>
 #include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
 
 #include <memory>
 

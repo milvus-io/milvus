@@ -44,9 +44,9 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
         ParameterType parameter_type;
         std::tie(index_type, parameter_type) = GetParam();
         // Init_with_default();
-//        nb = 1000000;
-//        nq = 1000;
-//        k = 1000;
+        //        nb = 1000000;
+        //        nq = 1000;
+        //        k = 1000;
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type);

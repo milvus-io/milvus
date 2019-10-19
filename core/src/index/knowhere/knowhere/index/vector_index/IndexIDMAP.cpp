@@ -17,9 +17,9 @@
 
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
-#include <faiss/index_io.h>
-#include <faiss/index_factory.h>
 #include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
+#include <faiss/index_io.h>
 
 #include <vector>
 

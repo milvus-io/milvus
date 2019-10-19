@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include <faiss/index_io.h>
 #include <faiss/gpu/GpuIndexFlat.h>
+#include <faiss/index_io.h>
 
 #include <memory>
 #include <utility>
