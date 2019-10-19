@@ -26,8 +26,8 @@
 namespace milvus {
 namespace scheduler {
 
- bool
- LargeSQ8HPass::Run(const TaskPtr& task) {
+bool
+LargeSQ8HPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask) {
         return false;
     }
@@ -67,7 +67,7 @@ namespace scheduler {
     task->label() = label;
 
     return true;
- }
+}
 
 }  // namespace scheduler
 }  // namespace milvus
