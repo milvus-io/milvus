@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/utils.h>
+#include <faiss/utils/distances.h>
 #include <omp.h>
 #include <cmath>
 #include <string>
