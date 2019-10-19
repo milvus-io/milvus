@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include <faiss/AuxIndexStructures.h>
+#include <faiss/impl/io.h>
 
 namespace knowhere {
 
