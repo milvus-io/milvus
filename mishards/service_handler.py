@@ -21,26 +21,12 @@ logger = logging.getLogger(__name__)
 class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     MAX_NPROBE = 2048
 
-    def __init__(self, conn_mgr, tracer, router, max_workers=multiprocessing.cpu_count(), **kwargs):
-        self.conn_mgr = conn_mgr
+    def __init__(self, tracer, router, max_workers=multiprocessing.cpu_count(), **kwargs):
         self.table_meta = {}
         self.error_handlers = {}
         self.tracer = tracer
         self.router = router
         self.max_workers = max_workers
-
-    def connection(self, metadata=None):
-        conn = self.conn_mgr.conn('WOSERVER', metadata=metadata)
-        if conn:
-            conn.on_connect(metadata=metadata)
-        return conn.conn
-
-    def query_conn(self, name, metadata=None):
-        conn = self.conn_mgr.conn(name, metadata=metadata)
-        if not conn:
-            raise exceptions.ConnectionNotFoundError(name, metadata=metadata)
-        conn.on_connect(metadata=metadata)
-        return conn.conn
 
     def _do_merge(self, files_n_topk_results, topk, reverse=False, **kwargs):
         status = status_pb2.Status(error_code=status_pb2.SUCCESS,
@@ -109,7 +95,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 'Send Search Request: addr={};params={};nq={};topk={};nprobe={}'
                 .format(addr, query_params, len(vectors), topk, nprobe))
 
-            conn = self.query_conn(addr, metadata=metadata)
+            conn = self.router.query_conn(addr, metadata=metadata)
             start = time.time()
             span = kwargs.get('span', None)
             span = span if span else (None if self.tracer.empty else
@@ -152,7 +138,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                   metadata=metadata)
 
     def _create_table(self, table_schema):
-        return self.connection().create_table(table_schema)
+        return self.router.connection().create_table(table_schema)
 
     @mark_grpc_method
     def CreateTable(self, request, context):
@@ -170,7 +156,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def _has_table(self, table_name, metadata=None):
-        return self.connection(metadata=metadata).has_table(table_name)
+        return self.router.connection(metadata=metadata).has_table(table_name)
 
     @mark_grpc_method
     def HasTable(self, request, context):
@@ -191,7 +177,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             bool_reply=_bool)
 
     def _delete_table(self, table_name):
-        return self.connection().delete_table(table_name)
+        return self.router.connection().delete_table(table_name)
 
     @mark_grpc_method
     def DropTable(self, request, context):
@@ -209,7 +195,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def _create_index(self, table_name, index):
-        return self.connection().create_index(table_name, index)
+        return self.router.connection().create_index(table_name, index)
 
     @mark_grpc_method
     def CreateIndex(self, request, context):
@@ -230,7 +216,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def _add_vectors(self, param, metadata=None):
-        return self.connection(metadata=metadata).add_vectors(
+        return self.router.connection(metadata=metadata).add_vectors(
             None, None, insert_param=param)
 
     @mark_grpc_method
@@ -263,7 +249,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         table_meta = self.table_meta.get(table_name, None)
 
         if not table_meta:
-            status, info = self.connection(
+            status, info = self.router.connection(
                 metadata=metadata).describe_table(table_name)
             if not status.OK():
                 raise exceptions.TableNotFoundError(table_name,
@@ -307,7 +293,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         raise NotImplemented()
 
     def _describe_table(self, table_name, metadata=None):
-        return self.connection(metadata=metadata).describe_table(table_name)
+        return self.router.connection(metadata=metadata).describe_table(table_name)
 
     @mark_grpc_method
     def DescribeTable(self, request, context):
@@ -340,7 +326,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         )
 
     def _count_table(self, table_name, metadata=None):
-        return self.connection(
+        return self.router.connection(
             metadata=metadata).get_table_row_count(table_name)
 
     @mark_grpc_method
@@ -364,7 +350,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             table_row_count=_count if isinstance(_count, int) else -1)
 
     def _get_server_version(self, metadata=None):
-        return self.connection(metadata=metadata).server_version()
+        return self.router.connection(metadata=metadata).server_version()
 
     @mark_grpc_method
     def Cmd(self, request, context):
@@ -380,7 +366,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         if _cmd == 'version':
             _status, _reply = self._get_server_version(metadata=metadata)
         else:
-            _status, _reply = self.connection(
+            _status, _reply = self.router.connection(
                 metadata=metadata).server_status()
 
         return milvus_pb2.StringReply(status=status_pb2.Status(
@@ -388,7 +374,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             string_reply=_reply)
 
     def _show_tables(self, metadata=None):
-        return self.connection(metadata=metadata).show_tables()
+        return self.router.connection(metadata=metadata).show_tables()
 
     @mark_grpc_method
     def ShowTables(self, request, context):
@@ -401,7 +387,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             table_names=_results)
 
     def _delete_by_range(self, table_name, start_date, end_date):
-        return self.connection().delete_vectors_by_range(table_name,
+        return self.router.connection().delete_vectors_by_range(table_name,
                                                          start_date,
                                                          end_date)
 
@@ -423,7 +409,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def _preload_table(self, table_name):
-        return self.connection().preload_table(table_name)
+        return self.router.connection().preload_table(table_name)
 
     @mark_grpc_method
     def PreloadTable(self, request, context):
@@ -439,7 +425,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                  reason=_status.message)
 
     def _describe_index(self, table_name, metadata=None):
-        return self.connection(metadata=metadata).describe_index(table_name)
+        return self.router.connection(metadata=metadata).describe_index(table_name)
 
     @mark_grpc_method
     def DescribeIndex(self, request, context):
@@ -464,7 +450,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             index=_index)
 
     def _drop_index(self, table_name):
-        return self.connection().drop_index(table_name)
+        return self.router.connection().drop_index(table_name)
 
     @mark_grpc_method
     def DropIndex(self, request, context):

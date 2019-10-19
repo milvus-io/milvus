@@ -88,8 +88,7 @@ class Server:
     def start(self, port=None):
         handler_class = self.decorate_handler(ServiceHandler)
         add_MilvusServiceServicer_to_server(
-            handler_class(conn_mgr=self.conn_mgr,
-                          tracer=self.tracer,
+            handler_class(tracer=self.tracer,
                           router=self.router), self.server_impl)
         self.server_impl.add_insecure_port("[::]:{}".format(
             str(port or self._port)))
