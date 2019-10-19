@@ -20,7 +20,7 @@ def app(request):
 @pytest.fixture
 def started_app(app):
     app.on_pre_run()
-    app.start(app.port)
+    app.start(settings.SERVER_TEST_PORT)
 
     yield app
 

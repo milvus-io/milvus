@@ -91,7 +91,7 @@ class Server:
             handler_class(tracer=self.tracer,
                           router=self.router), self.server_impl)
         self.server_impl.add_insecure_port("[::]:{}".format(
-            str(port or self._port)))
+            str(port or self.port)))
         self.server_impl.start()
 
     def run(self, port):

@@ -226,12 +226,13 @@ class EventHandler(threading.Thread):
 
 class KubernetesProviderSettings:
     def __init__(self, namespace, pod_patt, label_selector, in_cluster,
-                 poll_interval, **kwargs):
+                 poll_interval, port=None, **kwargs):
         self.namespace = namespace
         self.pod_patt = pod_patt
         self.label_selector = label_selector
         self.in_cluster = in_cluster
         self.poll_interval = poll_interval
+        self.port = int(port) if port else 19530
 
 
 @singleton
@@ -245,6 +246,7 @@ class KubernetesProvider(object):
         self.label_selector = settings.label_selector
         self.in_cluster = settings.in_cluster
         self.poll_interval = settings.poll_interval
+        self.port = settings.port
         self.kwargs = kwargs
         self.queue = queue.Queue()
 
@@ -279,7 +281,7 @@ class KubernetesProvider(object):
                                           **kwargs)
 
     def add_pod(self, name, ip):
-        self.conn_mgr.register(name, 'tcp://{}:19530'.format(ip))
+        self.conn_mgr.register(name, 'tcp://{}:{}'.format(ip, self.port))
 
     def delete_pod(self, name):
         self.conn_mgr.unregister(name)

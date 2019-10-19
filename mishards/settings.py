@@ -25,6 +25,7 @@ TIMEOUT = env.int('TIMEOUT', 60)
 MAX_RETRY = env.int('MAX_RETRY', 3)
 
 SERVER_PORT = env.int('SERVER_PORT', 19530)
+SERVER_TEST_PORT = env.int('SERVER_TEST_PORT', 19530)
 WOSERVER = env.str('WOSERVER')
 
 SD_PROVIDER_SETTINGS = None
@@ -36,11 +37,13 @@ if SD_PROVIDER == 'Kubernetes':
         in_cluster=env.bool('SD_IN_CLUSTER', False),
         poll_interval=env.int('SD_POLL_INTERVAL', 5),
         pod_patt=env.str('SD_ROSERVER_POD_PATT', ''),
-        label_selector=env.str('SD_LABEL_SELECTOR', ''))
+        label_selector=env.str('SD_LABEL_SELECTOR', ''),
+        port=env.int('SD_PORT', 19530))
 elif SD_PROVIDER == 'Static':
     from sd.static_provider import StaticProviderSettings
     SD_PROVIDER_SETTINGS = StaticProviderSettings(
-        hosts=env.list('SD_STATIC_HOSTS', []))
+        hosts=env.list('SD_STATIC_HOSTS', []),
+        port=env.int('SD_STATIC_PORT', 19530))
 
 # TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
 
