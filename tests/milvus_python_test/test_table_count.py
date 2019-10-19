@@ -38,8 +38,11 @@ class TestTableCount:
         scope="function",
         params=gen_index_params()
     )
-    def get_index_params(self, request):
-        yield request.param
+    def get_index_params(self, request, args):
+        if "internal" in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     def test_table_rows_count(self, connect, table, add_vectors_nb):
         '''
@@ -179,8 +182,11 @@ class TestTableCountIP:
         scope="function",
         params=gen_index_params()
     )
-    def get_index_params(self, request):
-        yield request.param
+    def get_index_params(self, request, args):
+        if "internal" in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     def test_table_rows_count(self, connect, ip_table, add_vectors_nb):
         '''
