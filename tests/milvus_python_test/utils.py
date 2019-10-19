@@ -461,6 +461,7 @@ def gen_simple_index_params():
 
     return gen_params(index_types, nlists)
 
+
 if __name__ == "__main__":
     import numpy
 

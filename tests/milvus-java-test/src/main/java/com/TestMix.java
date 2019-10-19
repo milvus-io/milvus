@@ -116,8 +116,7 @@ public class TestMix {
         executor.shutdown();
 
         Thread.sleep(2000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
         Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
     }
 
@@ -142,8 +141,7 @@ public class TestMix {
         executor.awaitQuiescence(300, TimeUnit.SECONDS);
         executor.shutdown();
         Thread.sleep(2000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
         Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
     }
 
@@ -180,8 +178,7 @@ public class TestMix {
         executor.awaitQuiescence(300, TimeUnit.SECONDS);
         executor.shutdown();
         Thread.sleep(2000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
         Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
     }
 
@@ -209,12 +206,10 @@ public class TestMix {
                                                                  .withIndexFileSize(index_file_size)
                                                                  .withMetricType(MetricType.IP)
                                                                  .build();
-                        TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-                        client.createTable(tableSchemaParam);
+                        client.createTable(tableSchema);
                         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
                         client.insert(insertParam);
-                        TableParam tableParam = new TableParam.Builder(tableName).build();
-                        Response response = client.dropTable(tableParam);
+                        Response response = client.dropTable(tableName);
                         Assert.assertTrue(response.ok());
                         try {
                             client.disconnect();

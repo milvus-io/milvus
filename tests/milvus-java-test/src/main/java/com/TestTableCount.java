@@ -27,21 +27,18 @@ public class TestTableCount {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_table_count_no_vectors(MilvusClient client, String tableName) {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), 0);
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), 0);
     }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_table_count_table_not_existed(MilvusClient client, String tableName) {
-        TableParam tableParam = new TableParam.Builder(tableName+"_").build();
-        GetTableRowCountResponse res = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse res = client.getTableRowCount(tableName+"_");
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_table_count_without_connect(MilvusClient client, String tableName) {
-        TableParam tableParam = new TableParam.Builder(tableName+"_").build();
-        GetTableRowCountResponse res = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse res = client.getTableRowCount(tableName+"_");
         assert(!res.getResponse().ok());
     }
 
@@ -52,9 +49,8 @@ public class TestTableCount {
         // Add vectors
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();;
         client.insert(insertParam);
-        Thread.currentThread().sleep(1000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), nb);
+        Thread.currentThread().sleep(2000);
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb);
     }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
@@ -69,8 +65,7 @@ public class TestTableCount {
                     .withIndexFileSize(index_file_size)
                     .withMetricType(MetricType.L2)
                     .build();
-            TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-            client.createTable(tableSchemaParam);
+            client.createTable(tableSchema);
             // Add vectors
             InsertParam insertParam = new InsertParam.Builder(tableNameNew, vectors).build();
             client.insert(insertParam);
@@ -78,8 +73,7 @@ public class TestTableCount {
         Thread.currentThread().sleep(1000);
         for (int i = 0; i < tableNum; ++i) {
             String tableNameNew = tableName + "_" + Integer.toString(i);
-            TableParam tableParam = new TableParam.Builder(tableNameNew).build();
-            res = client.getTableRowCount(tableParam);
+            res = client.getTableRowCount(tableNameNew);
             Assert.assertEquals(res.getTableRowCount(), nb);
         }
     }
