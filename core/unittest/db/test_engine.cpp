@@ -108,15 +108,16 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->Dimension(), dimension);
     ASSERT_EQ(engine_ptr->Count(), ids.size());
 
-//    status = engine_ptr->CopyToGpu(0);
-//    //ASSERT_TRUE(status.ok());
-//
-//    auto new_engine = engine_ptr->Clone();
-//    ASSERT_EQ(new_engine->Dimension(), dimension);
-//    ASSERT_EQ(new_engine->Count(), ids.size());
-//    status = new_engine->CopyToCpu();
-//    //ASSERT_TRUE(status.ok());
-//
-//    auto engine_build = new_engine->BuildIndex("/tmp/milvus_index_2", engine::EngineType::FAISS_IVFSQ8);
-//    //ASSERT_TRUE(status.ok());
+    status = engine_ptr->CopyToGpu(0, true);
+    status = engine_ptr->CopyToGpu(0, false);
+    //ASSERT_TRUE(status.ok());
+
+    auto new_engine = engine_ptr->Clone();
+    ASSERT_EQ(new_engine->Dimension(), dimension);
+    ASSERT_EQ(new_engine->Count(), ids.size());
+    status = new_engine->CopyToCpu();
+    //ASSERT_TRUE(status.ok());
+
+    auto engine_build = new_engine->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+    //ASSERT_TRUE(status.ok());
 }

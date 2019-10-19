@@ -88,7 +88,7 @@ Status::MoveFrom(Status& s) {
 std::string
 Status::message() const {
     if (state_ == nullptr) {
-        return "";
+        return "OK";
     }
 
     std::string msg;
