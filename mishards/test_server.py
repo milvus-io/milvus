@@ -13,6 +13,7 @@ from mishards import db, create_app, settings
 from mishards.service_handler import ServiceHandler
 from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
 from mishards.factories import TableFilesFactory, TablesFactory, TableFiles, Tables
+from mishards.routings import RouterMixin
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,10 @@ BAD = Status(code=Status.PERMISSION_DENIED, message='Fail')
 
 @pytest.mark.usefixtures('started_app')
 class TestServer:
-    def client(self, port):
+    @property
+    def client(self):
         m = Milvus()
-        m.connect(host='localhost', port=port)
+        m.connect(host='localhost', port=settings.SERVER_TEST_PORT)
         return m
 
     def test_server_start(self, started_app):
@@ -33,22 +35,22 @@ class TestServer:
     def test_cmd(self, started_app):
         ServiceHandler._get_server_version = mock.MagicMock(return_value=(OK,
                                                                           ''))
-        status, _ = self.client(started_app.port).server_version()
+        status, _ = self.client.server_version()
         assert status.OK()
 
         Parser.parse_proto_Command = mock.MagicMock(return_value=(BAD, 'cmd'))
-        status, _ = self.client(started_app.port).server_version()
+        status, _ = self.client.server_version()
         assert not status.OK()
 
     def test_drop_index(self, started_app):
         table_name = inspect.currentframe().f_code.co_name
         ServiceHandler._drop_index = mock.MagicMock(return_value=OK)
-        status = self.client(started_app.port).drop_index(table_name)
+        status = self.client.drop_index(table_name)
         assert status.OK()
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        status = self.client(started_app.port).drop_index(table_name)
+        status = self.client.drop_index(table_name)
         assert not status.OK()
 
     def test_describe_index(self, started_app):
@@ -62,13 +64,13 @@ class TestServer:
             return_value=(OK, table_name))
         ServiceHandler._describe_index = mock.MagicMock(
             return_value=(OK, index_param))
-        status, ret = self.client(started_app.port).describe_index(table_name)
+        status, ret = self.client.describe_index(table_name)
         assert status.OK()
         assert ret._table_name == index_param._table_name
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        status, _ = self.client(started_app.port).describe_index(table_name)
+        status, _ = self.client.describe_index(table_name)
         assert not status.OK()
 
     def test_preload(self, started_app):
@@ -77,12 +79,12 @@ class TestServer:
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(OK, table_name))
         ServiceHandler._preload_table = mock.MagicMock(return_value=OK)
-        status = self.client(started_app.port).preload_table(table_name)
+        status = self.client.preload_table(table_name)
         assert status.OK()
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        status = self.client(started_app.port).preload_table(table_name)
+        status = self.client.preload_table(table_name)
         assert not status.OK()
 
     def test_delete_by_range(self, started_app):
@@ -94,13 +96,13 @@ class TestServer:
         Parser.parse_proto_DeleteByRangeParam = mock.MagicMock(
             return_value=(OK, unpacked))
         ServiceHandler._delete_by_range = mock.MagicMock(return_value=OK)
-        status = self.client(started_app.port).delete_vectors_by_range(
+        status = self.client.delete_vectors_by_range(
             *unpacked)
         assert status.OK()
 
         Parser.parse_proto_DeleteByRangeParam = mock.MagicMock(
             return_value=(BAD, unpacked))
-        status = self.client(started_app.port).delete_vectors_by_range(
+        status = self.client.delete_vectors_by_range(
             *unpacked)
         assert not status.OK()
 
@@ -111,21 +113,19 @@ class TestServer:
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(OK, table_name))
         ServiceHandler._count_table = mock.MagicMock(return_value=(OK, count))
-        status, ret = self.client(
-            started_app.port).get_table_row_count(table_name)
+        status, ret = self.client.get_table_row_count(table_name)
         assert status.OK()
         assert ret == count
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        status, _ = self.client(
-            started_app.port).get_table_row_count(table_name)
+        status, _ = self.client.get_table_row_count(table_name)
         assert not status.OK()
 
     def test_show_tables(self, started_app):
         tables = ['t1', 't2']
         ServiceHandler._show_tables = mock.MagicMock(return_value=(OK, tables))
-        status, ret = self.client(started_app.port).show_tables()
+        status, ret = self.client.show_tables()
         assert status.OK()
         assert ret == tables
 
@@ -141,17 +141,17 @@ class TestServer:
             return_value=(OK, table_schema.table_name))
         ServiceHandler._describe_table = mock.MagicMock(
             return_value=(OK, table_schema))
-        status, _ = self.client(started_app.port).describe_table(table_name)
+        status, _ = self.client.describe_table(table_name)
         assert status.OK()
 
         ServiceHandler._describe_table = mock.MagicMock(
             return_value=(BAD, table_schema))
-        status, _ = self.client(started_app.port).describe_table(table_name)
+        status, _ = self.client.describe_table(table_name)
         assert not status.OK()
 
         Parser.parse_proto_TableName = mock.MagicMock(return_value=(BAD,
                                                                     'cmd'))
-        status, ret = self.client(started_app.port).describe_table(table_name)
+        status, ret = self.client.describe_table(table_name)
         assert not status.OK()
 
     def test_insert(self, started_app):
@@ -159,7 +159,7 @@ class TestServer:
         vectors = [[random.random() for _ in range(16)] for _ in range(10)]
         ids = [random.randint(1000000, 20000000) for _ in range(10)]
         ServiceHandler._add_vectors = mock.MagicMock(return_value=(OK, ids))
-        status, ret = self.client(started_app.port).add_vectors(
+        status, ret = self.client.add_vectors(
             table_name=table_name, records=vectors)
         assert status.OK()
         assert ids == ret
@@ -170,14 +170,12 @@ class TestServer:
         Parser.parse_proto_IndexParam = mock.MagicMock(return_value=(OK,
                                                                      unpacks))
         ServiceHandler._create_index = mock.MagicMock(return_value=OK)
-        status = self.client(
-            started_app.port).create_index(table_name=table_name)
+        status = self.client.create_index(table_name=table_name)
         assert status.OK()
 
         Parser.parse_proto_IndexParam = mock.MagicMock(return_value=(BAD,
                                                                      None))
-        status = self.client(
-            started_app.port).create_index(table_name=table_name)
+        status = self.client.create_index(table_name=table_name)
         assert not status.OK()
 
     def test_drop_table(self, started_app):
@@ -186,14 +184,12 @@ class TestServer:
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(OK, table_name))
         ServiceHandler._delete_table = mock.MagicMock(return_value=OK)
-        status = self.client(
-            started_app.port).delete_table(table_name=table_name)
+        status = self.client.delete_table(table_name=table_name)
         assert status.OK()
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        status = self.client(
-            started_app.port).delete_table(table_name=table_name)
+        status = self.client.delete_table(table_name=table_name)
         assert not status.OK()
 
     def test_has_table(self, started_app):
@@ -202,12 +198,12 @@ class TestServer:
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(OK, table_name))
         ServiceHandler._has_table = mock.MagicMock(return_value=True)
-        has = self.client(started_app.port).has_table(table_name=table_name)
+        has = self.client.has_table(table_name=table_name)
         assert has
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        has = self.client(started_app.port).has_table(table_name=table_name)
+        has = self.client.has_table(table_name=table_name)
         assert not has
 
     def test_create_table(self, started_app):
@@ -219,12 +215,12 @@ class TestServer:
                             dimension=dimension)
 
         ServiceHandler._create_table = mock.MagicMock(return_value=OK)
-        status = self.client(started_app.port).create_table(table_schema)
+        status = self.client.create_table(table_schema)
         assert status.OK()
 
         Parser.parse_proto_TableSchema = mock.MagicMock(return_value=(BAD,
                                                                       None))
-        status = self.client(started_app.port).create_table(table_schema)
+        status = self.client.create_table(table_schema)
         assert not status.OK()
 
     def random_data(self, n, dimension):
@@ -261,19 +257,21 @@ class TestServer:
                                    metric_type=table.metric_type,
                                    dimension=table.dimension)
 
-        status, _ = self.client(started_app.port).search_vectors(**param)
+        status, _ = self.client.search_vectors(**param)
         assert status.code == Status.ILLEGAL_ARGUMENT
 
         param['nprobe'] = 2048
+        RouterMixin.connection = mock.MagicMock(return_value=Milvus())
+        RouterMixin.query_conn = mock.MagicMock(return_value=Milvus())
         Milvus.describe_table = mock.MagicMock(return_value=(BAD,
                                                              table_schema))
-        status, ret = self.client(started_app.port).search_vectors(**param)
+        status, ret = self.client.search_vectors(**param)
         assert status.code == Status.TABLE_NOT_EXISTS
 
         Milvus.describe_table = mock.MagicMock(return_value=(OK, table_schema))
         Milvus.search_vectors_in_files = mock.MagicMock(
             return_value=mock_results)
 
-        status, ret = self.client(started_app.port).search_vectors(**param)
+        status, ret = self.client.search_vectors(**param)
         assert status.OK()
         assert len(ret) == nq
