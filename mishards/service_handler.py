@@ -388,8 +388,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     def _delete_by_range(self, table_name, start_date, end_date):
         return self.router.connection().delete_vectors_by_range(table_name,
-                                                         start_date,
-                                                         end_date)
+                                                                start_date,
+                                                                end_date)
 
     @mark_grpc_method
     def DeleteByRange(self, request, context):
