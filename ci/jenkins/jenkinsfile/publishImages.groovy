@@ -2,7 +2,6 @@ container('publish-images') {
     timeout(time: 15, unit: 'MINUTES') {
         dir ("docker/deploy/${OS_NAME}") {
             def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
-            def dockerRegistryURL = "registry.zilliz.com"
 
             withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
                 def downloadStatus = sh(returnStatus: true, script: "curl -u${JFROG_USERNAME}:${JFROG_PASSWORD} -O ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage}")
@@ -22,12 +21,12 @@ container('publish-images') {
 
                 def customImage = docker.build("${imageName}")
 
-                def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName} 2>&1 > /dev/null")
+                def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${env.DOKCER_REGISTRY_URL}/${imageName} 2>&1 > /dev/null")
                 if (isExistTargeImage == 0) {
-                    def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${dockerRegistryURL}/${imageName}")
+                    def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${env.DOKCER_REGISTRY_URL}/${imageName}")
                 }
 
-                docker.withRegistry("https://${dockerRegistryURL}", "${params.DOCKER_CREDENTIALS_ID}") {
+                docker.withRegistry("https://${env.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
                     customImage.push()
                 }
             } catch (exc) {
