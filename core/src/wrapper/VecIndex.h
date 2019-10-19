@@ -70,6 +70,7 @@ class VecIndex : public cache::DataObj {
     virtual VecIndexPtr
     CopyToCpu(const Config& cfg = Config()) = 0;
 
+    // TODO(linxj): Deprecated
     virtual VecIndexPtr
     Clone() = 0;
 

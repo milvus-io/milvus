@@ -15,15 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/AutoTune.h>
-#include <faiss/AuxIndexStructures.h>
+#include <faiss/gpu/GpuCloner.h>
 #include <faiss/IVFlib.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVF.h>
 #include <faiss/IndexIVFFlat.h>
-#include <faiss/IndexIVFPQ.h>
-#include <faiss/gpu/GpuAutoTune.h>
-#include <faiss/index_io.h>
 #include <memory>
 #include <utility>
 #include <vector>
