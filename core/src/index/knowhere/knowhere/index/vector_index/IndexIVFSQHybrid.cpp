@@ -22,19 +22,19 @@
 
 #include <utility>
 
+#include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
-#include <faiss/gpu/GpuCloner.h>
 
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
 
-//std::mutex g_mutex;
+// std::mutex g_mutex;
 
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
-//    std::lock_guard<std::mutex> lk(g_mutex);
+    //    std::lock_guard<std::mutex> lk(g_mutex);
 
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
     if (build_cfg != nullptr) {
@@ -74,12 +74,12 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
     }
     std::lock_guard<std::mutex> lk(mutex_);
 
-        faiss::Index* device_index = index_.get();
-        faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+    faiss::Index* device_index = index_.get();
+    faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
-        std::shared_ptr<faiss::Index> new_index;
-        new_index.reset(host_index);
-        return std::make_shared<IVFSQHybrid>(new_index);
+    std::shared_ptr<faiss::Index> new_index;
+    new_index.reset(host_index);
+    return std::make_shared<IVFSQHybrid>(new_index);
 }
 
 VectorIndexPtr
@@ -119,14 +119,14 @@ IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
 void
 IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
                          const Config& cfg) {
-//    std::lock_guard<std::mutex> lk(g_mutex);
-//    static int64_t search_count;
-//    ++search_count;
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+    //    static int64_t search_count;
+    //    ++search_count;
 
     if (gpu_mode == 2) {
         GPUIVF::search_impl(n, data, k, distances, labels, cfg);
-//        index_->search(n, (float*)data, k, distances, labels);
-    } else if (gpu_mode == 1) { // hybrid
+        //        index_->search(n, (float*)data, k, distances, labels);
+    } else if (gpu_mode == 1) {  // hybrid
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(quantizer_gpu_id_)) {
             ResScope rs(res, quantizer_gpu_id_, true);
             IVF::search_impl(n, data, k, distances, labels, cfg);
@@ -140,7 +140,7 @@ IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distanc
 
 QuantizerPtr
 IVFSQHybrid::LoadQuantizer(const Config& conf) {
-//    std::lock_guard<std::mutex> lk(g_mutex);
+    //    std::lock_guard<std::mutex> lk(g_mutex);
 
     auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
     if (quantizer_conf != nullptr) {
@@ -179,7 +179,7 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
 
 void
 IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
-//    std::lock_guard<std::mutex> lk(g_mutex);
+    //    std::lock_guard<std::mutex> lk(g_mutex);
 
     auto ivf_quantizer = std::dynamic_pointer_cast<FaissIVFQuantizer>(q);
     if (ivf_quantizer == nullptr) {
@@ -199,7 +199,7 @@ IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
 
 void
 IVFSQHybrid::UnsetQuantizer() {
-//    std::lock_guard<std::mutex> lk(g_mutex);
+    //    std::lock_guard<std::mutex> lk(g_mutex);
 
     auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     if (ivf_index == nullptr) {
@@ -212,7 +212,7 @@ IVFSQHybrid::UnsetQuantizer() {
 
 VectorIndexPtr
 IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
-//    std::lock_guard<std::mutex> lk(g_mutex);
+    //    std::lock_guard<std::mutex> lk(g_mutex);
 
     auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
     if (quantizer_conf != nullptr) {
@@ -251,7 +251,7 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
 
 std::pair<VectorIndexPtr, QuantizerPtr>
 IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config) {
-//    std::lock_guard<std::mutex> lk(g_mutex);
+    //    std::lock_guard<std::mutex> lk(g_mutex);
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);

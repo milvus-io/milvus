@@ -125,7 +125,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
     }
 }
 
-//TEST_F(SingleIndexTest, thread_safe) {
+// TEST_F(SingleIndexTest, thread_safe) {
 //    assert(!xb.empty());
 //
 //    index_type = "IVFSQHybrid";
@@ -233,6 +233,5 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 //    }
 //
 //}
-
 
 #endif
