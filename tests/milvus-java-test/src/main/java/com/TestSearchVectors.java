@@ -77,7 +77,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
         Assert.assertEquals(res_search.size(), nq);
@@ -101,7 +100,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
         Assert.assertEquals(res_search.get(0).get(0).getVectorId(), 0L);
@@ -115,7 +113,7 @@ public class TestSearchVectors {
         List<List<Float>> queryVectors = vectors.subList(0,nq);
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
         client.insert(insertParam);
-        Thread.sleep(1000);
+        Thread.sleep(2000);
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
         Assert.assertEquals(res_search.size(), nq);
@@ -135,7 +133,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
         double distance = res_search.get(0).get(0).getDistance();
@@ -159,7 +156,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
         Assert.assertEquals(res_search.size(), nq);
@@ -195,7 +191,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<Double>> res_search = client.search(searchParam).getResultDistancesList();
         for (int i = 0; i < nq; i++) {
@@ -222,7 +217,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).build();
         List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
         Assert.assertEquals(res_search.size(), nq);
@@ -244,22 +238,23 @@ public class TestSearchVectors {
         Assert.assertEquals(res_search.get(0).size(), top_k);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_search_FLAT_timeout(MilvusClient client, String tableName) throws InterruptedException {
-        IndexType indexType = IndexType.FLAT;
-        int nb = 100000;
-        int nq = 1000;
-        int top_k = 2048;
-        List<List<Float>> vectors = gen_vectors(nb, false);
-        List<List<Float>> queryVectors = vectors.subList(0,nq);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-        client.insert(insertParam);
-        Thread.sleep(1000);
-        SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).withTimeout(1).build();
-        System.out.println(new Date());
-        SearchResponse res_search = client.search(searchParam);
-        assert (!res_search.getResponse().ok());
-    }
+//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+//    public void test_search_FLAT_timeout(MilvusClient client, String tableName) throws InterruptedException {
+//        IndexType indexType = IndexType.FLAT;
+//        int nb = 100000;
+//        int nq = 1000;
+//        int top_k = 2048;
+//        List<List<Float>> vectors = gen_vectors(nb, false);
+//        List<List<Float>> vectors = gen_vectors(nb, false);
+//        List<List<Float>> queryVectors = vectors.subList(0,nq);
+//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+//        client.insert(insertParam);
+//        Thread.sleep(1000);
+//        SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).withTimeout(1).build();
+//        System.out.println(new Date());
+//        SearchResponse res_search = client.search(searchParam);
+//        assert (!res_search.getResponse().ok());
+//    }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_search_FLAT_big_data_size(MilvusClient client, String tableName) throws InterruptedException {
@@ -315,7 +310,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe_new).withTopK(top_k).build();
         SearchResponse res_search = client.search(searchParam);
         assert (!res_search.getResponse().ok());
@@ -335,7 +329,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k_new).build();
         SearchResponse res_search = client.search(searchParam);
         assert (!res_search.getResponse().ok());
@@ -374,7 +367,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).withDateRanges(dateRange).build();
         SearchResponse res_search = client.search(searchParam);
         assert (res_search.getResponse().ok());
@@ -416,7 +408,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).withDateRanges(dateRange).build();
         SearchResponse res_search = client.search(searchParam);
         assert (res_search.getResponse().ok());
@@ -456,7 +447,6 @@ public class TestSearchVectors {
                 .build();
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         client.createIndex(createIndexParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         SearchParam searchParam = new SearchParam.Builder(tableName, queryVectors).withNProbe(n_probe).withTopK(top_k).withDateRanges(dateRange).build();
         SearchResponse res_search = client.search(searchParam);
         assert (!res_search.getResponse().ok());

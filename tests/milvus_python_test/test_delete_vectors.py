@@ -108,8 +108,11 @@ class TestDeleteVectorsBase:
         scope="function",
         params=gen_index_params()
     )
-    def get_index_params(self, request):
-        yield request.param
+    def get_index_params(self, request, args):
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     @pytest.mark.timeout(DELETE_TIMEOUT)
     def test_delete_vectors_valid_range_index_created(self, connect, table, get_index_params):
@@ -291,8 +294,11 @@ class TestDeleteVectorsIP:
         scope="function",
         params=gen_index_params()
     )
-    def get_index_params(self, request):
-        yield request.param
+    def get_index_params(self, request, args):
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     @pytest.mark.timeout(DELETE_TIMEOUT)
     def test_delete_vectors_valid_range_index_created(self, connect, ip_table, get_index_params):
