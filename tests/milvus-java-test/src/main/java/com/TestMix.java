@@ -71,7 +71,7 @@ public class TestMix {
     }
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
-    public void test_connect_threads(String host, String port) throws InterruptedException {
+    public void test_connect_threads(String host, String port) throws ConnectFailedException {
         int thread_num = 100;
         ForkJoinPool executor = new ForkJoinPool();
         for (int i = 0; i < thread_num; i++) {
@@ -82,8 +82,12 @@ public class TestMix {
                                 .withHost(host)
                                 .withPort(port)
                                 .build();
-                        client.connect(connectParam);
-                        assert(client.connected());
+                        try {
+                            client.connect(connectParam);
+                        } catch (ConnectFailedException e) {
+                            e.printStackTrace();
+                        }
+                        assert(client.isConnected());
                         try {
                             client.disconnect();
                         } catch (InterruptedException e) {
@@ -112,8 +116,7 @@ public class TestMix {
         executor.shutdown();
 
         Thread.sleep(2000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
         Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
     }
 
@@ -138,8 +141,7 @@ public class TestMix {
         executor.awaitQuiescence(300, TimeUnit.SECONDS);
         executor.shutdown();
         Thread.sleep(2000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
         Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
     }
 
@@ -176,13 +178,12 @@ public class TestMix {
         executor.awaitQuiescence(300, TimeUnit.SECONDS);
         executor.shutdown();
         Thread.sleep(2000);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableParam);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
         Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
     }
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
-    public void test_create_insert_delete_threads(String host, String port) throws InterruptedException {
+    public void test_create_insert_delete_threads(String host, String port) {
         int thread_num = 100;
         List<List<Float>> vectors = gen_vectors(nb,false);
         ForkJoinPool executor = new ForkJoinPool();
@@ -194,18 +195,21 @@ public class TestMix {
                                 .withHost(host)
                                 .withPort(port)
                                 .build();
-                        client.connect(connectParam);
+                        try {
+                            client.connect(connectParam);
+                        } catch (ConnectFailedException e) {
+                            e.printStackTrace();
+                        }
+                        assert(client.isConnected());
                         String tableName = RandomStringUtils.randomAlphabetic(10);
                         TableSchema tableSchema = new TableSchema.Builder(tableName, dimension)
                                                                  .withIndexFileSize(index_file_size)
                                                                  .withMetricType(MetricType.IP)
                                                                  .build();
-                        TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-                        client.createTable(tableSchemaParam);
+                        client.createTable(tableSchema);
                         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
                         client.insert(insertParam);
-                        TableParam tableParam = new TableParam.Builder(tableName).build();
-                        Response response = client.dropTable(tableParam);
+                        Response response = client.dropTable(tableName);
                         Assert.assertTrue(response.ok());
                         try {
                             client.disconnect();

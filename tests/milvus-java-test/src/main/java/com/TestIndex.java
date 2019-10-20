@@ -4,7 +4,6 @@ import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
@@ -56,8 +55,7 @@ public class TestIndex {
         Response res_create = client.createIndex(createIndexParam);
         res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getNList(), n_list);
@@ -76,29 +74,27 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
     }
 
-
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_create_index_FLAT_timeout(MilvusClient client, String tableName) throws InterruptedException {
-        int nb = 500000;
-        IndexType indexType = IndexType.IVF_SQ8;
-        List<List<Float>> vectors = gen_vectors(nb);
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
-        client.insert(insertParam);
-        Index index = new Index.Builder().withIndexType(indexType)
-                .withNList(n_list)
-                .build();
-        System.out.println(new Date());
-        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).withTimeout(1).build();
-        Response res_create = client.createIndex(createIndexParam);
-        assert(!res_create.ok());
-    }
+//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+//    public void test_create_index_FLAT_timeout(MilvusClient client, String tableName) throws InterruptedException {
+//        int nb = 500000;
+//        IndexType indexType = IndexType.IVF_SQ8;
+//        List<List<Float>> vectors = gen_vectors(nb);
+//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+//        client.insert(insertParam);
+//        Index index = new Index.Builder().withIndexType(indexType)
+//                .withNList(n_list)
+//                .build();
+//        System.out.println(new Date());
+//        CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).withTimeout(1).build();
+//        Response res_create = client.createIndex(createIndexParam);
+//        assert(!res_create.ok());
+//    }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_create_index_IVFLAT(MilvusClient client, String tableName) throws InterruptedException {
@@ -112,8 +108,7 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -131,8 +126,7 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -140,7 +134,7 @@ public class TestIndex {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_create_index_IVFSQ8H(MilvusClient client, String tableName) throws InterruptedException {
-        IndexType indexType = IndexType.IVF_SQ8_H;
+        IndexType indexType = IndexType.IVF_SQ8H;
         List<List<Float>> vectors = gen_vectors(nb);
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
         client.insert(insertParam);
@@ -150,8 +144,7 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
@@ -213,8 +206,7 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getNList(), n_list);
@@ -232,7 +224,6 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
         // Create another index
         IndexType indexTypeNew = IndexType.IVFLAT;
         int n_list_new = n_list + 1;
@@ -242,7 +233,7 @@ public class TestIndex {
         CreateIndexParam createIndexParamNew = new CreateIndexParam.Builder(tableName).withIndex(index_new).build();
         Response res_create_new = client.createIndex(createIndexParamNew);
         assert(res_create_new.ok());
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res_create.ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getNList(), n_list_new);
@@ -252,15 +243,13 @@ public class TestIndex {
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_describe_index_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
         String tableNameNew = tableName + "_";
-        TableParam tableParam = new TableParam.Builder(tableNameNew).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableNameNew);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_describe_index_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(!res.getResponse().ok());
     }
 
@@ -275,10 +264,9 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Response res_drop = client.dropIndex(tableParam);
+        Response res_drop = client.dropIndex(tableName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getNList(), default_n_list);
@@ -296,11 +284,10 @@ public class TestIndex {
         CreateIndexParam createIndexParam = new CreateIndexParam.Builder(tableName).withIndex(index).build();
         Response res_create = client.createIndex(createIndexParam);
         assert(res_create.ok());
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Response res_drop = client.dropIndex(tableParam);
-        res_drop = client.dropIndex(tableParam);
+        Response res_drop = client.dropIndex(tableName);
+        res_drop = client.dropIndex(tableName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getNList(), default_n_list);
@@ -310,15 +297,13 @@ public class TestIndex {
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_drop_index_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
         String tableNameNew = tableName + "_";
-        TableParam tableParam = new TableParam.Builder(tableNameNew).build();
-        Response res_drop = client.dropIndex(tableParam);
+        Response res_drop = client.dropIndex(tableNameNew);
         assert(!res_drop.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_drop_index_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Response res_drop = client.dropIndex(tableParam);
+        Response res_drop = client.dropIndex(tableName);
         assert(!res_drop.ok());
     }
 
@@ -327,10 +312,9 @@ public class TestIndex {
         List<List<Float>> vectors = gen_vectors(nb);
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
         client.insert(insertParam);
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Response res_drop = client.dropIndex(tableParam);
+        Response res_drop = client.dropIndex(tableName);
         assert(res_drop.ok());
-        DescribeIndexResponse res = client.describeIndex(tableParam);
+        DescribeIndexResponse res = client.describeIndex(tableName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getNList(), default_n_list);
