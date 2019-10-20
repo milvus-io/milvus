@@ -16,8 +16,8 @@ import java.util.List;
 public class MainClass {
     private static String host = "127.0.0.1";
     private static String port = "19530";
-    public Integer index_file_size = 50;
-    public Integer dimension = 128;
+    private int index_file_size = 50;
+    public int dimension = 128;
 
     public static void setHost(String host) {
         MainClass.host = host;
@@ -33,7 +33,7 @@ public class MainClass {
     }
 
     @DataProvider(name="ConnectInstance")
-    public Object[][] connectInstance(){
+    public Object[][] connectInstance() throws ConnectFailedException {
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(host)
@@ -45,7 +45,7 @@ public class MainClass {
     }
 
     @DataProvider(name="DisConnectInstance")
-    public Object[][] disConnectInstance(){
+    public Object[][] disConnectInstance() throws ConnectFailedException {
         // Generate connection instance
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
@@ -63,10 +63,10 @@ public class MainClass {
     }
 
     @DataProvider(name="Table")
-    public Object[][] provideTable(){
+    public Object[][] provideTable() throws ConnectFailedException {
         Object[][] tables = new Object[2][2];
-        MetricType metricTypes[] = { MetricType.L2, MetricType.IP };
-        for (Integer i = 0; i < metricTypes.length; ++i) {
+        MetricType[] metricTypes = { MetricType.L2, MetricType.IP };
+        for (int i = 0; i < metricTypes.length; ++i) {
             String tableName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
             // Generate connection instance
             MilvusClient client = new MilvusGrpcClient();
@@ -79,8 +79,7 @@ public class MainClass {
                     .withIndexFileSize(index_file_size)
                     .withMetricType(metricTypes[i])
                     .build();
-            TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-            Response res = client.createTable(tableSchemaParam);
+            Response res = client.createTable(tableSchema);
             if (!res.ok()) {
                 System.out.println(res.getMessage());
                 throw new SkipException("Table created failed");
