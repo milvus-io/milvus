@@ -24,6 +24,7 @@
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/index_io.h>
+#include <chrono>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -216,7 +217,15 @@ IVF::GenGraph(const int64_t& k, Graph& graph, const DatasetPtr& dataset, const C
 void
 IVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
     auto params = GenParams(cfg);
+    stdclock::time_point before = stdclock::now();
     faiss::ivflib::search_with_parameters(index_.get(), n, (float*)data, k, distances, labels, params.get());
+    stdclock::time_point after = stdclock::now();
+    double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
+    KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
+                       << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
+                       << ", data search cost: " << faiss::indexIVF_stats.search_time;
+    faiss::indexIVF_stats.quantization_time = 0;
+    faiss::indexIVF_stats.search_time = 0;
 }
 
 VectorIndexPtr
