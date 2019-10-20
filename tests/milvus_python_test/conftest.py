@@ -12,6 +12,7 @@ index_file_size = 10
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
     parser.addoption("--port", action="store", default=19530)
+    parser.addoption("--internal", action="store", default=False)
 
 
 def check_server_connection(request):
@@ -76,7 +77,10 @@ def dis_connect(request):
 def args(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
+    internal = request.config.getoption("--internal")
     args = {"ip": ip, "port": port}
+    if internal:
+        args = {"ip": ip, "port": port, "internal": internal}
     return args
 
 
