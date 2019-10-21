@@ -53,8 +53,6 @@ static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "4";
-static const char* CONFIG_DB_BUILD_INDEX_GPU = "build_index_gpu";
-static const char* CONFIG_DB_BUILD_INDEX_GPU_DEFAULT = "0";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 
 /* cache config */
@@ -91,7 +89,9 @@ static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 static const char* CONFIG_RESOURCE = "resource_config";
 static const char* CONFIG_RESOURCE_MODE = "mode";
 static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
-static const char* CONFIG_RESOURCE_POOL = "resource_pool";
+static const char* CONFIG_RESOURCE_SEARCH_RESOURCES = "search_resources";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE = "index_build_device";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "gpu0";
 
 class Config {
  public:
@@ -140,8 +140,6 @@ class Config {
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
     Status
     CheckDBConfigInsertBufferSize(const std::string& value);
-    Status
-    CheckDBConfigBuildIndexGPU(const std::string& value);
 
     /* metric config */
     Status
@@ -173,7 +171,9 @@ class Config {
     Status
     CheckResourceConfigMode(const std::string& value);
     Status
-    CheckResourceConfigPool(const std::vector<std::string>& value);
+    CheckResourceConfigSearchResources(const std::vector<std::string>& value);
+    Status
+    CheckResourceConfigIndexBuildDevice(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -202,8 +202,6 @@ class Config {
     GetDBConfigArchiveDaysThreshold(int32_t& value);
     Status
     GetDBConfigInsertBufferSize(int32_t& value);
-    Status
-    GetDBConfigBuildIndexGPU(int32_t& value);
     Status
     GetDBConfigPreloadTable(std::string& value);
 
@@ -237,7 +235,9 @@ class Config {
     Status
     GetResourceConfigMode(std::string& value);
     Status
-    GetResourceConfigPool(std::vector<std::string>& value);
+    GetResourceConfigSearchResources(std::vector<std::string>& value);
+    Status
+    GetResourceConfigIndexBuildDevice(int32_t& value);
 
  public:
     /* server config */
@@ -263,8 +263,6 @@ class Config {
     SetDBConfigArchiveDaysThreshold(const std::string& value);
     Status
     SetDBConfigInsertBufferSize(const std::string& value);
-    Status
-    SetDBConfigBuildIndexGPU(const std::string& value);
 
     /* metric config */
     Status
@@ -295,6 +293,8 @@ class Config {
     /* resource config */
     Status
     SetResourceConfigMode(const std::string& value);
+    Status
+    SetResourceConfigIndexBuildDevice(const std::string& value);
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
