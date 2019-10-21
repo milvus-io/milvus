@@ -93,7 +93,7 @@ cd ${BUILD_OUTPUT_DIR}
 
 # remove make cache since build.sh -l use default variables
 # force update the variables each time
-make rebuild_cache
+make rebuild_cache > /dev/null 2>&1
 
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
@@ -139,13 +139,12 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #    fi
 #    echo "clang-tidy check passed!"
 else
-    # compile and build
-    make -j 4 || exit 1
 
     # strip binary symbol
     if [[ ${BUILD_TYPE} != "Debug" ]]; then
         strip src/milvus_server
     fi
 
-    make install || exit 1
+    # compile and build
+    make -j 8 install || exit 1
 fi
