@@ -46,7 +46,7 @@ BuildResult(std::vector<int64_t>& output_ids,
             output_distance[i * topk + j] = ascending ? (j + drand48()) : ((input_k - j) + drand48());
         }
         //insert invalid items
-        for(uint64_t j = input_k; j < topk; j++) {
+        for (uint64_t j = input_k; j < topk; j++) {
             output_ids[i * topk + j] = -1;
             output_distance[i * topk + j] = -1.0;
         }
@@ -113,7 +113,7 @@ CheckTopkResult(const std::vector<int64_t>& input_ids_1,
 
         uint64_t n = std::min(topk, result[i].size());
         for (uint64_t j = 0; j < n; j++) {
-            if(result[i][j].first < 0) {
+            if (result[i][j].first < 0) {
                 continue;
             }
             if (src_vec[j] != result[i][j].second) {
@@ -126,7 +126,8 @@ CheckTopkResult(const std::vector<int64_t>& input_ids_1,
 
 } // namespace
 
-void MergeTopkToResultSetTest(uint64_t topk_1, uint64_t topk_2, uint64_t nq, uint64_t topk, bool ascending) {
+void
+MergeTopkToResultSetTest(uint64_t topk_1, uint64_t topk_2, uint64_t nq, uint64_t topk, bool ascending) {
     std::vector<int64_t> ids1, ids2;
     std::vector<float> dist1, dist2;
     ms::ResultSet result;
@@ -150,12 +151,12 @@ TEST(DBSearchTest, MERGE_RESULT_SET_TEST) {
     MergeTopkToResultSetTest(TOP_K, TOP_K, NQ, TOP_K, false);
 
     /* test3, id1/dist1 small topk */
-    MergeTopkToResultSetTest(TOP_K/2, TOP_K, NQ, TOP_K, true);
-    MergeTopkToResultSetTest(TOP_K/2, TOP_K, NQ, TOP_K, false);
+    MergeTopkToResultSetTest(TOP_K / 2, TOP_K, NQ, TOP_K, true);
+    MergeTopkToResultSetTest(TOP_K / 2, TOP_K, NQ, TOP_K, false);
 
     /* test4, id1/dist1 small topk, id2/dist2 small topk */
-    MergeTopkToResultSetTest(TOP_K/2, TOP_K/3, NQ, TOP_K, true);
-    MergeTopkToResultSetTest(TOP_K/2, TOP_K/3, NQ, TOP_K, false);
+    MergeTopkToResultSetTest(TOP_K / 2, TOP_K / 3, NQ, TOP_K, true);
+    MergeTopkToResultSetTest(TOP_K / 2, TOP_K / 3, NQ, TOP_K, false);
 }
 
 //void MergeTopkArrayTest(uint64_t topk_1, uint64_t topk_2, uint64_t nq, uint64_t topk, bool ascending) {
@@ -224,8 +225,8 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
     std::vector<int32_t> thread_vec = {4, 8};
     std::vector<int32_t> nq_vec = {1, 10, 100};
     std::vector<int32_t> topk_vec = {1, 4, 16, 64};
-    int32_t NQ = nq_vec[nq_vec.size()-1];
-    int32_t TOPK = topk_vec[topk_vec.size()-1];
+    int32_t NQ = nq_vec[nq_vec.size() - 1];
+    int32_t TOPK = topk_vec[topk_vec.size() - 1];
 
     std::vector<std::vector<int64_t>> id_vec;
     std::vector<std::vector<float>> dist_vec;
@@ -255,7 +256,7 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
                 }
 
                 std::string str1 = "Method-1 " + std::to_string(max_thread_num) + " " +
-                                    std::to_string(nq) + " " + std::to_string(top_k);
+                                   std::to_string(nq) + " " + std::to_string(top_k);
                 milvus::TimeRecorder rc1(str1);
 
                 ///////////////////////////////////////////////////////////////////////////////////////
