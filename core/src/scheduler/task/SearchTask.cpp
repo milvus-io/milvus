@@ -253,7 +253,7 @@ XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids, const s
 
         if (result[i].empty()) {
             result_buf.resize(input_k, scheduler::IdDistPair(-1, 0.0));
-            uint64_t input_k_multi_i = input_k * i;
+            uint64_t input_k_multi_i = topk * i;
             for (auto k = 0; k < input_k; ++k) {
                 uint64_t idx = input_k_multi_i + k;
                 auto& result_buf_item = result_buf[k];
@@ -266,7 +266,7 @@ XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids, const s
             result_buf.resize(output_k, scheduler::IdDistPair(-1, 0.0));
             size_t buf_k = 0, src_k = 0, tar_k = 0;
             uint64_t src_idx;
-            uint64_t input_k_multi_i = input_k * i;
+            uint64_t input_k_multi_i = topk * i;
             while (buf_k < output_k && src_k < input_k && tar_k < tar_size) {
                 src_idx = input_k_multi_i + src_k;
                 auto& result_buf_item = result_buf[buf_k];
