@@ -121,6 +121,11 @@ ExecutionEngineImpl::HybridLoad() const {
         return;
     }
 
+    if (index_->GetType() == IndexType::FAISS_IDMAP) {
+        ENGINE_LOG_WARNING << "HybridLoad with type FAISS_IDMAP, ignore";
+        return;
+    }
+
     const std::string key = location_ + ".quantizer";
     std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
 
@@ -161,6 +166,9 @@ ExecutionEngineImpl::HybridLoad() const {
         quantizer_conf->mode = 1;
         quantizer_conf->gpu_id = best_device_id;
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        if (quantizer == nullptr) {
+            ENGINE_LOG_ERROR << "quantizer is nullptr";
+        }
         index_->SetQuantizer(quantizer);
         auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
         cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
@@ -170,6 +178,9 @@ ExecutionEngineImpl::HybridLoad() const {
 void
 ExecutionEngineImpl::HybridUnset() const {
     if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+    if (index_->GetType() == IndexType::FAISS_IDMAP) {
         return;
     }
     index_->UnsetQuantizer();
