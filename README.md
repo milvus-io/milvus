@@ -5,6 +5,7 @@
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Twitter](https://twitter.com/milvusio)
+- [Facebook](https://www.facebook.com/io.milvus.5)
 - [Blog](https://www.milvus.io/blog/)
 - [CSDN](https://zilliz.blog.csdn.net/)
 - [中文官网](https://www.milvus.io/zh-CN/)
@@ -12,32 +13,45 @@
 
 # Welcome to Milvus
 
-Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! ​​No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.
+Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! ​​No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.​ :beers:
 
 ## What is Milvus
 
-Milvus is an open source vector search engine that supports similarity search of large-scale vectors. Built on optimized indexing algorithm, it is compatible with major AI/ML models.
+Milvus is an open source vector search engine which provides state-of-the-art similarity search and analysis for billion-scale feature vectors.
 
-Milvus provides stable Python, C++ and Java APIs.
+Milvus provides stable Python, Java and C++ APIs.
 
 Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/Releases/v0.4.0/).
 
 - GPU-accelerated search engine
 
-  Milvus is designed for the largest scale of vector index. CPU/GPU heterogeneous computing architecture allows you to process data at a speed 1000 times faster.
+  Milvus uses CPU/GPU heterogeneous computing architecture to process feature vectors, and are orders of magnitudes faster than traditional databases.
 
-- Intelligent index
+- Various indexes
 
-  With a "Decide Your Own Algorithm" approach, you can embed machine learning and advanced algorithms into Milvus without the headache of complex data engineering or migrating data between disparate systems. Milvus is built on optimized indexing algorithm based on quantization indexing, tree-based and graph indexing methods.
+  Milvus supports quantization indexing, tree-based indexing, and graph indexing algorithms. 
 
-- Strong scalability
+- Intelligent scheduling
 
-  The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
+  Milvus optimizes the search computation and index building according to your data size and available resources. 
+
+- Horizontal scalability
+
+  Milvus expands computation and storage by adding nodes during runtime, which allows you to scale the data size without redesigning the system.
 
 ## Architecture
 ![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.jpg)
 
 ## Get started
+
+### Hardware Requirements
+
+| Component | Recommended configuration           |
+| --------- | ----------------------------------- |
+| CPU       | Intel CPU Haswell or higher         |
+| GPU       | NVIDIA Pascal series or higher      |
+| Memory    | 8 GB or more (depends on data size) |
+| Storage   | SATA 3.0 SSD or higher              |
 
 ### Install using docker
 
@@ -97,7 +111,7 @@ To stop Milvus server, run:
 $ ./stop_server.sh
 ```
 
-To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](https://www.milvus-io/docs/master/reference/milvus_config.md).
+To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](https://github.com/milvus-io/docs/blob/master/reference/milvus_config.md).
 
 ### Try your first Milvus program
 
@@ -165,4 +179,5 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 
 ## License
 
-[Apache 2.0 license](milvus-io/milvus/LICENSE.md)
+[Apache 2.0 license](LICENSE)
+
