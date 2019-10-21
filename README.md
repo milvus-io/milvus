@@ -111,7 +111,7 @@ To stop Milvus server, run:
 $ ./stop_server.sh
 ```
 
-To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](https://www.milvus-io/docs/master/reference/milvus_config.md).
+To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](https://github.com/milvus-io/docs/blob/master/reference/milvus_config.md).
 
 ### Try your first Milvus program
 
@@ -179,4 +179,5 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 
 ## License
 
-[Apache 2.0 license](milvus-io/milvus/LICENSE.md)
+[Apache 2.0 license](LICENSE)
+
