@@ -441,6 +441,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, _index_param = self._describe_index(table_name=_table_name,
                                                      metadata=metadata)
 
+        if not _index_param:
+            return milvus_pb2.IndexParam(status=status_pb2.Status(
+                error_code=_status.code, reason=_status.message))
+
         _index = milvus_pb2.Index(index_type=_index_param._index_type,
                                   nlist=_index_param._nlist)
 
