@@ -58,6 +58,12 @@ def TableNotFoundErrorHandler(err):
     return resp_handler(err, status_pb2.TABLE_NOT_EXISTS)
 
 
+@server.errorhandler(exceptions.InvalidTopKError)
+def InvalidTopKErrorHandler(err):
+    logger.error(err)
+    return resp_handler(err, status_pb2.ILLEGAL_TOPK)
+
+
 @server.errorhandler(exceptions.InvalidArgumentError)
 def InvalidArgumentErrorHandler(err):
     logger.error(err)

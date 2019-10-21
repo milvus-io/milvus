@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     MAX_NPROBE = 2048
+    MAX_TOPK = 2048
 
     def __init__(self, tracer, router, max_workers=multiprocessing.cpu_count(), **kwargs):
         self.table_meta = {}
@@ -245,6 +246,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         if nprobe > self.MAX_NPROBE or nprobe <= 0:
             raise exceptions.InvalidArgumentError(
                 message='Invalid nprobe: {}'.format(nprobe), metadata=metadata)
+
+        if topk > self.MAX_TOPK or topk <= 0:
+            raise exceptions.InvalidTopKError(
+                message='Invalid topk: {}'.format(topk), metadata=metadata)
 
         table_meta = self.table_meta.get(table_name, None)
 

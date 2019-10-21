@@ -26,6 +26,10 @@ class TableNotFoundError(BaseException):
     code = codes.TABLE_NOT_FOUND_CODE
 
 
+class InvalidTopKError(BaseException):
+    code = codes.INVALID_TOPK_CODE
+
+
 class InvalidArgumentError(BaseException):
     code = codes.INVALID_ARGUMENT_CODE
 
