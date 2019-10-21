@@ -65,7 +65,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
     index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
     if (!index_) {
-        throw Exception(DB_ERROR, "Could not create VecIndex");
+        throw Exception(DB_ERROR, "Unsupported index type");
     }
 
     TempMetaConf temp_conf;
@@ -111,7 +111,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         default: {
-            ENGINE_LOG_ERROR << "Invalid engine type";
+            ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;
         }
     }
@@ -121,6 +121,11 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 void
 ExecutionEngineImpl::HybridLoad() const {
     if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+
+    if (index_->GetType() == IndexType::FAISS_IDMAP) {
+        ENGINE_LOG_WARNING << "HybridLoad with type FAISS_IDMAP, ignore";
         return;
     }
 
@@ -164,6 +169,9 @@ ExecutionEngineImpl::HybridLoad() const {
         quantizer_conf->mode = 1;
         quantizer_conf->gpu_id = best_device_id;
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        if (quantizer == nullptr) {
+            ENGINE_LOG_ERROR << "quantizer is nullptr";
+        }
         index_->SetQuantizer(quantizer);
         auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
         cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
@@ -173,6 +181,9 @@ ExecutionEngineImpl::HybridLoad() const {
 void
 ExecutionEngineImpl::HybridUnset() const {
     if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+    if (index_->GetType() == IndexType::FAISS_IDMAP) {
         return;
     }
     index_->UnsetQuantizer();
@@ -373,7 +384,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
     auto to_index = CreatetVecIndex(engine_type);
     if (!to_index) {
-        throw Exception(DB_ERROR, "Could not create VecIndex");
+        throw Exception(DB_ERROR, "Unsupported index type");
     }
 
     TempMetaConf temp_conf;
@@ -503,7 +514,7 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
+    Status s = config.GetResourceConfigIndexBuildDevice(gpu_num_);
     if (!s.ok()) {
         return s;
     }
