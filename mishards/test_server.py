@@ -7,7 +7,7 @@ import faker
 import inspect
 from milvus import Milvus
 from milvus.client.types import Status, IndexType, MetricType
-from milvus.client.Abstract import IndexParam, TableSchema
+from milvus.client.abstract import IndexParam, TableSchema
 from milvus.grpc_gen import status_pb2, milvus_pb2
 from mishards import db, create_app, settings
 from mishards.service_handler import ServiceHandler
@@ -87,6 +87,7 @@ class TestServer:
         status = self.client.preload_table(table_name)
         assert not status.OK()
 
+    @pytest.mark.skip
     def test_delete_by_range(self, started_app):
         table_name = inspect.currentframe().f_code.co_name
 
@@ -203,7 +204,8 @@ class TestServer:
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(BAD, table_name))
-        has = self.client.has_table(table_name=table_name)
+        status, has = self.client.has_table(table_name=table_name)
+        assert not status.OK()
         assert not has
 
     def test_create_table(self, started_app):

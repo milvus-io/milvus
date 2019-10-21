@@ -7,7 +7,7 @@ import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
 from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
-from milvus.client.Abstract import Range
+from milvus.client.abstract import Range
 from milvus.client import types as Types
 
 from mishards import (db, settings, exceptions)
@@ -109,7 +109,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     query_records=vectors,
                     top_k=topk,
                     nprobe=nprobe,
-                    lazy=True)
+                    lazy_=True)
                 end = time.time()
                 logger.info('search_vectors_in_files takes: {}'.format(end - start))
 
