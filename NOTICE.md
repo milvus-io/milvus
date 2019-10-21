@@ -26,4 +26,5 @@
 | gperftools    | [BSD 3-Clause](https://github.com/gperftools/gperftools/blob/master/COPYING)                                                 |
 | grpc          | [Apache 2.0](https://github.com/grpc/grpc/blob/master/LICENSE)                                                   |
 | EASYLOGGINGPP | [MIT](https://github.com/zuhd-org/easyloggingpp/blob/master/LICENSEhttps://github.com/zuhd-org/easyloggingpp/blob/master/LICENSE)                                                          |
+| Json          | [MIT](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT)                                                          |
 
