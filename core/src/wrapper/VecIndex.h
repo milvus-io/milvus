@@ -25,6 +25,7 @@
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/Quantizer.h"
+#include "utils/Log.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -102,6 +103,7 @@ class VecIndex : public cache::DataObj {
     ////////////////
     virtual knowhere::QuantizerPtr
     LoadQuantizer(const Config& conf) {
+        ENGINE_LOG_ERROR << "LoadQuantizer virtual funciton called.";
         return nullptr;
     }
 
