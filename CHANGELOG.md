@@ -27,11 +27,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-654 - Describe index timeout when building index
 - MS-658 - Fix SQ8 Hybrid can't search
 - MS-665 - IVF_SQ8H search crash when no GPU resource in search_resources
+- \#9 - Change default gpu_cache_capacity to 4
 - \#20 - C++ sdk example get grpc error 
 - \#23 - Add unittest to improve code coverage
 - \#31 - make clang-format failed after run build.sh -l
 - \#39 - Create SQ8H index hang if using github server version
 - \#30 - Some troubleshoot messages in Milvus do not provide enough information
+- \#48 - Config unittest failed
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
@@ -53,6 +55,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
 - MS-655 - Upgrade SPTAG
+- \#42 - Put union of index_build_device and search resources to gpu_pool
 
 ## New Feature
 - MS-614 - Preload table at startup
@@ -74,6 +77,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-624 - Re-organize project directory for open-source
 - MS-635 - Add compile option to support customized faiss
 - MS-660 - add ubuntu_build_deps.sh
+- \#18 - Add all test cases
 	
 # Milvus 0.4.0 (2019-09-12)
 
