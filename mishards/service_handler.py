@@ -169,11 +169,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         logger.info('HasTable {}'.format(_table_name))
 
-        _bool = self._has_table(_table_name,
+        _status, _bool = self._has_table(_table_name,
                                 metadata={'resp_class': milvus_pb2.BoolReply})
 
         return milvus_pb2.BoolReply(status=status_pb2.Status(
-            error_code=status_pb2.SUCCESS, reason="OK"),
+            error_code=_status.code, reason=_status.message),
             bool_reply=_bool)
 
     def _delete_table(self, table_name):
