@@ -14,34 +14,19 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include <gtest/gtest.h>
+#include <chrono>
 
-#include "scheduler/task/Task.h"
+static const char *CONFIG_PATH = "/tmp/milvus_test/";
+static const char *VALID_CONFIG_FILE = "valid_config.yaml";
+static const char *INVALID_CONFIG_FILE = "invalid_config.conf";
 
-namespace milvus {
-namespace scheduler {
-
-class Pass {
- public:
-    //    virtual void
-    //    Init() {
-    //    }
-
-    virtual bool
-    Run(const TaskPtr& task) = 0;
+class ConfigTest : public ::testing::Test {
+ protected:
+    void SetUp() override;
+    void TearDown() override;
 };
-using PassPtr = std::shared_ptr<Pass>;
-
-}  // namespace scheduler
-}  // namespace milvus

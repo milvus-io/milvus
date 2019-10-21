@@ -45,7 +45,7 @@ KnowhereResource::Initialize() {
     server::Config& config = server::Config::GetInstance();
 
     int32_t build_index_gpu;
-    s = config.GetDBConfigBuildIndexGPU(build_index_gpu);
+    s = config.GetResourceConfigIndexBuildDevice(build_index_gpu);
     if (!s.ok())
         return s;
 
@@ -53,7 +53,7 @@ KnowhereResource::Initialize() {
 
     // get search gpu resource
     std::vector<std::string> pool;
-    s = config.GetResourceConfigPool(pool);
+    s = config.GetResourceConfigSearchResources(pool);
     if (!s.ok())
         return s;
 
