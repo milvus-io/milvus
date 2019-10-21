@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test-env
+spec:
+  containers:
+  - name: milvus-test-env
+    image: registry.zilliz.com/milvus/milvus-test-env:v0.1
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: test-cluster-config
+
