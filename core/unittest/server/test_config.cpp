@@ -22,11 +22,9 @@
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 #include "server/Config.h"
+#include "server/utils.h"
 
 namespace {
-
-static const char *CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
-static const char *LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
 static constexpr uint64_t KB = 1024;
 static constexpr uint64_t MB = KB * 1024;
@@ -34,16 +32,17 @@ static constexpr uint64_t GB = MB * 1024;
 
 } // namespace
 
-TEST(ConfigTest, CONFIG_TEST) {
+TEST_F(ConfigTest, CONFIG_TEST) {
     milvus::server::ConfigMgr *config_mgr = milvus::server::YamlConfigMgr::GetInstance();
 
     milvus::Status s = config_mgr->LoadConfigFile("");
     ASSERT_FALSE(s.ok());
 
-    s = config_mgr->LoadConfigFile(LOG_FILE_PATH);
+    std::string config_path(CONFIG_PATH);
+    s = config_mgr->LoadConfigFile(config_path+ INVALID_CONFIG_FILE);
     ASSERT_FALSE(s.ok());
 
-    s = config_mgr->LoadConfigFile(CONFIG_FILE_PATH);
+    s = config_mgr->LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 
     config_mgr->Print();
@@ -99,9 +98,10 @@ TEST(ConfigTest, CONFIG_TEST) {
     ASSERT_TRUE(seqs.empty());
 }
 
-TEST(ConfigTest, SERVER_CONFIG_TEST) {
+TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
+    std::string config_path(CONFIG_PATH);
     milvus::server::Config &config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 
     s = config.ValidateConfig();
