@@ -198,7 +198,7 @@ class TestServer:
 
         Parser.parse_proto_TableName = mock.MagicMock(
             return_value=(OK, table_name))
-        ServiceHandler._has_table = mock.MagicMock(return_value=True)
+        ServiceHandler._has_table = mock.MagicMock(return_value=(OK, True))
         has = self.client.has_table(table_name=table_name)
         assert has
 
