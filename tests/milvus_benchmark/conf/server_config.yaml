@@ -1,0 +1,28 @@
+cache_config:
+  cache_insert_data: false
+  cpu_cache_capacity: 16
+  gpu_cache_capacity: 6
+  cpu_cache_threshold: 0.85
+db_config:
+  backend_url: sqlite://:@:/
+  build_index_gpu: 0
+  insert_buffer_size: 4
+  preload_table: null
+  primary_path: /opt/milvus
+  secondary_path: null
+engine_config:
+  use_blas_threshold: 20
+metric_config:
+  collector: prometheus
+  enable_monitor: true
+  prometheus_config:
+    port: 8080
+resource_config:
+  resource_pool:
+  - cpu
+  - gpu0
+server_config:
+  address: 0.0.0.0
+  deploy_mode: single
+  port: 19530
+  time_zone: UTC+8

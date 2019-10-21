@@ -68,6 +68,12 @@ generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids);
 knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, float* xb);
 
+void
+AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+
+void
+PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+
 struct FileIOWriter {
     std::fstream fs;
     std::string name;
