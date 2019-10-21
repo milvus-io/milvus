@@ -1,4 +1,4 @@
-![Milvuslogo](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/0.5.0/assets/milvus_logo.png)
 
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
@@ -41,7 +41,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
   Milvus expands computation and storage by adding nodes during runtime, which allows you to scale the data size without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.jpg)
+![Milvus_arch](https://github.com/milvus-io/docs/blob/0.5.0/assets/milvus_arch.jpg)
 
 ## Get started
 
