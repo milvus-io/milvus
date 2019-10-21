@@ -31,10 +31,13 @@
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 
 namespace knowhere {
+
+using stdclock = std::chrono::high_resolution_clock;
 
 IndexModelPtr
 IVF::Train(const DatasetPtr& dataset, const Config& config) {
