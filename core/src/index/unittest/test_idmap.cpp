@@ -23,53 +23,27 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 
+#include "Helper.h"
 #include "unittest/utils.h"
 
-static int device_id = 0;
-class IDMAPTest : public DataGen, public ::testing::Test {
+class IDMAPTest : public DataGen, public TestGpuIndexBase {
  protected:
     void
     SetUp() override {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
+        TestGpuIndexBase::SetUp();
+
         Init_with_default();
         index_ = std::make_shared<knowhere::IDMAP>();
     }
 
     void
     TearDown() override {
-        knowhere::FaissGpuResourceMgr::GetInstance().Free();
+        TestGpuIndexBase::TearDown();
     }
 
  protected:
     knowhere::IDMAPPtr index_ = nullptr;
 };
-
-void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->array()[0];
-    for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
-    }
-}
-
-void
-PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->array()[0];
-    auto dists = result->array()[1];
-
-    std::stringstream ss_id;
-    std::stringstream ss_dist;
-    for (auto i = 0; i < 10; i++) {
-        for (auto j = 0; j < k; ++j) {
-            ss_id << *(ids->data()->GetValues<int64_t>(1, i * k + j)) << " ";
-            ss_dist << *(dists->data()->GetValues<float>(1, i * k + j)) << " ";
-        }
-        ss_id << std::endl;
-        ss_dist << std::endl;
-    }
-    std::cout << "id\n" << ss_id.str() << std::endl;
-    std::cout << "dist\n" << ss_dist.str() << std::endl;
-}
 
 TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
@@ -87,7 +61,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
-    PrintResult(result, nq, k);
+    //    PrintResult(result, nq, k);
 
     index_->Seal();
     auto binaryset = index_->Serialize();
@@ -95,7 +69,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     new_index->Load(binaryset);
     auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
-    PrintResult(re_result, nq, k);
+    //    PrintResult(re_result, nq, k);
 }
 
 TEST_F(IDMAPTest, idmap_serialize) {
@@ -118,7 +92,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         index_->Add(base_dataset, knowhere::Config());
         auto re_result = index_->Search(query_dataset, conf);
         AssertAnns(re_result, nq, k);
-        PrintResult(re_result, nq, k);
+        //        PrintResult(re_result, nq, k);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
         auto binaryset = index_->Serialize();
@@ -138,7 +112,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         EXPECT_EQ(index_->Dimension(), dim);
         auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
-        PrintResult(result, nq, k);
+        //        PrintResult(result, nq, k);
     }
 }
 
@@ -169,7 +143,7 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // cpu to gpu
-        auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, device_id, conf);
+        auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
         ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
@@ -194,9 +168,9 @@ TEST_F(IDMAPTest, copy_test) {
         ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawIds() != nullptr);
 
         // gpu to gpu
-        auto device_index = knowhere::cloner::CopyCpuToGpu(index_, device_id, conf);
+        auto device_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto new_device_index =
-            std::static_pointer_cast<knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(device_id, conf);
+            std::static_pointer_cast<knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(DEVICEID, conf);
         auto device_result = new_device_index->Search(query_dataset, conf);
         AssertAnns(device_result, nq, k);
     }

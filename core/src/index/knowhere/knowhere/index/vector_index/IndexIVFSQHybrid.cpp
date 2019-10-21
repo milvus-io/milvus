@@ -189,6 +189,8 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         if (quantizer_conf->mode != 2) {
             KNOWHERE_THROW_MSG("mode only support 2 in this func");
         }
+    } else {
+        KNOWHERE_THROW_MSG("conf error");
     }
     //    if (quantizer_conf->gpu_id != gpu_id_) {
     //        KNOWHERE_THROW_MSG("quantizer and data must on the same gpu card");
