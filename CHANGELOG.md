@@ -34,6 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#39 - Create SQ8H index hang if using github server version
 - \#30 - Some troubleshoot messages in Milvus do not provide enough information
 - \#48 - Config unittest failed
+- \#59 - Topk result is incorrect for small dataset
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
