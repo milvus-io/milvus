@@ -1,0 +1,5 @@
+#Configuration File for CodeCov
+coverage:
+  status:
+    project: off
+    patch: off
