@@ -7,6 +7,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 ## Improvement
 - \#64 - Improvement dump function in scheduler
+- \#80 - Print version information into log during server start
 
 ## Feature
 ## Task
