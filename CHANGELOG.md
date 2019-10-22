@@ -64,6 +64,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-648 - Improve unittest
 - MS-655 - Upgrade SPTAG
 - \#42 - Put union of index_build_device and search resources to gpu_pool
+- \#67 - Avoid linking targets multiple times in cmake
 
 ## Feature
 - MS-614 - Preload table at startup
