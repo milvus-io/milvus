@@ -26,7 +26,7 @@ set(wrapper_files
 
 set(util_files
         utils.cpp
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
+        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         )
 
