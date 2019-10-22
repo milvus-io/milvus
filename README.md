@@ -1,7 +1,9 @@
 ![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
+
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
+[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Twitter](https://twitter.com/milvusio)
@@ -54,6 +56,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
   You can track system performance on Prometheus-based GUI monitor dashboards.
 
 ## Architecture
+
 ![Milvus_arch](https://github.com/milvus-io/docs/blob/master/assets/milvus_arch.png)
 
 ## Get started

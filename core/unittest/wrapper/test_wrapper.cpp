@@ -25,150 +25,36 @@
 
 INITIALIZE_EASYLOGGINGPP
 
-namespace {
-
-namespace ms = milvus::engine;
-namespace kw = knowhere;
-
-} // namespace
-
 using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
-constexpr int64_t DIM = 128;
-constexpr int64_t NB = 100000;
-constexpr int64_t DEVICE_ID = 0;
-
-class ParamGenerator {
- public:
-    static ParamGenerator& GetInstance() {
-        static ParamGenerator instance;
-        return instance;
-    }
-
-    knowhere::Config Gen(const milvus::engine::IndexType& type) {
-        switch (type) {
-            case milvus::engine::IndexType::FAISS_IDMAP: {
-                auto tempconf = std::make_shared<knowhere::Cfg>();
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
-            case milvus::engine::IndexType::FAISS_IVFFLAT_CPU:
-            case milvus::engine::IndexType::FAISS_IVFFLAT_GPU:
-            case milvus::engine::IndexType::FAISS_IVFFLAT_MIX: {
-                auto tempconf = std::make_shared<knowhere::IVFCfg>();
-                tempconf->nlist = 100;
-                tempconf->nprobe = 16;
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
-            case milvus::engine::IndexType::FAISS_IVFSQ8_CPU:
-            case milvus::engine::IndexType::FAISS_IVFSQ8_GPU:
-            case milvus::engine::IndexType::FAISS_IVFSQ8_MIX: {
-                auto tempconf = std::make_shared<knowhere::IVFSQCfg>();
-                tempconf->nlist = 100;
-                tempconf->nprobe = 16;
-                tempconf->nbits = 8;
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
-            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
-            case milvus::engine::IndexType::FAISS_IVFPQ_GPU: {
-                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
-                tempconf->nlist = 100;
-                tempconf->nprobe = 16;
-                tempconf->nbits = 8;
-                tempconf->m = 8;
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
-            case milvus::engine::IndexType::NSG_MIX: {
-                auto tempconf = std::make_shared<knowhere::NSGCfg>();
-                tempconf->nlist = 100;
-                tempconf->nprobe = 16;
-                tempconf->search_length = 8;
-                tempconf->knng = 200;
-                tempconf->search_length = 40; // TODO(linxj): be 20 when search
-                tempconf->out_degree = 60;
-                tempconf->candidate_pool_size = 200;
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
-        }
-    }
-};
-
 class KnowhereWrapperTest
-    : public TestWithParam<::std::tuple<milvus::engine::IndexType, std::string, int, int, int, int>> {
+    : public DataGenBase,
+      public TestWithParam<::std::tuple<milvus::engine::IndexType, std::string, int, int, int, int>> {
  protected:
     void SetUp() override {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID,
-                                                                1024 * 1024 * 200,
-                                                                1024 * 1024 * 300,
-                                                                2);
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 
         std::string generator_type;
         std::tie(index_type, generator_type, dim, nb, nq, k) = GetParam();
-
-        auto generator = std::make_shared<DataGenBase>();
-        generator->GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
+        GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
 
         index_ = GetVecIndexFactory(index_type);
-
         conf = ParamGenerator::GetInstance().Gen(index_type);
         conf->k = k;
         conf->d = dim;
-        conf->gpu_id = DEVICE_ID;
+        conf->gpu_id = DEVICEID;
     }
 
     void TearDown() override {
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
     }
 
-    void AssertResult(const std::vector<int64_t>& ids, const std::vector<float>& dis) {
-        EXPECT_EQ(ids.size(), nq * k);
-        EXPECT_EQ(dis.size(), nq * k);
-
-        for (auto i = 0; i < nq; i++) {
-            EXPECT_EQ(ids[i * k], gt_ids[i * k]);
-            //EXPECT_EQ(dis[i * k], gt_dis[i * k]);
-        }
-
-        int match = 0;
-        for (int i = 0; i < nq; ++i) {
-            for (int j = 0; j < k; ++j) {
-                for (int l = 0; l < k; ++l) {
-                    if (ids[i * nq + j] == gt_ids[i * nq + l]) match++;
-                }
-            }
-        }
-
-        auto precision = float(match) / (nq * k);
-        EXPECT_GT(precision, 0.5);
-        std::cout << std::endl << "Precision: " << precision
-                  << ", match: " << match
-                  << ", total: " << nq * k
-                  << std::endl;
-    }
-
  protected:
     milvus::engine::IndexType index_type;
-    knowhere::Config conf;
-
-    int dim = DIM;
-    int nb = NB;
-    int nq = 10;
-    int k = 10;
-    std::vector<float> xb;
-    std::vector<float> xq;
-    std::vector<int64_t> ids;
-
     milvus::engine::VecIndexPtr index_ = nullptr;
-
-    // Ground Truth
-    std::vector<int64_t> gt_ids;
-    std::vector<float> gt_dis;
+    knowhere::Config conf;
 };
 
 INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
@@ -220,7 +106,7 @@ TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
     AssertResult(res_ids, res_dis);
 
     {
-        auto dev_idx = index_->CopyToGpu(DEVICE_ID);
+        auto dev_idx = index_->CopyToGpu(DEVICEID);
         for (int i = 0; i < 10; ++i) {
             dev_idx->Search(nq, xq.data(), res_dis.data(), res_ids.data(), conf);
         }
@@ -232,17 +118,13 @@ TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
         write_index(index_, file_location);
         auto new_index = milvus::engine::read_index(file_location);
 
-        auto dev_idx = new_index->CopyToGpu(DEVICE_ID);
+        auto dev_idx = new_index->CopyToGpu(DEVICEID);
         for (int i = 0; i < 10; ++i) {
             dev_idx->Search(nq, xq.data(), res_dis.data(), res_ids.data(), conf);
         }
         AssertResult(res_ids, res_dis);
     }
 }
-
-//TEST_P(KnowhereWrapperTest, TO_CPU_TEST) {
-//    // dev
-//}
 
 TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);
@@ -283,7 +165,13 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
     }
 }
 
-// TODO(linxj): add exception test
-//TEST_P(KnowhereWrapperTest, exception_test) {
-//}
+#include "wrapper/ConfAdapter.h"
+TEST(whatever, test_config) {
+    milvus::engine::TempMetaConf conf;
+    auto nsg_conf = std::make_shared<milvus::engine::NSGConfAdapter>();
+    nsg_conf->Match(conf);
+    nsg_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_GPU);
 
+    auto pq_conf = std::make_shared<milvus::engine::IVFPQConfAdapter>();
+    pq_conf->Match(conf);
+}
