@@ -6,6 +6,8 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 ## Improvement
+- \#64 - Improvement dump function in scheduler
+
 ## Feature
 ## Task
 
