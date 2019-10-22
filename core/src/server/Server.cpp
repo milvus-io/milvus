@@ -19,6 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "../../version.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
@@ -179,6 +180,9 @@ Server::Start() {
         tzset();
 
         InitLog(log_config_file_);
+
+        // print version information
+        SERVER_LOG_INFO << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
 
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
