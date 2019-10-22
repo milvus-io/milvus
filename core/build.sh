@@ -1,11 +1,12 @@
 #!/bin/bash
 
+BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
-DB_PATH="/opt/milvus"
+DB_PATH="/tmp/milvus"
 PROFILING="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
@@ -40,8 +41,8 @@ do
                 RUN_CPPLINT="ON"
                 ;;
              r)
-                if [[ -d cmake_build ]]; then
-                    rm ./cmake_build -r
+                if [[ -d ${BUILD_OUTPUT_DIR} ]]; then
+                    rm ./${BUILD_OUTPUT_DIR} -r
                     MAKE_CLEAN="ON"
                 fi
                 ;;
@@ -62,7 +63,7 @@ do
 
 parameter:
 -p: install prefix(default: $(pwd)/milvus)
--d: db path(default: /opt/milvus)
+-d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
@@ -84,11 +85,15 @@ usage:
         esac
 done
 
-if [[ ! -d cmake_build ]]; then
-    mkdir cmake_build
+if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
+    mkdir ${BUILD_OUTPUT_DIR}
 fi
 
-cd cmake_build
+cd ${BUILD_OUTPUT_DIR}
+
+# remove make cache since build.sh -l use default variables
+# force update the variables each time
+make rebuild_cache
 
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \

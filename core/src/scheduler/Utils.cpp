@@ -48,7 +48,7 @@ get_gpu_pool() {
 
     server::Config& config = server::Config::GetInstance();
     std::vector<std::string> pool;
-    Status s = config.GetResourceConfigPool(pool);
+    Status s = config.GetResourceConfigSearchResources(pool);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
