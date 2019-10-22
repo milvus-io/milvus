@@ -1,4 +1,5 @@
-![Milvuslogo](https://github.com/milvus-io/docs/blob/0.5.0/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
+
 
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
@@ -14,34 +15,49 @@
 
 # Welcome to Milvus
 
-Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! ​​No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.​ :beers:
-
 ## What is Milvus
 
-Milvus is an open source vector search engine which provides state-of-the-art similarity search and analysis for billion-scale feature vectors.
+Milvus is an open source similarity search engine for massive feature vectors. Designed with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
 Milvus provides stable Python, Java and C++ APIs.
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/Releases/v0.4.0/).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/Releases/v0.5.0/).
 
-- GPU-accelerated search engine
+- Heterogeneous computing
 
-  Milvus uses CPU/GPU heterogeneous computing architecture to process feature vectors, and are orders of magnitudes faster than traditional databases.
+  Milvus is designed with heterogeneous computing architecture for the best performance and cost efficiency. 
 
-- Various indexes
+- Multiple indexes
 
-  Milvus supports quantization indexing, tree-based indexing, and graph indexing algorithms. 
+  Milvus supports a variety of indexing types that employs quantization, tree-based, and graph indexing techniques. 
 
-- Intelligent scheduling
+- Intelligent resource management
 
-  Milvus optimizes the search computation and index building according to your data size and available resources. 
+  Milvus automatically adapts search computation and index building processes based on your datasets and available resources.
 
 - Horizontal scalability
 
-  Milvus expands computation and storage by adding nodes during runtime, which allows you to scale the data size without redesigning the system.
+  Milvus supports online / offline expansion to scale both storage and computation resources with simple commands.
+
+- High availability
+
+  Milvus is integrated with Kubernetes framework so that all single point of failures could be avoided.
+
+- High compatibility
+
+  Milvus is compatible with almost all deep learning models and major programming languages such as Python, Java and C++, etc.
+
+- Ease of use
+
+  Milvus can be easily installed in a few steps and enables you to exclusively focus on feature vectors. 
+
+- Visualized monitor
+
+  You can track system performance on Prometheus-based GUI monitor dashboards.
 
 ## Architecture
-![Milvus_arch](https://github.com/milvus-io/docs/blob/0.5.0/assets/milvus_arch.jpg)
+
+![Milvus_arch](https://github.com/milvus-io/docs/blob/master/assets/milvus_arch.png)
 
 ## Get started
 
@@ -118,20 +134,20 @@ To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`,
 
 #### Run Python example code
 
-Make sure [Python 3.4](https://www.python.org/downloads/) or higher is already installed and in use.
+Make sure [Python 3.5](https://www.python.org/downloads/) or higher is already installed and in use.
 
 Install Milvus Python SDK.
 
 ```shell
 # Install Milvus Python SDK
-$ pip install pymilvus==0.2.0
+$ pip install pymilvus==0.2.3
 ```
 
 Create a new file `example.py`, and add [Python example code](https://github.com/milvus-io/pymilvus/blob/master/examples/AdvancedExample.py) to it.
 
 Run the example code.
 
-```python
+```shell
 # Run Milvus Python example
 $ python3 example.py
 ```
