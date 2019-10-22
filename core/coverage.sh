@@ -122,7 +122,8 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "*/src/server/DBWrapper.cpp" \
     "*/src/server/grpc_impl/GrpcServer.cpp" \
     "*/src/external/easyloggingpp/easylogging++.h" \
-    "*/src/external/easyloggingpp/easylogging++.cc"
+    "*/src/external/easyloggingpp/easylogging++.cc" \
+    "*/src/external/*"
 
 # gen html report
 ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
