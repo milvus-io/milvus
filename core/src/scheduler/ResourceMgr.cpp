@@ -173,7 +173,7 @@ ResourceMgr::GetNumGpuResource() const {
 json
 ResourceMgr::Dump() const {
     json resources{};
-    for (auto &res : resources_) {
+    for (auto& res : resources_) {
         resources.push_back(res->Dump());
     }
     json ret{

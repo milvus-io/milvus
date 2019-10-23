@@ -41,7 +41,7 @@ Node::GetNeighbours() {
 json
 Node::Dump() const {
     json neighbours;
-    for (auto & neighbour : neighbours_) {
+    for (auto& neighbour : neighbours_) {
         json n;
         n["id"] = neighbour.first;
         n["connection"] = neighbour.second.connection.Dump();
