@@ -11,7 +11,7 @@ import numpy
 from milvus import Milvus, IndexType, MetricType
 from utils import *
 
-nb = 100000
+nb = 10000
 dim = 128
 index_file_size = 10
 vectors = gen_vectors(nb, dim)
