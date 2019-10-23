@@ -21,7 +21,7 @@ Milvus is an open source similarity search engine for massive feature vectors. D
 
 Milvus provides stable Python, Java and C++ APIs.
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/Releases/v0.5.0/).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/releases/v0.5.0/).
 
 - Heterogeneous computing
 
