@@ -475,7 +475,7 @@ if __name__ == "__main__":
     table = "test"
 
 
-    file_name = '/poc/yuncong/ann_1000m/query.npy'
+    file_name = 'query.npy'
     data = np.load(file_name)
     vectors = data[0:nq].tolist()
     # print(vectors)
