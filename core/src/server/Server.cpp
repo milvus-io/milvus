@@ -19,13 +19,13 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "../../version.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "src/version.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
