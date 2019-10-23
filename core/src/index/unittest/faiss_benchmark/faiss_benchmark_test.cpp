@@ -469,10 +469,8 @@ void test_ivfsq8h_gpu(const std::string& ann_test_name,
         long *I = new  faiss::Index::idx_t[NQ * K];
         float *D = new float[NQ * K];
 
-        printf ("\n%s %ld\n", index_key.c_str(), nprobe);
         printf ("\n%s | %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
         printf ("====================================================\n");
-
         for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {    // nq = {10, 100, 1000}
             for (size_t t_k = 100; t_k <= K; t_k *= 10) {   //  k = {100, 1000}
                 double t_start = elapsed(), t_end;
@@ -528,7 +526,7 @@ void test_ivfsq8h_gpu(const std::string& ann_test_name,
  * SIFT     128         1,000,000   10,000      100         Euclidean   HDF5 (501MB)
 *************************************************************************************/
 
-TEST(FAISSTEST, sift1m_L2) {
+TEST(FAISSTEST, BENCHMARK) {
     test_ann_hdf5("sift-128-euclidean", "IVF4096,Flat",       2, {8, 128});
     test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8",       2, {8, 128});
     test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", 2, {8, 128});
