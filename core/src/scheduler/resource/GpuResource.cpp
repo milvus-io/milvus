@@ -22,7 +22,7 @@ namespace scheduler {
 
 std::ostream&
 operator<<(std::ostream& out, const GpuResource& resource) {
-    out << resource.Dump();
+    out << resource.Dump().dump();
     return out;
 }
 

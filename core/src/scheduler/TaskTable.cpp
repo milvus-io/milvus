@@ -53,7 +53,7 @@ ToString(TaskTableItemState state) {
 }
 
 json
-TaskTimestamp::Dump() {
+TaskTimestamp::Dump() const {
     json ret{
         {"start", start},       {"load", load}, {"loaded", loaded}, {"execute", execute},
         {"executed", executed}, {"move", move}, {"moved", moved},   {"finish", finish},
@@ -141,7 +141,7 @@ TaskTableItem::Moved() {
 }
 
 json
-TaskTableItem::Dump() {
+TaskTableItem::Dump() const {
     json ret{
         {"id", id},
         {"task", (int64_t)task.get()},
@@ -263,7 +263,7 @@ TaskTable::Get(uint64_t index) {
 //}
 
 json
-TaskTable::Dump() {
+TaskTable::Dump() const {
     json ret;
     for (auto& item : table_) {
         ret.push_back(item->Dump());
