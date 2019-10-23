@@ -33,8 +33,6 @@
 
 namespace {
 
-static const char *CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
-
 static const char *TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
@@ -232,8 +230,10 @@ TEST_F(DBTest, DB_TEST) {
 }
 
 TEST_F(DBTest, SEARCH_TEST) {
+    std::string config_path(CONFIG_PATH);
+    config_path += CONFIG_FILE;
     milvus::server::Config &config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    milvus::Status s = config.LoadConfigFile(config_path);
 
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
