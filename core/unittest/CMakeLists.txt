@@ -102,7 +102,6 @@ set(unittest_libs
         sqlite
         libboost_system.a
         libboost_filesystem.a
-        lz4
         mysqlpp
         yaml-cpp
         gtest
