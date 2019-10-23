@@ -282,9 +282,12 @@ void test_ann_hdf5(const std::string& ann_test_name,
         float *D = new float[NQ * K];
 
         printf ("\n%s | %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
-        printf ("====================================================\n");
+        printf ("============================================================================================\n");
         for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {    // nq = {10, 100, 1000}
             for (size_t t_k = 100; t_k <= K; t_k *= 10) {   //  k = {100, 1000}
+                faiss::indexIVF_stats.quantization_time = 0.0;
+                faiss::indexIVF_stats.search_time = 0.0;
+
                 double t_start = elapsed(), t_end;
 
                 index->search(t_nq, xq, t_k, D, I);
@@ -306,11 +309,14 @@ void test_ann_hdf5(const std::string& ann_test_name,
                         }
                     }
                 }
-                printf("nq = %4ld, k = %4ld, elapse = %fs, R@ = %.4f\n",
-                       t_nq, t_k, (t_end - t_start), (hit / float(t_nq * k / index_add_loops)));
+                printf("nq = %4ld, k = %4ld, elapse = %fs (quant = %fs, search = %fs), R@ = %.4f\n",
+                       t_nq, t_k, (t_end - t_start),
+                       faiss::indexIVF_stats.quantization_time / 1000,
+                       faiss::indexIVF_stats.search_time / 1000,
+                       (hit / float(t_nq * k / index_add_loops)));
             }
         }
-        printf ("====================================================\n");
+        printf ("============================================================================================\n");
 #else
         printf ("[%.3f s] Perform a search on %ld queries\n", elapsed() - t0, nq);
 
@@ -470,9 +476,12 @@ void test_ivfsq8h_gpu(const std::string& ann_test_name,
         float *D = new float[NQ * K];
 
         printf ("\n%s | %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
-        printf ("====================================================\n");
+        printf ("============================================================================================\n");
         for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {    // nq = {10, 100, 1000}
             for (size_t t_k = 100; t_k <= K; t_k *= 10) {   //  k = {100, 1000}
+                faiss::indexIVF_stats.quantization_time = 0.0;
+                faiss::indexIVF_stats.search_time = 0.0;
+
                 double t_start = elapsed(), t_end;
 
                 cpu_index->search(t_nq, xq, t_k, D, I);
@@ -494,11 +503,14 @@ void test_ivfsq8h_gpu(const std::string& ann_test_name,
                         }
                     }
                 }
-                printf("nq = %4ld, k = %4ld, elapse = %fs, R@ = %.4f\n",
-                       t_nq, t_k, (t_end - t_start), (hit / float(t_nq * k / index_add_loops)));
+                printf("nq = %4ld, k = %4ld, elapse = %fs (quant = %fs, search = %fs), R@ = %.4f\n",
+                       t_nq, t_k, (t_end - t_start),
+                       faiss::indexIVF_stats.quantization_time / 1000,
+                       faiss::indexIVF_stats.search_time / 1000,
+                       (hit / float(t_nq * k / index_add_loops)));
             }
         }
-        printf ("====================================================\n");
+        printf ("============================================================================================\n");
 
         printf ("[%.3f s] Search test done\n\n", elapsed() - t0);
 
