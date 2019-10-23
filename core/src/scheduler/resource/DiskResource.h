@@ -28,11 +28,6 @@ class DiskResource : public Resource {
  public:
     explicit DiskResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
 
-    inline std::string
-    Dump() const override {
-        return "<DiskResource, name=" + name_ + ">";
-    }
-
     friend std::ostream&
     operator<<(std::ostream& out, const DiskResource& resource);
 
