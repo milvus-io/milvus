@@ -540,7 +540,7 @@ TEST(FAISSTEST, sift1m_L2) {
     test_ann_hdf5("glove-200-angular", "IVF16384,SQ8",       1, {8, 128});
     test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", 1, {8, 128});
 #ifdef CUSTOMIZATION
-    test_ivfsq8h_gpu("glove-200-angular", 2, {128, 1024});
+    test_ivfsq8h_gpu("glove-200-angular", 2, {8, 128});
 #endif
 }
 
