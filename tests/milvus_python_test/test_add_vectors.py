@@ -407,6 +407,7 @@ class TestAddBase:
     def get_vector_id(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_add_vectors_ids_invalid(self, connect, table, get_vector_id):
         '''
         target: test add vectors in table, use customize ids, which are not int64
@@ -974,6 +975,7 @@ class TestAddIP:
     def get_vector_id(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_add_vectors_ids_invalid(self, connect, ip_table, get_vector_id):
         '''
         target: test add vectors in table, use customize ids, which are not int64
@@ -1223,7 +1225,7 @@ class TestAddTableVectorsInvalid(object):
         with pytest.raises(Exception) as e:
             status, result = connect.add_vectors(table, tmp_single_vector)
 
-    @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_add_vectors_with_invalid_vectors(self, connect, table, gen_vector):
         tmp_vectors = copy.deepcopy(self.vectors)
         tmp_vectors[1][1] = gen_vector
