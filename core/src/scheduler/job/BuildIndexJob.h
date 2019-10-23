@@ -53,6 +53,9 @@ class BuildIndexJob : public Job {
     void
     BuildIndexDone(size_t to_index_id);
 
+    json
+    Dump() const override;
+
  public:
     Status&
     GetStatus() {

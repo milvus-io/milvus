@@ -38,15 +38,21 @@ Node::GetNeighbours() {
     return ret;
 }
 
-std::string
-Node::Dump() {
-    std::stringstream ss;
-    ss << "<Node, id=" << std::to_string(id_) << ">::neighbours:" << std::endl;
-    for (auto& neighbour : neighbours_) {
-        ss << "\t<Neighbour, id=" << std::to_string(neighbour.first);
-        ss << ", connection: " << neighbour.second.connection.Dump() << ">" << std::endl;
+json
+Node::Dump() const {
+    json neighbours;
+    for (auto & neighbour : neighbours_) {
+        json n;
+        n["id"] = neighbour.first;
+        n["connection"] = neighbour.second.connection.Dump();
+        neighbours.push_back(n);
     }
-    return ss.str();
+
+    json ret{
+        {"id", id_},
+        {"neighbours", neighbours},
+    };
+    return ret;
 }
 
 void
