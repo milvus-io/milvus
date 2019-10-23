@@ -573,7 +573,7 @@ class TestAddBase:
         nq = 100
         vectors = gen_vectors(nq, dim)
         table_list = []
-        for i in range(50):
+        for i in range(20):
             table_name = gen_unique_str('test_add_vector_multi_tables')
             table_list.append(table_name)
             param = {'table_name': table_name,
@@ -581,9 +581,9 @@ class TestAddBase:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_table(param)
-        time.sleep(2)
-        for j in range(10):
-            for i in range(50):
+        time.sleep(5)
+        for j in range(5):
+            for i in range(20):
                 status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
                 assert status.OK()
 
