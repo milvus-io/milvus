@@ -264,7 +264,7 @@ class TestTable:
         expected: status ok, and no table in tables
         '''
         status = connect.delete_table(table)
-        assert not connect.has_table(table)
+        assert not assert_has_table(connect, table)
 
     def test_delete_table_ip(self, connect, ip_table):
         '''
@@ -274,7 +274,7 @@ class TestTable:
         expected: status ok, and no table in tables
         '''
         status = connect.delete_table(ip_table)
-        assert not connect.has_table(ip_table)
+        assert not assert_has_table(connect, ip_table)
 
     @pytest.mark.level(2)
     def test_table_delete_without_connection(self, table, dis_connect):
@@ -314,7 +314,7 @@ class TestTable:
             connect.create_table(param)
             status = connect.delete_table(table_name)
             time.sleep(1)
-            assert not connect.has_table(table_name)
+            assert not assert_has_table(connect, table_name)
 
     def test_delete_create_table_repeatedly(self, connect):
         '''
@@ -371,7 +371,7 @@ class TestTable:
         def deletetable(milvus):
             status = milvus.delete_table(table)
             # assert not status.code==0
-            assert milvus.has_table(table)
+            assert assert_has_table(milvus, table)
             assert status.OK()
 
         for i in range(process_num):
@@ -411,11 +411,10 @@ class TestTable:
         def delete(connect,ids):
             i = 0
             while i < loop_num:
-                # assert connect.has_table(table[ids*8+i])
                 status = connect.delete_table(table[ids*process_num+i])
                 time.sleep(2)
                 assert status.OK()
-                assert not connect.has_table(table[ids*process_num+i])
+                assert not assert_has_table(connect, table[ids*process_num+i])
                 i = i + 1
 
         for i in range(process_num):
@@ -444,7 +443,7 @@ class TestTable:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_table(param)
-        assert connect.has_table(table_name)
+        assert assert_has_table(connect, table_name)
 
     def test_has_table_ip(self, connect):
         '''
@@ -458,7 +457,7 @@ class TestTable:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.IP}
         connect.create_table(param)
-        assert connect.has_table(table_name)
+        assert assert_has_table(connect, table_name)
 
     @pytest.mark.level(2)
     def test_has_table_without_connection(self, table, dis_connect):
@@ -468,7 +467,7 @@ class TestTable:
         expected: has table raise exception
         '''
         with pytest.raises(Exception) as e:
-            status = dis_connect.has_table(table)
+            assert_has_table(dis_connect, table)
 
     def test_has_table_not_existed(self, connect):
         '''
@@ -478,7 +477,7 @@ class TestTable:
         expected: False
         '''
         table_name = gen_unique_str("test_table")
-        assert not connect.has_table(table_name)
+        assert not assert_has_table(connect, table_name)
 
     """
     ******************************************************************
@@ -700,7 +699,7 @@ class TestCreateTableDimInvalid(object):
                  'dimension': dimension,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        if isinstance(dimension, int) and dimension > 0:
+        if isinstance(dimension, int):
             status = connect.create_table(param)
             assert not status.OK()
         else:
@@ -778,7 +777,7 @@ def preload_table(connect, **params):
     return status
 
 def has(connect, **params):
-    status = connect.has_table(params["table_name"])
+    status = assert_has_table(connect, params["table_name"])
     return status
 
 def show(connect, **params):
