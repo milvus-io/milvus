@@ -33,13 +33,13 @@ static constexpr uint64_t GB = MB * 1024;
 } // namespace
 
 TEST_F(ConfigTest, CONFIG_TEST) {
-    milvus::server::ConfigMgr *config_mgr = milvus::server::YamlConfigMgr::GetInstance();
+    milvus::server::ConfigMgr* config_mgr = milvus::server::YamlConfigMgr::GetInstance();
 
     milvus::Status s = config_mgr->LoadConfigFile("");
     ASSERT_FALSE(s.ok());
 
     std::string config_path(CONFIG_PATH);
-    s = config_mgr->LoadConfigFile(config_path+ INVALID_CONFIG_FILE);
+    s = config_mgr->LoadConfigFile(config_path + INVALID_CONFIG_FILE);
     ASSERT_FALSE(s.ok());
 
     s = config_mgr->LoadConfigFile(config_path + VALID_CONFIG_FILE);
@@ -47,11 +47,11 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 
     config_mgr->Print();
 
-    milvus::server::ConfigNode &root_config = config_mgr->GetRootNode();
-    milvus::server::ConfigNode &server_config = root_config.GetChild("server_config");
-    milvus::server::ConfigNode &db_config = root_config.GetChild("db_config");
-    milvus::server::ConfigNode &metric_config = root_config.GetChild("metric_config");
-    milvus::server::ConfigNode &cache_config = root_config.GetChild("cache_config");
+    milvus::server::ConfigNode& root_config = config_mgr->GetRootNode();
+    milvus::server::ConfigNode& server_config = root_config.GetChild("server_config");
+    milvus::server::ConfigNode& db_config = root_config.GetChild("db_config");
+    milvus::server::ConfigNode& metric_config = root_config.GetChild("metric_config");
+    milvus::server::ConfigNode& cache_config = root_config.GetChild("cache_config");
     milvus::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
     auto valus = invalid_config.GetSequence("not_exist");
     float ff = invalid_config.GetFloatValue("not_exist", 3.0);
@@ -100,7 +100,7 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 
