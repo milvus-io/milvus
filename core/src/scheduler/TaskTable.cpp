@@ -52,19 +52,13 @@ ToString(TaskTableItemState state) {
     }
 }
 
-std::string
-ToString(const TaskTimestamp& timestamp) {
-    std::stringstream ss;
-    ss << "<start=" << timestamp.start;
-    ss << ", load=" << timestamp.load;
-    ss << ", loaded=" << timestamp.loaded;
-    ss << ", execute=" << timestamp.execute;
-    ss << ", executed=" << timestamp.executed;
-    ss << ", move=" << timestamp.move;
-    ss << ", moved=" << timestamp.moved;
-    ss << ", finish=" << timestamp.finish;
-    ss << ">";
-    return ss.str();
+json
+TaskTimestamp::Dump() {
+    json ret{
+        {"start", start},       {"load", load}, {"loaded", loaded}, {"execute", execute},
+        {"executed", executed}, {"move", move}, {"moved", moved},   {"finish", finish},
+    };
+    return ret;
 }
 
 bool
@@ -146,15 +140,15 @@ TaskTableItem::Moved() {
     return false;
 }
 
-std::string
+json
 TaskTableItem::Dump() {
-    std::stringstream ss;
-    ss << "<id=" << id;
-    ss << ", task=" << task;
-    ss << ", state=" << ToString(state);
-    ss << ", timestamp=" << ToString(timestamp);
-    ss << ">";
-    return ss.str();
+    json ret{
+        {"id", id},
+        {"task", (int64_t)task.get()},
+        {"state", ToString(state)},
+        {"timestamp", timestamp.Dump()},
+    };
+    return ret;
 }
 
 std::vector<uint64_t>
@@ -268,13 +262,13 @@ TaskTable::Get(uint64_t index) {
 ////        table_.erase(table_.begin(), iterator);
 //}
 
-std::string
+json
 TaskTable::Dump() {
-    std::stringstream ss;
+    json ret;
     for (auto& item : table_) {
-        ss << item->Dump() << std::endl;
+        ret.push_back(item->Dump());
     }
-    return ss.str();
+    return ret;
 }
 
 }  // namespace scheduler

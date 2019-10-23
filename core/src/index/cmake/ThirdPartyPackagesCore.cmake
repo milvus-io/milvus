@@ -331,10 +331,9 @@ macro(build_arrow)
                         CMAKE_ARGS
                         ${ARROW_CMAKE_ARGS}
                         BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
+                        ""
                         INSTALL_COMMAND
-                        ${MAKE} install
+                        ${MAKE} ${MAKE_BUILD_ARGS} install
                         BUILD_BYPRODUCTS
                         "${ARROW_STATIC_LIB}"
                         )
@@ -365,10 +364,9 @@ macro(build_arrow)
                 CMAKE_ARGS
                 ${ARROW_CMAKE_ARGS}
                 BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
+                ""
                 INSTALL_COMMAND
-                ${MAKE} install
+                ${MAKE} ${MAKE_BUILD_ARGS} install
                 BUILD_BYPRODUCTS
                 "${ARROW_STATIC_LIB}"
                 )
