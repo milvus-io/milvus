@@ -1,6 +1,6 @@
 numpy==1.16.3
 pymilvus>=0.1.18
-pyyaml==3.12
+pyyaml==5.1
 docker==4.0.2
 tableprint==0.8.0
 ansicolors==1.1.8

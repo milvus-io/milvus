@@ -462,6 +462,11 @@ def gen_simple_index_params():
     return gen_params(index_types, nlists)
 
 
+def assert_has_table(conn, table_name):
+    status, ok = conn.has_table(table_name)
+    return status.OK() and ok
+    
+
 if __name__ == "__main__":
     import numpy
 

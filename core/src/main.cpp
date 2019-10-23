@@ -23,11 +23,11 @@
 #include <string>
 
 #include "../version.h"
+#include "external/easyloggingpp/easylogging++.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
-#include "utils/easylogging++.h"
 
 INITIALIZE_EASYLOGGINGPP
 
