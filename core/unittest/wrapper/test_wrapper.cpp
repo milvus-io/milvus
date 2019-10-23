@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "utils/easylogging++.h"
+#include "external/easyloggingpp/easylogging++.h"
 #include "wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
