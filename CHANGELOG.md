@@ -6,8 +6,9 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 ## Improvement
-- \#64 - Improvement dump function in scheduler
+- \#64 - Improvement dump function in
 - \#82 - Move easyloggingpp into "external" directory
+- \#92 - Speed up CMake build process
 
 ## Feature
 ## Task
