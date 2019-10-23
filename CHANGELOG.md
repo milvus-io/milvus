@@ -7,11 +7,12 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 ## Improvement
 - \#64 - Improvement dump function in scheduler
+- \#82 - Move easyloggingpp into "external" directory
 
 ## Feature
 ## Task
 
-# Milvus 0.5.0 (TODO)
+# Milvus 0.5.0 (2019-10-21)
 
 ## Bug
 - MS-568 - Fix gpuresource free error
