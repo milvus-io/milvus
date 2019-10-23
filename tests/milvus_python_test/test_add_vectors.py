@@ -50,8 +50,7 @@ class TestAddBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        ret = connect.has_table(table)
-        assert ret == True
+        assert assert_has_table(connect, table)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_delete_table_add_vector(self, connect, table):
@@ -618,8 +617,7 @@ class TestAddIP:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        ret = connect.has_table(ip_table)
-        assert ret == True
+        assert assert_has_table(connect, ip_table)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_delete_table_add_vector(self, connect, ip_table):
