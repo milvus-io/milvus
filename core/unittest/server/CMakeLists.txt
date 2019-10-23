@@ -59,9 +59,6 @@ set(client_grpc_lib
 target_link_libraries(test_server
         knowhere
         stdc++
-        snappy
-        bz2
-        zstd
         ${client_grpc_lib}
         ${unittest_libs}
         )
