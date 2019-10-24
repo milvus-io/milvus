@@ -11,7 +11,7 @@ import numpy
 from milvus import Milvus, IndexType, MetricType
 from utils import *
 
-nb = 100000
+nb = 10000
 dim = 128
 index_file_size = 10
 vectors = gen_vectors(nb, dim)
@@ -37,7 +37,10 @@ class TestIndexBase:
         params=gen_simple_index_params()
     )
     def get_simple_index_params(self, request):
-        yield request.param
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     """
     ******************************************************************
@@ -515,14 +518,17 @@ class TestIndexIP:
         params=gen_simple_index_params()
     )
     def get_simple_index_params(self, request):
-        yield request.param
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     """
     ******************************************************************
       The following cases are used to test `create_index` function
     ******************************************************************
     """
-
+    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, ip_table, get_index_params):
         '''
@@ -557,6 +563,7 @@ class TestIndexIP:
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
+        assert status.OK()
         logging.getLogger().info(connect.describe_index(ip_table))
         query_vecs = [vectors[0], vectors[1], vectors[2]]
         top_k = 5
@@ -927,19 +934,19 @@ class TestIndexTableInvalid(object):
     def get_table_name(self, request):
         yield request.param
 
-    # @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_create_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         status = connect.create_index(table_name, random.choice(gen_index_params()))
         assert not status.OK()
 
-    # @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_describe_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         status, result = connect.describe_index(table_name)
         assert not status.OK()   
 
-    # @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_drop_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         status = connect.drop_index(table_name)
