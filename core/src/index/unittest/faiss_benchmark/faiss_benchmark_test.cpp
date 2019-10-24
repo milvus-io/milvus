@@ -541,15 +541,15 @@ void test_ivfsq8h_gpu(const std::string& ann_test_name,
 TEST(FAISSTEST, BENCHMARK) {
     test_ann_hdf5("sift-128-euclidean", "IVF4096,Flat",       2, {8, 128});
     test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8",       2, {8, 128});
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", 2, {8, 128});
 #ifdef CUSTOMIZATION
+    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", 2, {8, 128});
     test_ivfsq8h_gpu("sift-128-euclidean", 2, {8, 128});
 #endif
 
     test_ann_hdf5("glove-200-angular", "IVF4096,Flat",       1, {8, 128});
     test_ann_hdf5("glove-200-angular", "IVF16384,SQ8",       1, {8, 128});
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", 1, {8, 128});
 #ifdef CUSTOMIZATION
+    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", 1, {8, 128});
     test_ivfsq8h_gpu("glove-200-angular", 2, {8, 128});
 #endif
 }
