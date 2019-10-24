@@ -28,10 +28,58 @@
 #include "db/DBFactory.h"
 #include "db/Options.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#include "utils/CommonUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
 
 namespace {
+
+static const char
+    * CONFIG_STR = "# All the following configurations are default values.\n"
+                   "\n"
+                   "server_config:\n"
+                   "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
+                   "  port: 19530                       # port range: 1025 ~ 65534\n"
+                   "  deploy_mode: single               \n"
+                   "  time_zone: UTC+8\n"
+                   "\n"
+                   "db_config:\n"
+                   "  primary_path: /tmp/milvus         # path used to store data and meta\n"
+                   "  secondary_path:                   # path used to store data only, split by semicolon\n"
+                   "\n"
+                   "  backend_url: sqlite://:@:/        \n"
+                   "                                    \n"
+                   "                                    # Replace 'dialect' with 'mysql' or 'sqlite'\n"
+                   "\n"
+                   "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
+                   "\n"
+                   "metric_config:\n"
+                   "  enable_monitor: false             # enable monitoring or not\n"
+                   "  collector: prometheus             # prometheus\n"
+                   "  prometheus_config:\n"
+                   "    port: 8080                      # port prometheus used to fetch metrics\n"
+                   "\n"
+                   "cache_config:\n"
+                   "  cpu_mem_capacity: 16              # GB, CPU memory used for cache\n"
+                   "  cpu_mem_threshold: 0.85           # percentage of data kept when cache cleanup triggered\n"
+                   "  cache_insert_data: false          # whether load inserted data into cache\n"
+                   "\n"
+                   "engine_config:\n"
+                   "  blas_threshold: 20\n"
+                   "\n"
+                   "resource_config:\n"
+                   "  resource_pool:\n"
+                   "    - gpu0\n"
+                   "  index_build_device: gpu0          # GPU used for building index";
+
+void
+WriteToFile(const std::string& file_path, const char* content) {
+    std::fstream fs(file_path.c_str(), std::ios_base::out);
+
+    //write data to file
+    fs << content;
+    fs.close();
+}
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
@@ -84,7 +132,7 @@ BaseTest::TearDown() {
 milvus::engine::DBOptions
 BaseTest::GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
-    options.meta_.path_ = "/tmp/milvus_test";
+    options.meta_.path_ = CONFIG_PATH;
     options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
@@ -111,6 +159,9 @@ DBTest::SetUp() {
 
     auto options = GetOptions();
     db_ = milvus::engine::DBFactory::Build(options);
+
+    std::string config_path(options.meta_.path_ + CONFIG_FILE);
+    WriteToFile(config_path, CONFIG_STR);
 }
 
 void
