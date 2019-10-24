@@ -36,7 +36,7 @@ class TestIndexBase:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request):
+    def get_simple_index_params(self, request, args):
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
@@ -68,8 +68,10 @@ class TestIndexBase:
         method: create table and add vectors in it, check if added successfully
         expected: raise exception
         '''
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         with pytest.raises(Exception) as e:
-            status = dis_connect.create_index(table, random.choice(gen_index_params()))
+            status = dis_connect.create_index(table, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, table, get_index_params):
@@ -182,12 +184,14 @@ class TestIndexBase:
     def test_create_index_table_not_existed(self, connect):
         '''
         target: test create index interface when table name not existed
-        method: create table and add vectors in it, create index with an random table_name
+        method: create table and add vectors in it, create index
             , make sure the table name not in index
         expected: return code not equals to 0, create index failed
         '''
         table_name = gen_unique_str(self.__class__.__name__)
-        status = connect.create_index(table_name, random.choice(gen_index_params()))
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(table_name, index_param)
         assert not status.OK()
 
     def test_create_index_table_None(self, connect):
@@ -197,8 +201,10 @@ class TestIndexBase:
         expected: return code not equals to 0, create index failed
         '''
         table_name = None
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         with pytest.raises(Exception) as e:
-            status = connect.create_index(table_name, random.choice(gen_index_params()))
+            status = connect.create_index(table_name, index_param)
 
     def test_create_index_no_vectors(self, connect, table):
         '''
@@ -206,7 +212,9 @@ class TestIndexBase:
         method: create table and add no vectors in it, and then create index
         expected: return code equals to 0
         '''
-        status = connect.create_index(table, random.choice(gen_index_params()))
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(table, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -216,7 +224,9 @@ class TestIndexBase:
         method: create table and add no vectors in it, and then create index, add vectors in it
         expected: return code equals to 0
         '''
-        status = connect.create_index(table, random.choice(gen_index_params()))
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(table, index_param)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
 
@@ -227,11 +237,12 @@ class TestIndexBase:
         method: create index after index have been built
         expected: return code success, and search ok
         '''
+        nlist = 16384
         status, ids = connect.add_vectors(table, vectors)
-        index_params = random.choice(gen_index_params())
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         # index_params = get_index_params
-        status = connect.create_index(table, index_params)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
+        status = connect.create_index(table, index_param)
         assert status.OK()
         query_vec = [vectors[0]]
         top_k = 1
@@ -246,16 +257,19 @@ class TestIndexBase:
         method: create another index with different index_params after index have been built
         expected: return code 0, and describe index result equals with the second index params
         '''
+        nlist = 16384
         status, ids = connect.add_vectors(table, vectors)
-        index_params = random.sample(gen_index_params(), 2)
+        index_type_1 = IndexType.IVF_SQ8
+        index_type_2 = IndexType.IVFLAT
+        index_params = [{"index_type": index_type_1, "nlist": nlist}, {"index_type": index_type_2, "nlist": nlist}]
         logging.getLogger().info(index_params)
-        status = connect.create_index(table, index_params[0])
-        status = connect.create_index(table, index_params[1])
-        assert status.OK()
+        for index_param in index_params:
+            status = connect.create_index(table, index_param)
+            assert status.OK()
         status, result = connect.describe_index(table)
-        assert result._nlist == index_params[1]["nlist"]
+        assert result._nlist == nlist
         assert result._table_name == table
-        assert result._index_type == index_params[1]["index_type"]
+        assert result._index_type == index_type_2
 
     """
     ******************************************************************
@@ -331,7 +345,7 @@ class TestIndexBase:
     def test_describe_index_table_not_existed(self, connect):
         '''
         target: test describe index interface when table name not existed
-        method: create table and add vectors in it, create index with an random table_name
+        method: create table and add vectors in it, create index
             , make sure the table name not in index
         expected: return code not equals to 0, describe index failed
         '''
@@ -352,7 +366,7 @@ class TestIndexBase:
     def test_describe_index_not_create(self, connect, table):
         '''
         target: test describe index interface when index not created
-        method: create table and add vectors in it, create index with an random table_name
+        method: create table and add vectors in it, create index
             , make sure the table name not in index
         expected: return code not equals to 0, describe index failed
         '''
@@ -425,7 +439,7 @@ class TestIndexBase:
     def test_drop_index_table_not_existed(self, connect):
         '''
         target: test drop index interface when table name not existed
-        method: create table and add vectors in it, create index with an random table_name
+        method: create table and add vectors in it, create index
             , make sure the table name not in index, and then drop it
         expected: return code not equals to 0, drop index failed
         '''
@@ -449,8 +463,8 @@ class TestIndexBase:
         method: create table and add vectors in it, create index
         expected: return code not equals to 0, drop index failed
         '''
-        index_params = random.choice(gen_index_params())
-        logging.getLogger().info(index_params)
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         status, ids = connect.add_vectors(table, vectors)
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
@@ -486,7 +500,8 @@ class TestIndexBase:
         method: create index, drop index, four times, each tme use different index_params to create index
         expected: return code 0
         '''
-        index_params = random.sample(gen_index_params(), 2)
+        nlist = 16384
+        index_params = [{"index_type": IndexType.IVFLAT, "nlist": nlist}, {"index_type": IndexType.IVF_SQ8, "nlist": nlist}]
         status, ids = connect.add_vectors(table, vectors)
         for i in range(2):
             status = connect.create_index(table, index_params[i])
@@ -517,7 +532,7 @@ class TestIndexIP:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request):
+    def get_simple_index_params(self, request, args):
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
@@ -549,8 +564,10 @@ class TestIndexIP:
         method: create table and add vectors in it, check if added successfully
         expected: raise exception
         '''
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         with pytest.raises(Exception) as e:
-            status = dis_connect.create_index(ip_table, random.choice(gen_index_params()))
+            status = dis_connect.create_index(ip_table, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, ip_table, get_index_params):
@@ -665,7 +682,9 @@ class TestIndexIP:
         method: create table and add no vectors in it, and then create index
         expected: return code equals to 0
         '''
-        status = connect.create_index(ip_table, random.choice(gen_index_params()))
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(ip_table, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -675,7 +694,9 @@ class TestIndexIP:
         method: create table and add no vectors in it, and then create index, add vectors in it
         expected: return code equals to 0
         '''
-        status = connect.create_index(ip_table, random.choice(gen_index_params()))
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(ip_table, index_param)
         status, ids = connect.add_vectors(ip_table, vectors)
         assert status.OK()
 
@@ -686,11 +707,11 @@ class TestIndexIP:
         method: create index after index have been built
         expected: return code success, and search ok
         '''
+        nlist = 16384
         status, ids = connect.add_vectors(ip_table, vectors)
-        index_params = random.choice(gen_index_params())
-        # index_params = get_index_params
-        status = connect.create_index(ip_table, index_params)
-        status = connect.create_index(ip_table, index_params)
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(ip_table, index_param)
+        status = connect.create_index(ip_table, index_param)
         assert status.OK()
         query_vec = [vectors[0]]
         top_k = 1
@@ -705,16 +726,19 @@ class TestIndexIP:
         method: create another index with different index_params after index have been built
         expected: return code 0, and describe index result equals with the second index params
         '''
+        nlist = 16384
         status, ids = connect.add_vectors(ip_table, vectors)
-        index_params = random.sample(gen_index_params(), 2)
+        index_type_1 = IndexType.IVF_SQ8
+        index_type_2 = IndexType.IVFLAT
+        index_params = [{"index_type": index_type_1, "nlist": nlist}, {"index_type": index_type_2, "nlist": nlist}]
         logging.getLogger().info(index_params)
-        status = connect.create_index(ip_table, index_params[0])
-        status = connect.create_index(ip_table, index_params[1])
-        assert status.OK()
+        for index_param in index_params:
+            status = connect.create_index(ip_table, index_param)
+            assert status.OK()
         status, result = connect.describe_index(ip_table)
-        assert result._nlist == index_params[1]["nlist"]
+        assert result._nlist == nlist
         assert result._table_name == ip_table
-        assert result._index_type == index_params[1]["index_type"]
+        assert result._index_type == index_type_2
 
     """
     ******************************************************************
@@ -790,7 +814,7 @@ class TestIndexIP:
     def test_describe_index_not_create(self, connect, ip_table):
         '''
         target: test describe index interface when index not created
-        method: create table and add vectors in it, create index with an random table_name
+        method: create table and add vectors in it, create index
             , make sure the table name not in index
         expected: return code not equals to 0, describe index failed
         '''
@@ -857,8 +881,10 @@ class TestIndexIP:
         method: drop index, and check if drop successfully
         expected: raise exception
         '''
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVFLAT, "nlist": nlist}
         with pytest.raises(Exception) as e:
-            status = dis_connect.drop_index(ip_table, random.choice(gen_index_params()))
+            status = dis_connect.drop_index(ip_table, index_param)
 
     def test_drop_index_table_not_create(self, connect, ip_table):
         '''
@@ -866,8 +892,9 @@ class TestIndexIP:
         method: create table and add vectors in it, create index
         expected: return code not equals to 0, drop index failed
         '''
-        index_params = random.choice(gen_index_params())
-        logging.getLogger().info(index_params)
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        logging.getLogger().info(index_param)
         status, ids = connect.add_vectors(ip_table, vectors)
         status, result = connect.describe_index(ip_table)
         logging.getLogger().info(result)
@@ -903,7 +930,8 @@ class TestIndexIP:
         method: create index, drop index, four times, each tme use different index_params to create index
         expected: return code 0
         '''
-        index_params = random.sample(gen_index_params(), 2)
+        nlist = 16384
+        index_params = [{"index_type": IndexType.IVFLAT, "nlist": nlist}, {"index_type": IndexType.IVF_SQ8, "nlist": nlist}]
         status, ids = connect.add_vectors(ip_table, vectors)
         for i in range(2):
             status = connect.create_index(ip_table, index_params[i])
@@ -937,7 +965,9 @@ class TestIndexTableInvalid(object):
     @pytest.mark.level(2)
     def test_create_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
-        status = connect.create_index(table_name, random.choice(gen_index_params()))
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        status = connect.create_index(table_name, index_param)
         assert not status.OK()
 
     @pytest.mark.level(2)

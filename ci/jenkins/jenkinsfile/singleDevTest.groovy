@@ -1,4 +1,4 @@
-timeout(time: 30, unit: 'MINUTES') {
+timeout(time: 60, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         sh 'python3 -m pip install -r requirements.txt'
         sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --level=1 --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-gpu-milvus-gpu-engine.milvus.svc.cluster.local"
