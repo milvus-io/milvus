@@ -22,10 +22,10 @@
 #include <cstring>
 #include <string>
 
-#include "../version.h"
 #include "external/easyloggingpp/easylogging++.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
+#include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 

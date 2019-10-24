@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
 #include <memory>
 #include <vector>
 #include <cstdlib>
@@ -39,6 +40,15 @@ constexpr int64_t DEVICEID = 0;
 constexpr int64_t PINMEM = 1024 * 1024 * 200;
 constexpr int64_t TEMPMEM = 1024 * 1024 * 300;
 constexpr int64_t RESNUM = 2;
+
+static const char *CONFIG_PATH = "/tmp/milvus_test";
+static const char *CONFIG_FILE = "/server_config.yaml";
+
+class KnowhereTest : public ::testing::Test {
+ protected:
+    void SetUp() override;
+    void TearDown() override;
+};
 
 class DataGenBase {
  public:
