@@ -656,6 +656,7 @@ class TestTableInvalid(object):
     def get_table_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_create_table_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         param = {'table_name': table_name,
@@ -691,6 +692,7 @@ class TestCreateTableDimInvalid(object):
     def get_dim(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(5)
     def test_create_table_with_invalid_dimension(self, connect, get_dim):
         dimension = get_dim
