@@ -15,6 +15,7 @@ os.makedirs(dirpath, 0o777)
 settings.TestingConfig.SQLALCHEMY_DATABASE_URI = 'sqlite:///{}?check_same_thread=False'.format(
     filepath)
 
+
 @pytest.fixture
 def app(request):
     app = create_app(settings.TestingConfig)
