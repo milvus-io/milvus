@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "event/Event.h"
+#include "interface/interfaces.h"
 #include "task/SearchTask.h"
 
 namespace milvus {
@@ -42,7 +43,7 @@ enum class TaskTableItemState {
     MOVED,      // moved, termination state
 };
 
-struct TaskTimestamp {
+struct TaskTimestamp : public interface::dumpable {
     uint64_t start = 0;
     uint64_t move = 0;
     uint64_t moved = 0;
@@ -51,9 +52,12 @@ struct TaskTimestamp {
     uint64_t execute = 0;
     uint64_t executed = 0;
     uint64_t finish = 0;
+
+    json
+    Dump() override;
 };
 
-struct TaskTableItem {
+struct TaskTableItem : public interface::dumpable {
     TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {
     }
 
@@ -87,13 +91,13 @@ struct TaskTableItem {
     bool
     Moved();
 
-    std::string
-    Dump();
+    json
+    Dump() override;
 };
 
 using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 
-class TaskTable {
+class TaskTable : public interface::dumpable {
  public:
     TaskTable() = default;
 
@@ -240,8 +244,8 @@ class TaskTable {
     /*
      * Dump;
      */
-    std::string
-    Dump();
+    json
+    Dump() override;
 
  private:
     std::uint64_t id_ = 0;
