@@ -26,9 +26,9 @@ def gen_vector(nb, d, seed=np.random.RandomState(1234)):
     return xb.tolist()
 
 
-def gen_unique_str(str=None):
+def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
-    return prefix if str is None else str + "_" + prefix
+    return "test_"+prefix if str_value is None else str_value+"_"+prefix
 
 
 def get_current_day():
@@ -449,10 +449,11 @@ def gen_index_params():
 
     return gen_params(index_types, nlists)
 
+
 def gen_simple_index_params():
     index_params = []
     index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]
-    nlists = [16384]
+    nlists = [1024]
 
     def gen_params(index_types, nlists):
         return [ {"index_type": index_type, "nlist": nlist} \
