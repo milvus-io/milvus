@@ -26,4 +26,5 @@ class DBHandler:
 
 if __name__ == '__main__':
     db.init_db(settings.DefaultConfig.SQLALCHEMY_DATABASE_URI)
+    from mishards import models
     fire.Fire(DBHandler)
