@@ -54,7 +54,7 @@ struct TaskTimestamp : public interface::dumpable {
     uint64_t finish = 0;
 
     json
-    Dump() override;
+    Dump() const override;
 };
 
 struct TaskTableItem : public interface::dumpable {
@@ -92,7 +92,7 @@ struct TaskTableItem : public interface::dumpable {
     Moved();
 
     json
-    Dump() override;
+    Dump() const override;
 };
 
 using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
@@ -245,7 +245,7 @@ class TaskTable : public interface::dumpable {
      * Dump;
      */
     json
-    Dump() override;
+    Dump() const override;
 
  private:
     std::uint64_t id_ = 0;
