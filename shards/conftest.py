@@ -1,10 +1,19 @@
+import os
 import logging
 import pytest
 import grpc
+import tempfile
+import shutil
 from mishards import settings, db, create_app
 
 logger = logging.getLogger(__name__)
 
+tpath = tempfile.mkdtemp()
+dirpath = '{}/db'.format(tpath)
+filepath = '{}/meta.sqlite'.format(dirpath)
+os.makedirs(dirpath, 0o777)
+settings.TestingConfig.SQLALCHEMY_DATABASE_URI = 'sqlite:///{}?check_same_thread=False'.format(
+    filepath)
 
 @pytest.fixture
 def app(request):
@@ -15,6 +24,7 @@ def app(request):
     yield app
 
     db.drop_all()
+    # shutil.rmtree(tpath)
 
 
 @pytest.fixture
