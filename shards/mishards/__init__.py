@@ -19,17 +19,22 @@ def create_app(testing_config=None):
     from sd import ProviderManager
 
     sd_proiver_class = ProviderManager.get_provider(settings.SD_PROVIDER)
-    discover = sd_proiver_class(settings=settings.SD_PROVIDER_SETTINGS, conn_mgr=connect_mgr)
+    discover = sd_proiver_class(settings=settings.SD_PROVIDER_SETTINGS,
+                                conn_mgr=connect_mgr)
 
-    from tracing.factory import TracerFactory
     from mishards.grpc_utils import GrpcSpanDecorator
-    tracer = TracerFactory.new_tracer(config.TRACING_TYPE, settings.TracingConfig,
-                                      span_decorator=GrpcSpanDecorator())
+    from tracer.factory import TracerFactory
+    tracer = TracerFactory(config.TRACING_PLUGIN_PATH).create(config.TRACING_TYPE,
+                                    settings.TracingConfig,
+                                    span_decorator=GrpcSpanDecorator())
 
     from mishards.routings import RouterFactory
     router = RouterFactory.new_router(config.ROUTER_CLASS_NAME, connect_mgr)
 
-    grpc_server.init_app(conn_mgr=connect_mgr, tracer=tracer, router=router, discover=discover)
+    grpc_server.init_app(conn_mgr=connect_mgr,
+                         tracer=tracer,
+                         router=router,
+                         discover=discover)
 
     from mishards import exception_handlers
 
