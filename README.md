@@ -1,3 +1,4 @@
+
 ![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
 
@@ -197,4 +198,10 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 ## License
 
 [Apache 2.0 license](LICENSE)
+
+=======
+![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen.svg)
+![Language](https://img.shields.io/badge/language-C%2B%2B-blue.svg)
+![Release](https://img.shields.io/badge/Release-v0.5.0-orange.svg)
+![Release date](https://img.shields.io/badge/release__date-October-yellowgreen)
 
