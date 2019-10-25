@@ -34,3 +34,4 @@ urllib3==1.25.3
 jaeger-client>=3.4.0
 grpcio-opentracing>=1.0
 mock==2.0.0
+pluginbase==1.0.0
