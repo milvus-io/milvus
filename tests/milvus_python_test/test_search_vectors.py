@@ -220,7 +220,6 @@ class TestSearchBase:
         scope="function",
         params=[
             (get_last_day(2), get_last_day(1)),
-            (get_last_day(2), get_current_day()),
             (get_next_day(1), get_next_day(2))
         ]
     )
