@@ -2,6 +2,15 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
+# Milvus 0.5.1 (TODO)
+
+## Bug
+## Improvement
+- \#64 - Improvement dump function in scheduler
+
+## Feature
+## Task
+
 # Milvus 0.5.0 (2019-10-21)
 
 ## Bug
@@ -57,8 +66,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-648 - Improve unittest
 - MS-655 - Upgrade SPTAG
 - \#42 - Put union of index_build_device and search resources to gpu_pool
+- \#67 - Avoid linking targets multiple times in cmake
 
-## New Feature
+## Feature
 - MS-614 - Preload table at startup
 - MS-627 - Integrate new index: IVFSQHybrid
 - MS-631 - IVFSQ8H Index support
@@ -202,7 +212,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-576 - Scheduler refactor
 - MS-592 - Change showtables stream transport to unary
 
-## New Feature
+## Feature
 - MS-343 - Implement ResourceMgr
 - MS-338 - NewAPI: refine code to support CreateIndex
 - MS-339 - NewAPI: refine code to support DropIndex
@@ -263,7 +273,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-332 - Set grpc and thrift server run concurrently
 - MS-352 - Add hybrid index
 
-## New Feature
+## Feature
 - MS-180 - Add new mem manager
 - MS-195 - Add nlist and use_blas_threshold conf
 - MS-137 - Integrate knowhere
@@ -297,7 +307,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-126 - Add more error code
 - MS-128 - Change default db path
 
-## New Feature
+## Feature
 
 - MS-57 - Implement index load/search pipeline
 - MS-56 - Add version information when server is started
@@ -342,7 +352,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-20 - Clean Code Part 1
 
-## New Feature
+## Feature
 
 - MS-5 - Implement Auto Archive Feature
 - MS-6 - Implement SDK interface part 1
