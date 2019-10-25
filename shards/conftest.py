@@ -25,6 +25,7 @@ def app(request):
     yield app
 
     db.drop_all()
+    app.stop()
     # shutil.rmtree(tpath)
 
 
