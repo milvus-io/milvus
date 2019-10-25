@@ -6,7 +6,7 @@ from tracer import Tracer
 
 logger = logging.getLogger(__name__)
 
-PLUGIN_NAME = __name__
+PLUGIN_NAME = __file__
 
 class JaegerFactory:
     name = 'jaeger'
@@ -29,5 +29,5 @@ class JaegerFactory:
 
 
 def setup(app):
-    logger.debug('Plugin \'{}\' Installed In Package: {}'.format(PLUGIN_NAME, app.plugin_package_name))
+    logger.info('Plugin \'{}\' Installed In Package: {}'.format(PLUGIN_NAME, app.plugin_package_name))
     app.on_plugin_setup(JaegerFactory)
