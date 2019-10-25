@@ -170,16 +170,20 @@ ResourceMgr::GetNumGpuResource() const {
     return num;
 }
 
-std::string
-ResourceMgr::Dump() {
-    std::stringstream ss;
-    ss << "ResourceMgr contains " << resources_.size() << " resources." << std::endl;
-
+json
+ResourceMgr::Dump() const {
+    json resources{};
     for (auto& res : resources_) {
-        ss << res->Dump();
+        resources.push_back(res->Dump());
     }
-
-    return ss.str();
+    json ret{
+        {"number_of_resource", resources_.size()},
+        {"number_of_disk_resource", disk_resources_.size()},
+        {"number_of_cpu_resource", cpu_resources_.size()},
+        {"number_of_gpu_resource", gpu_resources_.size()},
+        {"resources", resources},
+    };
+    return ret;
 }
 
 std::string
@@ -187,9 +191,9 @@ ResourceMgr::DumpTaskTables() {
     std::stringstream ss;
     ss << ">>>>>>>>>>>>>>>ResourceMgr::DumpTaskTable<<<<<<<<<<<<<<<" << std::endl;
     for (auto& resource : resources_) {
-        ss << resource->Dump() << std::endl;
-        ss << resource->task_table().Dump();
-        ss << resource->Dump() << std::endl << std::endl;
+        ss << resource->name() << std::endl;
+        ss << resource->task_table().Dump().dump();
+        ss << resource->name() << std::endl << std::endl;
     }
     return ss.str();
 }
