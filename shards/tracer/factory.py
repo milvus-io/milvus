@@ -2,6 +2,7 @@ import os
 import logging
 from functools import partial
 from pluginbase import PluginBase
+from tracer import Tracer
 
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,8 @@ get_path = partial(os.path.join, here)
 
 PLUGIN_PACKAGE_NAME = 'tracer.plugins'
 plugin_base = PluginBase(package=PLUGIN_PACKAGE_NAME,
-        searchpath=[get_path('./plugins')])
+                         searchpath=[get_path('./plugins')])
+
 
 class TracerFactory(object):
     def __init__(self, searchpath=None):
@@ -19,8 +21,8 @@ class TracerFactory(object):
         self.tracer_map = {}
         searchpath = searchpath if searchpath else []
         searchpath = [searchpath] if isinstance(searchpath, str) else searchpath
-        self.source = plugin_base.make_plugin_source(
-                searchpath=searchpath, identifier=self.__class__.__name__)
+        self.source = plugin_base.make_plugin_source(searchpath=searchpath,
+                                                     identifier=self.__class__.__name__)
 
         for plugin_name in self.source.list_plugins():
             plugin = self.source.load_plugin(plugin_name)
@@ -34,10 +36,10 @@ class TracerFactory(object):
         return self.tracer_map.get(name, None)
 
     def create(self,
-            tracer_type,
-            tracer_config,
-            span_decorator=None,
-            **kwargs):
+               tracer_type,
+               tracer_config,
+               span_decorator=None,
+               **kwargs):
         if not tracer_type:
             return Tracer()
         plugin_class = self.plugin(tracer_type.lower())

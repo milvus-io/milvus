@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 PLUGIN_NAME = __file__
 
+
 class JaegerFactory:
     name = 'jaeger'
     @classmethod

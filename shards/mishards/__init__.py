@@ -25,8 +25,8 @@ def create_app(testing_config=None):
     from mishards.grpc_utils import GrpcSpanDecorator
     from tracer.factory import TracerFactory
     tracer = TracerFactory(config.TRACING_PLUGIN_PATH).create(config.TRACING_TYPE,
-                                    settings.TracingConfig,
-                                    span_decorator=GrpcSpanDecorator())
+                                                              settings.TracingConfig,
+                                                              span_decorator=GrpcSpanDecorator())
 
     from mishards.routings import RouterFactory
     router = RouterFactory.new_router(config.ROUTER_CLASS_NAME, connect_mgr)
