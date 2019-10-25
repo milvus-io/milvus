@@ -61,6 +61,9 @@ class SearchJob : public Job {
     Status&
     GetStatus();
 
+    json
+    Dump() const override;
+
  public:
     uint64_t
     topk() const {
