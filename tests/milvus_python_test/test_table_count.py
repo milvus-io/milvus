@@ -23,7 +23,7 @@ class TestTableCount:
     @pytest.fixture(
         scope="function",
         params=[
-            100,
+            1,
             5000,
             100000,
         ],
@@ -36,9 +36,9 @@ class TestTableCount:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_index_params()
+        params=gen_simple_index_params()
     )
-    def get_index_params(self, request, args):
+    def get_simple_index_params(self, request, args):
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
@@ -58,14 +58,14 @@ class TestTableCount:
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
-    def test_table_rows_count_after_index_created(self, connect, table, get_index_params):
+    def test_table_rows_count_after_index_created(self, connect, table, get_simple_index_params):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params 
         expected: get_table_row_count raise exception
         '''
         nb = 100
-        index_params = get_index_params
+        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=table, records=vectors)
         time.sleep(add_time_interval)
@@ -91,7 +91,7 @@ class TestTableCount:
             assert the value returned by get_table_row_count method is equal to 0
         expected: the count is equal to 0
         '''
-        table_name = gen_unique_str("test_table")
+        table_name = gen_unique_str()
         param = {'table_name': table_name,
                  'dimension': dim,
                  'index_file_size': index_file_size}
@@ -142,8 +142,8 @@ class TestTableCount:
         nq = 100
         vectors = gen_vectors(nq, dim)
         table_list = []
-        for i in range(50):
-            table_name = gen_unique_str('test_table_rows_count_multi_tables')
+        for i in range(20):
+            table_name = gen_unique_str()
             table_list.append(table_name)
             param = {'table_name': table_name,
                      'dimension': dim,
@@ -152,7 +152,7 @@ class TestTableCount:
             connect.create_table(param)
             res = connect.add_vectors(table_name=table_name, records=vectors)
         time.sleep(2)
-        for i in range(50):
+        for i in range(20):
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
             assert res == nq
@@ -166,7 +166,7 @@ class TestTableCountIP:
     @pytest.fixture(
         scope="function",
         params=[
-            100,
+            1,
             5000,
             100000,
         ],
@@ -180,9 +180,9 @@ class TestTableCountIP:
 
     @pytest.fixture(
         scope="function",
-        params=gen_index_params()
+        params=gen_simple_index_params()
     )
-    def get_index_params(self, request, args):
+    def get_simple_index_params(self, request, args):
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
@@ -202,14 +202,14 @@ class TestTableCountIP:
         status, res = connect.get_table_row_count(ip_table)
         assert res == nb
 
-    def test_table_rows_count_after_index_created(self, connect, ip_table, get_index_params):
+    def test_table_rows_count_after_index_created(self, connect, ip_table, get_simple_index_params):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params
         expected: get_table_row_count raise exception
         '''
         nb = 100
-        index_params = get_index_params
+        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=ip_table, records=vectors)
         time.sleep(add_time_interval)
@@ -243,10 +243,8 @@ class TestTableCountIP:
         status, res = connect.get_table_row_count(ip_table)
         assert res == 0
 
-    # TODO: enable
-    @pytest.mark.level(2)
-    @pytest.mark.timeout(20)
-    def _test_table_rows_count_multiprocessing(self, connect, ip_table, args):
+    @pytest.mark.timeout(60)
+    def test_table_rows_count_multiprocessing(self, connect, ip_table, args):
         '''
         target: test table rows_count is correct or not with multiprocess
         method: create table and add vectors in it,
@@ -286,7 +284,7 @@ class TestTableCountIP:
         nq = 100
         vectors = gen_vectors(nq, dim)
         table_list = []
-        for i in range(50):
+        for i in range(20):
             table_name = gen_unique_str('test_table_rows_count_multi_tables')
             table_list.append(table_name)
             param = {'table_name': table_name,
@@ -296,7 +294,7 @@ class TestTableCountIP:
             connect.create_table(param)
             res = connect.add_vectors(table_name=table_name, records=vectors)
         time.sleep(2)
-        for i in range(50):
+        for i in range(20):
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
             assert res == nq
