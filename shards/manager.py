@@ -1,6 +1,6 @@
 import fire
-from mishards import db
 from sqlalchemy import and_
+from mishards import db, settings
 
 
 class DBHandler:
@@ -25,4 +25,5 @@ class DBHandler:
 
 
 if __name__ == '__main__':
+    db.init_db(settings.DefaultConfig.SQLALCHEMY_DATABASE_URI)
     fire.Fire(DBHandler)
