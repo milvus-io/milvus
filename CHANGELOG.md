@@ -10,7 +10,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#80 - Print version information into log during server start
 - \#82 - Move easyloggingpp into "external" directory
 - \#92 - Speed up CMake build process
-
+- \#96 - Remove .a file in milvus/lib for docker-version
 ## Feature
 ## Task
 
