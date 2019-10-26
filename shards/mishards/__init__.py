@@ -22,7 +22,7 @@ def create_app(testing_config=None):
 
     from mishards.grpc_utils import GrpcSpanDecorator
     from tracer.factory import TracerFactory
-    tracer = TracerFactory(config.TRACING_PLUGIN_PATH).create(config.TRACING_TYPE,
+    tracer = TracerFactory(config.TRACER_PLUGIN_PATH).create(config.TRACER_CLASS_NAME,
                                                               plugin_config=settings.TracingConfig,
                                                               span_decorator=GrpcSpanDecorator())
 

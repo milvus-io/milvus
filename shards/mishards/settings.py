@@ -61,8 +61,8 @@ class TracingConfig:
 class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
     SQL_ECHO = env.bool('SQL_ECHO', False)
-    TRACING_PLUGIN_PATH = env.str('TRACING_PLUGIN_PATH', '')
-    TRACING_TYPE = env.str('TRACING_TYPE', '')
+    TRACER_PLUGIN_PATH = env.str('TRACER_PLUGIN_PATH', '')
+    TRACER_CLASS_NAME = env.str('TRACER_CLASS_NAME', '')
     ROUTER_PLUGIN_PATH = env.str('ROUTER_PLUGIN_PATH', '')
     ROUTER_CLASS_NAME = env.str('ROUTER_CLASS_NAME', 'FileBasedHashRingRouter')
     DISCOVERY_PLUGIN_PATH = env.str('DISCOVERY_PLUGIN_PATH', '')
