@@ -1,4 +1,4 @@
-String cron_string = BRANCH_NAME == "master" ? "H 0 * * *" : cron_string
+String cron_string = BRANCH_NAME == "master" ? "H 0 * * *" : ""
 cron_string =  BRANCH_NAME == "0.5.1" ? "H 1 * * *" : cron_string
 
 pipeline {
@@ -25,7 +25,7 @@ pipeline {
         SEMVER = "${BRANCH_NAME}"
         JOBNAMES = env.JOB_NAME.split('/')
         PIPELINE_NAME = "${JOBNAMES[0]}"
-        NIGHTLIY_TEST = "${cron_string ? true : false}"
+        NIGHTLIY_TEST = "${cron_string == "" ? false : true}"
     }
 
     stages {
