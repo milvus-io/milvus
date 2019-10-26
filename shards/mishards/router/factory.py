@@ -1,9 +1,7 @@
 import os
 import logging
 from functools import partial
-# from pluginbase import PluginBase
-# import importlib
-from utils.pluginextension import MiPluginBase
+from utils.pluginextension import MiPluginBase as PluginBase
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +9,8 @@ here = os.path.abspath(os.path.dirname(__file__))
 get_path = partial(os.path.join, here)
 
 PLUGIN_PACKAGE_NAME = 'router.plugins'
-plugin_base = MiPluginBase(package=PLUGIN_PACKAGE_NAME,
-                           searchpath=[get_path('./plugins')])
+plugin_base = PluginBase(package=PLUGIN_PACKAGE_NAME,
+                         searchpath=[get_path('./plugins')])
 
 
 class RouterFactory(object):

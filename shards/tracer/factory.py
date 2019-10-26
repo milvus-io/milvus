@@ -1,7 +1,8 @@
 import os
 import logging
 from functools import partial
-from pluginbase import PluginBase
+from utils.pluginextension import MiPluginBase as PluginBase
+# from pluginbase import PluginBase
 from tracer import Tracer
 
 
