@@ -16,11 +16,9 @@ def create_app(testing_config=None):
     from mishards.connections import ConnectionMgr
     connect_mgr = ConnectionMgr()
 
-    from sd import ProviderManager
-
-    sd_proiver_class = ProviderManager.get_provider(settings.SD_PROVIDER)
-    discover = sd_proiver_class(settings=settings.SD_PROVIDER_SETTINGS,
-                                conn_mgr=connect_mgr)
+    from discovery.factory import DiscoveryFactory
+    discover = DiscoveryFactory(config.DISCOVERY_PLUGIN_PATH).create(config.DISCOVERY_CLASS_NAME,
+                                                                     conn_mgr=connect_mgr)
 
     from mishards.grpc_utils import GrpcSpanDecorator
     from tracer.factory import TracerFactory
