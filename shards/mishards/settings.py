@@ -76,6 +76,7 @@ class DefaultConfig:
     SQL_ECHO = env.bool('SQL_ECHO', False)
     TRACING_PLUGIN_PATH = env.str('TRACING_PLUGIN_PATH', '')
     TRACING_TYPE = env.str('TRACING_TYPE', '')
+    ROUTER_PLUGIN_PATH = env.str('ROUTER_PLUGIN_PATH', '')
     ROUTER_CLASS_NAME = env.str('ROUTER_CLASS_NAME', 'FileBasedHashRingRouter')
 
 
