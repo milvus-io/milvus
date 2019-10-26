@@ -25,7 +25,6 @@ pipeline {
         SEMVER = "${BRANCH_NAME}"
         JOBNAMES = env.JOB_NAME.split('/')
         PIPELINE_NAME = "${JOBNAMES[0]}"
-        NIGHTLIY_TEST = "${cron_string == "" ? false : true}"
     }
 
     stages {
@@ -125,7 +124,8 @@ pipeline {
                             steps {
                                 container('milvus-test-env') {
                                     script {
-                                        if (NIGHTLIY_TEST) {
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest) {
                                             load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevNightlyTest.groovy"
                                         } else {
                                             load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
@@ -160,3 +160,9 @@ pipeline {
     }
 }
 
+boolean isTimeTriggeredBuild() {
+    for (Object currentBuildCause : script.currentBuild.rawBuild.getCauses()) {
+        return currentBuildCause.class.getName().contains('TimerTriggerCause')
+    }
+    return false
+}
