@@ -5,7 +5,8 @@ from utils.pluginextension import MiPluginBase as PluginBase
 
 
 class BaseMixin(object):
-    def __init__(self, package_name,  searchpath=None):
+
+    def __init__(self, package_name, searchpath=None):
         self.plugin_package_name = package_name
         caller_path = os.path.dirname(inspect.stack()[1][1])
         get_path = partial(os.path.join, caller_path)

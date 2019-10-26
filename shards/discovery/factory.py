@@ -8,6 +8,7 @@ PLUGIN_PACKAGE_NAME = 'discovery.plugins'
 
 class DiscoveryFactory(BaseMixin):
     PLUGIN_TYPE = 'Discovery'
+
     def __init__(self, searchpath=None):
         super().__init__(searchpath=searchpath, package_name=PLUGIN_PACKAGE_NAME)
 
@@ -17,5 +18,5 @@ class DiscoveryFactory(BaseMixin):
             raise RuntimeError('Please pass conn_mgr to create discovery!')
 
         plugin_config = DiscoveryConfig.Create()
-        plugin = plugin_class.create(plugin_config=plugin_config, conn_mgr=conn_mgr, **kwargs)
+        plugin = plugin_class.Create(plugin_config=plugin_config, conn_mgr=conn_mgr, **kwargs)
         return plugin

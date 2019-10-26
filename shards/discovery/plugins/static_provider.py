@@ -33,7 +33,7 @@ class StaticDiscovery(object):
         self.conn_mgr.unregister(name)
 
     @classmethod
-    def create(cls, conn_mgr, plugin_config, **kwargs):
+    def Create(cls, conn_mgr, plugin_config, **kwargs):
         discovery = cls(config=plugin_config, conn_mgr=conn_mgr, **kwargs)
         return discovery
 
