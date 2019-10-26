@@ -8,6 +8,7 @@ import pdb
 import threading
 from multiprocessing import Pool, Process
 import numpy
+import sklearn.preprocessing
 from milvus import Milvus, IndexType, MetricType
 from utils import *
 
@@ -15,7 +16,7 @@ nb = 10000
 dim = 128
 index_file_size = 10
 vectors = gen_vectors(nb, dim)
-vectors /= numpy.linalg.norm(vectors)
+vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
 BUILD_TIMEOUT = 60
 nprobe = 1
@@ -218,29 +219,26 @@ class TestIndexBase:
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_no_vectors_then_add_vectors(self, connect, table):
+    def test_create_index_no_vectors_then_add_vectors(self, connect, table, get_simple_index_params):
         '''
         target: test create index interface when there is no vectors in table, and does not affect the subsequent process
         method: create table and add no vectors in it, and then create index, add vectors in it
         expected: return code equals to 0
         '''
-        nlist = 16384
-        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        index_param = get_simple_index_params
         status = connect.create_index(table, index_param)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_same_index_repeatedly(self, connect, table):
+    def test_create_same_index_repeatedly(self, connect, table, get_simple_index_params):
         '''
         target: check if index can be created repeatedly, with the same create_index params
         method: create index after index have been built
         expected: return code success, and search ok
         '''
-        nlist = 16384
         status, ids = connect.add_vectors(table, vectors)
-        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
-        # index_params = get_index_params
+        index_param = get_simple_index_params
         status = connect.create_index(table, index_param)
         status = connect.create_index(table, index_param)
         assert status.OK()
@@ -390,9 +388,9 @@ class TestIndexBase:
         method: create table and add vectors in it, create index, call drop index
         expected: return code 0, and default index param
         '''
-        index_params = get_index_params
+        index_param = get_index_params
         status, ids = connect.add_vectors(table, vectors)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
         assert status.OK()
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
@@ -404,15 +402,15 @@ class TestIndexBase:
         assert result._table_name == table
         assert result._index_type == IndexType.FLAT
 
-    def test_drop_index_repeatly(self, connect, table, get_simple_index_params):
+    def test_drop_index_repeatly(self, connect, table, get_index_params):
         '''
         target: test drop index repeatly
         method: create index, call drop index, and drop again
         expected: return code 0
         '''
-        index_params = get_simple_index_params
+        index_param = get_index_params
         status, ids = connect.add_vectors(table, vectors)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
         assert status.OK()
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
@@ -688,14 +686,13 @@ class TestIndexIP:
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_no_vectors_then_add_vectors(self, connect, ip_table):
+    def test_create_index_no_vectors_then_add_vectors(self, connect, ip_table, get_simple_index_params):
         '''
         target: test create index interface when there is no vectors in table, and does not affect the subsequent process
         method: create table and add no vectors in it, and then create index, add vectors in it
         expected: return code equals to 0
         '''
-        nlist = 16384
-        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        index_param = get_simple_index_params
         status = connect.create_index(ip_table, index_param)
         status, ids = connect.add_vectors(ip_table, vectors)
         assert status.OK()
