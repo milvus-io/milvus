@@ -1,5 +1,8 @@
+String cron_string = BRANCH_NAME == "master" || BRANCH_NAME == "0.5.0" || BRANCH_NAME == "0.5.1" ? "H 0 * * *" : ""
 pipeline {
     agent none
+
+    triggers { cron(cron_string) }
 
     options {
         timestamps()
@@ -20,6 +23,7 @@ pipeline {
         SEMVER = "${BRANCH_NAME}"
         JOBNAMES = env.JOB_NAME.split('/')
         PIPELINE_NAME = "${JOBNAMES[0]}"
+        NIGHTLIY_TEST = "${cron_string == "" ? false : true}"
     }
 
     stages {
@@ -119,7 +123,11 @@ pipeline {
                             steps {
                                 container('milvus-test-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
+                                        if (NIGHTLIY_TEST) {
+                                            load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevNightlyTest.groovy"
+                                        } else {
+                                            load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
+                                        }
                                     }
                                 }
                             }
