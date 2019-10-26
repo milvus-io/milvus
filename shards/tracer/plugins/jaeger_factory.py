@@ -12,10 +12,11 @@ PLUGIN_NAME = __file__
 class JaegerFactory:
     name = 'jaeger'
     @classmethod
-    def create(cls, tracer_config, span_decorator=None, **kwargs):
-        tracing_config = tracer_config.TRACING_CONFIG
-        service_name = tracer_config.TRACING_SERVICE_NAME
-        validate = tracer_config.TRACING_VALIDATE
+    def Create(cls, plugin_config, **kwargs):
+        tracing_config = plugin_config.TRACING_CONFIG
+        span_decorator = kwargs.pop('span_decorator', None)
+        service_name = plugin_config.TRACING_SERVICE_NAME
+        validate = plugin_config.TRACING_VALIDATE
         config = Config(config=tracing_config,
                         service_name=service_name,
                         validate=validate)
@@ -23,7 +24,7 @@ class JaegerFactory:
         tracer = config.initialize_tracer()
         tracer_interceptor = open_tracing_server_interceptor(
             tracer,
-            log_payloads=tracer_config.TRACING_LOG_PAYLOAD,
+            log_payloads=plugin_config.TRACING_LOG_PAYLOAD,
             span_decorator=span_decorator)
 
         return Tracer(tracer, tracer_interceptor, intercept_server)

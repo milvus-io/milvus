@@ -299,7 +299,7 @@ class KubernetesProvider(object):
         self.event_handler.stop()
 
     @classmethod
-    def create(cls, conn_mgr, plugin_config, **kwargs):
+    def Create(cls, conn_mgr, plugin_config, **kwargs):
         discovery = cls(plugin_config=plugin_config, conn_mgr=conn_mgr, **kwargs)
         return discovery
 

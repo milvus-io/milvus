@@ -13,5 +13,5 @@ class RouterFactory(BaseMixin):
         super().__init__(searchpath=searchpath, package_name=PLUGIN_PACKAGE_NAME)
 
     def _create(self, plugin_class, **kwargs):
-        router = plugin_class.create(**kwargs)
+        router = plugin_class.Create(**kwargs)
         return router
