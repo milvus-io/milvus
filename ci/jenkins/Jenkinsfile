@@ -125,7 +125,7 @@ pipeline {
                                     script {
                                         if (NIGHTLIY_TEST) {
                                             load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevNightlyTest.groovy"
-                                        else {
+                                        } else {
                                             load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
                                         }
                                     }
