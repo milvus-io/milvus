@@ -24,6 +24,7 @@
 
 #include "Connection.h"
 #include "scheduler/TaskTable.h"
+#include "scheduler/interface/interfaces.h"
 
 namespace milvus {
 namespace scheduler {
@@ -41,7 +42,7 @@ struct Neighbour {
 };
 
 // TODO(lxj): return type void -> Status
-class Node {
+class Node : public interface::dumpable {
  public:
     Node();
 
@@ -52,8 +53,8 @@ class Node {
     GetNeighbours();
 
  public:
-    std::string
-    Dump();
+    json
+    Dump() const override;
 
  private:
     std::mutex mutex_;

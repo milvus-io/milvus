@@ -66,9 +66,13 @@ Scheduler::PostEvent(const EventPtr& event) {
     event_cv_.notify_one();
 }
 
-std::string
-Scheduler::Dump() {
-    return std::string();
+json
+Scheduler::Dump() const {
+    json ret{
+        {"running", running_},
+        {"event_queue_length", event_queue_.size()},
+    };
+    return ret;
 }
 
 void

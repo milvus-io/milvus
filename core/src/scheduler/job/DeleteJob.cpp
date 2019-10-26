@@ -45,5 +45,15 @@ DeleteJob::ResourceDone() {
     cv_.notify_one();
 }
 
+json
+DeleteJob::Dump() const {
+    json ret{
+        {"table_id", table_id_},
+        {"number_of_resource", num_resource_},
+        {"number_of_done", done_resource},
+    };
+    return ret;
+}
+
 }  // namespace scheduler
 }  // namespace milvus

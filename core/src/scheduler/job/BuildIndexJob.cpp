@@ -54,5 +54,13 @@ BuildIndexJob::BuildIndexDone(size_t to_index_id) {
     SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
 }
 
+json
+BuildIndexJob::Dump() const {
+    json ret{
+        {"number_of_to_index_file", to_index_files_.size()},
+    };
+    return ret;
+}
+
 }  // namespace scheduler
 }  // namespace milvus
