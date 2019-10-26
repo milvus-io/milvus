@@ -11,6 +11,7 @@ if FROM_EXAMPLE:
 else:
     env.read_env()
 
+
 DEBUG = env.bool('DEBUG', False)
 
 LOG_LEVEL = env.str('LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO')
@@ -28,22 +29,8 @@ SERVER_PORT = env.int('SERVER_PORT', 19530)
 SERVER_TEST_PORT = env.int('SERVER_TEST_PORT', 19530)
 WOSERVER = env.str('WOSERVER')
 
-SD_PROVIDER_SETTINGS = None
-SD_PROVIDER = env.str('SD_PROVIDER', 'Kubernetes')
-if SD_PROVIDER == 'Kubernetes':
-    from sd.kubernetes_provider import KubernetesProviderSettings
-    SD_PROVIDER_SETTINGS = KubernetesProviderSettings(
-        namespace=env.str('SD_NAMESPACE', ''),
-        in_cluster=env.bool('SD_IN_CLUSTER', False),
-        poll_interval=env.int('SD_POLL_INTERVAL', 5),
-        pod_patt=env.str('SD_ROSERVER_POD_PATT', ''),
-        label_selector=env.str('SD_LABEL_SELECTOR', ''),
-        port=env.int('SD_PORT', 19530))
-elif SD_PROVIDER == 'Static':
-    from sd.static_provider import StaticProviderSettings
-    SD_PROVIDER_SETTINGS = StaticProviderSettings(
-        hosts=env.list('SD_STATIC_HOSTS', []),
-        port=env.int('SD_STATIC_PORT', 19530))
+DISCOVERY_STATIC_HOSTS = env.list('DISCOVERY_STATIC_HOSTS', [])
+DISCOVERY_STATIC_PORT = env.int('DISCOVERY_STATIC_PORT', 19530)
 
 # TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
 
@@ -78,6 +65,8 @@ class DefaultConfig:
     TRACING_TYPE = env.str('TRACING_TYPE', '')
     ROUTER_PLUGIN_PATH = env.str('ROUTER_PLUGIN_PATH', '')
     ROUTER_CLASS_NAME = env.str('ROUTER_CLASS_NAME', 'FileBasedHashRingRouter')
+    DISCOVERY_PLUGIN_PATH = env.str('DISCOVERY_PLUGIN_PATH', '')
+    DISCOVERY_CLASS_NAME = env.str('DISCOVERY_CLASS_NAME', 'static')
 
 
 class TestingConfig(DefaultConfig):

@@ -13,9 +13,6 @@ import queue
 import enum
 from kubernetes import client, config, watch
 
-from utils import singleton
-from sd import ProviderManager
-
 logger = logging.getLogger(__name__)
 
 INCLUSTER_NAMESPACE_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
@@ -42,6 +39,8 @@ class K8SMixin:
 
 
 class K8SHeartbeatHandler(threading.Thread, K8SMixin):
+    name = 'kubernetes'
+
     def __init__(self,
                  message_queue,
                  namespace,
@@ -235,18 +234,19 @@ class KubernetesProviderSettings:
         self.port = int(port) if port else 19530
 
 
-@singleton
-@ProviderManager.register_service_provider
 class KubernetesProvider(object):
-    NAME = 'Kubernetes'
+    name = 'kubernetes'
 
-    def __init__(self, settings, conn_mgr, **kwargs):
-        self.namespace = settings.namespace
-        self.pod_patt = settings.pod_patt
-        self.label_selector = settings.label_selector
-        self.in_cluster = settings.in_cluster
-        self.poll_interval = settings.poll_interval
-        self.port = settings.port
+    def __init__(self, plugin_config, conn_mgr, **kwargs):
+        self.namespace = plugin_config.DISCOVERY_KUBERNETES_NAMESPACE
+        self.pod_patt = plugin_config.DISCOVERY_KUBERNETES_POD_PATT
+        self.label_selector = plugin_config.DISCOVERY_KUBERNETES_LABEL_SELECTOR
+        self.in_cluster = plugin_config.DISCOVERY_KUBERNETES_IN_CLUSTER.lower()
+        self.in_cluster = self.in_cluster == 'true'
+        self.poll_interval = plugin_config.DISCOVERY_KUBERNETES_POLL_INTERVAL
+        self.poll_interval = int(self.poll_interval) if self.poll_interval else 5
+        self.port = plugin_config.DISCOVERY_KUBERNETES_PORT
+        self.port = int(self.port) if self.port else 19530
         self.kwargs = kwargs
         self.queue = queue.Queue()
 
@@ -298,9 +298,23 @@ class KubernetesProvider(object):
         self.pod_heartbeater.stop()
         self.event_handler.stop()
 
+    @classmethod
+    def create(cls, conn_mgr, plugin_config, **kwargs):
+        discovery = cls(plugin_config=plugin_config, conn_mgr=conn_mgr, **kwargs)
+        return discovery
+
+
+def setup(app):
+    logger.info('Plugin \'{}\' Installed In Package: {}'.format(__file__, app.plugin_package_name))
+    app.on_plugin_setup(KubernetesProvider)
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))))
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
 
     class Connect:
         def register(self, name, value):
@@ -315,14 +329,15 @@ if __name__ == '__main__':
 
     connect_mgr = Connect()
 
-    settings = KubernetesProviderSettings(namespace='xp',
-                                          pod_patt=".*-ro-servers-.*",
-                                          label_selector='tier=ro-servers',
-                                          poll_interval=5,
-                                          in_cluster=False)
+    from discovery import DiscoveryConfig
+    settings = DiscoveryConfig(DISCOVERY_KUBERNETES_NAMESPACE='xp',
+                               DISCOVERY_KUBERNETES_POD_PATT=".*-ro-servers-.*",
+                               DISCOVERY_KUBERNETES_LABEL_SELECTOR='tier=ro-servers',
+                               DISCOVERY_KUBERNETES_POLL_INTERVAL=5,
+                               DISCOVERY_KUBERNETES_IN_CLUSTER=False)
 
-    provider_class = ProviderManager.get_provider('Kubernetes')
-    t = provider_class(conn_mgr=connect_mgr, settings=settings)
+    provider_class = KubernetesProvider
+    t = provider_class(conn_mgr=connect_mgr, plugin_config=settings)
     t.start()
     cnt = 100
     while cnt > 0:
