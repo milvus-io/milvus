@@ -161,8 +161,8 @@ pipeline {
 }
 
 boolean isTimeTriggeredBuild() {
-    for (Object currentBuildCause : script.currentBuild.rawBuild.getCauses()) {
-        return currentBuildCause.class.getName().contains('TimerTriggerCause')
+    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
+        return true
     }
     return false
 }
