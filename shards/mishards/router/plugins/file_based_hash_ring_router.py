@@ -51,7 +51,7 @@ class Factory(RouterMixin):
         return routing
 
     @classmethod
-    def create(cls, config, **kwargs):
+    def create(cls, **kwargs):
         conn_mgr = kwargs.pop('conn_mgr', None)
         if not conn_mgr:
             raise RuntimeError('Cannot find \'conn_mgr\' to initialize \'{}\''.format(self.name))
