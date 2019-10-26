@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 here = os.path.abspath(os.path.dirname(__file__))
 get_path = partial(os.path.join, here)
 
-PLUGIN_PACKAGE_NAME = 'router.plugins'
+PLUGIN_PACKAGE_NAME = 'mishards.router.plugins'
 plugin_base = PluginBase(package=PLUGIN_PACKAGE_NAME,
                          searchpath=[get_path('./plugins')])
 
