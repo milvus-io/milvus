@@ -16,9 +16,6 @@ ADD_TIMEOUT = 60
 nprobe = 1
 epsilon = 0.0001
 
-index_params = random.choice(gen_index_params())
-logging.getLogger().info(index_params)
-
 
 class TestAddBase:
     """
@@ -26,6 +23,15 @@ class TestAddBase:
       The following cases are used to test `add_vectors / index / search / delete` mixed function
     ******************************************************************
     """
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, args):
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     def test_add_vector_create_table(self, connect, table):
         '''
@@ -71,7 +77,7 @@ class TestAddBase:
         method: delete table_2 and add vector to table_1
         expected: status ok
         '''
-        param = {'table_name': 'test_delete_table_add_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -79,7 +85,6 @@ class TestAddBase:
         status = connect.delete_table(table)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(param['table_name'], vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -101,14 +106,13 @@ class TestAddBase:
         method: add vector and delete table
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_delete_another_table',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status = connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -131,7 +135,7 @@ class TestAddBase:
         method: add vector , sleep, and delete table
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_sleep_delete_another_table',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -143,86 +147,91 @@ class TestAddBase:
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector(self, connect, table):
+    def test_create_index_add_vector(self, connect, table, get_simple_index_params):
         '''
         target: test add vector after build index
         method: build index and add vector
         expected: status ok
         '''
-        status = connect.create_index(table, index_params)
+        index_param = get_simple_index_params
+        status = connect.create_index(table, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector_another(self, connect, table):
+    def test_create_index_add_vector_another(self, connect, table, get_simple_index_params):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_create_index_add_vector_another',
+        index_param = get_simple_index_params
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index(self, connect, table):
+    def test_add_vector_create_index(self, connect, table, get_simple_index_params):
         '''
         target: test build index add after vector
         method: add vector and build index
         expected: status ok
         '''
+        index_param = get_simple_index_params
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index_another(self, connect, table):
+    def test_add_vector_create_index_another(self, connect, table, get_simple_index_params):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_create_index_another',
+        index_param = get_simple_index_params
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status = connect.create_index(param['table_name'], index_params)
-        connect.delete_table(param['table_name'])
+        status = connect.create_index(param['table_name'], index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index(self, connect, table):
+    def test_add_vector_sleep_create_index(self, connect, table, get_simple_index_params):
         '''
         target: test build index add after vector for a while
         method: add vector and build index
         expected: status ok
         '''
+        index_param = get_simple_index_params
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         time.sleep(1)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index_another(self, connect, table):
+    def test_add_vector_sleep_create_index_another(self, connect, table, get_simple_index_params):
         '''
         target: test add vector to table_2 after build index for table_1 for a while
         method: build index and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_sleep_create_index_another',
+        index_param = get_simple_index_params
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -230,8 +239,7 @@ class TestAddBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         time.sleep(1)
-        status = connect.create_index(param['table_name'], index_params)
-        connect.delete_table(param['table_name'])
+        status = connect.create_index(param['table_name'], index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -253,7 +261,7 @@ class TestAddBase:
         method: search table and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_search_vector_add_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -261,7 +269,6 @@ class TestAddBase:
         vector = gen_single_vector(dim)
         status, result = connect.search_vectors(table, 1, nprobe, vector)
         status, ids = connect.add_vectors(param['table_name'], vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -283,7 +290,7 @@ class TestAddBase:
         method: search table and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_search_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -291,7 +298,6 @@ class TestAddBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -314,7 +320,7 @@ class TestAddBase:
         method: search table , sleep, and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_sleep_search_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -323,7 +329,6 @@ class TestAddBase:
         status, ids = connect.add_vectors(table, vector)
         time.sleep(1)
         status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     """
@@ -594,6 +599,15 @@ class TestAddIP:
       The following cases are used to test `add_vectors / index / search / delete` mixed function
     ******************************************************************
     """
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, args):
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
 
     def test_add_vector_create_table(self, connect, ip_table):
         '''
@@ -639,7 +653,7 @@ class TestAddIP:
         method: delete table_2 and add vector to table_1
         expected: status ok
         '''
-        param = {'table_name': 'test_delete_table_add_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -647,7 +661,6 @@ class TestAddIP:
         status = connect.delete_table(ip_table)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(param['table_name'], vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -699,7 +712,7 @@ class TestAddIP:
         method: add vector , sleep, and delete table
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_sleep_delete_another_table',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -711,86 +724,90 @@ class TestAddIP:
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector(self, connect, ip_table):
+    def test_create_index_add_vector(self, connect, ip_table, get_simple_index_params):
         '''
         target: test add vector after build index
         method: build index and add vector
         expected: status ok
         '''
-        status = connect.create_index(ip_table, index_params)
+        index_param = get_simple_index_params
+        status = connect.create_index(ip_table, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector_another(self, connect, ip_table):
+    def test_create_index_add_vector_another(self, connect, ip_table, get_simple_index_params):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_create_index_add_vector_another',
+        index_param = get_simple_index_params
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
-        status = connect.create_index(ip_table, index_params)
+        status = connect.create_index(ip_table, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index(self, connect, ip_table):
+    def test_add_vector_create_index(self, connect, ip_table, get_simple_index_params):
         '''
         target: test build index add after vector
         method: add vector and build index
         expected: status ok
         '''
+        index_param = get_simple_index_params
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status = connect.create_index(ip_table, index_params)
+        status = connect.create_index(ip_table, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index_another(self, connect, ip_table):
+    def test_add_vector_create_index_another(self, connect, ip_table, get_simple_index_params):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_create_index_another',
+        index_param = get_simple_index_params
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status = connect.create_index(param['table_name'], index_params)
-        connect.delete_table(param['table_name'])
+        status = connect.create_index(param['table_name'], index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index(self, connect, ip_table):
+    def test_add_vector_sleep_create_index(self, connect, ip_table, get_simple_index_params):
         '''
         target: test build index add after vector for a while
         method: add vector and build index
         expected: status ok
         '''
+        index_param = get_simple_index_params
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         time.sleep(1)
-        status = connect.create_index(ip_table, index_params)
+        status = connect.create_index(ip_table, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index_another(self, connect, ip_table):
+    def test_add_vector_sleep_create_index_another(self, connect, ip_table, get_simple_index_params):
         '''
         target: test add vector to table_2 after build index for table_1 for a while
         method: build index and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_sleep_create_index_another',
+        index_param = get_simple_index_params
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -798,8 +815,7 @@ class TestAddIP:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         time.sleep(1)
-        status = connect.create_index(param['table_name'], index_params)
-        connect.delete_table(param['table_name'])
+        status = connect.create_index(param['table_name'], index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -821,7 +837,7 @@ class TestAddIP:
         method: search table and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_search_vector_add_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -829,7 +845,6 @@ class TestAddIP:
         vector = gen_single_vector(dim)
         status, result = connect.search_vectors(ip_table, 1, nprobe, vector)
         status, ids = connect.add_vectors(param['table_name'], vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -851,7 +866,7 @@ class TestAddIP:
         method: search table and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_search_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -859,7 +874,6 @@ class TestAddIP:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -882,7 +896,7 @@ class TestAddIP:
         method: search table , sleep, and add vector
         expected: status ok
         '''
-        param = {'table_name': 'test_add_vector_sleep_search_vector_another',
+        param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
@@ -891,7 +905,6 @@ class TestAddIP:
         status, ids = connect.add_vectors(ip_table, vector)
         time.sleep(1)
         status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
-        connect.delete_table(param['table_name'])
         assert status.OK()
 
     """
@@ -1130,7 +1143,7 @@ class TestAddIP:
         nq = 100
         vectors = gen_vectors(nq, dim)
         table_list = []
-        for i in range(50):
+        for i in range(20):
             table_name = gen_unique_str('test_add_vector_multi_tables')
             table_list.append(table_name)
             param = {'table_name': table_name,
@@ -1140,7 +1153,7 @@ class TestAddIP:
             connect.create_table(param)
         time.sleep(2)
         for j in range(10):
-            for i in range(50):
+            for i in range(20):
                 status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
                 assert status.OK()
 
