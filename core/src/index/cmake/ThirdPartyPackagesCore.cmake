@@ -299,12 +299,29 @@ macro(build_arrow)
             ${EP_COMMON_CMAKE_ARGS}
             -DARROW_BUILD_STATIC=ON
             -DARROW_BUILD_SHARED=OFF
-            -DARROW_PARQUET=OFF
             -DARROW_USE_GLOG=OFF
             -DCMAKE_INSTALL_PREFIX=${ARROW_PREFIX}
-            "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
+            -DARROW_CUDA=OFF
+            -DARROW_FLIGHT=OFF
+            -DARROW_GANDIVA=OFF
+            -DARROW_GANDIVA_JAVA=OFF
+            -DARROW_HDFS=OFF
+            -DARROW_HIVESERVER2=OFF
+            -DARROW_ORC=OFF
+            -DARROW_PARQUET=OFF
+            -DARROW_PLASMA=OFF
+            -DARROW_PLASMA_JAVA_CLIENT=OFF
+            -DARROW_PYTHON=OFF
+            -DARROW_WITH_BZ2=OFF
+            -DARROW_WITH_ZLIB=OFF
+            -DARROW_WITH_LZ4=OFF
+            -DARROW_WITH_SNAPPY=OFF
+            -DARROW_WITH_ZSTD=OFF
+            -DARROW_WITH_BROTLI=OFF
             -DCMAKE_BUILD_TYPE=Release
-            -DARROW_DEPENDENCY_SOURCE=BUNDLED) #Build all arrow dependencies from source instead of calling find_package first
+            -DARROW_DEPENDENCY_SOURCE=BUNDLED #Build all arrow dependencies from source instead of calling find_package first
+            -DBOOST_SOURCE=AUTO #try to find BOOST in the system default locations and build from source if not found
+            )
 
     
     if(USE_JFROG_CACHE STREQUAL "ON")

@@ -63,5 +63,15 @@ SearchJob::GetStatus() {
     return status_;
 }
 
+json
+SearchJob::Dump() const {
+    json ret{
+        {"topk", topk_},
+        {"nq", nq_},
+        {"nprobe", nprobe_},
+    };
+    return ret;
+}
+
 }  // namespace scheduler
 }  // namespace milvus

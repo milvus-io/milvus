@@ -16,21 +16,16 @@
 
 set(MILVUS_THIRDPARTY_DEPENDENCIES
 
-        BOOST
-        BZip2
         GTest
-        Lz4
         MySQLPP
         Prometheus
-        Snappy
         SQLite
         SQLite_ORM
         yaml-cpp
-        ZLIB
-        ZSTD
         libunwind
         gperftools
-        GRPC)
+        GRPC
+        ZLIB)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -42,34 +37,26 @@ foreach(DEPENDENCY ${MILVUS_THIRDPARTY_DEPENDENCIES})
 endforeach()
 
 macro(build_dependency DEPENDENCY_NAME)
-    if("${DEPENDENCY_NAME}" STREQUAL "BZip2")
-        build_bzip2()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
+    if ("${DEPENDENCY_NAME}" STREQUAL "GTest")
         build_gtest()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "Lz4")
-        build_lz4()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "MySQLPP")
         build_mysqlpp()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Prometheus")
         build_prometheus()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "Snappy")
-        build_snappy()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
         build_sqlite()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite_ORM")
         build_sqlite_orm()
     elseif("${DEPENDENCY_NAME}" STREQUAL "yaml-cpp")
         build_yamlcpp()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
-        build_zlib()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "ZSTD")
-        build_zstd()
     elseif("${DEPENDENCY_NAME}" STREQUAL "libunwind")
         build_libunwind()
     elseif("${DEPENDENCY_NAME}" STREQUAL "gperftools")
         build_gperftools()
     elseif("${DEPENDENCY_NAME}" STREQUAL "GRPC")
         build_grpc()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
+        build_zlib()
     else()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -263,23 +250,6 @@ foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach()
 
-if(DEFINED ENV{MILVUS_BOOST_URL})
-    set(BOOST_SOURCE_URL "$ENV{MILVUS_BOOST_URL}")
-else()
-    string(REPLACE "." "_" BOOST_VERSION_UNDERSCORES ${BOOST_VERSION})
-    set(BOOST_SOURCE_URL
-            "https://nchc.dl.sourceforge.net/project/boost/boost/${BOOST_VERSION}/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz")
-            #"https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz")
-endif()
-set(BOOST_MD5 "fea771fe8176828fabf9c09242ee8c26")
-
-if(DEFINED ENV{MILVUS_BZIP2_URL})
-    set(BZIP2_SOURCE_URL "$ENV{MILVUS_BZIP2_URL}")
-else()
-    set(BZIP2_SOURCE_URL "https://sourceware.org/pub/bzip2/bzip2-${BZIP2_VERSION}.tar.gz")
-endif()
-set(BZIP2_MD5 "00b516f4704d4a7cb50a1d97e6e8e15b")
-
 if (DEFINED ENV{MILVUS_GTEST_URL})
     set(GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}")
 else ()
@@ -287,13 +257,6 @@ else ()
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
 endif()
 set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
-
-if(DEFINED ENV{MILVUS_LZ4_URL})
-    set(LZ4_SOURCE_URL "$ENV{MILVUS_LZ4_URL}")
-else()
-    set(LZ4_SOURCE_URL "https://github.com/lz4/lz4/archive/${LZ4_VERSION}.tar.gz")
-endif()
-set(LZ4_MD5 "a80f28f2a2e5fe59ebfe8407f793da22")
 
 if(DEFINED ENV{MILVUS_MYSQLPP_URL})
     set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
@@ -309,14 +272,6 @@ else ()
             https://github.com/jupp0r/prometheus-cpp.git)
 endif()
 
-if(DEFINED ENV{MILVUS_SNAPPY_URL})
-    set(SNAPPY_SOURCE_URL "$ENV{MILVUS_SNAPPY_URL}")
-else()
-    set(SNAPPY_SOURCE_URL
-            "https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz")
-endif()
-set(SNAPPY_MD5 "ee9086291c9ae8deb4dac5e0b85bf54a")
-
 if(DEFINED ENV{MILVUS_SQLITE_URL})
     set(SQLITE_SOURCE_URL "$ENV{MILVUS_SQLITE_URL}")
 else()
@@ -329,7 +284,6 @@ if(DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
 else()
     set(SQLITE_ORM_SOURCE_URL
-#            "http://192.168.1.105:6060/Test/sqlite_orm/-/archive/master/sqlite_orm-master.zip")
             "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
@@ -340,20 +294,6 @@ else()
     set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz")
 endif()
 set(YAMLCPP_MD5 "5b943e9af0060d0811148b037449ef82")
-
-if(DEFINED ENV{MILVUS_ZLIB_URL})
-    set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
-else()
-    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
-endif()
-set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
-
-if(DEFINED ENV{MILVUS_ZSTD_URL})
-    set(ZSTD_SOURCE_URL "$ENV{MILVUS_ZSTD_URL}")
-else()
-    set(ZSTD_SOURCE_URL "https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz")
-endif()
-set(ZSTD_MD5 "340c837db48354f8d5eafe74c6077120")
 
 if(DEFINED ENV{MILVUS_LIBUNWIND_URL})
     set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
@@ -379,202 +319,12 @@ else()
 endif()
 set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
-
-# ----------------------------------------------------------------------
-# Add Boost dependencies (code adapted from Apache Kudu (incubating))
-
-set(Boost_USE_MULTITHREADED ON)
-set(Boost_ADDITIONAL_VERSIONS
-        "1.70.0"
-        "1.70"
-        "1.69.0"
-        "1.69"
-        "1.68.0"
-        "1.68"
-        "1.67.0"
-        "1.67"
-        "1.66.0"
-        "1.66"
-        "1.65.0"
-        "1.65"
-        "1.64.0"
-        "1.64"
-        "1.63.0"
-        "1.63"
-        "1.62.0"
-        "1.61"
-        "1.61.0"
-        "1.62"
-        "1.60.0"
-        "1.60")
-
-if(MILVUS_BOOST_VENDORED)
-    set(BOOST_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/boost_ep-prefix/src/boost_ep")
-    set(BOOST_LIB_DIR "${BOOST_PREFIX}/stage/lib")
-    set(BOOST_BUILD_LINK "static")
-    set(BOOST_STATIC_SYSTEM_LIBRARY
-            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_system${CMAKE_STATIC_LIBRARY_SUFFIX}"
-    )
-    set(BOOST_STATIC_FILESYSTEM_LIBRARY
-            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_filesystem${CMAKE_STATIC_LIBRARY_SUFFIX}"
-    )
-    set(BOOST_STATIC_SERIALIZATION_LIBRARY
-            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_serialization${CMAKE_STATIC_LIBRARY_SUFFIX}"
-    )
-    set(BOOST_SYSTEM_LIBRARY boost_system_static)
-    set(BOOST_FILESYSTEM_LIBRARY boost_filesystem_static)
-    set(BOOST_SERIALIZATION_LIBRARY boost_serialization_static)
-
-    if(MILVUS_BOOST_HEADER_ONLY)
-        set(BOOST_BUILD_PRODUCTS)
-        set(BOOST_CONFIGURE_COMMAND "")
-        set(BOOST_BUILD_COMMAND "")
-    else()
-        set(BOOST_BUILD_PRODUCTS ${BOOST_STATIC_SYSTEM_LIBRARY}
-                ${BOOST_STATIC_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY})
-        set(BOOST_CONFIGURE_COMMAND "./bootstrap.sh" "--prefix=${BOOST_PREFIX}"
-                "--with-libraries=filesystem,serialization,system")
-        if("${CMAKE_BUILD_TYPE}" STREQUAL "DEBUG")
-            set(BOOST_BUILD_VARIANT "debug")
-        else()
-            set(BOOST_BUILD_VARIANT "release")
-        endif()
-        set(BOOST_BUILD_COMMAND
-                "./b2"
-                "link=${BOOST_BUILD_LINK}"
-                "variant=${BOOST_BUILD_VARIANT}"
-                "cxxflags=-fPIC")
-
-        add_thirdparty_lib(boost_system STATIC_LIB "${BOOST_STATIC_SYSTEM_LIBRARY}")
-
-        add_thirdparty_lib(boost_filesystem STATIC_LIB "${BOOST_STATIC_FILESYSTEM_LIBRARY}")
-
-        add_thirdparty_lib(boost_serialization STATIC_LIB "${BOOST_STATIC_SERIALIZATION_LIBRARY}")
-
-        set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY})
-    endif()
-    externalproject_add(boost_ep
-            URL
-            ${BOOST_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            ${BOOST_BUILD_PRODUCTS}
-            BUILD_IN_SOURCE
-            1
-            CONFIGURE_COMMAND
-            ${BOOST_CONFIGURE_COMMAND}
-            BUILD_COMMAND
-            ${BOOST_BUILD_COMMAND}
-            INSTALL_COMMAND
-            ""
-            ${EP_LOG_OPTIONS})
-
-
-    set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
-    set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
-    add_dependencies(boost_system_static boost_ep)
-    add_dependencies(boost_filesystem_static boost_ep)
-    add_dependencies(boost_serialization_static boost_ep)
-
+if(DEFINED ENV{MILVUS_ZLIB_URL})
+    set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
+else()
+    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
 endif()
-
-include_directories(SYSTEM ${Boost_INCLUDE_DIR})
-link_directories(SYSTEM ${BOOST_LIB_DIR})
-
-# ----------------------------------------------------------------------
-# bzip2
-
-macro(build_bzip2)
-    message(STATUS "Building BZip2-${BZIP2_VERSION} from source")
-    set(BZIP2_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix/src/bzip2_ep")
-    set(BZIP2_INCLUDE_DIR "${BZIP2_PREFIX}/include")
-    set(BZIP2_STATIC_LIB
-            "${BZIP2_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}bz2${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(BZIP2_CACHE_PACKAGE_NAME "bzip2_${BZIP2_MD5}.tar.gz")
-        set(BZIP2_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BZIP2_CACHE_PACKAGE_NAME}")
-        set(BZIP2_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BZIP2_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${BZIP2_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote cache file ${BZIP2_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(bzip2_ep
-                                ${EP_LOG_OPTIONS}
-                                CONFIGURE_COMMAND
-                                ""
-                                BUILD_IN_SOURCE
-                                1
-                                BUILD_COMMAND
-                                ${MAKE}
-                                ${MAKE_BUILD_ARGS}
-                                CFLAGS=${EP_C_FLAGS}
-                                INSTALL_COMMAND
-                                ${MAKE}
-                                install
-                                PREFIX=${BZIP2_PREFIX}
-                                CFLAGS=${EP_C_FLAGS}
-                                INSTALL_DIR
-                                ${BZIP2_PREFIX}
-                                URL
-                                ${BZIP2_SOURCE_URL}
-                                BUILD_BYPRODUCTS
-                                "${BZIP2_STATIC_LIB}")
-
-            ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
-        else()
-            file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(bzip2_ep
-                                ${EP_LOG_OPTIONS}
-                                CONFIGURE_COMMAND
-                                ""
-                                BUILD_IN_SOURCE
-                                1
-                                BUILD_COMMAND
-                                ${MAKE}
-                                ${MAKE_BUILD_ARGS}
-                                CFLAGS=${EP_C_FLAGS}
-                                INSTALL_COMMAND
-                                ${MAKE}
-                                install
-                                PREFIX=${BZIP2_PREFIX}
-                                CFLAGS=${EP_C_FLAGS}
-                                INSTALL_DIR
-                                ${BZIP2_PREFIX}
-                                URL
-                                ${BZIP2_SOURCE_URL}
-                                BUILD_BYPRODUCTS
-                                "${BZIP2_STATIC_LIB}")
-    endif()
-
-    file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
-    add_library(bzip2 STATIC IMPORTED)
-    set_target_properties(
-            bzip2
-            PROPERTIES IMPORTED_LOCATION "${BZIP2_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${BZIP2_INCLUDE_DIR}")
-
-    add_dependencies(bzip2 bzip2_ep)
-endmacro()
-
-if(MILVUS_WITH_BZ2)
-    resolve_dependency(BZip2)
-
-    if(NOT TARGET bzip2)
-        add_library(bzip2 UNKNOWN IMPORTED)
-        set_target_properties(bzip2
-                PROPERTIES IMPORTED_LOCATION "${BZIP2_LIBRARIES}"
-                INTERFACE_INCLUDE_DIRECTORIES "${BZIP2_INCLUDE_DIR}")
-    endif()
-    link_directories(SYSTEM ${BZIP2_PREFIX}/lib/)
-    include_directories(SYSTEM "${BZIP2_INCLUDE_DIR}")
-endif()
+set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
 # ----------------------------------------------------------------------
 # Google gtest
@@ -687,95 +437,6 @@ if (MILVUS_BUILD_TESTS)
     get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM "${GTEST_PREFIX}/lib")
     include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
-endif()
-
-# ----------------------------------------------------------------------
-# lz4
-
-macro(build_lz4)
-    message(STATUS "Building lz4-${LZ4_VERSION} from source")
-    set(LZ4_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix/src/lz4_ep")
-    set(LZ4_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix/")
-
-    set(LZ4_STATIC_LIB "${LZ4_BUILD_DIR}/lib/liblz4.a")
-    set(LZ4_BUILD_COMMAND BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS} CFLAGS=${EP_C_FLAGS})
-
-    # We need to copy the header in lib to directory outside of the build
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(LZ4_CACHE_PACKAGE_NAME "lz4_${LZ4_MD5}.tar.gz")
-        set(LZ4_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LZ4_CACHE_PACKAGE_NAME}")
-        set(LZ4_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LZ4_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${LZ4_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${LZ4_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(lz4_ep
-                    URL
-                    ${LZ4_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    UPDATE_COMMAND
-                    ${CMAKE_COMMAND}
-                    -E
-                    copy_directory
-                    "${LZ4_BUILD_DIR}/lib"
-                    "${LZ4_PREFIX}/include"
-                    ${LZ4_PATCH_COMMAND}
-                    CONFIGURE_COMMAND
-                    ""
-                    INSTALL_COMMAND
-                    ""
-                    BINARY_DIR
-                    ${LZ4_BUILD_DIR}
-                    BUILD_BYPRODUCTS
-                    ${LZ4_STATIC_LIB}
-                    ${LZ4_BUILD_COMMAND})
-
-            ExternalProject_Create_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LZ4_CACHE_URL})
-        else()
-            file(DOWNLOAD ${LZ4_CACHE_URL} ${LZ4_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${LZ4_CACHE_URL} TO ${LZ4_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(lz4_ep
-                URL
-                ${LZ4_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                UPDATE_COMMAND
-                ${CMAKE_COMMAND}
-                -E
-                copy_directory
-                "${LZ4_BUILD_DIR}/lib"
-                "${LZ4_PREFIX}/include"
-                ${LZ4_PATCH_COMMAND}
-                CONFIGURE_COMMAND
-                ""
-                INSTALL_COMMAND
-                ""
-                BINARY_DIR
-                ${LZ4_BUILD_DIR}
-                BUILD_BYPRODUCTS
-                ${LZ4_STATIC_LIB}
-                ${LZ4_BUILD_COMMAND})
-    endif()
-
-    file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
-    add_library(lz4 STATIC IMPORTED)
-    set_target_properties(lz4
-            PROPERTIES IMPORTED_LOCATION "${LZ4_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${LZ4_PREFIX}/include")
-    add_dependencies(lz4 lz4_ep)
-endmacro()
-
-if(MILVUS_WITH_LZ4)
-    resolve_dependency(Lz4)
-
-    get_target_property(LZ4_INCLUDE_DIR lz4 INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM ${LZ4_BUILD_DIR}/lib/)
-    include_directories(SYSTEM ${LZ4_INCLUDE_DIR})
 endif()
 
 # ----------------------------------------------------------------------
@@ -997,93 +658,6 @@ if(MILVUS_WITH_PROMETHEUS)
 endif()
 
 # ----------------------------------------------------------------------
-# Snappy
-
-macro(build_snappy)
-    message(STATUS "Building snappy-${SNAPPY_VERSION} from source")
-    set(SNAPPY_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix/src/snappy_ep")
-    set(SNAPPY_INCLUDE_DIRS "${SNAPPY_PREFIX}/include")
-    set(SNAPPY_STATIC_LIB_NAME snappy)
-    set(SNAPPY_STATIC_LIB
-            "${SNAPPY_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${SNAPPY_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-    )
-
-    set(SNAPPY_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            -DCMAKE_INSTALL_LIBDIR=lib
-            -DSNAPPY_BUILD_TESTS=OFF
-            "-DCMAKE_INSTALL_PREFIX=${SNAPPY_PREFIX}")
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(SNAPPY_CACHE_PACKAGE_NAME "snappy_${SNAPPY_MD5}.tar.gz")
-        set(SNAPPY_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SNAPPY_CACHE_PACKAGE_NAME}")
-        set(SNAPPY_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SNAPPY_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${SNAPPY_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${SNAPPY_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(snappy_ep
-                    ${EP_LOG_OPTIONS}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    BUILD_IN_SOURCE
-                    1
-                    INSTALL_DIR
-                    ${SNAPPY_PREFIX}
-                    URL
-                    ${SNAPPY_SOURCE_URL}
-                    CMAKE_ARGS
-                    ${SNAPPY_CMAKE_ARGS}
-                    BUILD_BYPRODUCTS
-                    "${SNAPPY_STATIC_LIB}")
-
-            ExternalProject_Create_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SNAPPY_CACHE_URL})
-        else()
-            file(DOWNLOAD ${SNAPPY_CACHE_URL} ${SNAPPY_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${SNAPPY_CACHE_URL} TO ${SNAPPY_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(snappy_ep
-                ${EP_LOG_OPTIONS}
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                BUILD_IN_SOURCE
-                1
-                INSTALL_DIR
-                ${SNAPPY_PREFIX}
-                URL
-                ${SNAPPY_SOURCE_URL}
-                CMAKE_ARGS
-                ${SNAPPY_CMAKE_ARGS}
-                BUILD_BYPRODUCTS
-                "${SNAPPY_STATIC_LIB}")
-    endif()
-
-    file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
-    add_library(snappy STATIC IMPORTED)
-    set_target_properties(snappy
-                        PROPERTIES IMPORTED_LOCATION "${SNAPPY_STATIC_LIB}"
-                        INTERFACE_INCLUDE_DIRECTORIES
-                        "${SNAPPY_INCLUDE_DIR}")
-    add_dependencies(snappy snappy_ep)
-endmacro()
-
-if(MILVUS_WITH_SNAPPY)
-
-    resolve_dependency(Snappy)
-
-    get_target_property(SNAPPY_INCLUDE_DIRS snappy INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM ${SNAPPY_PREFIX}/lib/)
-    include_directories(SYSTEM ${SNAPPY_INCLUDE_DIRS})
-endif()
-
-# ----------------------------------------------------------------------
 # SQLite
 
 macro(build_sqlite)
@@ -1263,176 +837,6 @@ if(MILVUS_WITH_YAMLCPP)
     get_target_property(YAMLCPP_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${YAMLCPP_PREFIX}/lib/)
     include_directories(SYSTEM ${YAMLCPP_INCLUDE_DIR})
-endif()
-
-# ----------------------------------------------------------------------
-# zlib
-
-macro(build_zlib)
-    message(STATUS "Building ZLIB-${ZLIB_VERSION} from source")
-    set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
-    set(ZLIB_STATIC_LIB_NAME libz.a)
-    set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
-    set(ZLIB_INCLUDE_DIR "${ZLIB_PREFIX}/include")
-    set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF)
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(ZLIB_CACHE_PACKAGE_NAME "zlib_${ZLIB_MD5}.tar.gz")
-        set(ZLIB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZLIB_CACHE_PACKAGE_NAME}")
-        set(ZLIB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZLIB_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${ZLIB_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${ZLIB_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(zlib_ep
-                    URL
-                    ${ZLIB_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    BUILD_BYPRODUCTS
-                    "${ZLIB_STATIC_LIB}"
-                    CMAKE_ARGS
-                    ${ZLIB_CMAKE_ARGS})
-
-            ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
-        else()
-            file(DOWNLOAD ${ZLIB_CACHE_URL} ${ZLIB_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${ZLIB_CACHE_URL} TO ${ZLIB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(zlib_ep
-                URL
-                ${ZLIB_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                BUILD_BYPRODUCTS
-                "${ZLIB_STATIC_LIB}"
-                CMAKE_ARGS
-                ${ZLIB_CMAKE_ARGS})
-    endif()
-
-    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
-    add_library(zlib STATIC IMPORTED)
-    set_target_properties(zlib
-            PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
-
-    add_dependencies(zlib zlib_ep)
-endmacro()
-
-if(MILVUS_WITH_ZLIB)
-    resolve_dependency(ZLIB)
-
-    get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
-endif()
-
-# ----------------------------------------------------------------------
-# zstd
-
-macro(build_zstd)
-    message(STATUS "Building zstd-${ZSTD_VERSION} from source")
-    set(ZSTD_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix/src/zstd_ep")
-
-    set(ZSTD_CMAKE_ARGS
-            ${EP_COMMON_TOOLCHAIN}
-            "-DCMAKE_INSTALL_PREFIX=${ZSTD_PREFIX}"
-            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DCMAKE_INSTALL_LIBDIR=lib #${CMAKE_INSTALL_LIBDIR}
-            -DZSTD_BUILD_PROGRAMS=off
-            -DZSTD_BUILD_SHARED=off
-            -DZSTD_BUILD_STATIC=on
-            -DZSTD_MULTITHREAD_SUPPORT=off)
-
-
-    set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/libzstd.a")
-    set(ZSTD_INCLUDE_DIR "${ZSTD_PREFIX}/include")
-    set(ZSTD_CMAKE_ARGS
-            ${ZSTD_CMAKE_ARGS}
-            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DCMAKE_C_FLAGS=${EP_C_FLAGS}
-            -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
-
-    if(CMAKE_VERSION VERSION_LESS 3.7)
-        message(FATAL_ERROR "Building zstd using ExternalProject requires at least CMake 3.7")
-    endif()
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(ZSTD_CACHE_PACKAGE_NAME "zstd_${ZSTD_MD5}.tar.gz")
-        set(ZSTD_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZSTD_CACHE_PACKAGE_NAME}")
-        set(ZSTD_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZSTD_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${ZSTD_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${ZSTD_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(zstd_ep
-                    ${EP_LOG_OPTIONS}
-                    CMAKE_ARGS
-                    ${ZSTD_CMAKE_ARGS}
-                    SOURCE_SUBDIR
-                    "build/cmake"
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    INSTALL_DIR
-                    ${ZSTD_PREFIX}
-                    URL
-                    ${ZSTD_SOURCE_URL}
-                    BUILD_BYPRODUCTS
-                    "${ZSTD_STATIC_LIB}")
-
-            ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
-        else()
-            file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(zstd_ep
-                ${EP_LOG_OPTIONS}
-                CMAKE_ARGS
-                ${ZSTD_CMAKE_ARGS}
-                SOURCE_SUBDIR
-                "build/cmake"
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                INSTALL_DIR
-                ${ZSTD_PREFIX}
-                URL
-                ${ZSTD_SOURCE_URL}
-                BUILD_BYPRODUCTS
-                "${ZSTD_STATIC_LIB}")
-    endif()
-
-    file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
-    add_library(zstd STATIC IMPORTED)
-    set_target_properties(zstd
-            PROPERTIES IMPORTED_LOCATION "${ZSTD_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}")
-
-    add_dependencies(zstd zstd_ep)
-endmacro()
-
-if(MILVUS_WITH_ZSTD)
-    resolve_dependency(ZSTD)
-
-    get_target_property(ZSTD_INCLUDE_DIR zstd INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM ${ZSTD_PREFIX}/lib)
-    include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
 endif()
 
 # ----------------------------------------------------------------------
@@ -1637,6 +1041,8 @@ macro(build_grpc)
                     ${GRPC_PROTOBUF_STATIC_LIB}
                     ${GRPC_PROTOC_STATIC_LIB})
 
+            ExternalProject_Add_StepDependencies(grpc_ep build zlib_ep)
+
             ExternalProject_Create_Cache(grpc_ep ${GRPC_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GRPC_CACHE_URL})
         else()
             file(DOWNLOAD ${GRPC_CACHE_URL} ${GRPC_CACHE_PACKAGE_PATH} STATUS status)
@@ -1665,6 +1071,9 @@ macro(build_grpc)
                 ${GRPCPP_CHANNELZ_STATIC_LIB}
                 ${GRPC_PROTOBUF_STATIC_LIB}
                 ${GRPC_PROTOC_STATIC_LIB})
+
+        ExternalProject_Add_StepDependencies(grpc_ep build zlib_ep)
+
     endif()
 
     file(MAKE_DIRECTORY "${GRPC_INCLUDE_DIR}")
@@ -1672,25 +1081,30 @@ macro(build_grpc)
     add_library(grpc STATIC IMPORTED)
     set_target_properties(grpc
             PROPERTIES IMPORTED_LOCATION "${GRPC_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "zlib" )
 
     add_library(grpc++ STATIC IMPORTED)
     set_target_properties(grpc++
             PROPERTIES IMPORTED_LOCATION "${GRPC++_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "zlib" )
 
     add_library(grpcpp_channelz STATIC IMPORTED)
     set_target_properties(grpcpp_channelz
             PROPERTIES IMPORTED_LOCATION "${GRPCPP_CHANNELZ_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "zlib" )
 
     add_library(grpc_protobuf STATIC IMPORTED)
     set_target_properties(grpc_protobuf
-            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOBUF_STATIC_LIB}")
+            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOBUF_STATIC_LIB}"
+            INTERFACE_LINK_LIBRARIES "zlib" )
 
     add_library(grpc_protoc STATIC IMPORTED)
     set_target_properties(grpc_protoc
-            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOC_STATIC_LIB}")
+            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOC_STATIC_LIB}"
+            INTERFACE_LINK_LIBRARIES "zlib" )
 
     add_dependencies(grpc grpc_ep)
     add_dependencies(grpc++ grpc_ep)
@@ -1709,4 +1123,75 @@ if(MILVUS_WITH_GRPC)
     set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
     include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
     link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
+endif()
+
+# ----------------------------------------------------------------------
+# zlib
+
+macro(build_zlib)
+    message(STATUS "Building ZLIB-${ZLIB_VERSION} from source")
+    set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
+    set(ZLIB_STATIC_LIB_NAME libz.a)
+    set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
+    set(ZLIB_INCLUDE_DIR "${ZLIB_PREFIX}/include")
+    set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
+            -DBUILD_SHARED_LIBS=OFF)
+
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(ZLIB_CACHE_PACKAGE_NAME "zlib_${ZLIB_MD5}.tar.gz")
+        set(ZLIB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZLIB_CACHE_PACKAGE_NAME}")
+        set(ZLIB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZLIB_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${ZLIB_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${ZLIB_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(zlib_ep
+                    URL
+                    ${ZLIB_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${ZLIB_STATIC_LIB}"
+                    CMAKE_ARGS
+                    ${ZLIB_CMAKE_ARGS})
+
+            ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
+        else()
+            file(DOWNLOAD ${ZLIB_CACHE_URL} ${ZLIB_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ZLIB_CACHE_URL} TO ${ZLIB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(zlib_ep
+                URL
+                ${ZLIB_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                "${ZLIB_STATIC_LIB}"
+                CMAKE_ARGS
+                ${ZLIB_CMAKE_ARGS})
+    endif()
+
+    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
+    add_library(zlib STATIC IMPORTED)
+    set_target_properties(zlib
+            PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
+
+    add_dependencies(zlib zlib_ep)
+endmacro()
+
+if(MILVUS_WITH_ZLIB)
+    resolve_dependency(ZLIB)
+
+    get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
 endif()
