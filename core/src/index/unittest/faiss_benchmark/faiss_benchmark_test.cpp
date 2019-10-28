@@ -28,6 +28,7 @@
 #include <faiss/IndexIVF.h>
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexFlat.h>
+#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_io.h>
 #include <faiss/utils.h>
@@ -183,9 +184,31 @@ parse_ann_test_name(const std::string& ann_test_name, size_t& dim, faiss::Metric
     return true;
 }
 
+int32_t
+GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::idx_t* index, size_t ground_k, size_t k,
+                  size_t nq, int32_t index_add_loops) {
+    assert(ground_k <= k);
+    int hit = 0;
+    for (int i = 0; i < nq; i++) {
+        // count the num of results exist in ground truth result set
+        // each result replicates INDEX_ADD_LOOPS times
+        for (int j_c = 0; j_c < ground_k; j_c++) {
+            int r_c = index[i * k + j_c];
+            int j_g = 0;
+            for (; j_g < ground_k / index_add_loops; j_g++) {
+                if (ground_index[i * ground_k + j_g] == r_c) {
+                    hit++;
+                    continue;
+                }
+            }
+        }
+    }
+    return hit;
+}
+
 void
 test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, int32_t index_add_loops,
-              const std::vector<size_t>& nprobes) {
+              const std::vector<size_t>& nprobes, int32_t search_loops) {
     double t0 = elapsed();
 
     const std::string ann_file_name = ann_test_name + ".hdf5";
@@ -265,8 +288,6 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, in
     for (auto nprobe : nprobes) {
         faiss::ParameterSpace params;
 
-        printf("[%.3f s] Setting parameter configuration 'nprobe=%lu' on index\n", elapsed() - t0, nprobe);
-
         std::string nprobe_str = "nprobe=" + std::to_string(nprobe);
         params.set_index_parameters(index, nprobe_str.c_str());
 
@@ -277,39 +298,28 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, in
         float* D = new float[NQ * K];
 
         printf("\n%s | %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
-        printf("============================================================================================\n");
+        printf("======================================================================================\n");
         for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
             for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
                 faiss::indexIVF_stats.quantization_time = 0.0;
                 faiss::indexIVF_stats.search_time = 0.0;
 
                 double t_start = elapsed(), t_end;
-
-                index->search(t_nq, xq, t_k, D, I);
-
+                for (int i = 0; i < search_loops; i++) {
+                    index->search(t_nq, xq, t_k, D, I);
+                }
                 t_end = elapsed();
 
                 // k = 100 for ground truth
-                int hit = 0;
-                for (int i = 0; i < t_nq; i++) {
-                    // count the num of results exist in ground truth result set
-                    // consider: each result replicates DATA_LOOPS times
-                    for (int j_c = 0; j_c < k; j_c++) {
-                        int r_c = I[i * t_k + j_c];
-                        for (int j_g = 0; j_g < k / index_add_loops; j_g++) {
-                            if (gt[i * k + j_g] == r_c) {
-                                hit++;
-                                continue;
-                            }
-                        }
-                    }
-                }
-                printf("nq = %4ld, k = %4ld, elapse = %fs (quant = %fs, search = %fs), R@ = %.4f\n", t_nq, t_k,
-                       (t_end - t_start), faiss::indexIVF_stats.quantization_time / 1000,
-                       faiss::indexIVF_stats.search_time / 1000, (hit / float(t_nq * k / index_add_loops)));
+                int32_t hit = GetResultHitCount(gt, I, k, t_k, t_nq, index_add_loops);
+
+                printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq, t_k,
+                       (t_end - t_start) / search_loops, faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
+                       faiss::indexIVF_stats.search_time / 1000 / search_loops,
+                       (hit / float(t_nq * k / index_add_loops)));
             }
         }
-        printf("============================================================================================\n");
+        printf("======================================================================================\n");
 #else
         printf("[%.3f s] Perform a search on %ld queries\n", elapsed() - t0, nq);
 
@@ -353,7 +363,8 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, in
 
 #ifdef CUSTOMIZATION
 void
-test_ivfsq8h_gpu(const std::string& ann_test_name, int32_t index_add_loops, const std::vector<size_t>& nprobes) {
+test_ivfsq8h(const std::string& ann_test_name, int32_t index_add_loops, const std::vector<size_t>& nprobes,
+             bool pure_gpu_mode, int32_t search_loops) {
     double t0 = elapsed();
 
     const std::string ann_file_name = ann_test_name + ".hdf5";
@@ -423,8 +434,17 @@ test_ivfsq8h_gpu(const std::string& ann_test_name, int32_t index_add_loops, cons
     index_composition.quantizer = nullptr;
     index_composition.mode = 1;
 
+    double copy_time = elapsed();
     auto index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
     delete index;
+
+    if (pure_gpu_mode) {
+        index_composition.mode = 2;  // 0: all data, 1: copy quantizer, 2: copy data
+        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
+    }
+
+    copy_time = elapsed() - copy_time;
+    printf("[%.3f s] Copy quantizer completed, cost %f s\n", elapsed() - t0, copy_time);
 
     size_t nq;
     float* xq;
@@ -446,67 +466,98 @@ test_ivfsq8h_gpu(const std::string& ann_test_name, int32_t index_add_loops, cons
         assert(nq2 == nq || !"incorrect nb of ground truth entries");
 
         gt = new faiss::Index::idx_t[k * nq];
-        for (unsigned long i = 0; i < k * nq; ++i) {
+        for (uint64_t i = 0; i < k * nq; ++i) {
             gt[i] = gt_int[i];
         }
         delete[] gt_int;
     }
 
-    for (auto nprobe : nprobes) {
-        printf("[%.3f s] Setting parameter configuration 'nprobe=%lu' on index\n", elapsed() - t0, nprobe);
+    const size_t NQ = 1000, K = 1000;
+    if (!pure_gpu_mode) {
+        for (auto nprobe : nprobes) {
+            auto ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
+            ivf_index->nprobe = nprobe;
 
-        auto ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
-        ivf_index->nprobe = nprobe;
-
-        auto is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
-        if (is_gpu_flat_index == nullptr) {
-            delete ivf_index->quantizer;
-            ivf_index->quantizer = index_composition.quantizer;
-        }
-
-        const size_t NQ = 1000, K = 1000;
-        long* I = new faiss::Index::idx_t[NQ * K];
-        float* D = new float[NQ * K];
-
-        printf("\n%s | %s-gpu | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
-        printf("============================================================================================\n");
-        for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
-            for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
-                faiss::indexIVF_stats.quantization_time = 0.0;
-                faiss::indexIVF_stats.search_time = 0.0;
-
-                double t_start = elapsed(), t_end;
-
-                cpu_index->search(t_nq, xq, t_k, D, I);
-
-                t_end = elapsed();
-
-                // k = 100 for ground truth
-                int hit = 0;
-                for (unsigned long i = 0; i < t_nq; i++) {
-                    // count the num of results exist in ground truth result set
-                    // consider: each result replicates DATA_LOOPS times
-                    for (unsigned long j_c = 0; j_c < k; j_c++) {
-                        int r_c = I[i * t_k + j_c];
-                        for (unsigned long j_g = 0; j_g < k / index_add_loops; j_g++) {
-                            if (gt[i * k + j_g] == r_c) {
-                                hit++;
-                                continue;
-                            }
-                        }
-                    }
-                }
-                printf("nq = %4ld, k = %4ld, elapse = %fs (quant = %fs, search = %fs), R@ = %.4f\n", t_nq, t_k,
-                       (t_end - t_start), faiss::indexIVF_stats.quantization_time / 1000,
-                       faiss::indexIVF_stats.search_time / 1000, (hit / float(t_nq * k / index_add_loops)));
+            auto is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
+            if (is_gpu_flat_index == nullptr) {
+                delete ivf_index->quantizer;
+                ivf_index->quantizer = index_composition.quantizer;
             }
+
+            int64_t* I = new faiss::Index::idx_t[NQ * K];
+            float* D = new float[NQ * K];
+
+            printf("\n%s | %s-MIX | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
+            printf("======================================================================================\n");
+            for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
+                for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
+                    faiss::indexIVF_stats.quantization_time = 0.0;
+                    faiss::indexIVF_stats.search_time = 0.0;
+
+                    double t_start = elapsed(), t_end;
+                    for (int32_t i = 0; i < search_loops; i++) {
+                        cpu_index->search(t_nq, xq, t_k, D, I);
+                    }
+                    t_end = elapsed();
+
+                    // k = 100 for ground truth
+                    int32_t hit = GetResultHitCount(gt, I, k, t_k, t_nq, index_add_loops);
+
+                    printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq,
+                           t_k, (t_end - t_start) / search_loops,
+                           faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
+                           faiss::indexIVF_stats.search_time / 1000 / search_loops,
+                           (hit / float(t_nq * k / index_add_loops)));
+                }
+            }
+            printf("======================================================================================\n");
+
+            printf("[%.3f s] Search test done\n\n", elapsed() - t0);
+
+            delete[] I;
+            delete[] D;
         }
-        printf("============================================================================================\n");
+    } else {
+        std::shared_ptr<faiss::Index> gpu_index_ivf_ptr = std::shared_ptr<faiss::Index>(index);
 
-        printf("[%.3f s] Search test done\n\n", elapsed() - t0);
+        for (auto nprobe : nprobes) {
+            faiss::gpu::GpuIndexIVFSQHybrid* gpu_index_ivf_hybrid =
+                dynamic_cast<faiss::gpu::GpuIndexIVFSQHybrid*>(gpu_index_ivf_ptr.get());
+            gpu_index_ivf_hybrid->setNumProbes(nprobe);
 
-        delete[] I;
-        delete[] D;
+            int64_t* I = new faiss::Index::idx_t[NQ * K];
+            float* D = new float[NQ * K];
+
+            printf("\n%s | %s-GPU | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
+            printf("======================================================================================\n");
+            for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
+                for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
+                    faiss::indexIVF_stats.quantization_time = 0.0;
+                    faiss::indexIVF_stats.search_time = 0.0;
+
+                    double t_start = elapsed(), t_end;
+                    for (int32_t i = 0; i < search_loops; i++) {
+                        gpu_index_ivf_ptr->search(nq, xq, k, D, I);
+                    }
+                    t_end = elapsed();
+
+                    // k = 100 for ground truth
+                    int32_t hit = GetResultHitCount(gt, I, k, t_k, t_nq, index_add_loops);
+
+                    printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq,
+                           t_k, (t_end - t_start) / search_loops,
+                           faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
+                           faiss::indexIVF_stats.search_time / 1000 / search_loops,
+                           (hit / float(t_nq * k / index_add_loops)));
+                }
+            }
+            printf("======================================================================================\n");
+
+            printf("[%.3f s] Search test done\n\n", elapsed() - t0);
+
+            delete[] I;
+            delete[] D;
+        }
     }
 
     delete[] xq;
@@ -530,17 +581,24 @@ test_ivfsq8h_gpu(const std::string& ann_test_name, int32_t index_add_loops, cons
  *************************************************************************************/
 
 TEST(FAISSTEST, BENCHMARK) {
-    test_ann_hdf5("sift-128-euclidean", "IVF4096,Flat", 2, {8, 128});
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8", 2, {8, 128});
+    std::vector<size_t> param_nprobes = {8, 128};
+    const int32_t SEARCH_LOOPS = 5;
+    const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
+    const int32_t GLOVE_INSERT_LOOPS = 1;
+
+    test_ann_hdf5("sift-128-euclidean", "IVF4096,Flat", SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8", SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", 2, {8, 128});
-    test_ivfsq8h_gpu("sift-128-euclidean", 2, {8, 128});
+    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ivfsq8h("sift-128-euclidean", SIFT_INSERT_LOOPS, param_nprobes, false, SEARCH_LOOPS);
+    test_ivfsq8h("sift-128-euclidean", SIFT_INSERT_LOOPS, param_nprobes, true, SEARCH_LOOPS);
 #endif
 
-    test_ann_hdf5("glove-200-angular", "IVF4096,Flat", 1, {8, 128});
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8", 1, {8, 128});
+    test_ann_hdf5("glove-200-angular", "IVF4096,Flat", GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8", GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", 1, {8, 128});
-    test_ivfsq8h_gpu("glove-200-angular", 1, {8, 128});
+    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ivfsq8h("glove-200-angular", GLOVE_INSERT_LOOPS, param_nprobes, false, SEARCH_LOOPS);
+    test_ivfsq8h("glove-200-angular", GLOVE_INSERT_LOOPS, param_nprobes, true, SEARCH_LOOPS);
 #endif
 }
