@@ -15,7 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//
-// Created by wxyu on 2019/10/28.
-//
+#include "Job.h"
 
+namespace milvus {
+namespace scheduler {
+
+namespace {
+std::mutex unique_job_mutex;
+uint64_t unique_job_id = 0;
+}  // namespace
+
+Job::Job(JobType type) : type_(type) {
+    std::lock_guard<std::mutex> lock(unique_job_mutex);
+    id_ = unique_job_id++;
+}
+
+json
+Job::Dump() const {
+    json ret{
+        {"id", id_},
+        {"type", type_},
+    };
+    return ret;
+}
+
+}  // namespace scheduler
+}  // namespace milvus
