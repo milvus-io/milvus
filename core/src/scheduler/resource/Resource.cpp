@@ -123,12 +123,7 @@ Resource::Dump() const {
 
 uint64_t
 Resource::NumOfTaskToExec() {
-    uint64_t count = 0;
-    for (auto& task : task_table_) {
-        if (task->state == TaskTableItemState::LOADED)
-            ++count;
-    }
-    return count;
+    return task_table_.TaskToExecute();
 }
 
 TaskTableItemPtr
