@@ -14,6 +14,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#92 - Speed up CMake build process
 - \#96 - Remove .a file in milvus/lib for docker-version
 ## Feature
+- \#115 - Using new structure for tasktable
+
 ## Task
 
 # Milvus 0.5.0 (2019-10-21)

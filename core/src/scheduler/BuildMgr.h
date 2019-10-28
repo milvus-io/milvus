@@ -34,27 +34,30 @@ namespace scheduler {
 
 class BuildMgr {
  public:
-    explicit BuildMgr(int64_t numoftasks) : numoftasks_(numoftasks) {
+    explicit BuildMgr(int64_t concurrent_limit) : available_(concurrent_limit) {
     }
 
  public:
     void
     Put() {
-        ++numoftasks_;
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++available_;
     }
 
-    void
-    take() {
-        --numoftasks_;
-    }
-
-    int64_t
-    numoftasks() {
-        return (int64_t)numoftasks_;
+    bool
+    Take() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (available_ < 1) {
+            return false;
+        } else {
+            --available_;
+            return true;
+        }
     }
 
  private:
-    std::atomic_long numoftasks_;
+    std::int64_t available_;
+    std::mutex mutex_;
 };
 
 using BuildMgrPtr = std::shared_ptr<BuildMgr>;
