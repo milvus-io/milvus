@@ -20,6 +20,7 @@
 #include "event/TaskTableUpdatedEvent.h"
 #include "scheduler/SchedInst.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #include <ctime>
 #include <sstream>
@@ -153,7 +154,42 @@ TaskTableItem::Dump() const {
 
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
-    std::lock_guard<std::mutex> lock(mutex_);
+#if 1
+    TimeRecorder rc("");
+    std::vector<uint64_t> indexes;
+    bool cross = false;
+
+    uint64_t available_begin = table_.front() + 1;
+    for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
+        auto index = available_begin + i;
+        if (not table_[index])
+            break;
+        if (index % table_.capacity() == table_.rear())
+            break;
+        if (not cross && table_[index]->IsFinish()) {
+            table_.set_front(index);
+        } else if (table_[index]->state == TaskTableItemState::LOADED) {
+            cross = true;
+            ++loaded_count;
+            if (loaded_count > 2)
+                return std::vector<uint64_t>();
+        } else if (table_[index]->state == TaskTableItemState::START) {
+            auto task = table_[index]->task;
+
+            // if task is a build index task, limit it
+            if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
+                if (not BuildMgrInst::GetInstance()->Take()) {
+                    continue;
+                }
+            }
+            cross = true;
+            indexes.push_back(index);
+            ++pick_count;
+        }
+    }
+    rc.ElapseFromBegin("PickToLoad ");
+    return indexes;
+#else
     size_t count = 0;
     for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
         if (not table_[j]) {
@@ -197,34 +233,44 @@ TaskTable::PickToLoad(uint64_t limit) {
         }
     }
     return indexes;
+#endif
 }
 
 std::vector<uint64_t>
 TaskTable::PickToExecute(uint64_t limit) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
-    for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
-        if (not cross && table_[i]->IsFinish()) {
-            last_finish_ = i;
-        } else if (table_[i]->state == TaskTableItemState::LOADED) {
+    uint64_t available_begin = table_.front() + 1;
+    for (uint64_t i = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
+        uint64_t index = available_begin + i;
+        if (not table_[index]) {
+            break;
+        }
+        if (index % table_.capacity() == table_.rear()) {
+            break;
+        }
+
+        if (not cross && table_[index]->IsFinish()) {
+            table_.set_front(index);
+        } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
-            indexes.push_back(i);
-            ++count;
+            indexes.push_back(index);
+            ++pick_count;
         }
     }
+    rc.ElapseFromBegin("PickToExecute ");
     return indexes;
 }
 
 void
 TaskTable::Put(TaskPtr task) {
-    std::lock_guard<std::mutex> lock(mutex_);
     auto item = std::make_shared<TaskTableItem>();
     item->id = id_++;
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
     item->timestamp.start = get_current_timestamp();
-    table_.push_back(item);
+    table_.put(std::move(item));
     if (subscriber_) {
         subscriber_();
     }
@@ -232,14 +278,13 @@ TaskTable::Put(TaskPtr task) {
 
 void
 TaskTable::Put(std::vector<TaskPtr>& tasks) {
-    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& task : tasks) {
         auto item = std::make_shared<TaskTableItem>();
         item->id = id_++;
         item->task = std::move(task);
         item->state = TaskTableItemState::START;
         item->timestamp.start = get_current_timestamp();
-        table_.push_back(item);
+        table_.put(std::move(item));
     }
     if (subscriber_) {
         subscriber_();
@@ -248,26 +293,25 @@ TaskTable::Put(std::vector<TaskPtr>& tasks) {
 
 TaskTableItemPtr
 TaskTable::Get(uint64_t index) {
-    std::lock_guard<std::mutex> lock(mutex_);
     return table_[index];
 }
 
-// void
-// TaskTable::Clear() {
-//// find first task is NOT (done or moved), erase from begin to it;
-////        auto iterator = table_.begin();
-////        while (iterator->state == TaskTableItemState::EXECUTED or
-////            iterator->state == TaskTableItemState::MOVED)
-////            iterator++;
-////        table_.erase(table_.begin(), iterator);
-//}
+size_t
+TaskTable::TaskToExecute() {
+    size_t count = 0;
+    auto begin = table_.front() + 1;
+    for (size_t i = 0; i < table_.size(); ++i) {
+        auto index = begin + i;
+        if (table_[index]->state == TaskTableItemState::LOADED) {
+            ++count;
+        }
+    }
+    return count;
+}
 
 json
 TaskTable::Dump() const {
-    json ret;
-    for (auto& item : table_) {
-        ret.push_back(item->Dump());
-    }
+    json ret{{"error.message", "not support yet."}};
     return ret;
 }
 
