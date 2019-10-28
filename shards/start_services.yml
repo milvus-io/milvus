@@ -33,9 +33,10 @@ services:
             FROM_EXAMPLE: 'true'
             DEBUG: 'true'
             SERVER_PORT: 19531
-            WOSERVER: tcp://milvus:19530
-            SD_STATIC_HOSTS: milvus
-            TRACING_TYPE: jaeger
+            WOSERVER: tcp://milvus_wr:19530
+            DISCOVERY_PLUGIN_PATH: static
+            DISCOVERY_STATIC_HOSTS: milvus_wr,milvus_ro
+            TRACER_CLASS_NAME: jaeger
             TRACING_SERVICE_NAME: mishards-demo
             TRACING_REPORTING_HOST: jaeger
             TRACING_REPORTING_PORT: 5775
