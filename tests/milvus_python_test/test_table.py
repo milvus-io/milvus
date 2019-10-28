@@ -178,6 +178,7 @@ class TestTable:
         assert res.table_name == table_name
         assert res.metric_type == MetricType.L2
 
+    @pytest.mark.level(2)
     def test_table_describe_table_name_ip(self, connect):
         '''
         target: test describe table created with correct params 
@@ -266,6 +267,7 @@ class TestTable:
         status = connect.delete_table(table)
         assert not assert_has_table(connect, table)
 
+    @pytest.mark.level(2)
     def test_delete_table_ip(self, connect, ip_table):
         '''
         target: test delete table created with correct params 
@@ -335,7 +337,6 @@ class TestTable:
             time.sleep(2)
             assert status.OK()
 
-    @pytest.mark.level(2)
     def test_delete_create_table_repeatedly_ip(self, connect):
         '''
         target: test delete and create the same table repeatedly
@@ -587,25 +588,25 @@ class TestTable:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_index_params()
+        params=gen_simple_index_params()
     )
-    def get_index_params(self, request, args):
+    def get_simple_index_params(self, request, args):
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
         return request.param
 
     @pytest.mark.level(1)
-    def test_preload_table(self, connect, table, get_index_params):
-        index_params = get_index_params
+    def test_preload_table(self, connect, table, get_simple_index_params):
+        index_params = get_simple_index_params
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_params)
         status = connect.preload_table(table)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_table_ip(self, connect, ip_table, get_index_params):
-        index_params = get_index_params
+    def test_preload_table_ip(self, connect, ip_table, get_simple_index_params):
+        index_params = get_simple_index_params
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
         status = connect.preload_table(ip_table)
@@ -613,19 +614,21 @@ class TestTable:
 
     @pytest.mark.level(1)
     def test_preload_table_not_existed(self, connect, table):
-        table_name = gen_unique_str("test_preload_table_not_existed")
-        index_params = random.choice(gen_index_params())
+        table_name = gen_unique_str()
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         status, ids = connect.add_vectors(table, vectors)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_param)
         status = connect.preload_table(table_name)
         assert not status.OK()
 
-    @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_preload_table_not_existed_ip(self, connect, ip_table):
-        table_name = gen_unique_str("test_preload_table_not_existed")
-        index_params = random.choice(gen_index_params())
+        table_name = gen_unique_str()
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         status, ids = connect.add_vectors(ip_table, vectors)
-        status = connect.create_index(ip_table, index_params)
+        status = connect.create_index(ip_table, index_param)
         status = connect.preload_table(table_name)
         assert not status.OK()
 
@@ -634,7 +637,7 @@ class TestTable:
         status = connect.preload_table(table)
         assert status.OK()
 
-    @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_preload_table_no_vectors_ip(self, connect, ip_table):
         status = connect.preload_table(ip_table)
         assert status.OK()
@@ -656,6 +659,7 @@ class TestTableInvalid(object):
     def get_table_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_create_table_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         param = {'table_name': table_name,
@@ -691,6 +695,7 @@ class TestCreateTableDimInvalid(object):
     def get_dim(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(5)
     def test_create_table_with_invalid_dimension(self, connect, get_dim):
         dimension = get_dim
@@ -726,7 +731,7 @@ class TestCreateTableIndexSizeInvalid(object):
                  'dimension': dim,
                  'index_file_size': file_size,
                  'metric_type': MetricType.L2}
-        if isinstance(file_size, int) and file_size > 0:
+        if isinstance(file_size, int):
             status = connect.create_table(param)
             assert not status.OK()
         else:
@@ -777,7 +782,7 @@ def preload_table(connect, **params):
     return status
 
 def has(connect, **params):
-    status = assert_has_table(connect, params["table_name"])
+    status, result = connect.has_table(params["table_name"])
     return status
 
 def show(connect, **params):
@@ -801,7 +806,7 @@ def create_index(connect, **params):
     return status
 
 func_map = { 
-    # 0:has, 
+    0:has, 
     1:show,
     10:create_table, 
     11:describe,

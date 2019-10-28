@@ -32,6 +32,22 @@ operator<<(std::ostream& out, const Resource& resource) {
     return out;
 }
 
+std::string
+ToString(ResourceType type) {
+    switch (type) {
+        case ResourceType::DISK: {
+            return "DISK";
+        }
+        case ResourceType::CPU: {
+            return "CPU";
+        }
+        case ResourceType::GPU: {
+            return "GPU";
+        }
+        default: { return "UNKNOWN"; }
+    }
+}
+
 Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor)
     : name_(std::move(name)),
       type_(type),
@@ -87,6 +103,22 @@ Resource::WakeupExecutor() {
         exec_flag_ = true;
     }
     exec_cv_.notify_one();
+}
+
+json
+Resource::Dump() const {
+    json ret{
+        {"device_id", device_id_},
+        {"name", name_},
+        {"type", ToString(type_)},
+        {"task_average_cost", TaskAvgCost()},
+        {"task_total_cost", total_cost_},
+        {"total_tasks", total_task_},
+        {"running", running_},
+        {"enable_loader", enable_loader_},
+        {"enable_executor", enable_executor_},
+    };
+    return ret;
 }
 
 uint64_t
