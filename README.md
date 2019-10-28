@@ -20,7 +20,7 @@
 
 ## What is Milvus
 
-Milvus is an open source similarity search engine for massive feature vectors. Designed with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
+Milvus is an open source similarity search engine for massive-scale feature vectors. Built with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
 Milvus provides stable Python, Java and C++ APIs.
 
@@ -28,7 +28,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 - Heterogeneous computing
 
-  Milvus is designed with heterogeneous computing architecture for the best performance and cost efficiency. 
+  Milvus is built with heterogeneous computing architecture for the best performance and cost efficiency. 
 
 - Multiple indexes
 
@@ -64,14 +64,14 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 ## Get started
 
-### Hardware Requirements
+### Hardware requirements
 
 | Component | Recommended configuration           |
 | --------- | ----------------------------------- |
 | CPU       | Intel CPU Haswell or higher         |
 | GPU       | NVIDIA Pascal series or higher      |
-| Memory    | 8 GB or more (depends on data size) |
-| Storage   | SATA 3.0 SSD or higher              |
+| RAM       | 8 GB or more (depends on data size) |
+| Hard drive| SATA 3.0 SSD or higher              |
 
 ### Install using docker
 
@@ -185,7 +185,7 @@ Deep thanks and appreciation go to the following people.
 - [akihoni](https://github.com/akihoni) found a broken link and a small typo in the README file.
 
 
-## Milvus Roadmap
+## Milvus roadmap
 
 Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upcoming features.
 
