@@ -178,9 +178,9 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) to
 
 To connect with other users and contributors, welcome to join our [slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
 
-## Contributors
+## Thanks
 
-We greatly appreciate the help and contributions of the following people.
+We greatly appreciate the help of the following people.
 
 - [akihoni](https://github.com/akihoni) found a broken link and a small typo in the README file.
 
