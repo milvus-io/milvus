@@ -238,8 +238,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_LIMIT) {
     auto indexes = empty_table_.PickToLoad(3);
     ASSERT_EQ(indexes.size(), 3);
     ASSERT_EQ(indexes[0] % empty_table_.Capacity(), 2);
-    ASSERT_EQ(indexes[1]% empty_table_.Capacity(), 3);
-    ASSERT_EQ(indexes[2]% empty_table_.Capacity(), 4);
+    ASSERT_EQ(indexes[1] % empty_table_.Capacity(), 3);
+    ASSERT_EQ(indexes[2] % empty_table_.Capacity(), 4);
 }
 
 TEST_F(TaskTableBaseTest, PICK_TO_LOAD_CACHE) {
