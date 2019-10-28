@@ -136,7 +136,7 @@ DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
 
         // scheduler will determine when to delete table files
         auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
-        scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(0, table_id, meta_ptr_, nres);
+        scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(table_id, meta_ptr_, nres);
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitAndDelete();
     } else {
@@ -439,7 +439,7 @@ DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& fi
 
     // step 1: get files to search
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(0, k, nq, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(k, nq, nprobe, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -754,7 +754,7 @@ DBImpl::BackgroundBuildIndex() {
     Status status;
 
     if (!to_index_files.empty()) {
-        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
+        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
 
         // step 2: put build index task to scheduler
         for (auto& file : to_index_files) {
