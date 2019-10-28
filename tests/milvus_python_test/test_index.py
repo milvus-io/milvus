@@ -301,7 +301,7 @@ class TestIndexBase:
         vectors = gen_vectors(nq, dim)
         table_list = []
         for i in range(10):
-            table_name = gen_unique_str('test_create_index_multi_tables')
+            table_name = gen_unique_str()
             table_list.append(table_name)
             param = {'table_name': table_name,
                      'dimension': dim,
@@ -769,7 +769,7 @@ class TestIndexIP:
         vectors = gen_vectors(nq, dim)
         table_list = []
         for i in range(10):
-            table_name = gen_unique_str('test_create_index_multi_tables')
+            table_name = gen_unique_str()
             table_list.append(table_name)
             param = {'table_name': table_name,
                      'dimension': dim,
