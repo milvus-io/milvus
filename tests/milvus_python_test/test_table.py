@@ -806,7 +806,7 @@ def create_index(connect, **params):
     return status
 
 func_map = { 
-    0:has, 
+    # 0:has, 
     1:show,
     10:create_table, 
     11:describe,
