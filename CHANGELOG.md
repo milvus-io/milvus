@@ -13,6 +13,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#82 - Move easyloggingpp into "external" directory
 - \#92 - Speed up CMake build process
 - \#96 - Remove .a file in milvus/lib for docker-version
+- \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
+- \#122 - Add unique id for Job
+
 ## Feature
 - \#115 - Using new structure for tasktable
 

@@ -28,7 +28,7 @@ namespace scheduler {
 
 class TaskTableUpdatedEvent : public Event {
  public:
-    explicit TaskTableUpdatedEvent(std::weak_ptr<Resource> resource)
+    explicit TaskTableUpdatedEvent(std::shared_ptr<Resource> resource)
         : Event(EventType::TASK_TABLE_UPDATED, std::move(resource)) {
     }
 
