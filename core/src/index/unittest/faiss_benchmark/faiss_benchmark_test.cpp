@@ -426,26 +426,6 @@ test_ivfsq8h(const std::string& ann_test_name, int32_t index_add_loops, const st
         cpu_ivf_index->to_readonly();
     }
 
-    faiss::gpu::GpuClonerOptions option;
-    option.allInGpu = true;
-
-    faiss::IndexComposition index_composition;
-    index_composition.index = cpu_index;
-    index_composition.quantizer = nullptr;
-    index_composition.mode = 1;
-
-    double copy_time = elapsed();
-    auto index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
-    delete index;
-
-    if (pure_gpu_mode) {
-        index_composition.mode = 2;  // 0: all data, 1: copy quantizer, 2: copy data
-        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
-    }
-
-    copy_time = elapsed() - copy_time;
-    printf("[%.3f s] Copy quantizer completed, cost %f s\n", elapsed() - t0, copy_time);
-
     size_t nq;
     float* xq;
     {
@@ -471,6 +451,36 @@ test_ivfsq8h(const std::string& ann_test_name, int32_t index_add_loops, const st
         }
         delete[] gt_int;
     }
+
+    faiss::gpu::GpuClonerOptions option;
+    option.allInGpu = true;
+
+    faiss::IndexComposition index_composition;
+    index_composition.index = cpu_index;
+    index_composition.quantizer = nullptr;
+
+    faiss::Index* index;
+    double copy_time;
+
+    if (!pure_gpu_mode) {
+        index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
+        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
+        delete index;
+
+        copy_time = elapsed();
+        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
+        delete index;
+    } else {
+        index_composition.mode = 2;
+        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
+        delete index;
+
+        copy_time = elapsed();
+        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
+    }
+
+    copy_time = elapsed() - copy_time;
+    printf("[%.3f s] Copy quantizer completed, cost %f s\n", elapsed() - t0, copy_time);
 
     const size_t NQ = 1000, K = 1000;
     if (!pure_gpu_mode) {
