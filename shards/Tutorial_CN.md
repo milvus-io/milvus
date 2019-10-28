@@ -13,7 +13,7 @@ Milvus 旨在帮助用户实现海量非结构化数据的近似检索和分析�
 2. pip install -r requirements.txt
 3. nvidia-docker run --rm -d -p 19530:19530 -v /tmp/milvus/db:/opt/milvus/db milvusdb/milvus:0.5.0-d102119-ede20b
 4. sudo chown -R $USER:$USER /tmp/milvus
-5. cp mishards/.env.example to mishards/.env
+5. cp mishards/.env.example mishards/.env
 6
 7. 在python mishards/main.py #.env配置mishards监听19532端口
 ```
@@ -100,23 +100,25 @@ pytest --cov-report html:cov_html --cov=mishards
 ### 服务发现
 | Name | Required  | Type | Default Value | Explanation |
 | --------------------------- | -------- | -------- | ------------- | ------------- |
-| SD_PROVIDER | No | string | "Kubernetes" | 配置服务发现服务类型，目前只有Static, Kubernetes可选 |
-| SD_STATIC_HOSTS | No | list | [] | **SD_PROVIDER** 为**Static**时，配置服务地址列表，例"192.168.1.188,192.168.1.190"|
-| SD_STATIC_PORT | No | int | 19530 | **SD_PROVIDER** 为**Static**时，配置Hosts监听端口 |
-| SD_NAMESPACE | No | string | - | **SD_PROVIDER** 为**Kubernetes**时，配置集群namespace |
-| SD_IN_CLUSTER | No | bool | False | **SD_PROVIDER** 为**Kubernetes**时，标明服务发现是否在集群中运行 |
-| SD_POLL_INTERVAL | No | int | 5 | **SD_PROVIDER** 为**Kubernetes**时，标明服务发现监听服务列表频率,单位Second |
-| SD_ROSERVER_POD_PATT | No | string | - | **SD_PROVIDER** 为**Kubernetes**时，匹配可读Milvus实例的正则表达式 |
-| SD_LABEL_SELECTOR | No | string | - | **SD_PROVIDER** 为**Kubernetes**时，匹配可读Milvus实例的标签选择 |
+| DISCOVERY_PLUGIN_PATH | No | string | - | 用户自定义服务发现插件搜索路径，默认使用系统搜索路径|
+| DISCOVERY_CLASS_NAME | No | string | static | 在服务发现插件搜索路径下搜索类并实例化。目前系统提供 **static** 和 **kubernetes** 两种类，默认使用 **static** |
+| DISCOVERY_STATIC_HOSTS | No | list | [] | **DISCOVERY_CLASS_NAME** 为 **static** 时，配置服务地址列表，例"192.168.1.188,192.168.1.190"|
+| DISCOVERY_STATIC_PORT | No | int | 19530 | **DISCOVERY_CLASS_NAME** 为 **static** 时，配置 Hosts 监听端口 |
+| DISCOVERY_KUBERNETES_NAMESPACE | No | string | - | **DISCOVERY_CLASS_NAME** 为 **kubernetes** 时，配置集群 namespace |
+| DISCOVERY_KUBERNETES_IN_CLUSTER | No | bool | False | **DISCOVERY_CLASS_NAME** 为 **kubernetes** 时，标明服务发现是否在集群中运行 |
+| DISCOVERY_KUBERNETES_POLL_INTERVAL | No | int | 5 | **DISCOVERY_CLASS_NAME** 为 **kubernetes** 时，标明服务发现监听服务列表频率,单位 Second |
+| DISCOVERY_KUBERNETES_POD_PATT | No | string | - | **DISCOVERY_CLASS_NAME** 为 **kubernetes** 时，匹配可读 Milvus 实例的正则表达式 |
+| DISCOVERY_KUBERNETES_LABEL_SELECTOR | No | string | - | **SD_PROVIDER** 为**Kubernetes**时，匹配可读Milvus实例的标签选择 |
 
 ### 链路追踪
 | Name | Required  | Type | Default Value | Explanation |
 | --------------------------- | -------- | -------- | ------------- | ------------- |
-| TRACING_TYPE | No | string | "" | 链路追踪方案选择，目前只有Jaeger, 默认不使用|
-| TRACING_SERVICE_NAME | No | string | "mishards" | **TRACING_TYPE** 为**Jaeger**时，链路追踪服务名 |
-| TRACING_SAMPLER_TYPE | No | string | "const" | **TRACING_TYPE** 为**Jaeger**时，链路追踪采样类型 |
-| TRACING_SAMPLER_PARAM | No | int | 1 | **TRACING_TYPE** 为**Jaeger**时，链路追踪采样频率 |
-| TRACING_LOG_PAYLOAD | No | bool | False | **TRACING_TYPE** 为**Jaeger**时，链路追踪是否采集Payload |
+| TRACER_PLUGIN_PATH | No | string | - | 用户自定义链路追踪插件搜索路径，默认使用系统搜索路径|
+| TRACER_CLASS_NAME | No | string | "" | 链路追踪方案选择，目前只实现 **Jaeger**, 默认不使用|
+| TRACING_SERVICE_NAME | No | string | "mishards" | **TRACING_TYPE** 为 **Jaeger** 时，链路追踪服务名 |
+| TRACING_SAMPLER_TYPE | No | string | "const" | **TRACING_TYPE** 为 **Jaeger** 时，链路追踪采样类型 |
+| TRACING_SAMPLER_PARAM | No | int | 1 | **TRACING_TYPE** 为 **Jaeger** 时，链路追踪采样频率 |
+| TRACING_LOG_PAYLOAD | No | bool | False | **TRACING_TYPE** 为 **Jaeger** 时，链路追踪是否采集 Payload |
 
 ### 日志
 | Name | Required  | Type | Default Value | Explanation |
@@ -128,5 +130,6 @@ pytest --cov-report html:cov_html --cov=mishards
 ### 路由
 | Name | Required  | Type | Default Value | Explanation |
 | --------------------------- | -------- | -------- | ------------- | ------------- |
-| ROUTER_CLASS_NAME | No | string | FileBasedHashRingRouter | 处理请求路由类名, 可注册自定义类 |
+| ROUTER_PLUGIN_PATH | No | string | - | 用户自定义路由插件搜索路径，默认使用系统搜索路径|
+| ROUTER_CLASS_NAME | No | string | FileBasedHashRingRouter | 处理请求路由类名, 可注册自定义类。目前系统只提供了类 **FileBasedHashRingRouter** |
 | ROUTER_CLASS_TEST_NAME | No | string | FileBasedHashRingRouter | 测试环境下处理请求路由类名, 可注册自定义类 |
