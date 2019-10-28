@@ -5,7 +5,6 @@ import threading
 from multiprocessing import Process
 from utils import *
 
-__version__ = '0.5.0'
 CONNECT_TIMEOUT = 12
 
 
