@@ -6,8 +6,8 @@ pipeline {
     agent none
 
     triggers {
-        cron("${cron_timezone}
-            ${cron_string}")
+        cron('''"${cron_timezone}"
+            "${cron_string}"''')
     }
 
     options {
