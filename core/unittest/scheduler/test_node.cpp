@@ -15,15 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "scheduler/resource/Node.h"
 #include <gtest/gtest.h>
+#include "scheduler/resource/Node.h"
 
 namespace {
 
 namespace ms = milvus::scheduler;
 
-} // namespace
+}  // namespace
 
 class NodeTest : public ::testing::Test {
  protected:
@@ -73,9 +72,11 @@ TEST_F(NodeTest, GET_NEIGHBOURS) {
         bool n2 = false, n3 = false;
         auto node1_neighbours = node1_->GetNeighbours();
         ASSERT_EQ(node1_neighbours.size(), 2);
-        for (auto &n : node1_neighbours) {
-            if (n.neighbour_node.lock() == node2_) n2 = true;
-            if (n.neighbour_node.lock() == node3_) n3 = true;
+        for (auto& n : node1_neighbours) {
+            if (n.neighbour_node == node2_)
+                n2 = true;
+            if (n.neighbour_node == node3_)
+                n3 = true;
         }
         ASSERT_TRUE(n2);
         ASSERT_TRUE(n3);
@@ -84,7 +85,7 @@ TEST_F(NodeTest, GET_NEIGHBOURS) {
     {
         auto node2_neighbours = node2_->GetNeighbours();
         ASSERT_EQ(node2_neighbours.size(), 1);
-        ASSERT_EQ(node2_neighbours[0].neighbour_node.lock(), node1_);
+        ASSERT_EQ(node2_neighbours[0].neighbour_node, node1_);
     }
 
     {
@@ -100,4 +101,3 @@ TEST_F(NodeTest, DUMP) {
     std::cout << node2_->Dump();
     ASSERT_FALSE(node2_->Dump().empty());
 }
-

@@ -30,7 +30,7 @@ class Resource;
 
 class Event {
  public:
-    explicit Event(EventType type, std::weak_ptr<Resource> resource) : type_(type), resource_(std::move(resource)) {
+    explicit Event(EventType type, std::shared_ptr<Resource> resource) : type_(type), resource_(std::move(resource)) {
     }
 
     inline EventType
@@ -46,7 +46,7 @@ class Event {
 
  public:
     EventType type_;
-    std::weak_ptr<Resource> resource_;
+    std::shared_ptr<Resource> resource_;
 };
 
 using EventPtr = std::shared_ptr<Event>;
