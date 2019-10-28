@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "CircleQueue.h"
 #include "event/Event.h"
 #include "interface/interfaces.h"
 #include "task/SearchTask.h"
@@ -99,7 +100,8 @@ using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 
 class TaskTable : public interface::dumpable {
  public:
-    TaskTable() = default;
+    TaskTable() : table_(1ULL << 16ULL) {
+    }
 
     TaskTable(const TaskTable&) = delete;
     TaskTable(TaskTable&&) = delete;
@@ -128,20 +130,9 @@ class TaskTable : public interface::dumpable {
     TaskTableItemPtr
     Get(uint64_t index);
 
-    /*
-     * TODO(wxyu): BIG GC
-     * Remove sequence task which is DONE or MOVED from front;
-     * Called by ?
-     */
-    //    void
-    //    Clear();
-
-    /*
-     * Return true if task table empty, otherwise false;
-     */
-    inline bool
-    Empty() {
-        return table_.empty();
+    inline size_t
+    Capacity() {
+        return table_.capacity();
     }
 
     /*
@@ -152,20 +143,12 @@ class TaskTable : public interface::dumpable {
         return table_.size();
     }
 
+    size_t
+    TaskToExecute();
+
  public:
-    TaskTableItemPtr& operator[](uint64_t index) {
-        std::lock_guard<std::mutex> lock(mutex_);
+    const TaskTableItemPtr& operator[](uint64_t index) {
         return table_[index];
-    }
-
-    std::deque<TaskTableItemPtr>::iterator
-    begin() {
-        return table_.begin();
-    }
-
-    std::deque<TaskTableItemPtr>::iterator
-    end() {
-        return table_.end();
     }
 
  public:
@@ -249,8 +232,7 @@ class TaskTable : public interface::dumpable {
 
  private:
     std::uint64_t id_ = 0;
-    mutable std::mutex mutex_;
-    std::deque<TaskTableItemPtr> table_;
+    CircleQueue<TaskTableItemPtr> table_;
     std::function<void(void)> subscriber_ = nullptr;
 
     // cache last finish avoid Pick task from begin always
