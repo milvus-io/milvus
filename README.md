@@ -170,7 +170,7 @@ Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/ex
 
 ## Contribution guidelines
 
-Contributions are welcomed and greatly appreciated. If you want to contribute to Milvus, please read our [contribution guidelines](CONTRIBUTING.md). This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
+Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](CONTRIBUTING.md) for detailed contribution workflow. This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
 
 We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) to track issues and bugs. For general questions and public discussions, please join our community.
 
@@ -199,6 +199,6 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 
 ## License
 
-[Apache 2.0 license](LICENSE)
+[Apache License 2.0](LICENSE)
 
 
