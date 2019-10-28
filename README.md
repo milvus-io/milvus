@@ -180,7 +180,7 @@ To connect with other users and contributors, welcome to join our [slack channel
 
 ## Contributors
 
-Deep thanks and appreciation go to the following people.
+We greatly appreciate the help and contributions of the following people.
 
 - [akihoni](https://github.com/akihoni) found a broken link and a small typo in the README file.
 
