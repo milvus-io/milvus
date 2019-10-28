@@ -31,10 +31,14 @@ namespace scheduler {
 
 class Node;
 
-using NeighbourNodePtr = std::weak_ptr<Node>;
+using NeighbourNodePtr = std::shared_ptr<Node>;
 
 struct Neighbour {
-    Neighbour(NeighbourNodePtr nei, Connection conn) : neighbour_node(nei), connection(conn) {
+    Neighbour(NeighbourNodePtr nei, Connection conn) : neighbour_node(std::move(nei)), connection(std::move(conn)) {
+    }
+
+    ~Neighbour() {
+        neighbour_node = nullptr;
     }
 
     NeighbourNodePtr neighbour_node;

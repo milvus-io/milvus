@@ -34,7 +34,9 @@ namespace scheduler {
 
 class Scheduler : public interface::dumpable {
  public:
-    explicit Scheduler(ResourceMgrWPtr res_mgr);
+    explicit Scheduler(ResourceMgrPtr res_mgr);
+
+    ~Scheduler();
 
     Scheduler(const Scheduler&) = delete;
     Scheduler(Scheduler&&) = delete;
@@ -118,7 +120,7 @@ class Scheduler : public interface::dumpable {
 
     std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
 
-    ResourceMgrWPtr res_mgr_;
+    ResourceMgrPtr res_mgr_;
     std::queue<EventPtr> event_queue_;
     std::thread worker_thread_;
     std::mutex event_mutex_;
