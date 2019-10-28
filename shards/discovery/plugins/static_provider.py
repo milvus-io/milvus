@@ -5,8 +5,10 @@ if __name__ == '__main__':
 
 import logging
 import socket
+from environs import Env
 
 logger = logging.getLogger(__name__)
+env = Env()
 
 
 class StaticDiscovery(object):
@@ -14,9 +16,9 @@ class StaticDiscovery(object):
 
     def __init__(self, config, conn_mgr, **kwargs):
         self.conn_mgr = conn_mgr
-        hosts = [config.DISCOVERY_STATIC_HOSTS] if isinstance(config.DISCOVERY_STATIC_HOSTS, str) else hosts
+        hosts = env.list('DISCOVERY_STATIC_HOSTS', [])
+        self.port = env.int('DISCOVERY_STATIC_PORT', 19530)
         self.hosts = [socket.gethostbyname(host) for host in hosts]
-        self.port = config.DISCOVERY_STATIC_PORT
 
     def start(self):
         for host in self.hosts:
