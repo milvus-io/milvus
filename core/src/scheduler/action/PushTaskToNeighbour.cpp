@@ -30,7 +30,7 @@ std::vector<ResourcePtr>
 get_neighbours(const ResourcePtr& self) {
     std::vector<ResourcePtr> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
-        auto node = neighbour_node.neighbour_node.lock();
+        auto node = neighbour_node.neighbour_node;
         if (not node)
             continue;
 
@@ -46,7 +46,7 @@ std::vector<std::pair<ResourcePtr, Connection>>
 get_neighbours_with_connetion(const ResourcePtr& self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
-        auto node = neighbour_node.neighbour_node.lock();
+        auto node = neighbour_node.neighbour_node;
         if (not node)
             continue;
 
@@ -102,7 +102,7 @@ Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
 }
 
 void
-Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+Action::DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                   std::shared_ptr<LoadCompletedEvent> event) {
     if (not resource->HasExecutor() && event->task_table_item_->Move()) {
         auto task = event->task_table_item_->task;
@@ -114,11 +114,11 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
             if (auto index_engine = search_task->index_engine_) {
                 auto location = index_engine->GetLocation();
 
-                for (auto i = 0; i < res_mgr.lock()->GetNumGpuResource(); ++i) {
+                for (auto i = 0; i < res_mgr->GetNumGpuResource(); ++i) {
                     auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
                     if (index != nullptr) {
                         moved = true;
-                        auto dest_resource = res_mgr.lock()->GetResource(ResourceType::GPU, i);
+                        auto dest_resource = res_mgr->GetResource(ResourceType::GPU, i);
                         PushTaskToResource(event->task_table_item_->task, dest_resource);
                         break;
                     }
@@ -133,17 +133,17 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
 }
 
 void
-Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                             std::shared_ptr<LoadCompletedEvent> event) {
     auto task = event->task_table_item_->task;
     if (resource->type() == ResourceType::DISK) {
         // step 1: calculate shortest path per resource, from disk to compute resource
-        auto compute_resources = res_mgr.lock()->GetComputeResources();
+        auto compute_resources = res_mgr->GetComputeResources();
         std::vector<std::vector<std::string>> paths;
         std::vector<uint64_t> transport_costs;
         for (auto& res : compute_resources) {
             std::vector<std::string> path;
-            uint64_t transport_cost = ShortestPath(resource, res, res_mgr.lock(), path);
+            uint64_t transport_cost = ShortestPath(resource, res, res_mgr, path);
             transport_costs.push_back(transport_cost);
             paths.emplace_back(path);
         }
@@ -187,10 +187,10 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
             Status stat = config.GetResourceConfigIndexBuildDevice(build_index_gpu);
 
             bool find_gpu_res = false;
-            if (res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
+            if (res_mgr->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
                 for (uint64_t i = 0; i < compute_resources.size(); ++i) {
                     if (compute_resources[i]->name() ==
-                        res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
+                        res_mgr->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
                         find_gpu_res = true;
                         Path task_path(paths[i], paths[i].size() - 1);
                         task->path() = task_path;
@@ -208,7 +208,7 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
         resource->WakeupExecutor();
     } else {
         auto next_res_name = task->path().Next();
-        auto next_res = res_mgr.lock()->GetResource(next_res_name);
+        auto next_res = res_mgr->GetResource(next_res_name);
         //        if (event->task_table_item_->Move()) {
         //            next_res->task_table().Put(task);
         //        }
