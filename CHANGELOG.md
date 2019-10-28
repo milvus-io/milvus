@@ -15,7 +15,6 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#96 - Remove .a file in milvus/lib for docker-version
 - \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
 
->>>>>>> main/0.5.1
 ## Feature
 - \#115 - Using new structure for tasktable
 
