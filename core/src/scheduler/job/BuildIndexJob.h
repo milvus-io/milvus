@@ -41,7 +41,7 @@ using Id2ToTableFileMap = std::unordered_map<size_t, TableFileSchema>;
 
 class BuildIndexJob : public Job {
  public:
-    explicit BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr, engine::DBOptions options);
+    explicit BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options);
 
  public:
     bool
