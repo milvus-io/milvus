@@ -120,14 +120,10 @@ set(third_party_libs
         ${client_grpc_lib}
         yaml-cpp
         ${prometheus_lib}
-        ${boost_lib}
-        bzip2
-        lz4
-        snappy
-        zlib
-        zstd
         ${cuda_lib}
         mysqlpp
+        zlib
+        ${boost_lib}
         )
 
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")

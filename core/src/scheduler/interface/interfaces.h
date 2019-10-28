@@ -37,7 +37,7 @@ struct dumpable {
     }
 
     virtual json
-    Dump() = 0;
+    Dump() const = 0;
 };
 
 }  // namespace interface

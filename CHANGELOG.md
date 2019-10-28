@@ -5,9 +5,13 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
+- \#104 - test_scheduler core dump
+
 ## Improvement
 - \#64 - Improvement dump function in scheduler
+- \#80 - Print version information into log during server start
 - \#82 - Move easyloggingpp into "external" directory
+- \#92 - Speed up CMake build process
 
 ## Feature
 ## Task

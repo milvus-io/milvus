@@ -42,6 +42,9 @@
 #define STOP_TIMER(name)
 #endif
 
+static const char *CONFIG_PATH = "/tmp/milvus_test";
+static const char *CONFIG_FILE = "/server_config.yaml";
+
 class BaseTest : public ::testing::Test {
  protected:
     void InitLog();
