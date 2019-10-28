@@ -28,7 +28,7 @@ namespace milvus {
 namespace scheduler {
 
 TEST(EventTest, START_UP_EVENT) {
-    ResourceWPtr res(ResourcePtr(nullptr));
+    ResourcePtr res(nullptr);
     auto event = std::make_shared<StartUpEvent>(res);
     ASSERT_FALSE(event->Dump().empty());
     std::cout << *event;
@@ -36,7 +36,7 @@ TEST(EventTest, START_UP_EVENT) {
 }
 
 TEST(EventTest, LOAD_COMPLETED_EVENT) {
-    ResourceWPtr res(ResourcePtr(nullptr));
+    ResourcePtr res(nullptr);
     auto event = std::make_shared<LoadCompletedEvent>(res, nullptr);
     ASSERT_FALSE(event->Dump().empty());
     std::cout << *event;
@@ -44,7 +44,7 @@ TEST(EventTest, LOAD_COMPLETED_EVENT) {
 }
 
 TEST(EventTest, FINISH_TASK_EVENT) {
-    ResourceWPtr res(ResourcePtr(nullptr));
+    ResourcePtr res(nullptr);
     auto event = std::make_shared<FinishTaskEvent>(res, nullptr);
     ASSERT_FALSE(event->Dump().empty());
     std::cout << *event;
@@ -53,7 +53,7 @@ TEST(EventTest, FINISH_TASK_EVENT) {
 
 
 TEST(EventTest, TASKTABLE_UPDATED_EVENT) {
-    ResourceWPtr res(ResourcePtr(nullptr));
+    ResourcePtr res(nullptr);
     auto event = std::make_shared<TaskTableUpdatedEvent>(res);
     ASSERT_FALSE(event->Dump().empty());
     std::cout << *event;

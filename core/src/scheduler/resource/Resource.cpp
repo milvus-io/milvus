@@ -132,7 +132,7 @@ Resource::pick_task_load() {
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
-            return task_table_.Get(index);
+            return task_table_.at(index);
         // else try next
     }
     return nullptr;
@@ -150,7 +150,7 @@ Resource::pick_task_execute() {
         }
 
         if (task_table_.Execute(index)) {
-            return task_table_.Get(index);
+            return task_table_.at(index);
         }
         //        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
         //            if (task_table_.Get(index)->task->path().Current() == task_table_.Get(index)->task->path().Last()
