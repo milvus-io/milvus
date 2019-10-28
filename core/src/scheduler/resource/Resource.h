@@ -77,10 +77,8 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         subscriber_ = std::move(subscriber);
     }
 
-    inline virtual std::string
-    Dump() const {
-        return "<Resource>";
-    }
+    json
+    Dump() const override;
 
  public:
     inline std::string
@@ -121,6 +119,9 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     // TODO(wxyu): need double ?
     inline uint64_t
     TaskAvgCost() const {
+        if (total_task_ == 0) {
+            return 0;
+        }
         return total_cost_ / total_task_;
     }
 

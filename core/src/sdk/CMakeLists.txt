@@ -30,9 +30,6 @@ add_library(milvus_sdk STATIC
 
 target_link_libraries(milvus_sdk
         ${client_grpc_lib}
-        bzip2
-        lz4
-        snappy
         zlib
         )
 

@@ -44,6 +44,9 @@ class DeleteJob : public Job {
     void
     ResourceDone();
 
+    json
+    Dump() const override;
+
  public:
     std::string
     table_id() const {
