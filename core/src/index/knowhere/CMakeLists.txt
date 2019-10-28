@@ -81,27 +81,6 @@ target_link_libraries(
         ${depend_libs}
 )
 
-INSTALL(TARGETS
-        knowhere
-        SPTAGLibStatic
-        DESTINATION
-        lib)
-
-INSTALL(FILES
-        ${ARROW_STATIC_LIB}
-        ${ARROW_PREFIX}/lib/libjemalloc_pic.a
-        ${FAISS_STATIC_LIB}
-        ${LAPACK_STATIC_LIB}
-        ${BLAS_STATIC_LIB}
-        DESTINATION
-        lib
-        )
-
-INSTALL(FILES ${OPENBLAS_REAL_STATIC_LIB}
-        RENAME "libopenblas.a"
-        DESTINATION lib
-        )
-
 set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/knowhere
         ${INDEX_SOURCE_DIR}/thirdparty
@@ -113,16 +92,3 @@ set(INDEX_INCLUDE_DIRS
         )
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
-
-#INSTALL(DIRECTORY
-#        ${INDEX_SOURCE_DIR}/include/knowhere
-#        ${ARROW_INCLUDE_DIR}/arrow
-#        ${FAISS_PREFIX}/include/faiss
-#        ${OPENBLAS_INCLUDE_DIR}/
-#        DESTINATION
-#        include)
-#
-#INSTALL(DIRECTORY
-#        ${SPTAG_SOURCE_DIR}/AnnService/inc/
-#        DESTINATION
-#        include/SPTAG/AnnService/inc)
