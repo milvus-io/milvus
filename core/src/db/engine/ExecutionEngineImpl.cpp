@@ -257,7 +257,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     if (hybrid) {
-#if 1
         const std::string key = location_ + ".quantizer";
         std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
 
@@ -306,7 +305,6 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
             cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
         }
-#endif
         return Status::OK();
     }
 
