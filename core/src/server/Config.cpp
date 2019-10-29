@@ -363,8 +363,8 @@ Config::PrintAll() {
 Status
 Config::CheckServerConfigAddress(const std::string& value) {
     if (!ValidationUtil::ValidateIpAddress(value).ok()) {
-        std::string msg = "Invalid server IP address: " + value +
-                          ". Possible reason: server_config.address is invalid in server_config.yaml.";
+        std::string msg =
+            "Invalid server IP address: " + value + ". Possible reason: server_config.address is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -373,14 +373,13 @@ Config::CheckServerConfigAddress(const std::string& value) {
 Status
 Config::CheckServerConfigPort(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Port " + value + " is not a number. " +
-                          "Possible reason: server_config.port in server_config.yaml is invalid.";
+        std::string msg = "Port " + value + " is not a number. " + "Possible reason: server_config.port is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int32_t port = std::stoi(value);
         if (!(port > 1024 && port < 65535)) {
             std::string msg = "Port " + value + " is not in range [1025, 65534]. " +
-                              "Possible reason: server_config.port in server_config.yaml is invalid.";
+                              "Possible reason: server_config.port is invalid.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -391,7 +390,7 @@ Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
-                      "Error: server_config.deploy_mode in server_config.yaml is not one of "
+                      "Error: server_config.deploy_mode is not one of "
                       "single, cluster_readonly, and cluster_writable.");
     }
     return Status::OK();
@@ -418,8 +417,7 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 Status
 Config::CheckDBConfigPrimaryPath(const std::string& value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT,
-                      "db_path is empty. Possible reason: db_config.db_path in server_config.yaml is empty.");
+        return Status(SERVER_INVALID_ARGUMENT, "db_path is empty. Possible reason: db_config.db_path is empty.");
     }
     return Status::OK();
 }
@@ -433,8 +431,7 @@ Status
 Config::CheckDBConfigBackendUrl(const std::string& value) {
     if (!ValidationUtil::ValidateDbURI(value).ok()) {
         std::string msg =
-            "Invalid db_backend_url: " + value +
-            ". Possible reason: db_config.db_backend_url is invalid in server_config.yaml. " +
+            "Invalid db_backend_url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
         return Status(SERVER_INVALID_ARGUMENT, "invalid db_backend_url: " + value);
     }
@@ -445,7 +442,7 @@ Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid archive disk threshold: " + value +
-                          "Possible reason: db_config.archive_disk_threshold in server_config.yaml is invalid.";
+                          "Possible reason: db_config.archive_disk_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -455,7 +452,7 @@ Status
 Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid archive days threshold: " + value +
-                          "Possible reason: db_config.archive_disk_threshold in server_config.yaml is invalid.";
+                          "Possible reason: db_config.archive_disk_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -465,15 +462,13 @@ Status
 Config::CheckDBConfigInsertBufferSize(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid insert buffer size: " + value +
-                          "Possible reason: db_config.insert_buffer_size in server_config.yaml "
-                          "is not a positive integer.";
+                          "Possible reason: db_config.insert_buffer_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int64_t buffer_size = std::stoi(value) * GB;
         if (buffer_size <= 0) {
             std::string msg = "Invalid insert buffer size: " + value +
-                              "Possible reason: db_config.insert_buffer_size in server_config.yaml "
-                              "is not a positive integer.";
+                              "Possible reason: db_config.insert_buffer_size is not a positive integer.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
@@ -535,7 +530,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (static_cast<uint64_t>(cpu_cache_capacity) >= total_mem) {
             std::string msg = "Invalid cpu cache capacity: " + value +
-                              "Possible reason: Cache config cpu_cache_capacity exceeds system memory.";
+                              "Possible reason: cache_config.cpu_cache_capacity exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         } else if (static_cast<double>(cpu_cache_capacity) > static_cast<double>(total_mem * 0.9)) {
             std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
