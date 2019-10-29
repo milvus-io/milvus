@@ -475,8 +475,8 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size >= total_mem) {
-            std::string msg =
-                "Invalid insert buffer size: " + value + ". Possible reason: insert buffer size exceeds system memory.";
+            std::string msg = "Invalid insert buffer size: " + value +
+                              ". Possible reason: db_config.insert_buffer_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
