@@ -160,7 +160,7 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
         index_composition->quantizer = nullptr;
         index_composition->mode = quantizer_conf->mode;  // only 1
 
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index_composition, &option);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
         delete gpu_index;
 
         auto q = std::make_shared<FaissIVFQuantizer>();
@@ -352,6 +352,11 @@ IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distanc
 void
 IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
     GPUIVF::LoadImpl(index_binary);
+}
+
+void
+IVFSQHybrid::set_index_model(IndexModelPtr model) {
+    GPUIVF::set_index_model(model);
 }
 
 #endif
