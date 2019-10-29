@@ -4,7 +4,7 @@ server_config:
   address: 0.0.0.0                  # milvus server ip address (IPv4)
   port: 19530                       # port range: 1025 ~ 65534
   deploy_mode: single               # deployment type: single, cluster_readonly, cluster_writable
-  time_zone: UTC+8
+  time_zone: UTC+8                  # time zone, must be in format: UTC+X
 
 db_config:
   primary_path: @MILVUS_DB_PATH@    # path used to store data and meta
@@ -14,30 +14,30 @@ db_config:
                                     # Keep 'dialect://:@:/', and replace other texts with real values
                                     # Replace 'dialect' with 'mysql' or 'sqlite'
 
-  insert_buffer_size: 4             # GB, maximum insert buffer size allowed
+  insert_buffer_size: 4             # GB, maximum insert buffer size allowed, must be a positive integer
                                     # sum of insert_buffer_size and cpu_cache_capacity cannot exceed total memory
 
   preload_table:                    # preload data at startup, '*' means load all tables, empty value means no preload
                                     # you can specify preload tables like this: table1,table2,table3
 
 metric_config:
-  enable_monitor: false             # enable monitoring or not
+  enable_monitor: false             # enable monitoring or not, must be a boolean
   collector: prometheus             # prometheus
   prometheus_config:
-    port: 8080                      # port prometheus uses to fetch metrics
+    port: 8080                      # port prometheus uses to fetch metrics, range: 1025 ~ 65534
 
 cache_config:
-  cpu_cache_capacity: 16            # GB, CPU memory used for cache
-  cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
-  gpu_cache_capacity: 4             # GB, GPU memory used for cache
-  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
-  cache_insert_data: false          # whether to load inserted data into cache
+  cpu_cache_capacity: 16            # GB, CPU memory used for cache, must be a positive integer
+  cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
+  gpu_cache_capacity: 4             # GB, GPU memory used for cache, must be a positive integer
+  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
+  cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
 
 engine_config:
   use_blas_threshold: 20            # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times
                                     # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
 
 resource_config:
-  search_resources:                 # define the GPUs used for search computation, valid value: gpux
+  search_resources:                 # define the GPUs used for search computation, must be in format: gpux
     - gpu0
   index_build_device: gpu0          # GPU used for building index
