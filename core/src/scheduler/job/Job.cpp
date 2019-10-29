@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Job.h"
+#include "scheduler/job/Job.h"
 
 namespace milvus {
 namespace scheduler {
