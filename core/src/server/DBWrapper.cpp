@@ -40,12 +40,14 @@ DBWrapper::StartService() {
     engine::DBOptions opt;
     s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
     std::string path;
     s = config.GetDBConfigPrimaryPath(path);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -55,7 +57,7 @@ DBWrapper::StartService() {
     s = config.GetDBConfigSecondaryPath(db_slave_path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
@@ -64,14 +66,14 @@ DBWrapper::StartService() {
     s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     std::string mode;
     s = config.GetServerConfigDeployMode(mode);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     if (mode == "single") {
@@ -91,7 +93,7 @@ DBWrapper::StartService() {
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     if (omp_thread > 0) {
@@ -110,7 +112,7 @@ DBWrapper::StartService() {
     s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     faiss::distance_compute_blas_threshold = use_blas_threshold;
@@ -121,7 +123,7 @@ DBWrapper::StartService() {
     s = config.GetDBConfigArchiveDiskThreshold(disk);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     if (disk > 0) {
@@ -131,7 +133,7 @@ DBWrapper::StartService() {
     s = config.GetDBConfigArchiveDaysThreshold(days);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     if (days > 0) {
@@ -174,7 +176,7 @@ DBWrapper::StartService() {
     s = config.GetDBConfigPreloadTable(preload_tables);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
-        kill(0, SIGUSR1);
+        return s;
     }
 
     s = PreloadTables(preload_tables);
