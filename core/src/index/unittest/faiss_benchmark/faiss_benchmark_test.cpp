@@ -54,7 +54,8 @@ elapsed() {
     return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
-void normalize(float* arr, size_t nq, size_t dim) {
+void
+normalize(float* arr, size_t nq, size_t dim) {
     for (size_t i = 0; i < nq; i++) {
         double vecLen = 0.0;
         for (size_t j = 0; j < dim; j++) {
@@ -63,7 +64,7 @@ void normalize(float* arr, size_t nq, size_t dim) {
         }
         vecLen = std::sqrt(vecLen);
         for (size_t j = 0; j < dim; j++) {
-            arr[i * dim + j] = (float) (arr[i * dim + j] / vecLen);
+            arr[i * dim + j] = (float)(arr[i * dim + j] / vecLen);
         }
     }
 }
