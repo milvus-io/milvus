@@ -373,13 +373,13 @@ Config::CheckServerConfigAddress(const std::string& value) {
 Status
 Config::CheckServerConfigPort(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Port " + value + " is not a number. " + "Possible reason: server_config.port is invalid.";
+        std::string msg = "Invalid server port: " + value + ". Possible reason: server_config.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int32_t port = std::stoi(value);
         if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Port " + value + " is not in range [1025, 65534]. " +
-                              "Possible reason: server_config.port is invalid.";
+            std::string msg = "Invalid server port: " + value +
+                              ". Possible reason: server_config.port is not in range [1025, 65534].";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -390,7 +390,7 @@ Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
-                      "Error: server_config.deploy_mode is not one of "
+                      "server_config.deploy_mode is not one of "
                       "single, cluster_readonly, and cluster_writable.");
     }
     return Status::OK();
@@ -399,15 +399,15 @@ Config::CheckServerConfigDeployMode(const std::string& value) {
 Status
 Config::CheckServerConfigTimeZone(const std::string& value) {
     if (value.length() <= 3) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid server config time_zone: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
     } else {
         if (value.substr(0, 3) != "UTC") {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid server config time_zone: " + value);
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
         } else {
             try {
                 stoi(value.substr(3));
             } catch (...) {
-                return Status(SERVER_INVALID_ARGUMENT, "Invalid server config time_zone: " + value);
+                return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
             }
         }
     }
@@ -417,7 +417,7 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 Status
 Config::CheckDBConfigPrimaryPath(const std::string& value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "db_path is empty. Possible reason: db_config.db_path is empty.");
+        return Status(SERVER_INVALID_ARGUMENT, "db_config.db_path is empty.");
     }
     return Status::OK();
 }
@@ -431,7 +431,7 @@ Status
 Config::CheckDBConfigBackendUrl(const std::string& value) {
     if (!ValidationUtil::ValidateDbURI(value).ok()) {
         std::string msg =
-            "Invalid db_backend_url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
+            "Invalid backend url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
         return Status(SERVER_INVALID_ARGUMENT, "invalid db_backend_url: " + value);
     }
@@ -442,7 +442,7 @@ Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid archive disk threshold: " + value +
-                          "Possible reason: db_config.archive_disk_threshold is invalid.";
+                          ". Possible reason: db_config.archive_disk_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -452,7 +452,7 @@ Status
 Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid archive days threshold: " + value +
-                          "Possible reason: db_config.archive_disk_threshold is invalid.";
+                          ". Possible reason: db_config.archive_disk_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -462,13 +462,13 @@ Status
 Config::CheckDBConfigInsertBufferSize(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid insert buffer size: " + value +
-                          "Possible reason: db_config.insert_buffer_size is not a positive integer.";
+                          ". Possible reason: db_config.insert_buffer_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int64_t buffer_size = std::stoi(value) * GB;
         if (buffer_size <= 0) {
             std::string msg = "Invalid insert buffer size: " + value +
-                              "Possible reason: db_config.insert_buffer_size is not a positive integer.";
+                              ". Possible reason: db_config.insert_buffer_size is not a positive integer.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
@@ -476,7 +476,7 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size >= total_mem) {
             std::string msg =
-                "Invalid insert buffer size: " + value + "Possible reason: insert buffer size exceeds system memory.";
+                "Invalid insert buffer size: " + value + ". Possible reason: insert buffer size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -487,7 +487,7 @@ Status
 Config::CheckMetricConfigEnableMonitor(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg =
-            "Invalid metric config: " + value + "Possible reason: metric_config.enable_monitor is not a boolean.";
+            "Invalid metric config: " + value + ". Possible reason: metric_config.enable_monitor is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -496,7 +496,8 @@ Config::CheckMetricConfigEnableMonitor(const std::string& value) {
 Status
 Config::CheckMetricConfigCollector(const std::string& value) {
     if (value != "prometheus") {
-        std::string msg = "Invalid metric config: " + value + "Possible reason: metric_config.collector is invalid.";
+        std::string msg =
+            "Invalid metric collector: " + value + ". Possible reason: metric_config.collector is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -505,8 +506,8 @@ Config::CheckMetricConfigCollector(const std::string& value) {
 Status
 Config::CheckMetricConfigPrometheusPort(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid metric config: " + value +
-                          "Possible reason: metric_config.prometheus_config.port is not in range [1025, 65534].";
+        std::string msg = "Invalid metric port: " + value +
+                          ". Possible reason: metric_config.prometheus_config.port is not in range [1025, 65534].";
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config prometheus_port: " + value);
     }
     return Status::OK();
@@ -516,13 +517,13 @@ Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid cpu cache capacity: " + value +
-                          "Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
+                          ". Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int64_t cpu_cache_capacity = std::stoi(value) * GB;
         if (cpu_cache_capacity <= 0) {
             std::string msg = "Invalid cpu cache capacity: " + value +
-                              "Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
+                              ". Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
@@ -530,7 +531,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (static_cast<uint64_t>(cpu_cache_capacity) >= total_mem) {
             std::string msg = "Invalid cpu cache capacity: " + value +
-                              "Possible reason: cache_config.cpu_cache_capacity exceeds system memory.";
+                              ". Possible reason: cache_config.cpu_cache_capacity exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         } else if (static_cast<double>(cpu_cache_capacity) > static_cast<double>(total_mem * 0.9)) {
             std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
@@ -545,7 +546,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         int64_t insert_buffer_size = buffer_value * GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
             std::string msg = "Invalid cpu cache capacity: " + value +
-                              "Possible reason: sum of cache_config.cpu_cache_capacity and "
+                              ". Possible reason: sum of cache_config.cpu_cache_capacity and "
                               "db_config.insert_buffer_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
@@ -557,13 +558,13 @@ Status
 Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
         std::string msg = "Invalid cpu cache threshold: " + value +
-                          "Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
+                          ". Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         float cpu_cache_threshold = std::stof(value);
         if (cpu_cache_threshold <= 0.0 || cpu_cache_threshold >= 1.0) {
             std::string msg = "Invalid cpu cache threshold: " + value +
-                              "Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
+                              ". Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -574,7 +575,7 @@ Status
 Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid gpu cache capacity: " + value +
-                          "Possible reason: cache_config.gpu_cache_capacity is not a positive integer.";
+                          ". Possible reason: cache_config.gpu_cache_capacity is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
@@ -590,7 +591,7 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         } else if (gpu_cache_capacity >= gpu_memory) {
             std::string msg = "Invalid gpu cache capacity: " + value +
-                              "Possible reason: cache_config.gpu_cache_capacity exceeds GPU memory.";
+                              ". Possible reason: cache_config.gpu_cache_capacity exceeds GPU memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         } else if (gpu_cache_capacity > (double)gpu_memory * 0.9) {
             std::cerr << "Warning: gpu cache capacity value is too big" << std::endl;
@@ -603,13 +604,13 @@ Status
 Config::CheckCacheConfigGpuCacheThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
         std::string msg = "Invalid gpu cache threshold: " + value +
-                          "Possible reason: cache_config.gpu_cache_threshold is not in range (0.0, 1.0].";
+                          ". Possible reason: cache_config.gpu_cache_threshold is not in range (0.0, 1.0].";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         float gpu_cache_threshold = std::stof(value);
         if (gpu_cache_threshold <= 0.0 || gpu_cache_threshold >= 1.0) {
             std::string msg = "Invalid gpu cache threshold: " + value +
-                              "Possible reason: cache_config.gpu_cache_threshold is not in range (0.0, 1.0].";
+                              ". Possible reason: cache_config.gpu_cache_threshold is not in range (0.0, 1.0].";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -620,7 +621,7 @@ Status
 Config::CheckCacheConfigCacheInsertData(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg = "Invalid cache insert option: " + value +
-                          "Possible reason: cache_config.cache_insert_data is not a boolean.";
+                          ". Possible reason: cache_config.cache_insert_data is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -630,7 +631,7 @@ Status
 Config::CheckEngineConfigUseBlasThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid blas threshold: " + value +
-                          "Possible reason: engine_config.use_blas_threshold is not a positive integer.";
+                          ". Possible reason: engine_config.use_blas_threshold is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -640,7 +641,7 @@ Status
 Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid omp thread number: " + value +
-                          "Possible reason: engine_config.omp_thread_num is not a positive integer.";
+                          ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
@@ -649,7 +650,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     CommonUtil::GetSystemAvailableThreads(sys_thread_cnt);
     if (omp_thread > static_cast<int32_t>(sys_thread_cnt)) {
         std::string msg = "Invalid omp thread number: " + value +
-                          "Possible reason: engine_config.omp_thread_num exceeds system cpu cores.";
+                          ". Possible reason: engine_config.omp_thread_num exceeds system cpu cores.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -658,7 +659,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 Status
 Config::CheckResourceConfigMode(const std::string& value) {
     if (value != "simple") {
-        std::string msg = "Invalid resource mode: " + value + "Possible reason: resource_config.mode is invalid.";
+        std::string msg = "Invalid resource mode: " + value + ". Possible reason: resource_config.mode is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -670,14 +671,14 @@ CheckGpuDevice(const std::string& value) {
     std::cmatch m;
     if (!std::regex_match(value.c_str(), m, pat)) {
         std::string msg = "Invalid gpu device: " + value +
-                          "Possible reason: resource_config.search_resources does not match your hardware.";
+                          ". Possible reason: resource_config.search_resources does not match your hardware.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     int32_t gpu_index = std::stoi(value.substr(3));
     if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
         std::string msg = "Invalid gpu device: " + value +
-                          "Possible reason: resource_config.search_resources does not match your hardware.";
+                          ". Possible reason: resource_config.search_resources does not match your hardware.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -695,7 +696,7 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
     for (auto& gpu_device : value) {
         if (!CheckGpuDevice(gpu_device).ok()) {
             std::string msg = "Invalid search resource: " + gpu_device +
-                              "Possible reason: resource_config.search_resources does not match your hardware.";
+                              ". Possible reason: resource_config.search_resources does not match your hardware.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -706,7 +707,7 @@ Status
 Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
     if (!CheckGpuDevice(value).ok()) {
         std::string msg = "Invalid index build device: " + value +
-                          "Possible reason: resource_config.index_build_device does not match your hardware.";
+                          ". Possible reason: resource_config.index_build_device does not match your hardware.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
