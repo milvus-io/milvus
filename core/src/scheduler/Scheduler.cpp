@@ -26,10 +26,8 @@
 namespace milvus {
 namespace scheduler {
 
-Scheduler::Scheduler(ResourceMgrWPtr res_mgr) : running_(false), res_mgr_(std::move(res_mgr)) {
-    if (auto mgr = res_mgr_.lock()) {
-        mgr->RegisterSubscriber(std::bind(&Scheduler::PostEvent, this, std::placeholders::_1));
-    }
+Scheduler::Scheduler(ResourceMgrPtr res_mgr) : running_(false), res_mgr_(std::move(res_mgr)) {
+    res_mgr_->RegisterSubscriber(std::bind(&Scheduler::PostEvent, this, std::placeholders::_1));
     event_register_.insert(std::make_pair(static_cast<uint64_t>(EventType::START_UP),
                                           std::bind(&Scheduler::OnStartUp, this, std::placeholders::_1)));
     event_register_.insert(std::make_pair(static_cast<uint64_t>(EventType::LOAD_COMPLETED),
@@ -38,6 +36,10 @@ Scheduler::Scheduler(ResourceMgrWPtr res_mgr) : running_(false), res_mgr_(std::m
                                           std::bind(&Scheduler::OnTaskTableUpdated, this, std::placeholders::_1)));
     event_register_.insert(std::make_pair(static_cast<uint64_t>(EventType::FINISH_TASK),
                                           std::bind(&Scheduler::OnFinishTask, this, std::placeholders::_1)));
+}
+
+Scheduler::~Scheduler() {
+    res_mgr_ = nullptr;
 }
 
 void
@@ -100,51 +102,45 @@ Scheduler::Process(const EventPtr& event) {
 void
 Scheduler::OnLoadCompleted(const EventPtr& event) {
     auto load_completed_event = std::static_pointer_cast<LoadCompletedEvent>(event);
-    if (auto resource = event->resource_.lock()) {
-        resource->WakeupExecutor();
 
-        auto task_table_type = load_completed_event->task_table_item_->task->label()->Type();
-        switch (task_table_type) {
-            case TaskLabelType::DEFAULT: {
-                Action::DefaultLabelTaskScheduler(res_mgr_, resource, load_completed_event);
-                break;
-            }
-            case TaskLabelType::SPECIFIED_RESOURCE: {
-                Action::SpecifiedResourceLabelTaskScheduler(res_mgr_, resource, load_completed_event);
-                break;
-            }
-            case TaskLabelType::BROADCAST: {
-                if (resource->HasExecutor() == false) {
-                    load_completed_event->task_table_item_->Move();
-                }
-                Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_->task, resource);
-                break;
-            }
-            default: { break; }
+    auto resource = event->resource_;
+    resource->WakeupExecutor();
+
+    auto task_table_type = load_completed_event->task_table_item_->task->label()->Type();
+    switch (task_table_type) {
+        case TaskLabelType::DEFAULT: {
+            Action::DefaultLabelTaskScheduler(res_mgr_, resource, load_completed_event);
+            break;
         }
-        resource->WakeupLoader();
+        case TaskLabelType::SPECIFIED_RESOURCE: {
+            Action::SpecifiedResourceLabelTaskScheduler(res_mgr_, resource, load_completed_event);
+            break;
+        }
+        case TaskLabelType::BROADCAST: {
+            if (resource->HasExecutor() == false) {
+                load_completed_event->task_table_item_->Move();
+            }
+            Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_->task, resource);
+            break;
+        }
+        default: { break; }
     }
+    resource->WakeupLoader();
 }
 
 void
 Scheduler::OnStartUp(const EventPtr& event) {
-    if (auto resource = event->resource_.lock()) {
-        resource->WakeupLoader();
-    }
+    event->resource_->WakeupLoader();
 }
 
 void
 Scheduler::OnFinishTask(const EventPtr& event) {
-    if (auto resource = event->resource_.lock()) {
-        resource->WakeupLoader();
-    }
+    event->resource_->WakeupLoader();
 }
 
 void
 Scheduler::OnTaskTableUpdated(const EventPtr& event) {
-    if (auto resource = event->resource_.lock()) {
-        resource->WakeupLoader();
-    }
+    event->resource_->WakeupLoader();
 }
 
 }  // namespace scheduler

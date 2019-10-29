@@ -15,35 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include "scheduler/TaskTable.h"
-#include "scheduler/event/Event.h"
-
-#include <memory>
-#include <string>
-#include <utility>
+#include "Job.h"
 
 namespace milvus {
 namespace scheduler {
 
-class LoadCompletedEvent : public Event {
- public:
-    LoadCompletedEvent(std::shared_ptr<Resource> resource, TaskTableItemPtr task_table_item)
-        : Event(EventType::LOAD_COMPLETED, std::move(resource)), task_table_item_(std::move(task_table_item)) {
-    }
+namespace {
+std::mutex unique_job_mutex;
+uint64_t unique_job_id = 0;
+}  // namespace
 
-    inline std::string
-    Dump() const override {
-        return "<LoadCompletedEvent>";
-    }
+Job::Job(JobType type) : type_(type) {
+    std::lock_guard<std::mutex> lock(unique_job_mutex);
+    id_ = unique_job_id++;
+}
 
-    friend std::ostream&
-    operator<<(std::ostream& out, const LoadCompletedEvent& event);
-
- public:
-    TaskTableItemPtr task_table_item_;
-};
+json
+Job::Dump() const {
+    json ret{
+        {"id", id_},
+        {"type", type_},
+    };
+    return ret;
+}
 
 }  // namespace scheduler
 }  // namespace milvus

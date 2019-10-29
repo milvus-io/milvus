@@ -75,7 +75,6 @@ class ResourceMgr : public interface::dumpable {
         return gpu_resources_;
     }
 
-    // TODO(wxyu): why return shared pointer
     inline std::vector<ResourcePtr>
     GetAllResources() {
         return resources_;
