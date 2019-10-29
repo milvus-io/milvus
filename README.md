@@ -168,6 +168,10 @@ Make sure Java 8 or higher is already installed.
 
 Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
 
+## Milvus roadmap
+
+Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upcoming features.
+
 ## Contribution guidelines
 
 Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](CONTRIBUTING.md) for detailed contribution workflow. This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
@@ -184,11 +188,6 @@ We greatly appreciate the help of the following people.
 
 - [akihoni](https://github.com/akihoni) found a broken link and a small typo in the README file.
 
-
-## Milvus roadmap
-
-Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upcoming features.
-
 ## Resources
 
 [Milvus official website](https://www.milvus.io)
@@ -202,7 +201,6 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
 [Milvus roadmap](https://milvus.io/docs/en/roadmap/)
-
 
 ## License
 
