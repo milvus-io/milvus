@@ -38,7 +38,7 @@ class FaissBaseIndex {
     virtual void
     SealImpl();
 
- protected:
+ public:
     std::shared_ptr<faiss::Index> index_ = nullptr;
 };
 
