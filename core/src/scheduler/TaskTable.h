@@ -106,6 +106,11 @@ class TaskTable : public interface::dumpable {
     TaskTable(const TaskTable&) = delete;
     TaskTable(TaskTable&&) = delete;
 
+ public:
+    json
+    Dump() const override;
+
+ public:
     inline void
     RegisterSubscriber(std::function<void(void)> subscriber) {
         subscriber_ = std::move(subscriber);
@@ -124,39 +129,34 @@ class TaskTable : public interface::dumpable {
     void
     Put(std::vector<TaskPtr>& tasks);
 
-    /*
-     * Return task table item reference;
-     */
-    TaskTableItemPtr
-    Get(uint64_t index);
-
-    inline size_t
-    Capacity() {
-        return table_.capacity();
-    }
-
-    /*
-     * Return size of task table;
-     */
-    inline size_t
-    Size() {
-        return table_.size();
-    }
-
     size_t
     TaskToExecute();
 
- public:
-    const TaskTableItemPtr& operator[](uint64_t index) {
-        return table_[index];
-    }
-
- public:
     std::vector<uint64_t>
     PickToLoad(uint64_t limit);
 
     std::vector<uint64_t>
     PickToExecute(uint64_t limit);
+
+ public:
+    inline const TaskTableItemPtr& operator[](uint64_t index) {
+        return table_[index];
+    }
+
+    inline const TaskTableItemPtr&
+    at(uint64_t index) {
+        return table_[index];
+    }
+
+    inline size_t
+    capacity() {
+        return table_.capacity();
+    }
+
+    inline size_t
+    size() {
+        return table_.size();
+    }
 
  public:
     /******** Action ********/
@@ -222,13 +222,6 @@ class TaskTable : public interface::dumpable {
     Moved(uint64_t index) {
         return table_[index]->Moved();
     }
-
- public:
-    /*
-     * Dump;
-     */
-    json
-    Dump() const override;
 
  private:
     std::uint64_t id_ = 0;

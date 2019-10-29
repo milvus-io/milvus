@@ -291,11 +291,6 @@ TaskTable::Put(std::vector<TaskPtr>& tasks) {
     }
 }
 
-TaskTableItemPtr
-TaskTable::Get(uint64_t index) {
-    return table_[index];
-}
-
 size_t
 TaskTable::TaskToExecute() {
     size_t count = 0;
