@@ -35,7 +35,7 @@ namespace scheduler {
 
 class DeleteJob : public Job {
  public:
-    DeleteJob(JobId id, std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
+    DeleteJob(std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
 
  public:
     void

@@ -43,7 +43,7 @@ using ResultSet = std::vector<Id2DistVec>;
 
 class SearchJob : public Job {
  public:
-    SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
+    SearchJob(uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
 
  public:
     bool
