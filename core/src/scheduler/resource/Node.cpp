@@ -58,9 +58,7 @@ Node::Dump() const {
 void
 Node::AddNeighbour(const NeighbourNodePtr& neighbour_node, Connection& connection) {
     std::lock_guard<std::mutex> lk(mutex_);
-    if (auto s = neighbour_node.lock()) {
-        neighbours_.emplace(std::make_pair(s->id_, Neighbour(neighbour_node, connection)));
-    }
+    neighbours_.emplace(std::make_pair(neighbour_node->id_, Neighbour(neighbour_node, connection)));
     // else do nothing, consider it..
 }
 

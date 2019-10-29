@@ -53,12 +53,14 @@ class Job : public interface::dumpable {
         return type_;
     }
 
+    json
+    Dump() const override;
+
  protected:
-    Job(JobId id, JobType type) : id_(id), type_(type) {
-    }
+    explicit Job(JobType type);
 
  private:
-    JobId id_;
+    JobId id_ = 0;
     JobType type_;
 };
 
