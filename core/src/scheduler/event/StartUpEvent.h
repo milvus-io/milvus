@@ -28,7 +28,7 @@ namespace scheduler {
 
 class StartUpEvent : public Event {
  public:
-    explicit StartUpEvent(std::weak_ptr<Resource> resource) : Event(EventType::START_UP, std::move(resource)) {
+    explicit StartUpEvent(std::shared_ptr<Resource> resource) : Event(EventType::START_UP, std::move(resource)) {
     }
 
     inline std::string
