@@ -82,8 +82,7 @@ DBWrapper::StartService() {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     } else {
         std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
-                  << "single, cluster_readonly, and cluster_writable."
-                  << std::endl;
+                  << "single, cluster_readonly, and cluster_writable." << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -164,8 +163,7 @@ DBWrapper::StartService() {
         db_ = engine::DBFactory::Build(opt);
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
-                << ". Possible reason: the meta system does not work."
-                << std::endl;
+                  << ". Possible reason: the meta system does not work." << std::endl;
         kill(0, SIGUSR1);
     }
 
