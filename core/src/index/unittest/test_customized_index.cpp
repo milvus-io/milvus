@@ -16,17 +16,23 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <thread>
 
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
+
+#include "knowhere/common/Timer.h"
 
 class SingleIndexTest : public DataGen, public TestGpuIndexBase {
  protected:
     void
     SetUp() override {
         TestGpuIndexBase::SetUp();
-        Generate(DIM, NB, NQ);
-        k = K;
+        nb = 1000000;
+        nq = 1000;
+        dim = DIM;
+        Generate(dim, nb, nq);
+        k = 1000;
     }
 
     void
@@ -118,5 +124,114 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         }
     }
 }
+
+// TEST_F(SingleIndexTest, thread_safe) {
+//    assert(!xb.empty());
+//
+//    index_type = "IVFSQHybrid";
+//    index_ = IndexFactory(index_type);
+//    auto base = ParamGenerator::GetInstance().Gen(ParameterType::ivfsq);
+//    auto conf = std::dynamic_pointer_cast<knowhere::IVFSQCfg>(base);
+//    conf->nlist = 16384;
+//    conf->k = k;
+//    conf->nprobe = 10;
+//    conf->d = dim;
+//    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
+//    index_->set_preprocessor(preprocessor);
+//
+//    auto model = index_->Train(base_dataset, conf);
+//    index_->set_index_model(model);
+//    index_->Add(base_dataset, conf);
+//    EXPECT_EQ(index_->Count(), nb);
+//    EXPECT_EQ(index_->Dimension(), dim);
+//
+//    auto binaryset = index_->Serialize();
+//
+//
+//
+//    auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+//    cpu_idx->Load(binaryset);
+//    auto pair = cpu_idx->CopyCpuToGpuWithQuantizer(DEVICEID, conf);
+//    auto quantizer = pair.second;
+//
+//    auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+//    quantizer_conf->mode = 2;  // only copy data
+//    quantizer_conf->gpu_id = DEVICEID;
+//
+//    auto CopyAllToGpu = [&](int64_t search_count, bool do_search = false) {
+//        for (int i = 0; i < search_count; ++i) {
+//            auto gpu_idx = cpu_idx->CopyCpuToGpu(DEVICEID, conf);
+//            if (do_search) {
+//                auto result = gpu_idx->Search(query_dataset, conf);
+//                AssertAnns(result, nq, conf->k);
+//            }
+//        }
+//    };
+//
+//    auto hybrid_qt_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+//    hybrid_qt_idx->Load(binaryset);
+//    auto SetQuantizerDoSearch = [&](int64_t search_count) {
+//        for (int i = 0; i < search_count; ++i) {
+//            hybrid_qt_idx->SetQuantizer(quantizer);
+//            auto result = hybrid_qt_idx->Search(query_dataset, conf);
+//            AssertAnns(result, nq, conf->k);
+//            //            PrintResult(result, nq, k);
+//            hybrid_qt_idx->UnsetQuantizer();
+//        }
+//    };
+//
+//    auto hybrid_data_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+//    hybrid_data_idx->Load(binaryset);
+//    auto LoadDataDoSearch = [&](int64_t search_count, bool do_search = false) {
+//        for (int i = 0; i < search_count; ++i) {
+//            auto hybrid_idx = hybrid_data_idx->LoadData(quantizer, quantizer_conf);
+//            if (do_search) {
+//                auto result = hybrid_idx->Search(query_dataset, conf);
+////                AssertAnns(result, nq, conf->k);
+//            }
+//        }
+//    };
+//
+//    knowhere::TimeRecorder tc("");
+//    CopyAllToGpu(2000/2, false);
+//    tc.RecordSection("CopyAllToGpu witout search");
+//    CopyAllToGpu(400/2, true);
+//    tc.RecordSection("CopyAllToGpu with search");
+//    SetQuantizerDoSearch(6);
+//    tc.RecordSection("SetQuantizer with search");
+//    LoadDataDoSearch(2000/2, false);
+//    tc.RecordSection("LoadData without search");
+//    LoadDataDoSearch(400/2, true);
+//    tc.RecordSection("LoadData with search");
+//
+//    {
+//        std::thread t1(CopyAllToGpu, 2000, false);
+//        std::thread t2(CopyAllToGpu, 400, true);
+//        t1.join();
+//        t2.join();
+//    }
+//
+//    {
+//        std::thread t1(SetQuantizerDoSearch, 12);
+//        std::thread t2(CopyAllToGpu, 400, true);
+//        t1.join();
+//        t2.join();
+//    }
+//
+//    {
+//        std::thread t1(SetQuantizerDoSearch, 12);
+//        std::thread t2(LoadDataDoSearch, 400, true);
+//        t1.join();
+//        t2.join();
+//    }
+//
+//    {
+//        std::thread t1(LoadDataDoSearch, 2000, false);
+//        std::thread t2(LoadDataDoSearch, 400, true);
+//        t1.join();
+//        t2.join();
+//    }
+//
+//}
 
 #endif
