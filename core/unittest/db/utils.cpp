@@ -68,7 +68,7 @@ static const char
                    "  blas_threshold: 20\n"
                    "\n"
                    "resource_config:\n"
-                   "  resource_pool:\n"
+                   "  search_resources:\n"
                    "    - gpu0\n"
                    "  index_build_device: gpu0          # GPU used for building index";
 
