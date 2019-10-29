@@ -40,12 +40,14 @@ DBWrapper::StartService() {
     engine::DBOptions opt;
     s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
     std::string path;
     s = config.GetDBConfigPrimaryPath(path);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -54,6 +56,7 @@ DBWrapper::StartService() {
     std::string db_slave_path;
     s = config.GetDBConfigSecondaryPath(db_slave_path);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -62,12 +65,14 @@ DBWrapper::StartService() {
     // cache config
     s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
     std::string mode;
     s = config.GetServerConfigDeployMode(mode);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -78,8 +83,8 @@ DBWrapper::StartService() {
     } else if (mode == "cluster_writable") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     } else {
-        std::cerr << "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']"
-                  << std::endl;
+        std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
+                  << "single, cluster_readonly, and cluster_writable." << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -87,6 +92,7 @@ DBWrapper::StartService() {
     int32_t omp_thread;
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -105,6 +111,7 @@ DBWrapper::StartService() {
     int32_t use_blas_threshold;
     s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -115,6 +122,7 @@ DBWrapper::StartService() {
     int32_t disk, days;
     s = config.GetDBConfigArchiveDiskThreshold(disk);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -124,6 +132,7 @@ DBWrapper::StartService() {
 
     s = config.GetDBConfigArchiveDaysThreshold(days);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
@@ -133,16 +142,20 @@ DBWrapper::StartService() {
     opt.meta_.archive_conf_.SetCriterias(criterial);
 
     // create db root folder
-    Status status = CommonUtil::CreateDirectory(opt.meta_.path_);
-    if (!status.ok()) {
-        std::cerr << "ERROR! Failed to create database root path: " << opt.meta_.path_ << std::endl;
+    s = CommonUtil::CreateDirectory(opt.meta_.path_);
+    if (!s.ok()) {
+        std::cerr << "Error: Failed to create database primary path: " << path
+                  << ". Possible reason: db_config.primary_path is wrong in server_config.yaml or not available."
+                  << std::endl;
         kill(0, SIGUSR1);
     }
 
     for (auto& path : opt.meta_.slave_paths_) {
-        status = CommonUtil::CreateDirectory(path);
-        if (!status.ok()) {
-            std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
+        s = CommonUtil::CreateDirectory(path);
+        if (!s.ok()) {
+            std::cerr << "Error: Failed to create database secondary path: " << path
+                      << ". Possible reason: db_config.secondary_path is wrong in server_config.yaml or not available."
+                      << std::endl;
             kill(0, SIGUSR1);
         }
     }
@@ -151,7 +164,8 @@ DBWrapper::StartService() {
     try {
         db_ = engine::DBFactory::Build(opt);
     } catch (std::exception& ex) {
-        std::cerr << "ERROR! Failed to open database: " << ex.what() << std::endl;
+        std::cerr << "Error: failed to open database: " << ex.what()
+                  << ". Possible reason: the meta system does not work." << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -161,6 +175,7 @@ DBWrapper::StartService() {
     std::string preload_tables;
     s = config.GetDBConfigPreloadTable(preload_tables);
     if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
         return s;
     }
 
