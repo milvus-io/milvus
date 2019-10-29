@@ -18,16 +18,13 @@
 #include "db/engine/ExecutionEngineImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "knowhere/common/Config.h"
 #include "metrics/Metrics.h"
+#include "scheduler/Utils.h"
+#include "server/Config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-
-#include "knowhere/common/Config.h"
-#include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
-#include "scheduler/Utils.h"
-#include "server/Config.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
@@ -260,6 +257,56 @@ ExecutionEngineImpl::Load(bool to_cache) {
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     if (hybrid) {
+#if 1
+        const std::string key = location_ + ".quantizer";
+        std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+        const int64_t NOT_FOUND = -1;
+        int64_t device_id = NOT_FOUND;
+
+        // cache hit
+        {
+            knowhere::QuantizerPtr quantizer = nullptr;
+
+            for (auto& gpu : gpus) {
+                auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+                if (auto cached_quantizer = cache->GetIndex(key)) {
+                    device_id = gpu;
+                    quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
+                }
+            }
+
+            if (device_id != NOT_FOUND) {
+                // cache hit
+                auto config = std::make_shared<knowhere::QuantizerCfg>();
+                config->gpu_id = device_id;
+                config->mode = 2;
+                auto new_index = index_->LoadData(quantizer, config);
+                index_ = new_index;
+            }
+        }
+
+        if (device_id == NOT_FOUND) {
+            // cache miss
+            std::vector<int64_t> all_free_mem;
+            for (auto& gpu : gpus) {
+                auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+                auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+                all_free_mem.push_back(free_mem);
+            }
+
+            auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+            auto best_index = std::distance(all_free_mem.begin(), max_e);
+            device_id = gpus[best_index];
+
+            auto pair = index_->CopyToGpuWithQuantizer(device_id);
+            index_ = pair.first;
+
+            // cache
+            auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
+            cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
+        }
+#endif
         return Status::OK();
     }
 
