@@ -28,7 +28,7 @@
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "server/Server.h"
-#include "src/version.h"
+#include "src/config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"

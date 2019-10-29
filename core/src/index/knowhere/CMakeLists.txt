@@ -1,6 +1,3 @@
-include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
-
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
@@ -19,9 +16,9 @@ file(GLOB SRC_FILES
         ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
         ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
 
-if(NOT TARGET SPTAGLibStatic)
+if (NOT TARGET SPTAGLibStatic)
     add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-endif()
+endif ()
 
 set(external_srcs
         knowhere/adapter/SptagAdapter.cpp
@@ -61,20 +58,30 @@ set(depend_libs
         lapack
         arrow
         ${ARROW_PREFIX}/lib/libjemalloc_pic.a
-        cudart
-        cublas
         gomp
         gfortran
         pthread
         )
 
-if(NOT TARGET knowhere)
+if (KNOWHERE_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            cudart
+            cublas
+            )
+    set(depend_libs ${depend_libs}
+            ${cuda_lib}
+            )
+endif ()
+
+if (NOT TARGET knowhere)
     add_library(
             knowhere STATIC
             ${external_srcs}
             ${index_srcs}
     )
-endif()
+endif ()
 
 target_link_libraries(
         knowhere

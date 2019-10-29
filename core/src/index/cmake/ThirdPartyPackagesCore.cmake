@@ -689,7 +689,6 @@ macro(build_faiss)
     set(FAISS_STATIC_LIB
             "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-                    
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
             "CFLAGS=${EP_C_FLAGS}"
@@ -697,8 +696,7 @@ macro(build_faiss)
             "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib -lopenblas -llapack"
             --without-python)
 
-                        
-    if(${KNOWHERE_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
+    if(KNOWHERE_GPU_VERSION)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
                 "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75"

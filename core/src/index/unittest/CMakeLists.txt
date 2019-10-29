@@ -2,11 +2,6 @@ include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR})
-include_directories(/usr/local/cuda/include)
-link_directories(/usr/local/cuda/lib64)
-
-message(STATUS "arrow prefix: ${ARROW_PREFIX}")
-message(STATUS "libjemalloc_pic path: ${ARROW_PREFIX}/lib/libjemalloc_pic.a")
 
 set(depend_libs
         gtest gmock gtest_main gmock_main
@@ -15,9 +10,20 @@ set(depend_libs
         )
 
 set(basic_libs
-        cudart cublas
         gomp gfortran pthread
         )
+
+if (KNOWHERE_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            cudart
+            cublas
+            )
+    set(basic_libs ${basic_libs}
+            ${cuda_lib}
+            )
+endif ()
 
 set(util_srcs
         ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
@@ -44,9 +50,9 @@ set(ivf_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseIndex.cpp
         )
-if(NOT TARGET test_ivf)
+if (NOT TARGET test_ivf)
     add_executable(test_ivf test_ivf.cpp ${ivf_srcs} ${util_srcs})
-endif()
+endif ()
 target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 
 
@@ -54,9 +60,9 @@ target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 set(idmap_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
         )
-if(NOT TARGET test_idmap)
+if (NOT TARGET test_idmap)
     add_executable(test_idmap test_idmap.cpp ${idmap_srcs} ${ivf_srcs} ${util_srcs})
-endif()
+endif ()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
 #<KDT-TEST>
@@ -66,9 +72,9 @@ set(kdt_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexKDT.cpp
         )
-if(NOT TARGET test_kdt)
+if (NOT TARGET test_kdt)
     add_executable(test_kdt test_kdt.cpp ${kdt_srcs} ${util_srcs})
-endif()
+endif ()
 target_link_libraries(test_kdt
         SPTAGLibStatic
         ${depend_libs} ${unittest_libs} ${basic_libs})

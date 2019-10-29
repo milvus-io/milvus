@@ -41,6 +41,15 @@ macro(define_option_string name description default)
 endmacro()
 
 #----------------------------------------------------------------------
+set_option_category("CPU version")
+
+if(MILVUS_CPU_VERSION)
+    define_option(KNOWHERE_CPU_VERSION "Build CPU version only" ON)
+else()
+    define_option(KNOWHERE_CPU_VERSION "Build CPU version only" OFF)
+endif()
+
+#----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
 set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "AUTO")

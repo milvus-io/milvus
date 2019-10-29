@@ -4,14 +4,13 @@
 
 add_definitions(-std=c++11 -O3 -lboost -march=native -Wall -DINFO)
 
-find_package(OpenMP)
+find_package(OpenMP REQUIRED)
 if (OPENMP_FOUND)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 else ()
     message(FATAL_ERROR "no OpenMP supprot")
 endif ()
-message(${OpenMP_CXX_FLAGS})
 
 include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg)
 aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg nsg_src)
