@@ -15,9 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
+
 #include <memory>
-#include <utility>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
@@ -69,15 +70,6 @@ GPUIVFSQ::CopyGpuToCpu(const Config& config) {
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
     return std::make_shared<IVFSQ>(new_index);
-}
-
-void
-GPUIVFSQ::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
-#ifdef CUSTOMIZATION
-    GPUIVF::search_impl(n, data, k, distances, labels, cfg);
-#else
-    IVF::search_impl(n, data, k, distances, labels, cfg);
-#endif
 }
 
 }  // namespace knowhere
