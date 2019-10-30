@@ -193,14 +193,11 @@ TEST_F(TaskTableBaseTest, PUT_INVALID_TEST) {
 
 TEST_F(TaskTableBaseTest, PUT_BATCH) {
     std::vector<milvus::scheduler::TaskPtr> tasks{task1_, task2_};
-    empty_table_.Put(tasks);
+    for (auto& task : tasks) {
+        empty_table_.Put(task);
+    }
     ASSERT_EQ(empty_table_.at(0)->task, task1_);
     ASSERT_EQ(empty_table_.at(1)->task, task2_);
-}
-
-TEST_F(TaskTableBaseTest, PUT_EMPTY_BATCH) {
-    std::vector<milvus::scheduler::TaskPtr> tasks{};
-    empty_table_.Put(tasks);
 }
 
 TEST_F(TaskTableBaseTest, SIZE) {

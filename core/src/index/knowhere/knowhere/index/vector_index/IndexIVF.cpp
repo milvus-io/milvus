@@ -16,15 +16,17 @@
 // under the License.
 
 #include <faiss/AutoTune.h>
-#include <faiss/AuxIndexStructures.h>
 #include <faiss/IVFlib.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVF.h>
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/index_io.h>
+#include <faiss/index_factory.h>
+#include <faiss/clone_index.h>
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuCloner.h>
 #endif
 
 #include <chrono>

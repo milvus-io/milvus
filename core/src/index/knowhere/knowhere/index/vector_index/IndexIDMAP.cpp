@@ -15,9 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/AutoTune.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
+
+#include <faiss/index_factory.h>
+#include <faiss/clone_index.h>
+#ifdef MILVUS_GPU_VERSION
+#include <faiss/gpu/GpuCloner.h>
+#endif
+
+#include <faiss/AutoTune.h>
 #include <faiss/index_io.h>
 
 #include <vector>

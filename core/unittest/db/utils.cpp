@@ -67,18 +67,20 @@ static const char
                    "  cache_insert_data: false          # whether load inserted data into cache\n"
                    "\n"
                    "engine_config:\n"
-                   "  blas_threshold: 20\n"
+                   "  use_blas_threshold: 20\n"
                    "\n"
                    "resource_config:\n"
-                   #ifdef MILVUS_CPU_VERSION
-                   "  resource_pool:\n"
+#ifdef MILVUS_CPU_VERSION
+                   "  search_resources:\n"
                    "    - cpu0\n"
                    "  index_build_device: cpu0          # CPU used for building index";
-                   #else
+#else
                    "  resource_pool:\n"
+                   "  search_resources:\n"
                    "    - gpu0\n"
                    "  index_build_device: gpu0          # GPU used for building index";
-                   #endif
+#endif
+
 void
 WriteToFile(const std::string& file_path, const char* content) {
     std::fstream fs(file_path.c_str(), std::ios_base::out);

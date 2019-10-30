@@ -105,7 +105,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     ASSERT_TRUE(s.ok());
 
     s = config.ValidateConfig();
-    std::cout << s.ToString() << std::endl;
     ASSERT_TRUE(s.ok());
 
     config.PrintAll();

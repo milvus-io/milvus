@@ -15,29 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/job/Job.h"
+#include "wrapper/WrapperException.h"
 
 namespace milvus {
-namespace scheduler {
+namespace engine {
 
-namespace {
-std::mutex unique_job_mutex;
-uint64_t unique_job_id = 0;
-}  // namespace
+WrapperException::WrapperException(const std::string &msg) : msg(msg) {}
 
-Job::Job(JobType type) : type_(type) {
-    std::lock_guard<std::mutex> lock(unique_job_mutex);
-    id_ = unique_job_id++;
+const char *WrapperException::what() const noexcept {
+    return msg.c_str();
 }
 
-json
-Job::Dump() const {
-    json ret{
-        {"id", id_},
-        {"type", type_},
-    };
-    return ret;
-}
-
-}  // namespace scheduler
+}  // namespace engine
 }  // namespace milvus

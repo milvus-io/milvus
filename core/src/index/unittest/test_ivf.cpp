@@ -20,15 +20,13 @@
 #include <iostream>
 #include <thread>
 
-#include <faiss/AutoTune.h>
-
 #ifdef MILVUS_GPU_VERSION
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #endif
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
@@ -58,6 +56,9 @@ protected:
         ParameterType parameter_type;
         std::tie(index_type, parameter_type) = GetParam();
         // Init_with_default();
+        //        nb = 1000000;
+        //        nq = 1000;
+        //        k = 1000;
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type);
@@ -70,19 +71,7 @@ protected:
 #endif
     }
 
-    knowhere::VectorIndexPtr
-    ChooseTodo() {
-#ifdef MILVUS_GPU_VERSION
-        std::vector<std::string> gpu_idx{"GPUIVFSQ"};
-        auto finder = std::find(gpu_idx.cbegin(), gpu_idx.cend(), index_type);
-        if (finder != gpu_idx.cend()) {
-            return knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, knowhere::Config());
-        }
-#endif
-        return index_;
-    }
-
-protected:
+ protected:
     std::string index_type;
     knowhere::Config conf;
     knowhere::IVFIndexPtr index_ = nullptr;
@@ -114,8 +103,7 @@ TEST_P(IVFTest, ivf_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
 
-    auto new_idx = ChooseTodo();
-    auto result = new_idx->Search(query_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 }
@@ -148,8 +136,7 @@ TEST_P(IVFTest, ivf_serialize) {
 
         index_->set_index_model(model);
         index_->Add(base_dataset, conf);
-        auto new_idx = ChooseTodo();
-        auto result = new_idx->Search(query_dataset, conf);
+        auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
     }
 
@@ -173,8 +160,7 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
-        auto new_idx = ChooseTodo();
-        auto result = new_idx->Search(query_dataset, conf);
+        auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
     }
 }
@@ -191,8 +177,7 @@ TEST_P(IVFTest, clone_test) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto new_idx = ChooseTodo();
-    auto result = new_idx->Search(query_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
@@ -224,12 +209,6 @@ TEST_P(IVFTest, clone_test) {
     //                         }, KnowhereException);
     //        }
     //    }
-
-    {
-        if (index_type == "IVFSQHybrid") {
-            return;
-        }
-    }
 
     {
         // copy from gpu to cpu
@@ -294,8 +273,7 @@ TEST_P(IVFTest, gpu_seal_test) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto new_idx = ChooseTodo();
-    auto result = new_idx->Search(query_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
 
     auto cpu_idx = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());

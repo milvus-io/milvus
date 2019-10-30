@@ -61,11 +61,11 @@ static const char
                          "\n"
                          "resource_config:\n"
 #ifdef MILVUS_CPU_VERSION
-                         "  resource_pool:\n"
+                         "  search_resources:\n"
                          "    - cpu0\n"
                          "  index_build_device: cpu0          # CPU used for building index";
 #else
-                         "  resource_pool:\n"
+                         "  search_resources:\n"
                          "    - gpu0\n"
                          "  index_build_device: gpu0          # GPU used for building index";
 #endif
