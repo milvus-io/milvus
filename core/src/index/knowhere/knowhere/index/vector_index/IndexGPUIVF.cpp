@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/gpu/GpuAutoTune.h>
-#include <faiss/gpu/GpuIndexFlat.h>
+#include <memory>
+
+#include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/index_io.h>
-#include <memory>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
@@ -86,7 +86,8 @@ GPUIVF::SerializeImpl() {
             faiss::Index* index = index_.get();
             faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(index);
 
-            SealImpl();
+            // TODO(linxj): support seal
+            // SealImpl();
 
             faiss::write_index(host_index, &writer);
             delete host_index;
@@ -130,13 +131,12 @@ void
 GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
     std::lock_guard<std::mutex> lk(mutex_);
 
-    // TODO(linxj): gpu index support GenParams
     if (auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
         auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(cfg);
-        device_index->setNumProbes(search_cfg->nprobe);
+        device_index->nprobe = search_cfg->nprobe;
+        //        assert(device_index->getNumProbes() == search_cfg->nprobe);
 
         {
-            // TODO(linxj): allocate gpu mem
             ResScope rs(res_, gpu_id_);
             device_index->search(n, (float*)data, k, distances, labels);
         }
