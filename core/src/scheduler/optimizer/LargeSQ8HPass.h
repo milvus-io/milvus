@@ -18,6 +18,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
