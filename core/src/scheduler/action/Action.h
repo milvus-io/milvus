@@ -28,13 +28,13 @@ namespace scheduler {
 class Action {
  public:
     static void
-    PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self);
+    PushTaskToNeighbourRandomly(TaskTableItemPtr task_item, const ResourcePtr& self);
 
     static void
-    PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self);
+    PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& self);
 
     static void
-    PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest);
+    PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest);
 
     static void
     DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
