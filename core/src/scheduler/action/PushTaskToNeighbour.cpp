@@ -59,7 +59,7 @@ get_neighbours_with_connetion(const ResourcePtr& self) {
 }
 
 void
-Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self) {
+Action::PushTaskToNeighbourRandomly(TaskTableItemPtr task_item, const ResourcePtr& self) {
     auto neighbours = get_neighbours_with_connetion(self);
     if (not neighbours.empty()) {
         std::vector<uint64_t> speeds;
@@ -78,7 +78,7 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self
         for (uint64_t i = 0; i < speeds.size(); ++i) {
             rd_speed -= speeds[i];
             if (rd_speed <= 0) {
-                neighbours[i].first->task_table().Put(task);
+                neighbours[i].first->task_table().Put(task_item->task, task_item);
                 return;
             }
         }
@@ -89,22 +89,23 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self
 }
 
 void
-Action::PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self) {
+Action::PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& self) {
     auto neighbours = get_neighbours(self);
     for (auto& neighbour : neighbours) {
-        neighbour->task_table().Put(task);
+        neighbour->task_table().Put(task_item->task, task_item);
     }
 }
 
 void
-Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
-    dest->task_table().Put(task);
+Action::PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest) {
+    dest->task_table().Put(task_item->task, task_item);
 }
 
 void
 Action::DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                   std::shared_ptr<LoadCompletedEvent> event) {
     if (not resource->HasExecutor() && event->task_table_item_->Move()) {
+        auto task_item = event->task_table_item_;
         auto task = event->task_table_item_->task;
         auto search_task = std::static_pointer_cast<XSearchTask>(task);
         bool moved = false;
@@ -119,7 +120,7 @@ Action::DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr res
                     if (index != nullptr) {
                         moved = true;
                         auto dest_resource = res_mgr->GetResource(ResourceType::GPU, i);
-                        PushTaskToResource(event->task_table_item_->task, dest_resource);
+                        PushTaskToResource(event->task_table_item_, dest_resource);
                         break;
                     }
                 }
@@ -127,7 +128,7 @@ Action::DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr res
         }
 
         if (not moved) {
-            PushTaskToNeighbourRandomly(task, resource);
+            PushTaskToNeighbourRandomly(task_item, resource);
         }
     }
 }
@@ -135,6 +136,7 @@ Action::DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr res
 void
 Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                             std::shared_ptr<LoadCompletedEvent> event) {
+    auto task_item = event->task_table_item_;
     auto task = event->task_table_item_->task;
     if (resource->type() == ResourceType::DISK) {
         // step 1: calculate shortest path per resource, from disk to compute resource
@@ -213,7 +215,7 @@ Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, Resou
         //            next_res->task_table().Put(task);
         //        }
         event->task_table_item_->Move();
-        next_res->task_table().Put(task);
+        next_res->task_table().Put(task, task_item);
     }
 }
 
