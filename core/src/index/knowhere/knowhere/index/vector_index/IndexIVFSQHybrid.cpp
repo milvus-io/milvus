@@ -17,19 +17,25 @@
 // under the License.
 
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
-#include <utility>
-#include "faiss/AutoTune.h"
-#include "faiss/gpu/GpuAutoTune.h"
-#include "faiss/gpu/GpuIndexIVF.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+
+#include <utility>
+
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/gpu/GpuIndexIVF.h>
+#include <faiss/index_factory.h>
 
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
 
+// std::mutex g_mutex;
+
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
     if (build_cfg != nullptr) {
         build_cfg->CheckValid();  // throw exception
@@ -63,23 +69,25 @@ IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
 
 VectorIndexPtr
 IVFSQHybrid::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    if (auto device_idx = std::dynamic_pointer_cast<faiss::IndexIVF>(index_)) {
-        faiss::Index* device_index = index_.get();
-        faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
-
-        std::shared_ptr<faiss::Index> new_index;
-        new_index.reset(host_index);
-        return std::make_shared<IVFSQHybrid>(new_index);
-    } else {
-        // TODO(linxj): why? jinhai
+    if (gpu_mode == 0) {
         return std::make_shared<IVFSQHybrid>(index_);
     }
+    std::lock_guard<std::mutex> lk(mutex_);
+
+    faiss::Index* device_index = index_.get();
+    faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+
+    std::shared_ptr<faiss::Index> new_index;
+    new_index.reset(host_index);
+    return std::make_shared<IVFSQHybrid>(new_index);
 }
 
 VectorIndexPtr
 IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+    if (gpu_mode != 0) {
+        KNOWHERE_THROW_MSG("Not a GpuIndex Type");
+    }
+
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
@@ -105,16 +113,26 @@ IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
     FaissBaseIndex::LoadImpl(index_binary);  // load on cpu
     auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->backup_quantizer();
+    gpu_mode = 0;
 }
 
 void
 IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
                          const Config& cfg) {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+    //    static int64_t search_count;
+    //    ++search_count;
+
     if (gpu_mode == 2) {
         GPUIVF::search_impl(n, data, k, distances, labels, cfg);
-    } else if (gpu_mode == 1) {
-        ResScope rs(res_, gpu_id_);
-        IVF::search_impl(n, data, k, distances, labels, cfg);
+        //        index_->search(n, (float*)data, k, distances, labels);
+    } else if (gpu_mode == 1) {  // hybrid
+        if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(quantizer_gpu_id_)) {
+            ResScope rs(res, quantizer_gpu_id_, true);
+            IVF::search_impl(n, data, k, distances, labels, cfg);
+        } else {
+            KNOWHERE_THROW_MSG("Hybrid Search Error, can't get gpu: " + std::to_string(quantizer_gpu_id_) + "resource");
+        }
     } else if (gpu_mode == 0) {
         IVF::search_impl(n, data, k, distances, labels, cfg);
     }
@@ -122,16 +140,18 @@ IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distanc
 
 QuantizerPtr
 IVFSQHybrid::LoadQuantizer(const Config& conf) {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+
     auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
     if (quantizer_conf != nullptr) {
         if (quantizer_conf->mode != 1) {
             KNOWHERE_THROW_MSG("mode only support 1 in this func");
         }
     }
-    gpu_id_ = quantizer_conf->gpu_id;
+    auto gpu_id = quantizer_conf->gpu_id;
 
-    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
-        ResScope rs(res, gpu_id_, false);
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
+        ResScope rs(res, gpu_id, false);
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
@@ -140,7 +160,7 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
         index_composition->quantizer = nullptr;
         index_composition->mode = quantizer_conf->mode;  // only 1
 
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index_composition, &option);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
         delete gpu_index;
 
         auto q = std::make_shared<FaissIVFQuantizer>();
@@ -148,16 +168,19 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
         auto& q_ptr = index_composition->quantizer;
         q->size = q_ptr->d * q_ptr->getNumVecs() * sizeof(float);
         q->quantizer = q_ptr;
+        q->gpu_id = gpu_id;
         res_ = res;
         gpu_mode = 1;
         return q;
     } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id) + "resource");
     }
 }
 
 void
 IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+
     auto ivf_quantizer = std::dynamic_pointer_cast<FaissIVFQuantizer>(q);
     if (ivf_quantizer == nullptr) {
         KNOWHERE_THROW_MSG("Quantizer type error");
@@ -170,20 +193,27 @@ IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
         //        delete ivf_index->quantizer;
         ivf_index->quantizer = ivf_quantizer->quantizer;
     }
+    quantizer_gpu_id_ = ivf_quantizer->gpu_id;
+    gpu_mode = 1;
 }
 
 void
 IVFSQHybrid::UnsetQuantizer() {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+
     auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     if (ivf_index == nullptr) {
         KNOWHERE_THROW_MSG("Index type error");
     }
 
     ivf_index->quantizer = nullptr;
+    quantizer_gpu_id_ = -1;
 }
 
 VectorIndexPtr
 IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+
     auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
     if (quantizer_conf != nullptr) {
         if (quantizer_conf->mode != 2) {
@@ -192,13 +222,11 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
     } else {
         KNOWHERE_THROW_MSG("conf error");
     }
-    //    if (quantizer_conf->gpu_id != gpu_id_) {
-    //        KNOWHERE_THROW_MSG("quantizer and data must on the same gpu card");
-    //    }
-    gpu_id_ = quantizer_conf->gpu_id;
 
-    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
-        ResScope rs(res, gpu_id_, false);
+    auto gpu_id = quantizer_conf->gpu_id;
+
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
+        ResScope rs(res, gpu_id, false);
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
@@ -211,18 +239,20 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         index_composition->quantizer = ivf_quantizer->quantizer;
         index_composition->mode = quantizer_conf->mode;  // only 2
 
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index_composition, &option);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
         std::shared_ptr<faiss::Index> new_idx;
         new_idx.reset(gpu_index);
-        auto sq_idx = std::make_shared<IVFSQHybrid>(new_idx, gpu_id_, res);
+        auto sq_idx = std::make_shared<IVFSQHybrid>(new_idx, gpu_id, res);
         return sq_idx;
     } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id) + "resource");
     }
 }
 
 std::pair<VectorIndexPtr, QuantizerPtr>
 IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config) {
+    //    std::lock_guard<std::mutex> lk(g_mutex);
+
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
@@ -242,9 +272,26 @@ IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& c
         auto q = std::make_shared<FaissIVFQuantizer>();
         q->quantizer = index_composition.quantizer;
         q->size = index_composition.quantizer->d * index_composition.quantizer->getNumVecs() * sizeof(float);
+        q->gpu_id = device_id;
         return std::make_pair(new_idx, q);
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
+    }
+}
+
+void
+IVFSQHybrid::set_index_model(IndexModelPtr model) {
+    std::lock_guard<std::mutex> lk(mutex_);
+
+    auto host_index = std::static_pointer_cast<IVFIndexModel>(model);
+    if (auto gpures = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
+        ResScope rs(gpures, gpu_id_, false);
+        auto device_index = faiss::gpu::index_cpu_to_gpu(gpures->faiss_res.get(), gpu_id_, host_index->index_.get());
+        index_.reset(device_index);
+        res_ = gpures;
+        gpu_mode = 2;
+    } else {
+        KNOWHERE_THROW_MSG("load index model error, can't get gpu_resource");
     }
 }
 
@@ -305,6 +352,11 @@ IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distanc
 void
 IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
     GPUIVF::LoadImpl(index_binary);
+}
+
+void
+IVFSQHybrid::set_index_model(IndexModelPtr model) {
+    GPUIVF::set_index_model(model);
 }
 
 #endif

@@ -86,5 +86,6 @@ install(TARGETS test_gpuresource DESTINATION unittest)
 install(TARGETS test_customized_index DESTINATION unittest)
 
 #add_subdirectory(faiss_ori)
+#add_subdirectory(faiss_benchmark)
 add_subdirectory(test_nsg)
 
