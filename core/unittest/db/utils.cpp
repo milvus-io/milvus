@@ -65,10 +65,10 @@ static const char
                    "  cache_insert_data: false          # whether load inserted data into cache\n"
                    "\n"
                    "engine_config:\n"
-                   "  blas_threshold: 20\n"
+                   "  use_blas_threshold: 20\n"
                    "\n"
                    "resource_config:\n"
-                   "  resource_pool:\n"
+                   "  search_resources:\n"
                    "    - gpu0\n"
                    "  index_build_device: gpu0          # GPU used for building index";
 

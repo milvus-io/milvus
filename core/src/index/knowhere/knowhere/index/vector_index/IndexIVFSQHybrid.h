@@ -17,7 +17,9 @@
 
 #pragma once
 
+#include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/index_io.h>
+
 #include <memory>
 #include <utility>
 
@@ -29,6 +31,7 @@ namespace knowhere {
 #ifdef CUSTOMIZATION
 struct FaissIVFQuantizer : public Quantizer {
     faiss::gpu::GpuIndexFlat* quantizer = nullptr;
+    int64_t gpu_id;
 
     ~FaissIVFQuantizer() override;
 };
@@ -52,6 +55,9 @@ class IVFSQHybrid : public GPUIVFSQ {
     }
 
  public:
+    void
+    set_index_model(IndexModelPtr model) override;
+
     QuantizerPtr
     LoadQuantizer(const Config& conf);
 
@@ -85,6 +91,7 @@ class IVFSQHybrid : public GPUIVFSQ {
 
  protected:
     int64_t gpu_mode = 0;  // 0,1,2
+    int64_t quantizer_gpu_id_ = -1;
 };
 
 }  // namespace knowhere
