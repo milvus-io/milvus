@@ -22,8 +22,8 @@
 namespace milvus {
 namespace scheduler {
 
-DeleteJob::DeleteJob(JobId id, std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource)
-    : Job(id, JobType::DELETE),
+DeleteJob::DeleteJob(std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource)
+    : Job(JobType::DELETE),
       table_id_(std::move(table_id)),
       meta_ptr_(std::move(meta_ptr)),
       num_resource_(num_resource) {
@@ -43,6 +43,18 @@ DeleteJob::ResourceDone() {
         ++done_resource;
     }
     cv_.notify_one();
+}
+
+json
+DeleteJob::Dump() const {
+    json ret{
+        {"table_id", table_id_},
+        {"number_of_resource", num_resource_},
+        {"number_of_done", done_resource},
+    };
+    auto base = Job::Dump();
+    ret.insert(base.begin(), base.end());
+    return ret;
 }
 
 }  // namespace scheduler

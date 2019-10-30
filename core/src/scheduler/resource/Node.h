@@ -20,20 +20,26 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Connection.h"
 #include "scheduler/TaskTable.h"
+#include "scheduler/interface/interfaces.h"
 
 namespace milvus {
 namespace scheduler {
 
 class Node;
 
-using NeighbourNodePtr = std::weak_ptr<Node>;
+using NeighbourNodePtr = std::shared_ptr<Node>;
 
 struct Neighbour {
-    Neighbour(NeighbourNodePtr nei, Connection conn) : neighbour_node(nei), connection(conn) {
+    Neighbour(NeighbourNodePtr nei, Connection conn) : neighbour_node(std::move(nei)), connection(std::move(conn)) {
+    }
+
+    ~Neighbour() {
+        neighbour_node = nullptr;
     }
 
     NeighbourNodePtr neighbour_node;
@@ -41,7 +47,7 @@ struct Neighbour {
 };
 
 // TODO(lxj): return type void -> Status
-class Node {
+class Node : public interface::dumpable {
  public:
     Node();
 
@@ -52,8 +58,8 @@ class Node {
     GetNeighbours();
 
  public:
-    std::string
-    Dump();
+    json
+    Dump() const override;
 
  private:
     std::mutex mutex_;

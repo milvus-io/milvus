@@ -99,6 +99,7 @@ for test in `ls ${DIR_UNITTEST}`; do
     if [ $? -ne 0 ]; then
         echo ${args}
         echo ${DIR_UNITTEST}/${test} "run failed"
+        exit -1
     fi
 done
 
@@ -121,8 +122,13 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "*/src/server/Server.cpp" \
     "*/src/server/DBWrapper.cpp" \
     "*/src/server/grpc_impl/GrpcServer.cpp" \
-    "*/src/utils/easylogging++.h" \
-    "*/src/utils/easylogging++.cc"
+    "*/easylogging++.h" \
+    "*/easylogging++.cc" \
+    "*/src/external/*"
 
+if [ $? -ne 0 ]; then
+    echo "generate ${FILE_INFO_OUTPUT_NEW} failed"
+    exit -2
+fi
 # gen html report
 ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/

@@ -26,7 +26,7 @@ set(wrapper_files
 
 set(util_files
         utils.cpp
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
+        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         )
 
@@ -41,11 +41,3 @@ target_link_libraries(test_wrapper
         ${unittest_libs})
 
 install(TARGETS test_wrapper DESTINATION unittest)
-
-configure_file(appendix/server_config.yaml
-        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/server_config.yaml"
-        COPYONLY)
-
-configure_file(appendix/log_config.conf
-        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/log_config.conf"
-        COPYONLY)
