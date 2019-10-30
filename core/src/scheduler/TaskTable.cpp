@@ -264,28 +264,13 @@ TaskTable::PickToExecute(uint64_t limit) {
 }
 
 void
-TaskTable::Put(TaskPtr task) {
-    auto item = std::make_shared<TaskTableItem>();
+TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
+    auto item = std::make_shared<TaskTableItem>(std::move(from));
     item->id = id_++;
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
     item->timestamp.start = get_current_timestamp();
     table_.put(std::move(item));
-    if (subscriber_) {
-        subscriber_();
-    }
-}
-
-void
-TaskTable::Put(std::vector<TaskPtr>& tasks) {
-    for (auto& task : tasks) {
-        auto item = std::make_shared<TaskTableItem>();
-        item->id = id_++;
-        item->task = std::move(task);
-        item->state = TaskTableItemState::START;
-        item->timestamp.start = get_current_timestamp();
-        table_.put(std::move(item));
-    }
     if (subscriber_) {
         subscriber_();
     }
