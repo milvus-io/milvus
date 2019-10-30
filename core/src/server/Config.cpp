@@ -604,17 +604,29 @@ Config::CheckResourceConfigMode(const std::string& value) {
 }
 
 Status
-CheckGpuDevice(const std::string& value) {
-    const std::regex pat("gpu(\\d+)");
-    std::cmatch m;
-    if (!std::regex_match(value.c_str(), m, pat)) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid gpu device: " + value);
+CheckResource(const std::string& value) {
+    std::string s = value;
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+#ifdef MILVUS_CPU_VERSION
+    const std::regex pat("cpu(\\d+)");
+    std::smatch m;
+    if (!std::regex_match(s, m, pat)) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid CPU resource: " + s);
+    }
+#else
+    const std::regex pat("cpu(\\d+) | gpu(\\d+)");
+    std::smatch m;
+    if (!std::regex_match(s, m, pat)) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid resource: " + s);
     }
 
-    int32_t gpu_index = std::stoi(value.substr(3));
-    if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid gpu device: " + value);
+    if (s.compare(0, 3, "gpu")) {
+        int32_t gpu_index = std::stoi(s.substr(3));
+        if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid gpu device: " + s);
+        }
     }
+#endif
     return Status::OK();
 }
 
@@ -624,9 +636,9 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
         return Status(SERVER_INVALID_ARGUMENT, "Empty resource config search_resources");
     }
 
-    for (auto& gpu_device : value) {
-        if (!CheckGpuDevice(gpu_device).ok()) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config search_resources: " + gpu_device);
+    for (auto& resource : value) {
+        if (!CheckResource(resource).ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config search_resources: " + resource);
         }
     }
     return Status::OK();
@@ -634,7 +646,7 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
 
 Status
 Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
-    if (!CheckGpuDevice(value).ok()) {
+    if (!CheckResource(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config index_build_device: " + value);
     }
     return Status::OK();

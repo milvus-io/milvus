@@ -33,19 +33,13 @@ set(index_srcs
         knowhere/index/vector_index/IndexKDT.cpp
         knowhere/index/vector_index/IndexIDMAP.cpp
         knowhere/index/vector_index/IndexIVF.cpp
-        knowhere/index/vector_index/IndexGPUIVF.cpp
         knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
         knowhere/index/vector_index/IndexNSG.cpp
         knowhere/index/vector_index/nsg/NSG.cpp
         knowhere/index/vector_index/nsg/NSGIO.cpp
         knowhere/index/vector_index/nsg/NSGHelper.cpp
-        knowhere/index/vector_index/helpers/Cloner.cpp
-        knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
-        knowhere/index/vector_index/IndexGPUIVFSQ.cpp
-        knowhere/index/vector_index/IndexIVFSQHybrid.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
-        knowhere/index/vector_index/IndexGPUIVFPQ.cpp
         knowhere/index/vector_index/FaissBaseIndex.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
@@ -63,6 +57,7 @@ set(depend_libs
         pthread
         )
 
+
 if (KNOWHERE_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
@@ -73,6 +68,17 @@ if (KNOWHERE_GPU_VERSION)
     set(depend_libs ${depend_libs}
             ${cuda_lib}
             )
+
+    set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/IndexGPUIVF.cpp
+            knowhere/index/vector_index/helpers/Cloner.cpp
+            knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
+            knowhere/index/vector_index/IndexGPUIVFSQ.cpp
+            knowhere/index/vector_index/IndexIVFSQHybrid.cpp
+            knowhere/index/vector_index/IndexGPUIVFPQ.cpp
+            knowhere/index/vector_index/IndexGPUIDMAP.cpp
+            )
+
 endif ()
 
 if (NOT TARGET knowhere)

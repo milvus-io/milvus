@@ -29,9 +29,11 @@ metric_config:
 cache_config:
   cpu_cache_capacity: 16            # GB, CPU memory used for cache
   cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
-  gpu_cache_capacity: 4             # GB, GPU memory used for cache
-  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
-  cache_insert_data: false          # whether to load inserted data into cache
+  cache_insert_data: false          # whether to load inserted data into CPU cache
+
+#Uncomment the following config if you are using GPU version
+#  gpu_cache_capacity: 4             # GB, GPU memory used for cache
+#  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
 
 engine_config:
   use_blas_threshold: 20            # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times

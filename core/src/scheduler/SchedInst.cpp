@@ -18,7 +18,6 @@
 #include "scheduler/SchedInst.h"
 #include "ResourceFactory.h"
 #include "Utils.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "server/Config.h"
 
 #include <set>

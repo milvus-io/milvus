@@ -24,8 +24,6 @@
 #include "utils/Log.h"
 
 #include "knowhere/common/Config.h"
-#include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "scheduler/Utils.h"
 #include "server/Config.h"
 #include "wrapper/ConfAdapter.h"

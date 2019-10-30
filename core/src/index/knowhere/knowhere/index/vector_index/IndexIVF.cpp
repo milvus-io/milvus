@@ -22,8 +22,11 @@
 #include <faiss/IndexIVF.h>
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/index_io.h>
+#ifdef MILVUS_GPU_VERSION
+#include <faiss/gpu/GpuAutoTune.h>
+#endif
+
 #include <chrono>
 #include <memory>
 #include <utility>
@@ -32,7 +35,9 @@
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
+#endif
 #include "knowhere/index/vector_index/IndexIVF.h"
 
 namespace knowhere {
@@ -233,6 +238,9 @@ IVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int6
 
 VectorIndexPtr
 IVF::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+
+#ifdef MILVUS_GPU_VERSION
+
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
@@ -243,6 +251,10 @@ IVF::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
+
+#else
+    KNOWHERE_THROW_MSG("Calling IVF::CopyCpuToGpu when we are using CPU version");
+#endif
 }
 
 VectorIndexPtr
