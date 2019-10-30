@@ -58,8 +58,12 @@ struct TaskTimestamp : public interface::dumpable {
     Dump() const override;
 };
 
+struct TaskTableItem;
+using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
+
 struct TaskTableItem : public interface::dumpable {
-    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {
+    explicit TaskTableItem(TaskTableItemPtr f = nullptr)
+        : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex(), from(std::move(f)) {
     }
 
     TaskTableItem(const TaskTableItem& src) = delete;
@@ -70,6 +74,7 @@ struct TaskTableItem : public interface::dumpable {
     TaskTableItemState state;  // the state;
     std::mutex mutex;
     TaskTimestamp timestamp;
+    TaskTableItemPtr from;
 
     bool
     IsFinish();
@@ -96,8 +101,6 @@ struct TaskTableItem : public interface::dumpable {
     Dump() const override;
 };
 
-using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
-
 class TaskTable : public interface::dumpable {
  public:
     TaskTable() : table_(1ULL << 16ULL) {
@@ -120,14 +123,7 @@ class TaskTable : public interface::dumpable {
      * Put one task;
      */
     void
-    Put(TaskPtr task);
-
-    /*
-     * Put tasks back of task table;
-     * Called by DBImpl;
-     */
-    void
-    Put(std::vector<TaskPtr>& tasks);
+    Put(TaskPtr task, TaskTableItemPtr from = nullptr);
 
     size_t
     TaskToExecute();
