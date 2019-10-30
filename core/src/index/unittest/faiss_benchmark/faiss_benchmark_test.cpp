@@ -50,17 +50,13 @@
  *****************************************************/
 #define DEBUG_VERBOSE 0
 
-const std::string HDF5_POSTFIX = ".hdf5";
-const std::string HDF5_DATASET_TRAIN = "train";
-const std::string HDF5_DATASET_TEST = "test";
-const std::string HDF5_DATASET_NEIGHBORS = "neighbors";
-const std::string HDF5_DATASET_DISTANCES = "distances";
+const char HDF5_POSTFIX[] = ".hdf5";
+const char HDF5_DATASET_TRAIN[] = "train";
+const char HDF5_DATASET_TEST[] = "test";
+const char HDF5_DATASET_NEIGHBORS[] = "neighbors";
+const char HDF5_DATASET_DISTANCES[] = "distances";
 
-enum QueryMode {
-    MODE_CPU = 0,
-    MODE_MIX,
-    MODE_GPU
-};
+enum QueryMode { MODE_CPU = 0, MODE_MIX, MODE_GPU };
 
 double
 elapsed() {
@@ -85,8 +81,8 @@ normalize(float* arr, size_t nq, size_t dim) {
 }
 
 void*
-hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class,
-          size_t& d_out, size_t& n_out) {
+hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class, size_t& d_out,
+          size_t& n_out) {
     hid_t file, dataset, datatype, dataspace, memspace;
     H5T_class_t t_class;   /* data type class */
     hsize_t dimsm[3];      /* memory space dimensions */
@@ -95,7 +91,7 @@ hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_cla
     hsize_t offset[2];     /* hyperslab offset in the file */
     hsize_t count_out[3];  /* size of the hyperslab in memory */
     hsize_t offset_out[3]; /* hyperslab offset in memory */
-    void* data_out; /* output buffer */
+    void* data_out;        /* output buffer */
 
     /* Open the file and the dataset. */
     file = H5Fopen(file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -237,7 +233,7 @@ print_array(const char* header, bool is_integer, const void* arr, size_t nq, siz
 #endif
 
 void
-load_base_data(faiss::Index* &index, const std::string& ann_test_name, const std::string& index_key,
+load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std::string& index_key,
                faiss::gpu::StandardGpuResources& res, const faiss::MetricType metric_type, const size_t dim,
                int32_t index_add_loops, QueryMode mode = MODE_CPU) {
     double t0 = elapsed();
@@ -307,7 +303,7 @@ load_base_data(faiss::Index* &index, const std::string& ann_test_name, const std
         delete cpu_index;
         cpu_index = faiss::gpu::index_gpu_to_cpu(gpu_index);
 
-        faiss::IndexIVF *cpu_ivf_index = dynamic_cast<faiss::IndexIVF *>(cpu_index);
+        faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
         if (cpu_ivf_index != nullptr) {
             cpu_ivf_index->to_readonly();
         }
@@ -336,14 +332,14 @@ load_base_data(faiss::Index* &index, const std::string& ann_test_name, const std
 }
 
 void
-load_query_data(faiss::Index::distance_t* &xq, size_t& nq, const std::string& ann_test_name,
+load_query_data(faiss::Index::distance_t*& xq, size_t& nq, const std::string& ann_test_name,
                 const faiss::MetricType metric_type, const size_t dim) {
     double t0 = elapsed();
     size_t d;
 
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
-    xq = (float *) hdf5_read(ann_file_name, HDF5_DATASET_TEST, H5T_FLOAT, d, nq);
+    xq = (float*)hdf5_read(ann_file_name, HDF5_DATASET_TEST, H5T_FLOAT, d, nq);
     assert(d == dim || !"query does not have same dimension as train set");
 
     if (metric_type == faiss::METRIC_INNER_PRODUCT) {
@@ -353,12 +349,12 @@ load_query_data(faiss::Index::distance_t* &xq, size_t& nq, const std::string& an
 }
 
 void
-load_ground_truth(faiss::Index::idx_t* &gt, size_t& k, const std::string& ann_test_name, const size_t nq) {
+load_ground_truth(faiss::Index::idx_t*& gt, size_t& k, const std::string& ann_test_name, const size_t nq) {
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
     // load ground-truth and convert int to long
     size_t nq2;
-    int *gt_int = (int *) hdf5_read(ann_file_name, HDF5_DATASET_NEIGHBORS, H5T_INTEGER, k, nq2);
+    int* gt_int = (int*)hdf5_read(ann_file_name, HDF5_DATASET_NEIGHBORS, H5T_INTEGER, k, nq2);
     assert(nq2 == nq || !"incorrect nb of ground truth index");
 
     gt = new faiss::Index::idx_t[k * nq];
@@ -384,15 +380,15 @@ load_ground_truth(faiss::Index::idx_t* &gt, size_t& k, const std::string& ann_te
 
 void
 test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* index,
-                  faiss::gpu::StandardGpuResources& res, const QueryMode query_mode,
-                  const faiss::Index::distance_t *xq, const faiss::Index::idx_t *gt, const std::vector<size_t> nprobes,
-                  const int32_t index_add_loops, const int32_t search_loops) {
+                  faiss::gpu::StandardGpuResources& res, const QueryMode query_mode, const faiss::Index::distance_t* xq,
+                  const faiss::Index::idx_t* gt, const std::vector<size_t> nprobes, const int32_t index_add_loops,
+                  const int32_t search_loops) {
     const size_t NQ = 1000, NQ_START = 10, NQ_STEP = 10;
     const size_t K = 1000, K_START = 100, K_STEP = 10;
     const size_t GK = 100;  // topk of ground truth
 
-    std::unordered_map<size_t, std::string> mode_str_map =
-            {{MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
+    std::unordered_map<size_t, std::string> mode_str_map = {
+        {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
 
     for (auto nprobe : nprobes) {
         switch (query_mode) {
@@ -404,20 +400,20 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 break;
             }
             case MODE_GPU: {
-                faiss::gpu::GpuIndexIVF *gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF*>(index);
+                faiss::gpu::GpuIndexIVF* gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF*>(index);
                 gpu_index_ivf->setNumProbes(nprobe);
             }
         }
 
         // output buffers
-        faiss::Index::idx_t *I = new faiss::Index::idx_t[NQ * K];
-        faiss::Index::distance_t *D = new faiss::Index::distance_t[NQ * K];
+        faiss::Index::idx_t* I = new faiss::Index::idx_t[NQ * K];
+        faiss::Index::distance_t* D = new faiss::Index::distance_t[NQ * K];
 
         printf("\n%s | %s - %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(),
-                mode_str_map[query_mode].c_str(), nprobe);
+               mode_str_map[query_mode].c_str(), nprobe);
         printf("======================================================================================\n");
-        for (size_t t_nq = NQ_START; t_nq <= NQ; t_nq *= NQ_STEP) {   // nq = {10, 100, 1000}
-            for (size_t t_k = K_START; t_k <= K; t_k *= K_STEP) {  //  k = {100, 1000}
+        for (size_t t_nq = NQ_START; t_nq <= NQ; t_nq *= NQ_STEP) {  // nq = {10, 100, 1000}
+            for (size_t t_k = K_START; t_k <= K; t_k *= K_STEP) {    //  k = {100, 1000}
                 faiss::indexIVF_stats.quantization_time = 0.0;
                 faiss::indexIVF_stats.search_time = 0.0;
 
@@ -513,7 +509,7 @@ TEST(FAISSTEST, BENCHMARK) {
     const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
     const int32_t GLOVE_INSERT_LOOPS = 1;
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     test_ann_hdf5("sift-128-euclidean", "IVF16384,Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "IVF16384,Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
@@ -523,10 +519,11 @@ TEST(FAISSTEST, BENCHMARK) {
 #ifdef CUSTOMIZATION
     test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-//    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+//    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes,
+//    SEARCH_LOOPS);
 #endif
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     test_ann_hdf5("glove-200-angular", "IVF16384,Flat", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("glove-200-angular", "IVF16384,Flat", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
@@ -536,6 +533,7 @@ TEST(FAISSTEST, BENCHMARK) {
 #ifdef CUSTOMIZATION
     test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-//    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+//    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes,
+//    SEARCH_LOOPS);
 #endif
 }
