@@ -5,10 +5,21 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
-## Improvement
-- \#64 - Improvement dump function in scheduler
 
 ## Feature
+- \#90 - The server start error messages could be improved to enhance user experience
+- \#104 - test_scheduler core dump
+- \#115 - Using new structure for tasktable
+
+## Improvement
+- \#64 - Improvement dump function in scheduler
+- \#80 - Print version information into log during server start
+- \#82 - Move easyloggingpp into "external" directory
+- \#92 - Speed up CMake build process
+- \#96 - Remove .a file in milvus/lib for docker-version
+- \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
+- \#122 - Add unique id for Job
+
 ## Task
 
 # Milvus 0.5.0 (2019-10-21)
