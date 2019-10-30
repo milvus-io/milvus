@@ -1,5 +1,14 @@
+String cron_timezone = "TZ=Asia/Shanghai"
+String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
+cron_string =  BRANCH_NAME == "0.5.1" ? "H 1 * * * " : cron_string
+
 pipeline {
     agent none
+
+    triggers {
+        cron """${cron_timezone}
+            ${cron_string}"""
+    }
 
     options {
         timestamps()
@@ -119,7 +128,12 @@ pipeline {
                             steps {
                                 container('milvus-test-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest) {
+                                            load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevNightlyTest.groovy"
+                                        } else {
+                                            load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
+                                        }
                                     }
                                 }
                             }
@@ -150,3 +164,9 @@ pipeline {
     }
 }
 
+boolean isTimeTriggeredBuild() {
+    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
+        return true
+    }
+    return false
+}

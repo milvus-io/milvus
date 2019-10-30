@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "utils/easylogging++.h"
+#include "external/easyloggingpp/easylogging++.h"
 #include "wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -74,7 +74,7 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                                             10,
                                             10),
                             std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_CPU, "Default", DIM, NB, 10, 10),
-//                            std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_GPU, "Default", DIM, NB, 10, 10),
+                            std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_GPU, "Default", DIM, NB, 10, 10),
                             std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_MIX, "Default", DIM, NB, 10, 10),
 //                            std::make_tuple(IndexType::NSG_MIX, "Default", 128, 250000, 10, 10),
 //                            std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default", 128, 250000, 10, 10),

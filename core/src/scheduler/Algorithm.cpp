@@ -54,7 +54,7 @@ ShortestPath(const ResourcePtr& src, const ResourcePtr& dest, const ResourceMgrP
         auto cur_neighbours = cur_node->GetNeighbours();
 
         for (auto& neighbour : cur_neighbours) {
-            auto neighbour_res = std::static_pointer_cast<Resource>(neighbour.neighbour_node.lock());
+            auto neighbour_res = std::static_pointer_cast<Resource>(neighbour.neighbour_node);
             dis_matrix[name_id_map.at(res->name())][name_id_map.at(neighbour_res->name())] =
                 neighbour.connection.transport_cost();
         }
