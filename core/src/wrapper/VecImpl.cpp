@@ -20,6 +20,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/Log.h"
+#include "wrapper/WrapperException.h"
 
 /*
  * no parameter check in this layer.
@@ -150,7 +151,7 @@ VecIndexImpl::CopyToGpu(const int64_t& device_id, const Config& cfg) {
     return new_index;
 #else
     WRAPPER_LOG_ERROR << "Calling VecIndexImpl::CopyToGpu when we are using CPU version";
-    return nullptr;
+    throw WrapperException("Calling VecIndexImpl::CopyToGpu when we are using CPU version");
 #endif
 }
 
@@ -164,7 +165,7 @@ VecIndexImpl::CopyToCpu(const Config& cfg) {
     return new_index;
 #else
     WRAPPER_LOG_ERROR << "Calling VecIndexImpl::CopyToCpu when we are using CPU version";
-    return nullptr;
+    throw WrapperException("Calling VecIndexImpl::CopyToCpu when we are using CPU version");
 #endif
 
 }

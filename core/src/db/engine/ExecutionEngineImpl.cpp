@@ -93,11 +93,19 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+#endif
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+#endif
             break;
         }
         case EngineType::NSG_MIX: {

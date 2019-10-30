@@ -116,6 +116,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
     }
 }
 
+#ifdef MILVUS_GPU_VERSION
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
@@ -175,3 +176,4 @@ TEST_F(IDMAPTest, copy_test) {
         AssertAnns(device_result, nq, k);
     }
 }
+#endif

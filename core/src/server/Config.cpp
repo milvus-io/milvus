@@ -162,6 +162,7 @@ Config::ValidateConfig() {
         return s;
     }
 
+#ifdef MILVUS_GPU_VERSION
     int64_t cache_gpu_cache_capacity;
     s = GetCacheConfigGpuCacheCapacity(cache_gpu_cache_capacity);
     if (!s.ok()) {
@@ -173,6 +174,7 @@ Config::ValidateConfig() {
     if (!s.ok()) {
         return s;
     }
+#endif
 
     bool cache_insert_data;
     s = GetCacheConfigCacheInsertData(cache_insert_data);

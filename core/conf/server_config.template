@@ -40,6 +40,6 @@ engine_config:
                                     # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
 
 resource_config:
-  search_resources:                 # define the GPUs used for search computation, valid value: gpux
-    - gpu0
-  index_build_device: gpu0          # GPU used for building index
+  search_resources:                 # define the CPUs / GPUs used for search computation, valid value: cpux / gpux
+    - cpu0
+  index_build_device: cpu0          # CPU / GPU used for building index
