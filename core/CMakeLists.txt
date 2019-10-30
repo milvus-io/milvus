@@ -32,7 +32,10 @@ string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
 message(STATUS "Build time = ${BUILD_TIME}")
 
 MACRO (GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
-    execute_process(COMMAND "git" symbolic-ref --short HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    if(GIT_BRANCH_NAME STREQUAL "")
+        execute_process(COMMAND "git" symbolic-ref --short -q HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    endif()
 ENDMACRO (GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
