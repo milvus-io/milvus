@@ -17,36 +17,36 @@
 
 #include <gtest/gtest.h>
 
+#include <hdf5.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
-#include <hdf5.h>
-#include <unistd.h>
 #include <vector>
-#include <sys/time.h>
-#include <sys/types.h>
 
 #define USE_OLD_FAISS 0
 
 #if USE_OLD_FAISS
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/utils.h>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
-#include <sys/stat.h>
-#include <faiss/utils.h>
-#include <faiss/gpu/GpuAutoTune.h>
 
 #else
+#include <faiss/gpu/GpuCloner.h>
 #include <faiss/index_factory.h>
 #include <faiss/utils/distances.h>
-#include <faiss/gpu/GpuCloner.h>
 #endif
 
 #include <faiss/AutoTune.h>
 #include <faiss/Index.h>
 #include <faiss/IndexIVF.h>
-#include <faiss/index_io.h>
 #include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/gpu/StandardGpuResources.h>
+#include <faiss/index_io.h>
 
 #ifdef CUSTOMIZATION
 #include <faiss/gpu/GpuIndexIVFSQHybrid.h>
@@ -251,7 +251,6 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
 
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
-
     faiss::Index *cpu_index = nullptr, *gpu_index = nullptr;
     faiss::distance_compute_blas_threshold = 800;
 
@@ -367,7 +366,6 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
     std::unordered_map<size_t, std::string> mode_str_map = {
         {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
 
-
     faiss::Index *gpu_index, *index;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
@@ -379,10 +377,10 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
 
         double copy_time;
         switch (query_mode) {
-            case MODE_MIX:{
+            case MODE_MIX: {
                 index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
 
-                //warm up the transmission
+                // warm up the transmission
                 gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
                 delete gpu_index;
 
@@ -404,7 +402,7 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
             case MODE_GPU:
                 index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
 
-                //warm up the transmission
+                // warm up the transmission
                 gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
                 delete gpu_index;
 
@@ -417,11 +415,9 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 index = gpu_index;
                 break;
         }
-    }
-    else{
+    } else {
         index = cpu_index;
     }
-
 
     for (auto nprobe : nprobes) {
         switch (query_mode) {
