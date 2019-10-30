@@ -108,7 +108,6 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->Dimension(), dimension);
     ASSERT_EQ(engine_ptr->Count(), ids.size());
 
-    status = engine_ptr->CopyToGpu(0, true);
     status = engine_ptr->CopyToGpu(0, false);
     //ASSERT_TRUE(status.ok());
 

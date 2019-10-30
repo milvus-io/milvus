@@ -65,7 +65,7 @@ static const char
                    "  cache_insert_data: false          # whether load inserted data into cache\n"
                    "\n"
                    "engine_config:\n"
-                   "  blas_threshold: 20\n"
+                   "  use_blas_threshold: 20\n"
                    "\n"
                    "resource_config:\n"
                    "  search_resources:\n"
