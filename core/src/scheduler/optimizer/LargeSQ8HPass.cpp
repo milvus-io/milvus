@@ -21,10 +21,19 @@
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
+
+LargeSQ8HPass::LargeSQ8HPass() {
+    server::Config& config = server::Config::GetInstance();
+    Status s = config.GetEngineConfigUseGpuThreshold(threshold_);
+    if (!s.ok()) {
+        threshold_ = std::numeric_limits<int32_t>::max();
+    }
+}
 
 bool
 LargeSQ8HPass::Run(const TaskPtr& task) {
@@ -40,7 +49,8 @@ LargeSQ8HPass::Run(const TaskPtr& task) {
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
 
     // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
-    if (search_job->nq() < 100) {
+
+    if (search_job->nq() < threshold_) {
         return false;
     }
 

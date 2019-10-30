@@ -10,6 +10,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#90 - The server start error messages could be improved to enhance user experience
 - \#104 - test_scheduler core dump
 - \#115 - Using new structure for tasktable
+- \#139 - New config opion use_gpu_threshold
 
 ## Improvement
 - \#64 - Improvement dump function in scheduler

@@ -193,6 +193,12 @@ Config::ValidateConfig() {
         return s;
     }
 
+    int32_t engine_use_gpu_threshold;
+    s = GetEngineConfigUseGpuThreshold(engine_use_gpu_threshold);
+    if (!s.ok()) {
+        return s;
+    }
+
     /* resource config */
     std::string resource_mode;
     s = GetResourceConfigMode(resource_mode);
@@ -320,6 +326,11 @@ Config::ResetDefaultConfig() {
     }
 
     s = SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = SetEngineConfigUseGpuThreshold(CONFIG_ENGINE_USE_GPU_THRESHOLD_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -657,6 +668,16 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
+Config::CheckEngineConfigUseGpuThreshold(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid gpu threshold: " + value +
+                          ". Possible reason: engine_config.use_gpu_threshold is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
 Config::CheckResourceConfigMode(const std::string& value) {
     if (value != "simple") {
         std::string msg = "Invalid resource mode: " + value + ". Possible reason: resource_config.mode is invalid.";
@@ -952,6 +973,19 @@ Config::GetEngineConfigOmpThreadNum(int32_t& value) {
 }
 
 Status
+Config::GetEngineConfigUseGpuThreshold(int32_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_USE_GPU_THRESHOLD, CONFIG_ENGINE_USE_GPU_THRESHOLD_DEFAULT);
+    Status s = CheckEngineConfigUseGpuThreshold(str);
+    if (!s.ok()) {
+        return s;
+    }
+
+    value = std::stoi(str);
+    return Status::OK();
+}
+
+Status
 Config::GetResourceConfigMode(std::string& value) {
     value = GetConfigStr(CONFIG_RESOURCE, CONFIG_RESOURCE_MODE, CONFIG_RESOURCE_MODE_DEFAULT);
     return CheckResourceConfigMode(value);
@@ -1200,6 +1234,17 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
     }
 
     SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_OMP_THREAD_NUM, value);
+    return Status::OK();
+}
+
+Status
+Config::SetEngineConfigUseGpuThreshold(const std::string& value) {
+    Status s = CheckEngineConfigUseGpuThreshold(value);
+    if (!s.ok()) {
+        return s;
+    }
+
+    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_USE_GPU_THRESHOLD, value);
     return Status::OK();
 }
 
