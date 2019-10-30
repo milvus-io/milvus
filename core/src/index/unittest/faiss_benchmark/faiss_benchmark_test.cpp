@@ -448,7 +448,7 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
 }
 
 void
-test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, const QueryMode query_mode,
+test_ann_hdf5(const std::string& ann_test_name, const std::string& index_type, const QueryMode query_mode,
               int32_t index_add_loops, const std::vector<size_t>& nprobes, int32_t search_loops) {
     double t0 = elapsed();
 
@@ -457,10 +457,12 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, co
     faiss::MetricType metric_type;
     size_t dim;
 
-    if (query_mode == MODE_MIX && index_key.find("SQ8Hybrid") == std::string::npos) {
-        printf("Only SQ8Hybrid support MODE_MIX\n");
+    if (query_mode == MODE_MIX && index_type != "SQ8Hybrid") {
+        assert(index_type == "SQ8Hybrid" || !"Only SQ8Hybrid support MODE_MIX");
         return;
     }
+
+    std::string index_key = "IVF16384," + index_type;
 
     if (!parse_ann_test_name(ann_test_name, dim, metric_type)) {
         printf("Invalid ann test name: %s\n", ann_test_name.c_str());
@@ -506,34 +508,34 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, co
 TEST(FAISSTEST, BENCHMARK) {
     std::vector<size_t> param_nprobes = {8, 128};
     const int32_t SEARCH_LOOPS = 5;
-    const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
-    const int32_t GLOVE_INSERT_LOOPS = 1;
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
 
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
+    test_ann_hdf5("sift-128-euclidean", "SQ8", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-//    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes,
-//    SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+//    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    test_ann_hdf5("glove-200-angular", "IVF16384,Flat", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "IVF16384,Flat", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    const int32_t GLOVE_INSERT_LOOPS = 1;
 
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "Flat", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "Flat", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
+    test_ann_hdf5("glove-200-angular", "SQ8", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-//    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes,
-//    SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+//    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #endif
 }
