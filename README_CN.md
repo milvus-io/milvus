@@ -140,7 +140,7 @@ $ ./stop_server.sh
 $ pip install pymilvus==0.2.3
 ```
 
-创建 `example.py` 文件，并向文件中加入 [Python 示例代码](https://github.com/milvus-io/pymilvus/blob/master/examples/AdvancedExample.py)。
+创建 `example.py` 文件，并向文件中加入 [Python 示例代码](https://github.com/milvus-io/pymilvus/blob/master/examples/advanced_example.py)。
 
 运行示例代码
 
