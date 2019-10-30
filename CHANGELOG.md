@@ -5,8 +5,12 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
+
+## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
 - \#104 - test_scheduler core dump
+- \#115 - Using new structure for tasktable
+- \#139 - New config opion use_gpu_threshold
 
 ## Improvement
 - \#64 - Improvement dump function in scheduler
@@ -16,9 +20,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#96 - Remove .a file in milvus/lib for docker-version
 - \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
 - \#122 - Add unique id for Job
-
-## Feature
-- \#115 - Using new structure for tasktable
+- \#130 - Set task state MOVED after resource copy it completed
 
 ## Task
 

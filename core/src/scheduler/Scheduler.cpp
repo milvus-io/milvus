@@ -120,7 +120,7 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
             if (resource->HasExecutor() == false) {
                 load_completed_event->task_table_item_->Move();
             }
-            Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_->task, resource);
+            Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_, resource);
             break;
         }
         default: { break; }
