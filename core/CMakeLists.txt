@@ -71,7 +71,7 @@ if(MILVUS_VERSION_MAJOR STREQUAL ""
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h)
 
 message(STATUS "Milvus version: "
         "${MILVUS_VERSION_MAJOR}.${MILVUS_VERSION_MINOR}.${MILVUS_VERSION_PATCH} "

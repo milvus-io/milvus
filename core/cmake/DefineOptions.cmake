@@ -55,20 +55,9 @@ define_option_string(MILVUS_DEPENDENCY_SOURCE
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
-define_option(MILVUS_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
-Note that this requires linking Boost statically" OFF)
-
-define_option(MILVUS_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
-
-define_option(MILVUS_WITH_BZ2 "Build with BZ2 compression" ON)
-
 define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
 
-define_option(MILVUS_WITH_LZ4 "Build with lz4 compression" ON)
-
 define_option(MILVUS_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
-
-define_option(MILVUS_WITH_SNAPPY "Build with Snappy compression" ON)
 
 define_option(MILVUS_WITH_SQLITE "Build with SQLite library" ON)
 
@@ -78,22 +67,14 @@ define_option(MILVUS_WITH_MYSQLPP "Build with MySQL++" ON)
 
 define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
 
-define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
-
-if(CMAKE_VERSION VERSION_LESS 3.7)
-    set(MILVUS_WITH_ZSTD_DEFAULT OFF)
-else()
-    # ExternalProject_Add(SOURCE_SUBDIR) is available since CMake 3.7.
-    set(MILVUS_WITH_ZSTD_DEFAULT ON)
-endif()
-define_option(MILVUS_WITH_ZSTD "Build with zstd compression" ${MILVUS_WITH_ZSTD_DEFAULT})
-
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
     define_option(MILVUS_WITH_LIBUNWIND "Build with libunwind" ON)
     define_option(MILVUS_WITH_GPERFTOOLS "Build with gperftools" ON)
 endif()
 
 define_option(MILVUS_WITH_GRPC "Build with GRPC" ON)
+
+define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
 #----------------------------------------------------------------------
 if(MSVC)
