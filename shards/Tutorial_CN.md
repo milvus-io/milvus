@@ -24,8 +24,9 @@ Milvus 旨在帮助用户实现海量非结构化数据的近似检索和分析�
 **启动**
 ```
 1. 安装docker-compose
-2. make deploy #监听19531端口
-3. make clean_deploy #清理服务
+2. make build
+3. make deploy #监听19531端口
+4. make clean_deploy #清理服务
 ```
 
 **打开Jaeger UI**
