@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
+- \#134 - JFrog cache error
 
 ## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
