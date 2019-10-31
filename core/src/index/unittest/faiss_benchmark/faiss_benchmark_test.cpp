@@ -17,35 +17,57 @@
 
 #include <gtest/gtest.h>
 
+#include <hdf5.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <vector>
+
+#define USE_FAISS_V1_5_3 0
+
+#if USE_FAISS_V1_5_3
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/utils.h>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
+
+#else
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
+#include <faiss/utils/distances.h>
+#endif
 
 #include <faiss/AutoTune.h>
 #include <faiss/Index.h>
 #include <faiss/IndexIVF.h>
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexFlat.h>
-#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_io.h>
-#include <faiss/utils.h>
 
-#include <hdf5.h>
-
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <vector>
+#ifdef CUSTOMIZATION
+#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
+#endif
 
 /*****************************************************
  * To run this test, please download the HDF5 from
  *  https://support.hdfgroup.org/ftp/HDF5/releases/
  * and install it to /usr/local/hdf5 .
  *****************************************************/
+#define DEBUG_VERBOSE 0
+
+const char HDF5_POSTFIX[] = ".hdf5";
+const char HDF5_DATASET_TRAIN[] = "train";
+const char HDF5_DATASET_TEST[] = "test";
+const char HDF5_DATASET_NEIGHBORS[] = "neighbors";
+const char HDF5_DATASET_DISTANCES[] = "distances";
+
+const int32_t GPU_DEVICE_IDX = 0;
+
+enum QueryMode { MODE_CPU = 0, MODE_MIX, MODE_GPU };
 
 double
 elapsed() {
@@ -54,55 +76,48 @@ elapsed() {
     return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
+void
+normalize(float* arr, size_t nq, size_t dim) {
+    for (size_t i = 0; i < nq; i++) {
+        double vecLen = 0.0, inv_vecLen = 0.0;
+        for (size_t j = 0; j < dim; j++) {
+            double val = arr[i * dim + j];
+            vecLen += val * val;
+        }
+        inv_vecLen = 1.0 / std::sqrt(vecLen);
+        for (size_t j = 0; j < dim; j++) {
+            arr[i * dim + j] = (float)(arr[i * dim + j] * inv_vecLen);
+        }
+    }
+}
+
 void*
-hdf5_read(const char* file_name, const char* dataset_name, H5T_class_t dataset_class, size_t& d_out, size_t& n_out) {
+hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class, size_t& d_out,
+          size_t& n_out) {
     hid_t file, dataset, datatype, dataspace, memspace;
     H5T_class_t t_class;   /* data type class */
-    H5T_order_t order;     /* data order */
-    size_t size;           /* size of the data element stored in file */
     hsize_t dimsm[3];      /* memory space dimensions */
     hsize_t dims_out[2];   /* dataset dimensions */
     hsize_t count[2];      /* size of the hyperslab in the file */
     hsize_t offset[2];     /* hyperslab offset in the file */
     hsize_t count_out[3];  /* size of the hyperslab in memory */
     hsize_t offset_out[3]; /* hyperslab offset in memory */
-    int rank;
-    void* data_out; /* output buffer */
+    void* data_out;        /* output buffer */
 
     /* Open the file and the dataset. */
-    file = H5Fopen(file_name, H5F_ACC_RDONLY, H5P_DEFAULT);
-    dataset = H5Dopen2(file, dataset_name, H5P_DEFAULT);
+    file = H5Fopen(file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    dataset = H5Dopen2(file, dataset_name.c_str(), H5P_DEFAULT);
 
-    /*
-     * Get datatype and dataspace handles and then query
-     * dataset class, order, size, rank and dimensions.
-     */
+    /* Get datatype and dataspace handles and then query
+     * dataset class, order, size, rank and dimensions. */
     datatype = H5Dget_type(dataset); /* datatype handle */
     t_class = H5Tget_class(datatype);
     assert(t_class == dataset_class || !"Illegal dataset class type");
 
-    order = H5Tget_order(datatype);
-    switch (order) {
-        case H5T_ORDER_LE:
-            printf("Little endian order \n");
-            break;
-        case H5T_ORDER_BE:
-            printf("Big endian order \n");
-            break;
-        default:
-            printf("Illegal endian order \n");
-            break;
-    }
-
-    size = H5Tget_size(datatype);
-    printf("Data size is %d \n", (int)size);
-
     dataspace = H5Dget_space(dataset); /* dataspace handle */
-    rank = H5Sget_simple_extent_ndims(dataspace);
     H5Sget_simple_extent_dims(dataspace, dims_out, NULL);
     n_out = dims_out[0];
     d_out = dims_out[1];
-    printf("rank %d, dimensions %lu x %lu \n", rank, n_out, d_out);
 
     /* Define hyperslab in the dataset. */
     offset[0] = offset[1] = 0;
@@ -192,10 +207,9 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
     for (int i = 0; i < nq; i++) {
         // count the num of results exist in ground truth result set
         // each result replicates INDEX_ADD_LOOPS times
-        for (int j_c = 0; j_c < ground_k; j_c++) {
+        for (int j_c = 0; j_c < k; j_c++) {
             int r_c = index[i * k + j_c];
-            int j_g = 0;
-            for (; j_g < ground_k / index_add_loops; j_g++) {
+            for (int j_g = 0; j_g < ground_k / index_add_loops; j_g++) {
                 if (ground_index[i * ground_k + j_g] == r_c) {
                     hit++;
                     continue;
@@ -206,101 +220,229 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
     return hit;
 }
 
+#if DEBUG_VERBOSE
 void
-test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, int32_t index_add_loops,
-              const std::vector<size_t>& nprobes, int32_t search_loops) {
+print_array(const char* header, bool is_integer, const void* arr, size_t nq, size_t k) {
+    const int ROW = 10;
+    const int COL = 10;
+    assert(ROW <= nq);
+    assert(COL <= k);
+    printf("%s\n", header);
+    printf("==============================================\n");
+    for (int i = 0; i < 10; i++) {
+        for (int j = 0; j < 10; j++) {
+            if (is_integer) {
+                printf("%7ld ", ((int64_t*)arr)[i * k + j]);
+            } else {
+                printf("%.6f ", ((float*)arr)[i * k + j]);
+            }
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+#endif
+
+void
+load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std::string& index_key,
+               faiss::gpu::StandardGpuResources& res, const faiss::MetricType metric_type, const size_t dim,
+               int32_t index_add_loops, QueryMode mode = MODE_CPU) {
     double t0 = elapsed();
 
-    const std::string ann_file_name = ann_test_name + ".hdf5";
+    const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
-    faiss::MetricType metric_type;
-    size_t dim;
-
-    if (!parse_ann_test_name(ann_test_name, dim, metric_type)) {
-        printf("Invalid ann test name: %s\n", ann_test_name.c_str());
-        return;
-    }
-
-    faiss::Index* index;
-    size_t d;
+    faiss::Index *cpu_index = nullptr, *gpu_index = nullptr;
+    faiss::distance_compute_blas_threshold = 800;
 
     std::string index_file_name = get_index_file_name(ann_test_name, index_key, index_add_loops);
+
     try {
-        index = faiss::read_index(index_file_name.c_str());
-        d = dim;
+        printf("[%.3f s] Reading index file: %s\n", elapsed() - t0, index_file_name.c_str());
+        cpu_index = faiss::read_index(index_file_name.c_str());
     } catch (...) {
-        printf("Cannot read index file: %s\n", index_file_name.c_str());
-
-        printf("[%.3f s] Loading train set\n", elapsed() - t0);
-
-        size_t nb;
-        float* xb = (float*)hdf5_read(ann_file_name.c_str(), "train", H5T_FLOAT, d, nb);
+        size_t nb, d;
+        printf("[%.3f s] Loading HDF5 file: %s\n", elapsed() - t0, ann_file_name.c_str());
+        float* xb = (float*)hdf5_read(ann_file_name, HDF5_DATASET_TRAIN, H5T_FLOAT, d, nb);
         assert(d == dim || !"dataset does not have correct dimension");
 
-        printf("[%.3f s] Preparing index \"%s\" d=%ld\n", elapsed() - t0, index_key.c_str(), d);
+        if (metric_type == faiss::METRIC_INNER_PRODUCT) {
+            printf("[%.3f s] Normalizing base data set \n", elapsed() - t0);
+            normalize(xb, nb, d);
+        }
 
-        index = faiss::index_factory(d, index_key.c_str(), metric_type);
+        printf("[%.3f s] Creating CPU index \"%s\" d=%ld\n", elapsed() - t0, index_key.c_str(), d);
+        cpu_index = faiss::index_factory(d, index_key.c_str(), metric_type);
+
+        printf("[%.3f s] Cloning CPU index to GPU\n", elapsed() - t0);
+        gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, cpu_index);
+        delete cpu_index;
 
         printf("[%.3f s] Training on %ld vectors\n", elapsed() - t0, nb);
-
-        index->train(nb, xb);
-
-        printf("[%.3f s] Loading database\n", elapsed() - t0);
+        gpu_index->train(nb, xb);
 
         // add index multiple times to get ~1G data set
         for (int i = 0; i < index_add_loops; i++) {
-            printf("[%.3f s] Indexing database, size %ld*%ld\n", elapsed() - t0, nb, d);
-            index->add(nb, xb);
+            printf("[%.3f s] No.%d Indexing database, size %ld*%ld\n", elapsed() - t0, i, nb, d);
+            gpu_index->add(nb, xb);
         }
 
-        faiss::write_index(index, index_file_name.c_str());
+        printf("[%.3f s] Coping GPU index to CPU\n", elapsed() - t0);
+
+        cpu_index = faiss::gpu::index_gpu_to_cpu(gpu_index);
+        delete gpu_index;
+
+        faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
+        if (cpu_ivf_index != nullptr) {
+            cpu_ivf_index->to_readonly();
+        }
+
+        printf("[%.3f s] Writing index file: %s\n", elapsed() - t0, index_file_name.c_str());
+        faiss::write_index(cpu_index, index_file_name.c_str());
 
         delete[] xb;
     }
 
-    size_t nq;
-    float* xq;
-    {
-        printf("[%.3f s] Loading queries\n", elapsed() - t0);
+    index = cpu_index;
+}
 
-        size_t d2;
-        xq = (float*)hdf5_read(ann_file_name.c_str(), "test", H5T_FLOAT, d2, nq);
-        assert(d == d2 || !"query does not have same dimension as train set");
+void
+load_query_data(faiss::Index::distance_t*& xq, size_t& nq, const std::string& ann_test_name,
+                const faiss::MetricType metric_type, const size_t dim) {
+    double t0 = elapsed();
+    size_t d;
+
+    const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
+
+    xq = (float*)hdf5_read(ann_file_name, HDF5_DATASET_TEST, H5T_FLOAT, d, nq);
+    assert(d == dim || !"query does not have same dimension as train set");
+
+    if (metric_type == faiss::METRIC_INNER_PRODUCT) {
+        printf("[%.3f s] Normalizing query data \n", elapsed() - t0);
+        normalize(xq, nq, d);
     }
+}
 
-    size_t k;                 // nb of results per query in the GT
-    faiss::Index::idx_t* gt;  // nq * k matrix of ground-truth nearest-neighbors
-    {
-        printf("[%.3f s] Loading ground truth for %ld queries\n", elapsed() - t0, nq);
+void
+load_ground_truth(faiss::Index::idx_t*& gt, size_t& k, const std::string& ann_test_name, const size_t nq) {
+    const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
-        // load ground-truth and convert int to long
-        size_t nq2;
-        int* gt_int = (int*)hdf5_read(ann_file_name.c_str(), "neighbors", H5T_INTEGER, k, nq2);
-        assert(nq2 == nq || !"incorrect nb of ground truth entries");
+    // load ground-truth and convert int to long
+    size_t nq2;
+    int* gt_int = (int*)hdf5_read(ann_file_name, HDF5_DATASET_NEIGHBORS, H5T_INTEGER, k, nq2);
+    assert(nq2 == nq || !"incorrect nb of ground truth index");
 
-        gt = new faiss::Index::idx_t[k * nq];
-        for (int i = 0; i < k * nq; i++) {
-            gt[i] = gt_int[i];
+    gt = new faiss::Index::idx_t[k * nq];
+    for (int i = 0; i < k * nq; i++) {
+        gt[i] = gt_int[i];
+    }
+    delete[] gt_int;
+
+#if DEBUG_VERBOSE
+    faiss::Index::distance_t* gt_dist;  // nq * k matrix of ground-truth nearest-neighbors distances
+    gt_dist = (float*)hdf5_read(ann_file_name, HDF5_DATASET_DISTANCES, H5T_FLOAT, k, nq2);
+    assert(nq2 == nq || !"incorrect nb of ground truth distance");
+
+    std::string str;
+    str = ann_test_name + " ground truth index";
+    print_array(str.c_str(), true, gt, nq, k);
+    str = ann_test_name + " ground truth distance";
+    print_array(str.c_str(), false, gt_dist, nq, k);
+
+    delete gt_dist;
+#endif
+}
+
+void
+test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* cpu_index,
+                  faiss::gpu::StandardGpuResources& res, const QueryMode query_mode, const faiss::Index::distance_t* xq,
+                  const faiss::Index::idx_t* gt, const std::vector<size_t> nprobes, const int32_t index_add_loops,
+                  const int32_t search_loops) {
+    double t0 = elapsed();
+
+    const size_t NQ = 1000, NQ_START = 10, NQ_STEP = 10;
+    const size_t K = 1000, K_START = 100, K_STEP = 10;
+    const size_t GK = 100;  // topk of ground truth
+
+    std::unordered_map<size_t, std::string> mode_str_map = {
+        {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
+
+    faiss::Index *gpu_index, *index;
+    if (query_mode != MODE_CPU) {
+        faiss::gpu::GpuClonerOptions option;
+        option.allInGpu = true;
+
+        faiss::IndexComposition index_composition;
+        index_composition.index = cpu_index;
+        index_composition.quantizer = nullptr;
+
+        double copy_time;
+        switch (query_mode) {
+            case MODE_MIX: {
+                index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
+
+                // warm up the transmission
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                delete gpu_index;
+
+                copy_time = elapsed();
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                delete gpu_index;
+                copy_time = elapsed() - copy_time;
+                printf("[%.3f s] Copy quantizer completed, cost %f s\n", elapsed() - t0, copy_time);
+
+                auto ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
+                auto is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
+                if (is_gpu_flat_index == nullptr) {
+                    delete ivf_index->quantizer;
+                    ivf_index->quantizer = index_composition.quantizer;
+                }
+                index = cpu_index;
+                break;
+            }
+            case MODE_GPU:
+                index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
+
+                // warm up the transmission
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                delete gpu_index;
+
+                copy_time = elapsed();
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                copy_time = elapsed() - copy_time;
+                printf("[%.3f s] Copy data completed, cost %f s\n", elapsed() - t0, copy_time);
+
+                delete cpu_index;
+                index = gpu_index;
+                break;
         }
-        delete[] gt_int;
+    } else {
+        index = cpu_index;
     }
 
     for (auto nprobe : nprobes) {
-        faiss::ParameterSpace params;
-
-        std::string nprobe_str = "nprobe=" + std::to_string(nprobe);
-        params.set_index_parameters(index, nprobe_str.c_str());
+        switch (query_mode) {
+            case MODE_CPU:
+            case MODE_MIX: {
+                faiss::ParameterSpace params;
+                std::string nprobe_str = "nprobe=" + std::to_string(nprobe);
+                params.set_index_parameters(index, nprobe_str.c_str());
+                break;
+            }
+            case MODE_GPU: {
+                faiss::gpu::GpuIndexIVF* gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF*>(index);
+                gpu_index_ivf->setNumProbes(nprobe);
+            }
+        }
 
         // output buffers
-#if 1
-        const size_t NQ = 1000, K = 1000;
         faiss::Index::idx_t* I = new faiss::Index::idx_t[NQ * K];
-        float* D = new float[NQ * K];
+        faiss::Index::distance_t* D = new faiss::Index::distance_t[NQ * K];
 
-        printf("\n%s | %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
+        printf("\n%s | %s - %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(),
+               mode_str_map[query_mode].c_str(), nprobe);
         printf("======================================================================================\n");
-        for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
-            for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
+        for (size_t t_nq = NQ_START; t_nq <= NQ; t_nq *= NQ_STEP) {  // nq = {10, 100, 1000}
+            for (size_t t_k = K_START; t_k <= K; t_k *= K_STEP) {    //  k = {100, 1000}
                 faiss::indexIVF_stats.quantization_time = 0.0;
                 faiss::indexIVF_stats.search_time = 0.0;
 
@@ -310,271 +452,74 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_key, in
                 }
                 t_end = elapsed();
 
+#if DEBUG_VERBOSE
+                std::string str;
+                str = "I (" + index_key + ", nq=" + std::to_string(t_nq) + ", k=" + std::to_string(t_k) + ")";
+                print_array(str.c_str(), true, I, t_nq, t_k);
+                str = "D (" + index_key + ", nq=" + std::to_string(t_nq) + ", k=" + std::to_string(t_k) + ")";
+                print_array(str.c_str(), false, D, t_nq, t_k);
+#endif
+
                 // k = 100 for ground truth
-                int32_t hit = GetResultHitCount(gt, I, k, t_k, t_nq, index_add_loops);
+                int32_t hit = GetResultHitCount(gt, I, GK, t_k, t_nq, index_add_loops);
 
                 printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq, t_k,
                        (t_end - t_start) / search_loops, faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
                        faiss::indexIVF_stats.search_time / 1000 / search_loops,
-                       (hit / float(t_nq * k / index_add_loops)));
+                       (hit / float(t_nq * GK / index_add_loops)));
             }
         }
         printf("======================================================================================\n");
-#else
-        printf("[%.3f s] Perform a search on %ld queries\n", elapsed() - t0, nq);
-
-        faiss::Index::idx_t* I = new faiss::Index::idx_t[nq * k];
-        float* D = new float[nq * k];
-
-        index->search(nq, xq, k, D, I);
-
-        printf("[%.3f s] Compute recalls\n", elapsed() - t0);
-
-        // evaluate result by hand.
-        int n_1 = 0, n_10 = 0, n_100 = 0;
-        for (int i = 0; i < nq; i++) {
-            int gt_nn = gt[i * k];
-            for (int j = 0; j < k; j++) {
-                if (I[i * k + j] == gt_nn) {
-                    if (j < 1)
-                        n_1++;
-                    if (j < 10)
-                        n_10++;
-                    if (j < 100)
-                        n_100++;
-                }
-            }
-        }
-        printf("R@1 = %.4f\n", n_1 / float(nq));
-        printf("R@10 = %.4f\n", n_10 / float(nq));
-        printf("R@100 = %.4f\n", n_100 / float(nq));
-#endif
-
-        printf("[%.3f s] Search test done\n\n", elapsed() - t0);
 
         delete[] I;
         delete[] D;
     }
 
-    delete[] xq;
-    delete[] gt;
     delete index;
 }
 
-#ifdef CUSTOMIZATION
 void
-test_ivfsq8h(const std::string& ann_test_name, int32_t index_add_loops, const std::vector<size_t>& nprobes,
-             bool pure_gpu_mode, int32_t search_loops) {
+test_ann_hdf5(const std::string& ann_test_name, const std::string& index_type, const QueryMode query_mode,
+              int32_t index_add_loops, const std::vector<size_t>& nprobes, int32_t search_loops) {
     double t0 = elapsed();
 
-    const std::string ann_file_name = ann_test_name + ".hdf5";
+    faiss::gpu::StandardGpuResources res;
 
     faiss::MetricType metric_type;
     size_t dim;
+
+    if (query_mode == MODE_MIX && index_type != "SQ8Hybrid") {
+        assert(index_type == "SQ8Hybrid" || !"Only SQ8Hybrid support MODE_MIX");
+        return;
+    }
+
+    std::string index_key = "IVF16384," + index_type;
 
     if (!parse_ann_test_name(ann_test_name, dim, metric_type)) {
         printf("Invalid ann test name: %s\n", ann_test_name.c_str());
         return;
     }
 
-    faiss::distance_compute_blas_threshold = 800;
-    faiss::gpu::StandardGpuResources res;
-
-    const std::string index_key = "IVF16384,SQ8Hybrid";
-
-    faiss::Index* cpu_index = nullptr;
-    size_t d;
-
-    std::string index_file_name = get_index_file_name(ann_test_name, index_key, index_add_loops);
-    try {
-        cpu_index = faiss::read_index(index_file_name.c_str());
-        d = dim;
-    } catch (...) {
-        printf("Cannot read index file: %s\n", index_file_name.c_str());
-
-        printf("[%.3f s] Loading train set\n", elapsed() - t0);
-
-        size_t nb;
-        float* xb = (float*)hdf5_read(ann_file_name.c_str(), "train", H5T_FLOAT, d, nb);
-        assert(d == dim || !"dataset does not have correct dimension");
-
-        printf("[%.3f s] Preparing index \"%s\" d=%ld\n", elapsed() - t0, index_key.c_str(), d);
-
-        faiss::Index* ori_index = faiss::index_factory(d, index_key.c_str(), metric_type);
-
-        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, 0, ori_index);
-
-        printf("[%.3f s] Training on %ld vectors\n", elapsed() - t0, nb);
-
-        device_index->train(nb, xb);
-
-        printf("[%.3f s] Loading database\n", elapsed() - t0);
-
-        for (int i = 0; i < index_add_loops; i++) {
-            printf("[%.3f s] Indexing database, size %ld*%ld\n", elapsed() - t0, nb, d);
-            device_index->add(nb, xb);
-        }
-
-        cpu_index = faiss::gpu::index_gpu_to_cpu(device_index);
-        faiss::write_index(cpu_index, index_file_name.c_str());
-
-        delete[] xb;
-    }
-
-    faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
-    if (cpu_ivf_index != nullptr) {
-        cpu_ivf_index->to_readonly();
-    }
-
-    size_t nq;
-    float* xq;
-    {
-        printf("[%.3f s] Loading queries\n", elapsed() - t0);
-
-        size_t d2;
-        xq = (float*)hdf5_read(ann_file_name.c_str(), "test", H5T_FLOAT, d2, nq);
-        assert(d == d2 || !"query does not have same dimension as train set");
-    }
-
-    size_t k;
-    faiss::Index::idx_t* gt;
-    {
-        printf("[%.3f s] Loading ground truth for %ld queries\n", elapsed() - t0, nq);
-
-        size_t nq2;
-        int* gt_int = (int*)hdf5_read(ann_file_name.c_str(), "neighbors", H5T_INTEGER, k, nq2);
-        assert(nq2 == nq || !"incorrect nb of ground truth entries");
-
-        gt = new faiss::Index::idx_t[k * nq];
-        for (uint64_t i = 0; i < k * nq; ++i) {
-            gt[i] = gt_int[i];
-        }
-        delete[] gt_int;
-    }
-
-    faiss::gpu::GpuClonerOptions option;
-    option.allInGpu = true;
-
-    faiss::IndexComposition index_composition;
-    index_composition.index = cpu_index;
-    index_composition.quantizer = nullptr;
-
+    size_t nq, k;
     faiss::Index* index;
-    double copy_time;
+    faiss::Index::distance_t* xq;
+    faiss::Index::idx_t* gt;  // ground-truth index
 
-    if (!pure_gpu_mode) {
-        index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
-        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
-        delete index;
+    printf("[%.3f s] Loading base data\n", elapsed() - t0);
+    load_base_data(index, ann_test_name, index_key, res, metric_type, dim, index_add_loops, query_mode);
 
-        copy_time = elapsed();
-        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
-        delete index;
-    } else {
-        index_composition.mode = 2;
-        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
-        delete index;
+    printf("[%.3f s] Loading queries\n", elapsed() - t0);
+    load_query_data(xq, nq, ann_test_name, metric_type, dim);
 
-        copy_time = elapsed();
-        index = faiss::gpu::index_cpu_to_gpu(&res, 0, &index_composition, &option);
-    }
+    printf("[%.3f s] Loading ground truth for %ld queries\n", elapsed() - t0, nq);
+    load_ground_truth(gt, k, ann_test_name, nq);
 
-    copy_time = elapsed() - copy_time;
-    printf("[%.3f s] Copy quantizer completed, cost %f s\n", elapsed() - t0, copy_time);
-
-    const size_t NQ = 1000, K = 1000;
-    if (!pure_gpu_mode) {
-        for (auto nprobe : nprobes) {
-            auto ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
-            ivf_index->nprobe = nprobe;
-
-            auto is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
-            if (is_gpu_flat_index == nullptr) {
-                delete ivf_index->quantizer;
-                ivf_index->quantizer = index_composition.quantizer;
-            }
-
-            int64_t* I = new faiss::Index::idx_t[NQ * K];
-            float* D = new float[NQ * K];
-
-            printf("\n%s | %s-MIX | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
-            printf("======================================================================================\n");
-            for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
-                for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
-                    faiss::indexIVF_stats.quantization_time = 0.0;
-                    faiss::indexIVF_stats.search_time = 0.0;
-
-                    double t_start = elapsed(), t_end;
-                    for (int32_t i = 0; i < search_loops; i++) {
-                        cpu_index->search(t_nq, xq, t_k, D, I);
-                    }
-                    t_end = elapsed();
-
-                    // k = 100 for ground truth
-                    int32_t hit = GetResultHitCount(gt, I, k, t_k, t_nq, index_add_loops);
-
-                    printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq,
-                           t_k, (t_end - t_start) / search_loops,
-                           faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
-                           faiss::indexIVF_stats.search_time / 1000 / search_loops,
-                           (hit / float(t_nq * k / index_add_loops)));
-                }
-            }
-            printf("======================================================================================\n");
-
-            printf("[%.3f s] Search test done\n\n", elapsed() - t0);
-
-            delete[] I;
-            delete[] D;
-        }
-    } else {
-        std::shared_ptr<faiss::Index> gpu_index_ivf_ptr = std::shared_ptr<faiss::Index>(index);
-
-        for (auto nprobe : nprobes) {
-            faiss::gpu::GpuIndexIVFSQHybrid* gpu_index_ivf_hybrid =
-                dynamic_cast<faiss::gpu::GpuIndexIVFSQHybrid*>(gpu_index_ivf_ptr.get());
-            gpu_index_ivf_hybrid->setNumProbes(nprobe);
-
-            int64_t* I = new faiss::Index::idx_t[NQ * K];
-            float* D = new float[NQ * K];
-
-            printf("\n%s | %s-GPU | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(), nprobe);
-            printf("======================================================================================\n");
-            for (size_t t_nq = 10; t_nq <= NQ; t_nq *= 10) {   // nq = {10, 100, 1000}
-                for (size_t t_k = 100; t_k <= K; t_k *= 10) {  //  k = {100, 1000}
-                    faiss::indexIVF_stats.quantization_time = 0.0;
-                    faiss::indexIVF_stats.search_time = 0.0;
-
-                    double t_start = elapsed(), t_end;
-                    for (int32_t i = 0; i < search_loops; i++) {
-                        gpu_index_ivf_ptr->search(nq, xq, k, D, I);
-                    }
-                    t_end = elapsed();
-
-                    // k = 100 for ground truth
-                    int32_t hit = GetResultHitCount(gt, I, k, t_k, t_nq, index_add_loops);
-
-                    printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq,
-                           t_k, (t_end - t_start) / search_loops,
-                           faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
-                           faiss::indexIVF_stats.search_time / 1000 / search_loops,
-                           (hit / float(t_nq * k / index_add_loops)));
-                }
-            }
-            printf("======================================================================================\n");
-
-            printf("[%.3f s] Search test done\n\n", elapsed() - t0);
-
-            delete[] I;
-            delete[] D;
-        }
-    }
+    test_with_nprobes(ann_test_name, index_key, index, res, query_mode, xq, gt, nprobes, index_add_loops, search_loops);
+    printf("[%.3f s] Search test done\n\n", elapsed() - t0);
 
     delete[] xq;
     delete[] gt;
-    delete cpu_index;
 }
-#endif
 
 /************************************************************************************
  * https://github.com/erikbern/ann-benchmarks
@@ -593,22 +538,34 @@ test_ivfsq8h(const std::string& ann_test_name, int32_t index_add_loops, const st
 TEST(FAISSTEST, BENCHMARK) {
     std::vector<size_t> param_nprobes = {8, 128};
     const int32_t SEARCH_LOOPS = 5;
-    const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
-    const int32_t GLOVE_INSERT_LOOPS = 1;
 
-    test_ann_hdf5("sift-128-euclidean", "IVF4096,Flat", SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8", SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
+
+    test_ann_hdf5("sift-128-euclidean", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
+    test_ann_hdf5("sift-128-euclidean", "SQ8", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("sift-128-euclidean", "IVF16384,SQ8Hybrid", SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ivfsq8h("sift-128-euclidean", SIFT_INSERT_LOOPS, param_nprobes, false, SEARCH_LOOPS);
-    test_ivfsq8h("sift-128-euclidean", SIFT_INSERT_LOOPS, param_nprobes, true, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #endif
 
-    test_ann_hdf5("glove-200-angular", "IVF4096,Flat", GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8", GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    const int32_t GLOVE_INSERT_LOOPS = 1;
+
+    test_ann_hdf5("glove-200-angular", "Flat", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "Flat", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
+    test_ann_hdf5("glove-200-angular", "SQ8", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("glove-200-angular", "IVF16384,SQ8Hybrid", GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ivfsq8h("glove-200-angular", GLOVE_INSERT_LOOPS, param_nprobes, false, SEARCH_LOOPS);
-    test_ivfsq8h("glove-200-angular", GLOVE_INSERT_LOOPS, param_nprobes, true, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #endif
 }
