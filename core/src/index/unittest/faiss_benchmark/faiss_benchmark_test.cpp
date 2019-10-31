@@ -17,31 +17,40 @@
 
 #include <gtest/gtest.h>
 
+#include <hdf5.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <vector>
+
+#define USE_FAISS_V1_5_3 0
+
+#if USE_FAISS_V1_5_3
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/utils.h>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
+
+#else
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
+#include <faiss/utils/distances.h>
+#endif
 
 #include <faiss/AutoTune.h>
 #include <faiss/Index.h>
 #include <faiss/IndexIVF.h>
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexFlat.h>
+#include <faiss/gpu/StandardGpuResources.h>
+#include <faiss/index_io.h>
+
 #ifdef CUSTOMIZATION
 #include <faiss/gpu/GpuIndexIVFSQHybrid.h>
 #endif
-#include <faiss/gpu/StandardGpuResources.h>
-#include <faiss/index_io.h>
-#include <faiss/utils.h>
-
-#include <hdf5.h>
-
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <vector>
 
 /*****************************************************
  * To run this test, please download the HDF5 from
@@ -55,6 +64,8 @@ const char HDF5_DATASET_TRAIN[] = "train";
 const char HDF5_DATASET_TEST[] = "test";
 const char HDF5_DATASET_NEIGHBORS[] = "neighbors";
 const char HDF5_DATASET_DISTANCES[] = "distances";
+
+const int32_t GPU_DEVICE_IDX = 0;
 
 enum QueryMode { MODE_CPU = 0, MODE_MIX, MODE_GPU };
 
@@ -196,7 +207,7 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
     for (int i = 0; i < nq; i++) {
         // count the num of results exist in ground truth result set
         // each result replicates INDEX_ADD_LOOPS times
-        for (int j_c = 0; j_c < ground_k; j_c++) {
+        for (int j_c = 0; j_c < k; j_c++) {
             int r_c = index[i * k + j_c];
             for (int j_g = 0; j_g < ground_k / index_add_loops; j_g++) {
                 if (ground_index[i * ground_k + j_g] == r_c) {
@@ -239,7 +250,6 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
     double t0 = elapsed();
 
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
-    const int GPU_DEVICE_IDX = 0;
 
     faiss::Index *cpu_index = nullptr, *gpu_index = nullptr;
     faiss::distance_compute_blas_threshold = 800;
@@ -249,30 +259,6 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
     try {
         printf("[%.3f s] Reading index file: %s\n", elapsed() - t0, index_file_name.c_str());
         cpu_index = faiss::read_index(index_file_name.c_str());
-
-        if (mode != MODE_CPU) {
-            faiss::gpu::GpuClonerOptions option;
-            option.allInGpu = true;
-
-            faiss::IndexComposition index_composition;
-            index_composition.index = cpu_index;
-            index_composition.quantizer = nullptr;
-
-            switch (mode) {
-                case MODE_CPU:
-                    assert(false);
-                    break;
-                case MODE_MIX:
-                    index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
-                    break;
-                case MODE_GPU:
-                    index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
-                    break;
-            }
-
-            printf("[%.3f s] Cloning CPU index to GPU\n", elapsed() - t0);
-            gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
-        }
     } catch (...) {
         size_t nb, d;
         printf("[%.3f s] Loading HDF5 file: %s\n", elapsed() - t0, ann_file_name.c_str());
@@ -289,6 +275,7 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
 
         printf("[%.3f s] Cloning CPU index to GPU\n", elapsed() - t0);
         gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, cpu_index);
+        delete cpu_index;
 
         printf("[%.3f s] Training on %ld vectors\n", elapsed() - t0, nb);
         gpu_index->train(nb, xb);
@@ -300,8 +287,9 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         }
 
         printf("[%.3f s] Coping GPU index to CPU\n", elapsed() - t0);
-        delete cpu_index;
+
         cpu_index = faiss::gpu::index_gpu_to_cpu(gpu_index);
+        delete gpu_index;
 
         faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
         if (cpu_ivf_index != nullptr) {
@@ -314,21 +302,7 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         delete[] xb;
     }
 
-    switch (mode) {
-        case MODE_CPU:
-        case MODE_MIX:
-            index = cpu_index;
-            if (gpu_index) {
-                delete gpu_index;
-            }
-            break;
-        case MODE_GPU:
-            index = gpu_index;
-            if (cpu_index) {
-                delete cpu_index;
-            }
-            break;
-    }
+    index = cpu_index;
 }
 
 void
@@ -379,16 +353,71 @@ load_ground_truth(faiss::Index::idx_t*& gt, size_t& k, const std::string& ann_te
 }
 
 void
-test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* index,
+test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* cpu_index,
                   faiss::gpu::StandardGpuResources& res, const QueryMode query_mode, const faiss::Index::distance_t* xq,
                   const faiss::Index::idx_t* gt, const std::vector<size_t> nprobes, const int32_t index_add_loops,
                   const int32_t search_loops) {
+    double t0 = elapsed();
+
     const size_t NQ = 1000, NQ_START = 10, NQ_STEP = 10;
     const size_t K = 1000, K_START = 100, K_STEP = 10;
     const size_t GK = 100;  // topk of ground truth
 
     std::unordered_map<size_t, std::string> mode_str_map = {
         {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
+
+    faiss::Index *gpu_index, *index;
+    if (query_mode != MODE_CPU) {
+        faiss::gpu::GpuClonerOptions option;
+        option.allInGpu = true;
+
+        faiss::IndexComposition index_composition;
+        index_composition.index = cpu_index;
+        index_composition.quantizer = nullptr;
+
+        double copy_time;
+        switch (query_mode) {
+            case MODE_MIX: {
+                index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
+
+                // warm up the transmission
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                delete gpu_index;
+
+                copy_time = elapsed();
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                delete gpu_index;
+                copy_time = elapsed() - copy_time;
+                printf("[%.3f s] Copy quantizer completed, cost %f s\n", elapsed() - t0, copy_time);
+
+                auto ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
+                auto is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
+                if (is_gpu_flat_index == nullptr) {
+                    delete ivf_index->quantizer;
+                    ivf_index->quantizer = index_composition.quantizer;
+                }
+                index = cpu_index;
+                break;
+            }
+            case MODE_GPU:
+                index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
+
+                // warm up the transmission
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                delete gpu_index;
+
+                copy_time = elapsed();
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+                copy_time = elapsed() - copy_time;
+                printf("[%.3f s] Copy data completed, cost %f s\n", elapsed() - t0, copy_time);
+
+                delete cpu_index;
+                index = gpu_index;
+                break;
+        }
+    } else {
+        index = cpu_index;
+    }
 
     for (auto nprobe : nprobes) {
         switch (query_mode) {
@@ -445,6 +474,8 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
         delete[] I;
         delete[] D;
     }
+
+    delete index;
 }
 
 void
@@ -488,7 +519,6 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_type, c
 
     delete[] xq;
     delete[] gt;
-    delete index;
 }
 
 /************************************************************************************
@@ -520,8 +550,8 @@ TEST(FAISSTEST, BENCHMARK) {
 
 #ifdef CUSTOMIZATION
     test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-//    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -535,7 +565,7 @@ TEST(FAISSTEST, BENCHMARK) {
 
 #ifdef CUSTOMIZATION
     test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-//    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 #endif
 }
