@@ -678,11 +678,11 @@ CheckResource(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid CPU resource: " + s);
     }
 #else
-    const std::regex pat("cpu(\\d+) | gpu(\\d+)");
+    const std::regex pat("cpu(\\d+)|gpu(\\d+)");
     std::smatch m;
     if (!std::regex_match(s, m, pat)) {
         std::string msg = "Invalid search resource: " + value +
-                          ". Possible reason: resource_config.search_resources does not match your hardware.";
+                          ". Possible reason: resource_config.search_resources is not in the format of cpux or gpux";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 

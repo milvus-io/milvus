@@ -6,7 +6,9 @@
 #include <faiss/index_io.h>
 
 #ifdef MILVUS_GPU_VERSION
-#include <faiss/gpu/GpuAutoTune.h>
+
+#include <faiss/gpu/GpuCloner.h>
+
 #endif
 
 #include "knowhere/adapter/VectorAdapter.h"
@@ -18,12 +20,12 @@ namespace knowhere {
 
     VectorIndexPtr
     GPUIDMAP::CopyGpuToCpu(const Config &config) {
-        std::lock_guard <std::mutex> lk(mutex_);
+        std::lock_guard<std::mutex> lk(mutex_);
 
         faiss::Index *device_index = index_.get();
         faiss::Index *host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
-        std::shared_ptr <faiss::Index> new_index;
+        std::shared_ptr<faiss::Index> new_index;
         new_index.reset(host_index);
         return std::make_shared<IDMAP>(new_index);
     }

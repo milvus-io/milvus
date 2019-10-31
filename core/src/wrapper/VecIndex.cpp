@@ -28,7 +28,7 @@
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
-#include "wrapper/gpu/VecImpl.h"
+#include "wrapper/gpu/GPUVecImpl.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVFSQ.h"

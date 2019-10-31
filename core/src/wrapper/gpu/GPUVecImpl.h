@@ -22,7 +22,6 @@
 
 #include "wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/VectorIndex.h"
-#import "wrapper/VecImpl.h"
 
 namespace milvus {
 namespace engine {

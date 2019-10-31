@@ -123,6 +123,10 @@ if (MILVUS_GPU_VERSION)
             cudart
             cublas
             )
+    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
+    set(common_files ${common_files}
+            ${wrapper_gpu_files}
+            )
 endif()
 
 add_subdirectory(db)

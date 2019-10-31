@@ -54,7 +54,7 @@ print_banner() {
     std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << std::endl;
 #ifdef MILVUS_CPU_VERSION
     std::cout << "You are using Milvus CPU-only version" << std::endl;
-#elif
+#else
     std::cout << "You are using Milvus GPU version" << std::endl;
 #endif
     std::cout << std::endl;
