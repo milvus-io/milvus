@@ -18,6 +18,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -34,11 +35,14 @@ namespace scheduler {
 
 class LargeSQ8HPass : public Pass {
  public:
-    LargeSQ8HPass() = default;
+    LargeSQ8HPass();
 
  public:
     bool
     Run(const TaskPtr& task) override;
+
+ private:
+    int32_t threshold_ = std::numeric_limits<int32_t>::max();
 };
 
 using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
