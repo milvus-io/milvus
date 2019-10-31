@@ -714,9 +714,12 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    for (auto& gpu_device : value) {
-        if (!CheckGpuDevice(gpu_device).ok()) {
-            std::string msg = "Invalid search resource: " + gpu_device +
+    for (auto& device : value) {
+        if (device == "cpu") {
+            continue;
+        }
+        if (!CheckGpuDevice(device).ok()) {
+            std::string msg = "Invalid search resource: " + device +
                               ". Possible reason: resource_config.search_resources does not match your hardware.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
@@ -726,6 +729,9 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
 
 Status
 Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
+    if (value == "cpu") {
+        return Status::OK();
+    }
     if (!CheckGpuDevice(value).ok()) {
         std::string msg = "Invalid index build device: " + value +
                           ". Possible reason: resource_config.index_build_device does not match your hardware.";
