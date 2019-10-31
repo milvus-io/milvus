@@ -114,7 +114,7 @@ if (UNIX)
                             OUTPUT_VARIABLE LSB_RELEASE_ID_SHORT
                             OUTPUT_STRIP_TRAILING_WHITESPACE
                             )
-                    STRING(REGEX REPLACE "\\." "_" UBUNTU_VERSION ${LSB_RELEASE_ID_SHORT})
+                    STRING(REGEX REPLACE "\\." "_" UBUNTU_VERSION "${LSB_RELEASE_ID_SHORT}")
                 endif (UBUNTU_FOUND)
             endif (UBUNTU_EXTRA)
         endif (DEBIAN_FOUND)
