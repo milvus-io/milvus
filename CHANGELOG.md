@@ -23,6 +23,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#122 - Add unique id for Job
 - \#130 - Set task state MOVED after resource copy it completed
 - \#149 - Improve large query optimizer pass
+- \#156 - Not return error when search_resources and index_build_device set cpu
 
 ## Task
 
