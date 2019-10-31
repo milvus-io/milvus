@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
+- \#134 - JFrog cache error
 
 ## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
@@ -21,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
 - \#122 - Add unique id for Job
 - \#130 - Set task state MOVED after resource copy it completed
+- \#149 - Improve large query optimizer pass
 
 ## Task
 
