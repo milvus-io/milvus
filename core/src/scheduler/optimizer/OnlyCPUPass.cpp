@@ -17,9 +17,9 @@
 
 #include "scheduler/optimizer/OnlyCPUPass.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
-#include "scheduler/Utils.h"
 
 namespace milvus {
 namespace scheduler {
@@ -29,8 +29,8 @@ OnlyCPUPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask)
         return false;
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int) engine::EngineType::FAISS_IVFSQ8 &&
-        search_task->file_->engine_type_ != (int) engine::EngineType::FAISS_IVFFLAT) {
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8 &&
+        search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
         return false;
     }
 

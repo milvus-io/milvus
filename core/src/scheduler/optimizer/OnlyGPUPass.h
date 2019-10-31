@@ -32,15 +32,15 @@
 namespace milvus {
 namespace scheduler {
 
-class OnlyGPUPass  : public Pass {
-public:
+class OnlyGPUPass : public Pass {
+ public:
     OnlyGPUPass() = default;
 
-public:
+ public:
     bool
-    Run(const TaskPtr &task) override;
+    Run(const TaskPtr& task) override;
 
-private:
+ private:
     uint64_t specified_gpu_id_ = 0;
 };
 
