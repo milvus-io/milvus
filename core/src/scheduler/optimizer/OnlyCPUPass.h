@@ -32,13 +32,13 @@
 namespace milvus {
 namespace scheduler {
 
-class OnlyCPUPass  : public Pass {
-public:
+class OnlyCPUPass : public Pass {
+ public:
     OnlyCPUPass() = default;
 
-public:
+ public:
     bool
-    Run(const TaskPtr &task) override;
+    Run(const TaskPtr& task) override;
 };
 
 using OnlyCPUPassPtr = std::shared_ptr<OnlyCPUPass>;

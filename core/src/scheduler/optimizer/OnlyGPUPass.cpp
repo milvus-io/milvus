@@ -17,9 +17,9 @@
 
 #include "scheduler/optimizer/OnlyGPUPass.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
-#include "scheduler/Utils.h"
 #include "server/Config.h"
 
 namespace milvus {
@@ -31,15 +31,15 @@ OnlyGPUPass::Run(const TaskPtr& task) {
         return false;
 
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int) engine::EngineType::FAISS_IVFSQ8 &&
-        search_task->file_->engine_type_ != (int) engine::EngineType::FAISS_IVFFLAT) {
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8 &&
+        search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
         return false;
     }
 
     server::Config& config = server::Config::GetInstance();
     std::vector<std::string> search_resources;
     config.GetResourceConfigSearchResources(search_resources);
-    for (auto &resource : search_resources) {
+    for (auto& resource : search_resources) {
         if (resource == "cpu") {
             return false;
         }
