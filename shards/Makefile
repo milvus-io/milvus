@@ -6,10 +6,14 @@ pull:
 	docker pull milvusdb/mishards
 deploy:
 	cd all_in_one && docker-compose -f all_in_one.yml up -d && cd -
-clean:
-	rm -rf cov_html
+clean_deploy:
 	cd all_in_one && docker-compose -f all_in_one.yml down && cd -
-check_style:
+clean_coverage:
+	rm -rf cov_html
+clean: clean_coverage clean_deploy
+style:
 	pycodestyle --config=.
-make test:
+coverage:
 	pytest --cov-report html:cov_html --cov=mishards
+test:
+	pytest

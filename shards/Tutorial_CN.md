@@ -24,8 +24,8 @@ Milvus 旨在帮助用户实现海量非结构化数据的近似检索和分析�
 **启动**
 ```
 1. 安装docker-compose
-1. cd milvus/shards/all_in_one
-2. docker-compose -f all_in_one.yml up -d #监听19531端口
+2. make deploy #监听19531端口
+3. make clean_deploy #清理服务
 ```
 
 **打开Jaeger UI**
@@ -70,12 +70,19 @@ kubectl logs -f --tail=1000 -n milvus milvus-ro-servers-0 查看计算节点milv
 **启动单元测试**
 ```
 1. cd milvus/shards
-2. pytest
+2. make test
 ```
 
 **单元测试覆盖率**
 ```
-pytest --cov-report html:cov_html --cov=mishards
+1. cd milvus/shards
+2. make coverage
+```
+
+**代码风格检查**
+```
+1. cd milvus/shards
+2. make style
 ```
 
 ## mishards配置详解
