@@ -12,6 +12,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#104 - test_scheduler core dump
 - \#115 - Using new structure for tasktable
 - \#139 - New config opion use_gpu_threshold
+- \#146 - Add only GPU and only CPU version for IVF_SQ8 and IVF_FLAT
 
 ## Improvement
 - \#64 - Improvement dump function in scheduler
