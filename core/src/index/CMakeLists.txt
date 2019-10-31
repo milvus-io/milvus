@@ -74,7 +74,7 @@ include(BuildUtilsCore)
 
 set(KNOWHERE_GPU_VERSION false)
 if (MILVUS_CPU_VERSION OR KNOWHERE_CPU_VERSION)
-    message(STATUS "Building Knowhere CPU-only version")
+    message(STATUS "Building Knowhere CPU version")
     add_compile_definitions("MILVUS_CPU_VERSION")
 else ()
     message(STATUS "Building Knowhere GPU version")

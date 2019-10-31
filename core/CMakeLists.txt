@@ -120,7 +120,7 @@ include(ThirdPartyPackages)
 
 set(MILVUS_GPU_VERSION false)
 if (MILVUS_CPU_VERSION)
-    message(STATUS "Building Milvus CPU version only")
+    message(STATUS "Building Milvus CPU version")
     add_compile_definitions("MILVUS_CPU_VERSION")
 else ()
     message(STATUS "Building Milvus GPU version")
