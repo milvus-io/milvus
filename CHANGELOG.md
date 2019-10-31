@@ -5,12 +5,14 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
+- \#134 - JFrog cache error
 
 ## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
 - \#104 - test_scheduler core dump
 - \#115 - Using new structure for tasktable
 - \#139 - New config opion use_gpu_threshold
+- \#146 - Add only GPU and only CPU version for IVF_SQ8 and IVF_FLAT
 
 ## Improvement
 - \#64 - Improvement dump function in scheduler
@@ -21,6 +23,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
 - \#122 - Add unique id for Job
 - \#130 - Set task state MOVED after resource copy it completed
+- \#149 - Improve large query optimizer pass
+- \#156 - Not return error when search_resources and index_build_device set cpu
 
 ## Task
 
