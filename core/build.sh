@@ -12,6 +12,7 @@ USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
 CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+CPU_VERSION="OFF"
 
 CUSTOMIZED_FAISS_URL="${FAISS_URL:-NONE}"
 wget -q --method HEAD ${CUSTOMIZED_FAISS_URL}
@@ -21,7 +22,7 @@ else
   CUSTOMIZATION="OFF"
 fi
 
-while getopts "p:d:t:ulrcgjhx" arg
+while getopts "p:d:t:ulrcgjhxz" arg
 do
         case $arg in
              p)
@@ -58,6 +59,9 @@ do
              x)
                 CUSTOMIZATION="OFF" # force use ori faiss
                 ;;
+             z)
+                CPU_VERSION="ON"
+                ;;
              h) # help
                 echo "
 
@@ -71,10 +75,11 @@ parameter:
 -c: code coverage(default: OFF)
 -g: profiling(default: OFF)
 -j: use jfrog cache build directory(default: OFF)
+-z: use pure CPU version(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-g] [-j] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-g] [-j] [-z] [-h]
                 "
                 exit 0
                 ;;
@@ -106,6 +111,7 @@ CMAKE_CMD="cmake \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
 -DCUSTOMIZATION=${CUSTOMIZATION} \
 -DFAISS_URL=${CUSTOMIZED_FAISS_URL} \
+-DMILVUS_CPU_VERSION=${CPU_VERSION} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
