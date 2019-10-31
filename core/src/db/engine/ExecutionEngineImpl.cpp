@@ -258,7 +258,7 @@ Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     if (hybrid) {
         const std::string key = location_ + ".quantizer";
-        std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+        std::vector<uint64_t> gpus{device_id};
 
         const int64_t NOT_FOUND = -1;
         int64_t device_id = NOT_FOUND;
