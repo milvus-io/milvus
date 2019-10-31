@@ -54,7 +54,7 @@ Milvus 提供稳定的 Python、Java 以及 C++ 的 API 接口。
 
 ## 整体架构
 
-![](https://raw.githubusercontent.com/yamasite/docs/master/assets/milvus_arch.png)
+![Milvus_arch](https://github.com/milvus-io/docs/blob/master/assets/milvus_arch.png)
 
 ## 开始使用 Milvus
 
