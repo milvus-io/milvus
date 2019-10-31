@@ -20,14 +20,16 @@
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
-#include "server/Config.h"
 
 namespace milvus {
 namespace scheduler {
 
+OnlyGPUPass::OnlyGPUPass(bool has_cpu) : has_cpu_(has_cpu) {
+}
+
 bool
 OnlyGPUPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::SearchTask)
+    if (task->Type() != TaskType::SearchTask || has_cpu_)
         return false;
 
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
@@ -36,29 +38,15 @@ OnlyGPUPass::Run(const TaskPtr& task) {
         return false;
     }
 
-    server::Config& config = server::Config::GetInstance();
-    std::vector<std::string> search_resources;
-    config.GetResourceConfigSearchResources(search_resources);
-    for (auto& resource : search_resources) {
-        if (resource == "cpu") {
-            return false;
-        }
-    }
-
     auto gpu_id = get_gpu_pool();
-    if (!gpu_id.empty()) {
-        ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpu_id[specified_gpu_id_]);
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
-    } else {
+    if (gpu_id.empty())
         return false;
-    }
 
-    if (specified_gpu_id_ < gpu_id.size() - 1) {
-        ++specified_gpu_id_;
-    } else {
-        specified_gpu_id_ = 0;
-    }
+    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpu_id[specified_gpu_id_]);
+    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    task->label() = label;
+
+    specified_gpu_id_ = specified_gpu_id_++ % gpu_id.size();
     return true;
 }
 
