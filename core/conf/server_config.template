@@ -42,6 +42,6 @@ engine_config:
   use_gpu_threshold: 1000
 
 resource_config:
-  search_resources:                 # define the GPUs used for search computation, must be in format: gpux
-    - cpu0
-  index_build_device: cpu0          # GPU used for building index, must be in format: gpux
+  search_resources:                 # define the CPU / GPUs used for search computation, must be in format: cpu / gpux
+    - cpu
+  index_build_device: cpu           # CPU / GPU used for building index, must be in format: cpu / gpux

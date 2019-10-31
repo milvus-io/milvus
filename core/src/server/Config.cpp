@@ -693,13 +693,11 @@ CheckResource(const std::string& value) {
     std::string s = value;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 #ifdef MILVUS_CPU_VERSION
-    const std::regex pat("cpu(\\d+)");
-    std::smatch m;
-    if (!std::regex_match(s, m, pat)) {
+    if (s != "cpu") {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid CPU resource: " + s);
     }
 #else
-    const std::regex pat("cpu(\\d+)|gpu(\\d+)");
+    const std::regex pat("cpu|gpu(\\d+)");
     std::smatch m;
     if (!std::regex_match(s, m, pat)) {
         std::string msg = "Invalid search resource: " + value +
@@ -1019,7 +1017,13 @@ Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
         return s;
     }
 
-    value = std::stoi(str.substr(3));
+    if (str != "cpu") {
+        value = std::stoi(str.substr(3));
+    }
+    else {
+        value = -1;
+    }
+
     return Status::OK();
 }
 
