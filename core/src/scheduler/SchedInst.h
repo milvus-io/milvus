@@ -23,6 +23,8 @@
 #include "Scheduler.h"
 #include "optimizer/HybridPass.h"
 #include "optimizer/LargeSQ8HPass.h"
+#include "optimizer/OnlyCPUPass.h"
+#include "optimizer/OnlyGPUPass.h"
 #include "optimizer/Optimizer.h"
 
 #include <memory>
@@ -96,6 +98,8 @@ class OptimizerInst {
                 std::vector<PassPtr> pass_list;
                 pass_list.push_back(std::make_shared<LargeSQ8HPass>());
                 pass_list.push_back(std::make_shared<HybridPass>());
+                pass_list.push_back(std::make_shared<OnlyCPUPass>());
+                pass_list.push_back(std::make_shared<OnlyGPUPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
             }
         }
