@@ -90,6 +90,11 @@ class SearchJob : public Job {
         return index_files_;
     }
 
+    std::mutex&
+    mutex() {
+        return mutex_;
+    }
+
  private:
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
