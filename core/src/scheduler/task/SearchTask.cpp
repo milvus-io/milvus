@@ -219,8 +219,11 @@ XSearchTask::Execute() {
 
             // step 3: pick up topk result
             auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
-            XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
+            {
+                std::unique_lock<std::mutex> lock(search_job->mutex());
+                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
                                               search_job->GetResult());
+            }
 
             span = rc.RecordSection(hdr + ", reduce topk");
             //            search_job->AccumReduceCost(span);
