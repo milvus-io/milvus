@@ -18,7 +18,6 @@
 
 #include <condition_variable>
 #include <deque>
-#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -33,20 +32,20 @@
 namespace milvus {
 namespace scheduler {
 
-class LargeSQ8HPass : public Pass {
+class OnlyGPUPass : public Pass {
  public:
-    LargeSQ8HPass();
+    explicit OnlyGPUPass(bool has_cpu);
 
  public:
     bool
     Run(const TaskPtr& task) override;
 
  private:
-    int32_t threshold_ = std::numeric_limits<int32_t>::max();
-    int64_t count_ = 0;
+    uint64_t specified_gpu_id_ = 0;
+    bool has_cpu_ = false;
 };
 
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
+using OnlyGPUPassPtr = std::shared_ptr<OnlyGPUPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
