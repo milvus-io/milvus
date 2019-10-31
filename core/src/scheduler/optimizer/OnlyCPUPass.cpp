@@ -35,13 +35,13 @@ OnlyCPUPass::Run(const TaskPtr& task) {
     }
 
     auto gpu_id = get_gpu_pool();
-    if (gpu_id.empty()) {
-        ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
-        return true;
-    }
-    return false;
+    if (not gpu_id.empty())
+        return false;
+
+    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    task->label() = label;
+    return true;
 }
 
 }  // namespace scheduler
