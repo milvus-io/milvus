@@ -43,6 +43,7 @@ class LargeSQ8HPass : public Pass {
 
  private:
     int32_t threshold_ = std::numeric_limits<int32_t>::max();
+    int64_t count_ = 0;
 };
 
 using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
