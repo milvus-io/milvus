@@ -34,7 +34,7 @@ namespace scheduler {
 
 class OnlyGPUPass : public Pass {
  public:
-    OnlyGPUPass() = default;
+    explicit OnlyGPUPass(bool has_cpu);
 
  public:
     bool
@@ -42,6 +42,7 @@ class OnlyGPUPass : public Pass {
 
  private:
     uint64_t specified_gpu_id_ = 0;
+    bool has_cpu_ = false;
 };
 
 using OnlyGPUPassPtr = std::shared_ptr<OnlyGPUPass>;
