@@ -222,7 +222,7 @@ XSearchTask::Execute() {
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
-                                              search_job->GetResult());
+                                                  search_job->GetResult());
             }
 
             span = rc.RecordSection(hdr + ", reduce topk");

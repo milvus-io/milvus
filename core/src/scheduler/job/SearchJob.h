@@ -90,7 +90,8 @@ class SearchJob : public Job {
         return index_files_;
     }
 
-    std::mutex& mutex() {
+    std::mutex&
+    mutex() {
         return mutex_;
     }
 
