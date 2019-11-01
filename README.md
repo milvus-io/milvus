@@ -8,12 +8,7 @@
 ![Release](https://img.shields.io/badge/release-v0.5.0-orange)
 ![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
 
-- [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
-- [Twitter](https://twitter.com/milvusio)
-- [Facebook](https://www.facebook.com/io.milvus.5)
-- [Blog](https://www.milvus.io/blog/)
-- [中文官网](https://www.milvus.io/zh-CN/)
-
+[中文版](README_CN.md) 
 
 ## What is Milvus
 
@@ -65,15 +60,17 @@ We greatly appreciate the help of the following people.
 
 ## Resources
 
-[Milvus official website](https://www.milvus.io)
+- [Milvus.io](https://www.milvus.io)
 
-[Milvus docs](https://www.milvus.io/docs/en/userguide/install_milvus/)
+- [Milvus bootcamp](https://github.com/milvus-io/bootcamp)
 
-[Milvus bootcamp](https://github.com/milvus-io/bootcamp)
+- [Milvus Medium](https://medium.com/@milvusio)
 
-[Milvus Medium](https://medium.com/@milvusio)
+- [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
-[Milvus CSDN](https://zilliz.blog.csdn.net/)
+- [Milvus Twitter](https://twitter.com/milvusio)
+
+- [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
 ## License
 
