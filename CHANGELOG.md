@@ -1,6 +1,17 @@
 # Changelog
 
-Please mark all change in change log and use the ticket from JIRA.
+Please mark all change in change log and include the issue number from Github.
+
+# Milvus 0.6.0 (TODO)
+
+## Bug
+
+## Feature
+- \#12 - Pure CPU version for Milvus 
+
+## Improvement
+
+## Task
 
 # Milvus 0.5.1 (TODO)
 
