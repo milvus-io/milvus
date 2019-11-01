@@ -13,6 +13,7 @@ RUN_CPPLINT="OFF"
 CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 CPU_VERSION="OFF"
+WITH_MKL="OFF"
 
 CUSTOMIZED_FAISS_URL="${FAISS_URL:-NONE}"
 wget -q --method HEAD ${CUSTOMIZED_FAISS_URL}
@@ -22,7 +23,7 @@ else
   CUSTOMIZATION="OFF"
 fi
 
-while getopts "p:d:t:ulrcgjhxz" arg
+while getopts "p:d:t:ulrcgjhxzm" arg
 do
         case $arg in
              p)
@@ -62,6 +63,9 @@ do
              z)
                 CPU_VERSION="ON"
                 ;;
+             m)
+                WITH_MKL="ON"
+                ;;   
              h) # help
                 echo "
 
@@ -75,11 +79,12 @@ parameter:
 -c: code coverage(default: OFF)
 -g: profiling(default: OFF)
 -j: use jfrog cache build directory(default: OFF)
--z: use pure CPU version(default: OFF)
+-z: build pure CPU version(default: OFF)
+-m: build with MKL(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-g] [-j] [-z] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-g] [-j] [-z] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -112,6 +117,7 @@ CMAKE_CMD="cmake \
 -DCUSTOMIZATION=${CUSTOMIZATION} \
 -DFAISS_URL=${CUSTOMIZED_FAISS_URL} \
 -DMILVUS_CPU_VERSION=${CPU_VERSION} \
+-DBUILD_FAISS_WITH_MKL=${WITH_MKL} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
