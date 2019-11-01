@@ -5,9 +5,22 @@ include_directories(${INDEX_SOURCE_DIR})
 
 set(depend_libs
         gtest gmock gtest_main gmock_main
-        faiss openblas lapack
+        faiss
         arrow "${ARROW_PREFIX}/lib/libjemalloc_pic.a"
         )
+if (BUILD_FAISS_WITH_MKL)
+    set(depend_libs ${depend_libs}
+            "-Wl,--start-group \
+            ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
+            ${MKL_LIB_PATH}/libmkl_gnu_thread.a \
+            ${MKL_LIB_PATH}/libmkl_core.a \
+            -Wl,--end-group -lgomp -lpthread -lm -ldl"
+            )
+else ()
+    set(depend_libs ${depend_libs}
+            lapack
+            openblas)
+endif ()
 
 set(basic_libs
         gomp gfortran pthread
