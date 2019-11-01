@@ -29,7 +29,7 @@ namespace scheduler {
 
 LargeSQ8HPass::LargeSQ8HPass() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetEngineConfigUseGpuThreshold(threshold_);
+    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
