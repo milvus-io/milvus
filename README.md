@@ -22,45 +22,9 @@
 
 Milvus is an open source similarity search engine for massive-scale feature vectors. Built with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
-Milvus provides stable Python, Java and C++ APIs.
+Milvus provides stable Python, Java and C++ APIs. For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/release/v0.5.0/).
-
-- Heterogeneous computing
-
-  Milvus is built with heterogeneous computing architecture for the best performance and cost efficiency. 
-
-- Multiple indexes
-
-  Milvus supports a variety of indexing types that employs quantization, tree-based, and graph indexing techniques. 
-
-- Intelligent resource management
-
-  Milvus automatically adapts search computation and index building processes based on your datasets and available resources.
-
-- Horizontal scalability
-
-  Milvus supports online / offline expansion to scale both storage and computation resources with simple commands.
-
-- High availability
-
-  Milvus is integrated with Kubernetes framework so that all single point of failures could be avoided.
-
-- High compatibility
-
-  Milvus is compatible with almost all deep learning models and major programming languages such as Python, Java and C++, etc.
-
-- Ease of use
-
-  Milvus can be easily installed in a few steps and enables you to exclusively focus on feature vectors. 
-
-- Visualized monitor
-
-  You can track system performance on Prometheus-based GUI monitor dashboards.
-
-## Architecture
-
-![Milvus_arch](https://github.com/milvus-io/docs/blob/master/assets/milvus_arch.png)
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.0/).
 
 ## Get started
 
@@ -137,23 +101,7 @@ To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`,
 
 #### Run Python example code
 
-Make sure [Python 3.5](https://www.python.org/downloads/) or higher is already installed and in use.
-
-Install Milvus Python SDK.
-
-```shell
-# Install Milvus Python SDK
-$ pip install pymilvus==0.2.3
-```
-
-Create a new file `example.py`, and add [Python example code](https://github.com/milvus-io/pymilvus/blob/master/examples/advanced_example.py) to it.
-
-Run the example code.
-
-```shell
-# Run Milvus Python example
-$ python3 example.py
-```
+Please read [this page](https://www.milvus.io/docs/en/userguide/example_code/) for how to run an example program using Python SDK.
 
 #### Run C++ example code
 
@@ -164,6 +112,7 @@ $ python3 example.py
 ```
 
 #### Run Java example code
+
 Make sure Java 8 or higher is already installed.
 
 Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
