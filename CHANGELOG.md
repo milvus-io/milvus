@@ -5,12 +5,13 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
+- \#161 - Search IVFSQHybrid crash on gpu
 
 ## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
 - \#104 - test_scheduler core dump
 - \#115 - Using new structure for tasktable
-- \#139 - New config opion use_gpu_threshold
+- \#139 - New config option use_gpu_threshold
 
 ## Improvement
 - \#64 - Improvement dump function in scheduler
