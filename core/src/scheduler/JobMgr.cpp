@@ -104,20 +104,26 @@ JobMgr::build_task(const JobPtr& job) {
 
 void
 JobMgr::calculate_path(const TaskPtr& task) {
-    if (task->type_ != TaskType::SearchTask) {
-        return;
-    }
+    if (task->type_ == TaskType::SearchTask) {
+        if (task->label()->Type() != TaskLabelType::SPECIFIED_RESOURCE) {
+            return;
+        }
 
-    if (task->label()->Type() != TaskLabelType::SPECIFIED_RESOURCE) {
-        return;
+        std::vector<std::string> path;
+        auto spec_label = std::static_pointer_cast<SpecResLabel>(task->label());
+        auto src = res_mgr_->GetDiskResources()[0];
+        auto dest = spec_label->resource();
+        ShortestPath(src.lock(), dest.lock(), res_mgr_, path);
+        task->path() = Path(path, path.size() - 1);
+        
+    } else if (task->type_ == TaskType::BuildIndexTask) {
+        auto spec_label = std::static_pointer_cast<SpecResLabel>(task->label());
+        auto src = res_mgr_->GetDiskResources()[0];
+        auto dest = spec_label->resource();
+        std::vector<std::string> path;
+        ShortestPath(src.lock(), dest.lock(), res_mgr_, path);
+        task->path() = Path(path, path.size() - 1);
     }
-
-    std::vector<std::string> path;
-    auto spec_label = std::static_pointer_cast<SpecResLabel>(task->label());
-    auto src = res_mgr_->GetDiskResources()[0];
-    auto dest = spec_label->resource();
-    ShortestPath(src.lock(), dest.lock(), res_mgr_, path);
-    task->path() = Path(path, path.size() - 1);
 }
 
 }  // namespace scheduler
