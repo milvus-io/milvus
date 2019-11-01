@@ -596,6 +596,9 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
             return s;
         }
 
+        if (gpu_index == server::CPU_DEVICE_ID)
+            return Status::OK();
+
         size_t gpu_memory;
         if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
             std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_index);
@@ -1013,7 +1016,12 @@ Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
         return s;
     }
 
-    value = std::stoi(str.substr(3));
+    if (str == "cpu") {
+        value = CPU_DEVICE_ID;
+    } else {
+        value = std::stoi(str.substr(3));
+    }
+
     return Status::OK();
 }
 
