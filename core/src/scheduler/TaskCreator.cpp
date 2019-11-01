@@ -70,8 +70,16 @@ TaskCreator::Create(const DeleteJobPtr& job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    // TODO(yukun): remove "disk" hardcode here
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("disk");
+    
+    server::Config& config = server::Config::GetInstance();
+    int32_t build_index_id;
+    Status stat = config.GetResourceConfigIndexBuildDevice(build_index_id);
+    ResourcePtr res_ptr;
+    if (build_index_id == server::CPU_DEVICE_ID) {
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else {
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_index_id);
+    }
 
     for (auto& to_index_file : job->to_index_files()) {
         auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
