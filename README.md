@@ -16,13 +16,13 @@
 - [中文官网](https://www.milvus.io/zh-CN/)
 
 
-# Welcome to Milvus
-
 ## What is Milvus
 
 Milvus is an open source similarity search engine for massive-scale feature vectors. Built with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
-Milvus provides stable Python, Java and C++ APIs. For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
+
+Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://milvus-io.github.io/milvus-sdk-java/javadoc/io/milvus/client/package-summary.html) and C++ APIs. 
 
 Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.0/).
 
@@ -39,7 +39,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 ### Install using docker
 
-Use Docker to install Milvus is a breeze. See the [Milvus install guide](https://milvus.io/docs/en/userguide/install_milvus/) for details.
+Using Docker to install Milvus is a breeze. See the [Milvus install guide](https://milvus.io/docs/en/userguide/install_milvus/) for details.
 
 ### Build from source
 
@@ -103,6 +103,12 @@ To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`,
 
 Please read [this page](https://www.milvus.io/docs/en/userguide/example_code/) for how to run an example program using Python SDK.
 
+#### Run Java example code
+
+Make sure Java 8 or higher is already installed.
+
+Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
+
 #### Run C++ example code
 
 ```shell
@@ -111,13 +117,7 @@ Please read [this page](https://www.milvus.io/docs/en/userguide/example_code/) f
  $ ./sdk_simple
 ```
 
-#### Run Java example code
-
-Make sure Java 8 or higher is already installed.
-
-Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
-
-## Milvus roadmap
+## Roadmap
 
 Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upcoming features.
 
@@ -127,7 +127,7 @@ Contributions are welcomed and greatly appreciated. Please read our [contributio
 
 We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) to track issues and bugs. For general questions and public discussions, please join our community.
 
-## Join the Milvus community
+## Join our community
 
 To connect with other users and contributors, welcome to join our [slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
 
