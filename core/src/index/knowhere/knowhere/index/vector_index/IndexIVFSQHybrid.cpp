@@ -84,22 +84,14 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
 
 VectorIndexPtr
 IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
-    if (gpu_mode != 0) {
-        KNOWHERE_THROW_MSG("Not a GpuIndex Type");
-    }
-
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
-        faiss::IndexComposition index_composition;
-        index_composition.index = index_.get();
-        index_composition.quantizer = nullptr;
-        index_composition.mode = 0;  // copy all
-
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, &index_composition, &option);
-
+        auto idx = dynamic_cast<faiss::IndexIVF*>(index_.get());
+        idx->restore_quantizer();
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get(), &option);
         std::shared_ptr<faiss::Index> device_index = std::shared_ptr<faiss::Index>(gpu_index);
         auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
         return new_idx;
@@ -119,9 +111,9 @@ IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
 void
 IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
                          const Config& cfg) {
-    //    std::lock_guard<std::mutex> lk(g_mutex);
-    //    static int64_t search_count;
-    //    ++search_count;
+    //        std::lock_guard<std::mutex> lk(g_mutex);
+    //        static int64_t search_count;
+    //        ++search_count;
 
     if (gpu_mode == 2) {
         GPUIVF::search_impl(n, data, k, distances, labels, cfg);
