@@ -107,7 +107,7 @@ endif()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
-if(BUILD_UNIT_TEST STREQUAL "ON")
+if(KNOWHERE_BUILD_TESTS)
     add_subdirectory(unittest)
 endif()
 
