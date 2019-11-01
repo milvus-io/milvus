@@ -22,94 +22,21 @@ Milvus is an open source similarity search engine for massive-scale feature vect
 
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
 
-Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://milvus-io.github.io/milvus-sdk-java/javadoc/io/milvus/client/package-summary.html) and C++ APIs. 
+Milvus provides stable [Python](https://pypi.org/project/pymilvus/), [Java](https://milvus-io.github.io/milvus-sdk-java/javadoc/io/milvus/client/package-summary.html) and C++ APIs. 
 
 Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.0/).
 
 ## Get started
 
-### Hardware requirements
+See the [Milvus install guide](https://www.milvus.io/docs/en/userguide/install_milvus/) for using Docker containers. To install Milvus from source code, see [build from source](install.md).
 
-| Component | Recommended configuration           |
-| --------- | ----------------------------------- |
-| CPU       | Intel CPU Haswell or higher         |
-| GPU       | NVIDIA Pascal series or higher      |
-| RAM       | 8 GB or more (depends on data size) |
-| Hard drive| SATA 3.0 SSD or higher              |
-
-### Install using docker
-
-Using Docker to install Milvus is a breeze. See the [Milvus install guide](https://milvus.io/docs/en/userguide/install_milvus/) for details.
-
-### Build from source
-
-#### Software requirements
-
-- Ubuntu 18.04 or higher
-- CMake 3.14 or higher
-- CUDA 10.0 or higher
-- NVIDIA driver 418 or higher
-
-#### Compilation
-
-##### Step 1 Install dependencies
-
-```shell
-$ cd [Milvus sourcecode path]/core
-$ ./ubuntu_build_deps.sh
-```
-
-##### Step 2 Build
-
-```shell
-$ cd [Milvus sourcecode path]/core
-$ ./build.sh -t Debug
-or 
-$ ./build.sh -t Release
-```
-
-When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
-
-#### Launch Milvus server
-
-```shell
-$ cd [Milvus root path]/core/milvus
-```
-
-Add `lib/` directory to `LD_LIBRARY_PATH`
-
-```
-$ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/lib
-```
-
-Then start Milvus server:
-
-```
-$ cd scripts
-$ ./start_server.sh
-```
-
-To stop Milvus server, run:
-
-```shell
-$ ./stop_server.sh
-```
-
-To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](https://github.com/milvus-io/docs/blob/master/reference/milvus_config.md).
+To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/en/reference/milvus_config/).
 
 ### Try your first Milvus program
 
-#### Run Python example code
+Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/) or [Java example code](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples). 
 
-Please read [this page](https://www.milvus.io/docs/en/userguide/example_code/) for how to run an example program using Python SDK.
-
-#### Run Java example code
-
-Make sure Java 8 or higher is already installed.
-
-Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
-
-#### Run C++ example code
+To use C++ example code, use below command:
 
 ```shell
  # Run Milvus C++ example
@@ -119,7 +46,7 @@ Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/ex
 
 ## Roadmap
 
-Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upcoming features.
+Please read our [roadmap](https://milvus.io/docs/en/roadmap/) for upcoming features.
 
 ## Contribution guidelines
 
@@ -147,9 +74,9 @@ We greatly appreciate the help of the following people.
 
 [Milvus blog](https://www.milvus.io/blog/)
 
-[Milvus CSDN](https://zilliz.blog.csdn.net/)
+[Milvus Medium](https://medium.com/@milvusio)
 
-[Milvus roadmap](https://milvus.io/docs/en/roadmap/)
+[Milvus CSDN](https://zilliz.blog.csdn.net/)
 
 ## License
 
