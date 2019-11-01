@@ -6,12 +6,13 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - \#134 - JFrog cache error
+- \#161 - Search IVFSQHybrid crash on gpu
 
 ## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
 - \#104 - test_scheduler core dump
 - \#115 - Using new structure for tasktable
-- \#139 - New config opion use_gpu_threshold
+- \#139 - New config option use_gpu_threshold
 - \#146 - Add only GPU and only CPU version for IVF_SQ8 and IVF_FLAT
 
 ## Improvement
