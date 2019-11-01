@@ -12,7 +12,6 @@
 - [Twitter](https://twitter.com/milvusio)
 - [Facebook](https://www.facebook.com/io.milvus.5)
 - [Blog](https://www.milvus.io/blog/)
-- [CSDN](https://zilliz.blog.csdn.net/)
 - [中文官网](https://www.milvus.io/zh-CN/)
 
 
@@ -71,8 +70,6 @@ We greatly appreciate the help of the following people.
 [Milvus docs](https://www.milvus.io/docs/en/userguide/install_milvus/)
 
 [Milvus bootcamp](https://github.com/milvus-io/bootcamp)
-
-[Milvus blog](https://www.milvus.io/blog/)
 
 [Milvus Medium](https://medium.com/@milvusio)
 
