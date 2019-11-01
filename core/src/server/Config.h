@@ -84,8 +84,8 @@ static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
 static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "20";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
-static const char* CONFIG_ENGINE_USE_GPU_THRESHOLD = "use_gpu_threshold";
-static const char* CONFIG_ENGINE_USE_GPU_THRESHOLD_DEFAULT = "1000";
+static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
+static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
 /* resource config */
 static const char* CONFIG_RESOURCE = "resource_config";
@@ -169,7 +169,7 @@ class Config {
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
     Status
-    CheckEngineConfigUseGpuThreshold(const std::string& value);
+    CheckEngineConfigGpuSearchThreshold(const std::string& value);
 
     /* resource config */
     Status
@@ -235,7 +235,7 @@ class Config {
     Status
     GetEngineConfigOmpThreadNum(int32_t& value);
     Status
-    GetEngineConfigUseGpuThreshold(int32_t& value);
+    GetEngineConfigGpuSearchThreshold(int32_t& value);
 
     /* resource config */
     Status
@@ -296,7 +296,7 @@ class Config {
     Status
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
-    SetEngineConfigUseGpuThreshold(const std::string& value);
+    SetEngineConfigGpuSearchThreshold(const std::string& value);
 
     /* resource config */
     Status

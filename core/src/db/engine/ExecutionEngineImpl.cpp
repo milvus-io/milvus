@@ -265,9 +265,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
+#if 0
     if (hybrid) {
         const std::string key = location_ + ".quantizer";
-        std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+        std::vector<uint64_t> gpus{device_id};
 
         const int64_t NOT_FOUND = -1;
         int64_t device_id = NOT_FOUND;
@@ -316,6 +317,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         }
         return Status::OK();
     }
+#endif
 
     auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
