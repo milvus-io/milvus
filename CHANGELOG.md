@@ -14,6 +14,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#115 - Using new structure for tasktable
 - \#139 - New config option use_gpu_threshold
 - \#146 - Add only GPU and only CPU version for IVF_SQ8 and IVF_FLAT
+- \#164 - Add CPU version for building index
 
 ## Improvement
 - \#64 - Improvement dump function in scheduler
