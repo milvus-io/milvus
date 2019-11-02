@@ -221,9 +221,10 @@ IVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int6
     faiss::ivflib::search_with_parameters(index_.get(), n, (float*)data, k, distances, labels, params.get());
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
-                       << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
-                       << ", data search cost: " << faiss::indexIVF_stats.search_time;
+    KNOWHERE_LOG_DEBUG << "K=" << k << " NQ=" << n << " NL=" << faiss::indexIVF_stats.nlist
+                       << " ND=" << faiss::indexIVF_stats.ndis << " NH=" << faiss::indexIVF_stats.nheap_updates
+                       << " Q=" << faiss::indexIVF_stats.quantization_time
+                       << " S=" << faiss::indexIVF_stats.search_time;
     faiss::indexIVF_stats.quantization_time = 0;
     faiss::indexIVF_stats.search_time = 0;
 }
