@@ -39,8 +39,8 @@ class XSearchTask : public Task {
 
  public:
     static void
-    MergeTopkToResultSet(const std::vector<int64_t>& src_ids, const std::vector<float>& src_distances, uint64_t src_k,
-                         uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultIds& tar_ids,
+    MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
+                         size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
                          scheduler::ResultDistances& tar_distances);
 
     //    static void
