@@ -637,7 +637,8 @@ SearchTask::OnExecute() {
         rc.RecordSection("prepare vector data");
 
         // step 6: search vectors
-        engine::QueryResults results;
+        engine::ResultIds result_ids;
+        engine::ResultDistances result_distances;
         auto record_count = (uint64_t)search_param_->query_record_array().size();
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -647,11 +648,11 @@ SearchTask::OnExecute() {
 #endif
 
         if (file_id_array_.empty()) {
-            status =
-                DBWrapper::DB()->Query(table_name_, (size_t)top_k, record_count, nprobe, vec_f.data(), dates, results);
+            status = DBWrapper::DB()->Query(table_name_, (size_t)top_k, record_count, nprobe, vec_f.data(), dates,
+                                            result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
-                                            vec_f.data(), dates, results);
+                                            vec_f.data(), dates, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -663,23 +664,20 @@ SearchTask::OnExecute() {
             return status;
         }
 
-        if (results.empty()) {
+        if (result_ids.empty()) {
             return Status::OK();  // empty table
         }
 
-        if (results.size() != record_count) {
-            std::string msg = "Search " + std::to_string(record_count) + " vectors but only return " +
-                              std::to_string(results.size()) + " results";
-            return Status(SERVER_ILLEGAL_SEARCH_RESULT, msg);
-        }
+        size_t result_k = result_ids.size() / record_count;
 
         // step 7: construct result array
-        for (auto& result : results) {
+        for (size_t i = 0; i < record_count; i++) {
             ::milvus::grpc::TopKQueryResult* topk_query_result = topk_result_list->add_topk_query_result();
-            for (auto& pair : result) {
+            for (size_t j = 0; j < result_k; j++) {
                 ::milvus::grpc::QueryResult* grpc_result = topk_query_result->add_query_result_arrays();
-                grpc_result->set_id(pair.first);
-                grpc_result->set_distance(pair.second);
+                size_t idx = i * result_k + j;
+                grpc_result->set_id(result_ids[idx]);
+                grpc_result->set_distance(result_distances[idx]);
             }
         }
 
