@@ -590,18 +590,18 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
-        int gpu_index;
-        Status s = GetResourceConfigIndexBuildDevice(gpu_index);
+        int device_id;
+        Status s = GetResourceConfigIndexBuildDevice(device_id);
         if (!s.ok()) {
             return s;
         }
 
-        if (gpu_index == server::CPU_DEVICE_ID)
+        if (device_id == server::CPU_DEVICE_ID)
             return Status::OK();
 
         size_t gpu_memory;
-        if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
-            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_index);
+        if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
+            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(device_id);
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         } else if (gpu_cache_capacity >= gpu_memory) {
             std::string msg = "Invalid gpu cache capacity: " + value +
