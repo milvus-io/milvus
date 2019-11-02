@@ -143,7 +143,7 @@ Install Milvus Python SDK.
 $ pip install pymilvus==0.2.3
 ```
 
-Create a new file `example.py`, and add [Python example code](https://github.com/milvus-io/pymilvus/blob/master/examples/AdvancedExample.py) to it.
+Create a new file `example.py`, and add [Python example code](https://github.com/milvus-io/pymilvus/blob/master/examples/advanced_example.py) to it.
 
 Run the example code.
 
