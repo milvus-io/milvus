@@ -213,6 +213,10 @@ TEST_P(IVFTest, clone_test) {
         }
     }
 
+    if (index_type == "IVFSQHybrid") {
+        return;
+    }
+
     {
         // copy to gpu
         std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFSQ", "GPUIVFSQ"};
