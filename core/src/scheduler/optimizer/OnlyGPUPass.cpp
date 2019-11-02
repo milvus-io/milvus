@@ -46,7 +46,7 @@ OnlyGPUPass::Run(const TaskPtr& task) {
     auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
     task->label() = label;
 
-    specified_gpu_id_ = specified_gpu_id_++ % gpu_id.size();
+    specified_gpu_id_ = (specified_gpu_id_ + 1) % gpu_id.size();
     return true;
 }
 
