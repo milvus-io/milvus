@@ -243,16 +243,10 @@ XSearchTask::Execute() {
 }
 
 void
-XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& src_ids, const std::vector<float>& src_distances,
+XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
                                   size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
                                   scheduler::ResultDistances& tar_distances) {
     if (src_ids.empty()) {
-        return;
-    }
-
-    if (tar_ids.empty()) {
-        tar_ids = src_ids;
-        tar_distances = src_distances;
         return;
     }
 
