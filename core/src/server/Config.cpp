@@ -193,8 +193,8 @@ Config::ValidateConfig() {
         return s;
     }
 
-    int32_t engine_use_gpu_threshold;
-    s = GetEngineConfigUseGpuThreshold(engine_use_gpu_threshold);
+    int32_t engine_gpu_search_threshold;
+    s = GetEngineConfigGpuSearchThreshold(engine_gpu_search_threshold);
     if (!s.ok()) {
         return s;
     }
@@ -330,7 +330,7 @@ Config::ResetDefaultConfig() {
         return s;
     }
 
-    s = SetEngineConfigUseGpuThreshold(CONFIG_ENGINE_USE_GPU_THRESHOLD_DEFAULT);
+    s = SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -463,7 +463,7 @@ Status
 Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid archive days threshold: " + value +
-                          ". Possible reason: db_config.archive_disk_threshold is invalid.";
+                          ". Possible reason: db_config.archive_days_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -590,15 +590,18 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
-        int gpu_index;
-        Status s = GetResourceConfigIndexBuildDevice(gpu_index);
+        int device_id;
+        Status s = GetResourceConfigIndexBuildDevice(device_id);
         if (!s.ok()) {
             return s;
         }
 
+        if (device_id == server::CPU_DEVICE_ID)
+            return Status::OK();
+
         size_t gpu_memory;
-        if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
-            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_index);
+        if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
+            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(device_id);
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         } else if (gpu_cache_capacity >= gpu_memory) {
             std::string msg = "Invalid gpu cache capacity: " + value +
@@ -631,7 +634,7 @@ Config::CheckCacheConfigGpuCacheThreshold(const std::string& value) {
 Status
 Config::CheckCacheConfigCacheInsertData(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg = "Invalid cache insert option: " + value +
+        std::string msg = "Invalid cache insert data option: " + value +
                           ". Possible reason: cache_config.cache_insert_data is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -641,7 +644,7 @@ Config::CheckCacheConfigCacheInsertData(const std::string& value) {
 Status
 Config::CheckEngineConfigUseBlasThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid blas threshold: " + value +
+        std::string msg = "Invalid use blas threshold: " + value +
                           ". Possible reason: engine_config.use_blas_threshold is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -651,7 +654,7 @@ Config::CheckEngineConfigUseBlasThreshold(const std::string& value) {
 Status
 Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid omp thread number: " + value +
+        std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -660,7 +663,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     uint32_t sys_thread_cnt = 8;
     CommonUtil::GetSystemAvailableThreads(sys_thread_cnt);
     if (omp_thread > static_cast<int32_t>(sys_thread_cnt)) {
-        std::string msg = "Invalid omp thread number: " + value +
+        std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num exceeds system cpu cores.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -668,10 +671,10 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::CheckEngineConfigUseGpuThreshold(const std::string& value) {
+Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid gpu threshold: " + value +
-                          ". Possible reason: engine_config.use_gpu_threshold is not a positive integer.";
+        std::string msg = "Invalid gpu search threshold: " + value +
+                          ". Possible reason: engine_config.gpu_search_threshold is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -714,9 +717,12 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    for (auto& gpu_device : value) {
-        if (!CheckGpuDevice(gpu_device).ok()) {
-            std::string msg = "Invalid search resource: " + gpu_device +
+    for (auto& device : value) {
+        if (device == "cpu") {
+            continue;
+        }
+        if (!CheckGpuDevice(device).ok()) {
+            std::string msg = "Invalid search resource: " + device +
                               ". Possible reason: resource_config.search_resources does not match your hardware.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
@@ -726,6 +732,9 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
 
 Status
 Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
+    if (value == "cpu") {
+        return Status::OK();
+    }
     if (!CheckGpuDevice(value).ok()) {
         std::string msg = "Invalid index build device: " + value +
                           ". Possible reason: resource_config.index_build_device does not match your hardware.";
@@ -973,10 +982,10 @@ Config::GetEngineConfigOmpThreadNum(int32_t& value) {
 }
 
 Status
-Config::GetEngineConfigUseGpuThreshold(int32_t& value) {
+Config::GetEngineConfigGpuSearchThreshold(int32_t& value) {
     std::string str =
-        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_USE_GPU_THRESHOLD, CONFIG_ENGINE_USE_GPU_THRESHOLD_DEFAULT);
-    Status s = CheckEngineConfigUseGpuThreshold(str);
+        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT);
+    Status s = CheckEngineConfigGpuSearchThreshold(str);
     if (!s.ok()) {
         return s;
     }
@@ -1007,7 +1016,12 @@ Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
         return s;
     }
 
-    value = std::stoi(str.substr(3));
+    if (str == "cpu") {
+        value = CPU_DEVICE_ID;
+    } else {
+        value = std::stoi(str.substr(3));
+    }
+
     return Status::OK();
 }
 
@@ -1238,13 +1252,13 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::SetEngineConfigUseGpuThreshold(const std::string& value) {
-    Status s = CheckEngineConfigUseGpuThreshold(value);
+Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
+    Status s = CheckEngineConfigGpuSearchThreshold(value);
     if (!s.ok()) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_USE_GPU_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
     return Status::OK();
 }
 
