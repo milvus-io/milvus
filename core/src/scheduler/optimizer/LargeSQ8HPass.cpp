@@ -29,7 +29,7 @@ namespace scheduler {
 
 LargeSQ8HPass::LargeSQ8HPass() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetEngineConfigUseGpuThreshold(threshold_);
+    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
@@ -55,16 +55,18 @@ LargeSQ8HPass::Run(const TaskPtr& task) {
     }
 
     std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
-    std::vector<int64_t> all_free_mem;
-    for (auto& gpu : gpus) {
-        auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-        auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-        all_free_mem.push_back(free_mem);
-    }
-
-    auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-    auto best_index = std::distance(all_free_mem.begin(), max_e);
-    auto best_device_id = gpus[best_index];
+    //    std::vector<int64_t> all_free_mem;
+    //    for (auto& gpu : gpus) {
+    //        auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+    //        auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+    //        all_free_mem.push_back(free_mem);
+    //    }
+    //
+    //    auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+    //    auto best_index = std::distance(all_free_mem.begin(), max_e);
+    //    auto best_device_id = gpus[best_index];
+    auto best_device_id = count_ % gpus.size();
+    count_++;
 
     ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
     if (not res_ptr) {

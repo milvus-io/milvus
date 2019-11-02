@@ -36,7 +36,7 @@ cache_config:
 engine_config:
   use_blas_threshold: 20            # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times
                                     # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
-  use_gpu_threshold: 1000
+  gpu_search_threshold: 1000        # threshold beyond which the search computation is executed on GPUs only
 
 resource_config:
   search_resources:                 # define the GPUs used for search computation, must be in format: gpux
