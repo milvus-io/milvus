@@ -256,9 +256,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
+#if 0
     if (hybrid) {
         const std::string key = location_ + ".quantizer";
-        std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+        std::vector<uint64_t> gpus{device_id};
 
         const int64_t NOT_FOUND = -1;
         int64_t device_id = NOT_FOUND;
@@ -307,30 +308,14 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         }
         return Status::OK();
     }
-
-    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
-    bool already_in_cache = (index != nullptr);
-    if (already_in_cache) {
-        index_ = index;
-    } else {
-        if (index_ == nullptr) {
-            ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
-            return Status(DB_ERROR, "index is null");
-        }
-
-        try {
-            index_ = index_->CopyToGpu(device_id);
-            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-        } catch (std::exception& e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
-        }
+#endif
+    try {
+        index_ = index_->CopyToGpu(device_id);
+        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+    } catch (std::exception& e) {
+        ENGINE_LOG_ERROR << e.what();
+        return Status(DB_ERROR, e.what());
     }
-
-    if (!already_in_cache) {
-        GpuCache(device_id);
-    }
-
     return Status::OK();
 }
 
