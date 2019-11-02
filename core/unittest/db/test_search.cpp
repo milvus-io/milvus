@@ -85,8 +85,10 @@ CheckTopkResult(const std::vector<int64_t>& input_ids_1,
                 uint64_t topk,
                 uint64_t nq,
                 bool ascending,
-                const milvus::scheduler::ResultSet& result) {
-    ASSERT_EQ(result.size(), nq);
+                const ms::ResultIds& result_ids,
+                const ms::ResultDistances& result_distances) {
+    ASSERT_EQ(result_ids.size(), nq * topk);
+    ASSERT_EQ(result_distances.size(), nq * topk);
     ASSERT_EQ(input_ids_1.size(), input_distance_1.size());
     ASSERT_EQ(input_ids_2.size(), input_distance_2.size());
 
@@ -111,15 +113,16 @@ CheckTopkResult(const std::vector<int64_t>& input_ids_1,
                 ++iter;
         }
 
-        uint64_t n = std::min(topk, result[i].size());
+        uint64_t n = std::min(topk, result_ids.size() / nq);
         for (uint64_t j = 0; j < n; j++) {
-            if (result[i][j].first < 0) {
+            uint64_t idx = i * n + j;
+            if (result_ids[idx] < 0) {
                 continue;
             }
-            if (src_vec[j] != result[i][j].second) {
-                std::cout << src_vec[j] << " " << result[i][j].second << std::endl;
+            if (src_vec[j] != result_distances[idx]) {
+                std::cout << src_vec[j] << " " << result_distances[idx] << std::endl;
             }
-            ASSERT_TRUE(src_vec[j] == result[i][j].second);
+            ASSERT_TRUE(src_vec[j] == result_distances[idx]);
         }
     }
 }
@@ -130,12 +133,13 @@ void
 MergeTopkToResultSetTest(uint64_t topk_1, uint64_t topk_2, uint64_t nq, uint64_t topk, bool ascending) {
     std::vector<int64_t> ids1, ids2;
     std::vector<float> dist1, dist2;
-    ms::ResultSet result;
+    ms::ResultIds result_ids;
+    ms::ResultDistances result_distances;
     BuildResult(ids1, dist1, topk_1, topk, nq, ascending);
     BuildResult(ids2, dist2, topk_2, topk, nq, ascending);
-    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, topk_1, nq, topk, ascending, result);
-    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, topk_2, nq, topk, ascending, result);
-    CheckTopkResult(ids1, dist1, ids2, dist2, topk, nq, ascending, result);
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, topk_1, nq, topk, ascending, result_ids, result_distances);
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, topk_2, nq, topk, ascending, result_ids, result_distances);
+    CheckTopkResult(ids1, dist1, ids2, dist2, topk, nq, ascending, result_ids, result_distances);
 }
 
 TEST(DBSearchTest, MERGE_RESULT_SET_TEST) {
@@ -222,9 +226,9 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
     int32_t index_file_num = 478;   /* sift1B dataset, index files num */
     bool ascending = true;
 
-    std::vector<int32_t> thread_vec = {4, 8};
-    std::vector<int32_t> nq_vec = {1, 10, 100};
-    std::vector<int32_t> topk_vec = {1, 4, 16, 64};
+    std::vector<int32_t> thread_vec = {4};
+    std::vector<int32_t> nq_vec = {1000};
+    std::vector<int32_t> topk_vec = {64};
     int32_t NQ = nq_vec[nq_vec.size() - 1];
     int32_t TOPK = topk_vec[topk_vec.size() - 1];
 
@@ -247,7 +251,8 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
 
         for (int32_t nq : nq_vec) {
             for (int32_t top_k : topk_vec) {
-                ms::ResultSet final_result, final_result_2, final_result_3;
+                ms::ResultIds final_result_ids, final_result_ids_2, final_result_ids_3;
+                ms::ResultDistances final_result_distances, final_result_distances_2, final_result_distances_3;
 
                 std::vector<std::vector<int64_t>> id_vec_1(index_file_num);
                 std::vector<std::vector<float>> dist_vec_1(index_file_num);
@@ -268,8 +273,10 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
                                                           nq,
                                                           top_k,
                                                           ascending,
-                                                          final_result);
-                    ASSERT_EQ(final_result.size(), nq);
+                                                          final_result_ids,
+                                                          final_result_distances);
+                    ASSERT_EQ(final_result_ids.size(), nq * top_k);
+                    ASSERT_EQ(final_result_distances.size(), nq * top_k);
                 }
 
                 rc1.RecordSection("reduce done");
