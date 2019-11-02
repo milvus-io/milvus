@@ -3,7 +3,7 @@ timeout(time: 60, unit: 'MINUTES') {
         dir ("${PROJECT_NAME}_test") {
             checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:Test/milvus_test.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
             sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
-            sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-1.svc.cluster.local"
+            sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-1.svc.cluster.local --internal"
         }
 
         // mysql database backend test
@@ -20,7 +20,7 @@ timeout(time: 60, unit: 'MINUTES') {
             }
         }
         dir ("${PROJECT_NAME}_test") {
-            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-2.svc.cluster.local"
+            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-2.svc.cluster.local --internal"
         }
     } catch (exc) {
         echo 'Milvus Test Failed !'
