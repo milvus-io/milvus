@@ -7,6 +7,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 - \#134 - JFrog cache error
 - \#161 - Search IVFSQHybrid crash on gpu
+- \#169 - IVF_FLAT search out of memory
 
 ## Feature
 - \#90 - The server start error messages could be improved to enhance user experience
