@@ -259,10 +259,11 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
-        milvus::engine::QueryResults results;
-        stat = db_->Query(GetTableName(), topk, 1, nprobe, search.data(), results);
-        ASSERT_EQ(results[0][0].first, pair.first);
-        ASSERT_LT(results[0][0].second, 1e-4);
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(GetTableName(), topk, 1, nprobe, search.data(), result_ids, result_distances);
+        ASSERT_EQ(result_ids[0], pair.first);
+        ASSERT_LT(result_distances[0], 1e-4);
     }
 }
 
@@ -314,7 +315,8 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
     BuildVectors(qb, qxb);
 
     std::thread search([&]() {
-        milvus::engine::QueryResults results;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -329,17 +331,17 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(GetTableName(), k, qb, 10, qxb.data(), results);
+            stat = db_->Query(GetTableName(), k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
-            for (auto k = 0; k < qb; ++k) {
-                ASSERT_EQ(results[k][0].first, target_ids[k]);
+            for (auto i = 0; i < qb; ++i) {
+                ASSERT_EQ(result_ids[i * k], target_ids[i]);
                 ss.str("");
-                ss << "Result [" << k << "]:";
-                for (auto result : results[k]) {
-                    ss << result.first << " ";
+                ss << "Result [" << i << "]:";
+                for (auto t = 0; t < k; t++) {
+                    ss << result_ids[i * k + t] << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }
