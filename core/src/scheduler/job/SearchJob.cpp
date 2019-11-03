@@ -49,13 +49,21 @@ void
 SearchJob::SearchDone(size_t index_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     index_files_.erase(index_id);
-    cv_.notify_all();
+    if (index_files_.empty()) {
+        cv_.notify_all();
+    }
+
     SERVER_LOG_DEBUG << "SearchJob " << id() << " finish index file: " << index_id;
 }
 
-ResultSet&
-SearchJob::GetResult() {
-    return result_;
+ResultIds&
+SearchJob::GetResultIds() {
+    return result_ids_;
+}
+
+ResultDistances&
+SearchJob::GetResultDistances() {
+    return result_distances_;
 }
 
 Status&
