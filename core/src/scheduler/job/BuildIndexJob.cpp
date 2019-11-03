@@ -50,7 +50,10 @@ void
 BuildIndexJob::BuildIndexDone(size_t to_index_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     to_index_files_.erase(to_index_id);
-    cv_.notify_all();
+    if (to_index_files_.empty()) {
+        cv_.notify_all();
+    }
+
     SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
 }
 
