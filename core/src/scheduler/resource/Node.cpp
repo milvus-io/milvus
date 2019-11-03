@@ -38,23 +38,27 @@ Node::GetNeighbours() {
     return ret;
 }
 
-std::string
-Node::Dump() {
-    std::stringstream ss;
-    ss << "<Node, id=" << std::to_string(id_) << ">::neighbours:" << std::endl;
+json
+Node::Dump() const {
+    json neighbours;
     for (auto& neighbour : neighbours_) {
-        ss << "\t<Neighbour, id=" << std::to_string(neighbour.first);
-        ss << ", connection: " << neighbour.second.connection.Dump() << ">" << std::endl;
+        json n;
+        n["id"] = neighbour.first;
+        n["connection"] = neighbour.second.connection.Dump();
+        neighbours.push_back(n);
     }
-    return ss.str();
+
+    json ret{
+        {"id", id_},
+        {"neighbours", neighbours},
+    };
+    return ret;
 }
 
 void
 Node::AddNeighbour(const NeighbourNodePtr& neighbour_node, Connection& connection) {
     std::lock_guard<std::mutex> lk(mutex_);
-    if (auto s = neighbour_node.lock()) {
-        neighbours_.emplace(std::make_pair(s->id_, Neighbour(neighbour_node, connection)));
-    }
+    neighbours_.emplace(std::make_pair(neighbour_node->id_, Neighbour(neighbour_node, connection)));
     // else do nothing, consider it..
 }
 

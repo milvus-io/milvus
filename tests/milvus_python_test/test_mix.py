@@ -6,7 +6,7 @@ import datetime
 import logging
 from time import sleep
 from multiprocessing import Process
-import numpy
+import sklearn.preprocessing
 from milvus import Milvus, IndexType, MetricType
 from utils import *
 
@@ -15,7 +15,7 @@ index_file_size = 10
 table_id = "test_mix"
 add_interval_time = 2
 vectors = gen_vectors(100000, dim)
-vectors /= numpy.linalg.norm(vectors)
+vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
 top_k = 1
 nprobe = 1
@@ -26,9 +26,9 @@ index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 class TestMixBase:
 
     # TODO: enable
-    def _test_search_during_createIndex(self, args):
+    def test_search_during_createIndex(self, args):
         loops = 100000
-        table = "test_search_during_createIndex"
+        table = gen_unique_str()
         query_vecs = [vectors[0], vectors[1]]
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         id_0 = 0; id_1 = 0
@@ -54,6 +54,7 @@ class TestMixBase:
             status, ids = milvus_instance.add_vectors(table, vectors)
             logging.getLogger().info(status)
         def search(milvus_instance):
+            logging.getLogger().info("In search vectors")
             for i in range(loops):
                 status, result = milvus_instance.search_vectors(table, top_k, nprobe, query_vecs)
                 logging.getLogger().info(status)
@@ -69,6 +70,7 @@ class TestMixBase:
         p_create.start()
         p_create.join()
 
+    @pytest.mark.level(2)
     def test_mix_multi_tables(self, connect):
         '''
         target: test functions with multiple tables of different metric_types and index_types
@@ -77,6 +79,7 @@ class TestMixBase:
         expected: status ok
         '''
         nq = 10000
+        nlist= 16384
         vectors = gen_vectors(nq, dim)
         table_list = []
         idx = []
@@ -112,17 +115,17 @@ class TestMixBase:
 
         #create index
         for i in range(10):
-            index_params = {'index_type': IndexType.FLAT, 'nlist': 16384}
+            index_params = {'index_type': IndexType.FLAT, 'nlist': nlist}
             status = connect.create_index(table_list[i], index_params)
             assert status.OK()
             status = connect.create_index(table_list[30 + i], index_params)
             assert status.OK()
-            index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
+            index_params = {'index_type': IndexType.IVFLAT, 'nlist': nlist}
             status = connect.create_index(table_list[10 + i], index_params)
             assert status.OK()
             status = connect.create_index(table_list[40 + i], index_params)
             assert status.OK()
-            index_params = {'index_type': IndexType.IVF_SQ8, 'nlist': 16384}
+            index_params = {'index_type': IndexType.IVF_SQ8, 'nlist': nlist}
             status = connect.create_index(table_list[20 + i], index_params)
             assert status.OK()
             status = connect.create_index(table_list[50 + i], index_params)

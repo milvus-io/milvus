@@ -23,7 +23,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/grpc_impl/GrpcRequestScheduler.h"
 #include "server/grpc_impl/GrpcRequestTask.h"
-#include "../version.h"
+#include "src/version.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
@@ -36,7 +36,7 @@
 
 namespace {
 
-static const char *TABLE_NAME = "test_grpc";
+static const char* TABLE_NAME = "test_grpc";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t INDEX_FILE_SIZE = 1024;
 static constexpr int64_t VECTOR_COUNT = 1000;
@@ -109,7 +109,7 @@ class RpcHandlerTest : public testing::Test {
 
 void
 BuildVectors(int64_t from, int64_t to,
-             std::vector<std::vector<float >> &vector_record_array) {
+             std::vector<std::vector<float >>& vector_record_array) {
     if (to <= from) {
         return;
     }
@@ -119,7 +119,7 @@ BuildVectors(int64_t from, int64_t to,
         std::vector<float> record;
         record.resize(TABLE_DIM);
         for (int64_t i = 0; i < TABLE_DIM; i++) {
-            record[i] = (float) (k % (i + 1));
+            record[i] = (float)(k % (i + 1));
         }
 
         vector_record_array.emplace_back(record);
@@ -136,7 +136,7 @@ CurrentTmDate(int64_t offset_day = 0) {
     gmtime_r(&tt, &t);
 
     std::string str = std::to_string(t.tm_year + 1900) + "-" + std::to_string(t.tm_mon + 1)
-        + "-" + std::to_string(t.tm_mday);
+                      + "-" + std::to_string(t.tm_mday);
 
     return str;
 }
@@ -200,8 +200,8 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
-    for (auto &record : record_array) {
-        ::milvus::grpc::RowRecord *grpc_record = request.add_row_record_array();
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
         for (size_t i = 0; i < record.size(); i++) {
             grpc_record->add_vector_data(record[i]);
         }
@@ -239,8 +239,8 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::InsertParam insert_param;
-    for (auto &record : record_array) {
-        ::milvus::grpc::RowRecord *grpc_record = insert_param.add_row_record_array();
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
         for (size_t i = 0; i < record.size(); i++) {
             grpc_record->add_vector_data(record[i]);
         }
@@ -252,16 +252,16 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     sleep(7);
 
     BuildVectors(0, 10, record_array);
-    for (auto &record : record_array) {
-        ::milvus::grpc::RowRecord *row_record = request.add_query_record_array();
-        for (auto &rec : record) {
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* row_record = request.add_query_record_array();
+        for (auto& rec : record) {
             row_record->add_vector_data(rec);
         }
     }
     handler->Search(&context, &request, &response);
 
     //test search with range
-    ::milvus::grpc::Range *range = request.mutable_query_range_array()->Add();
+    ::milvus::grpc::Range* range = request.mutable_query_range_array()->Add();
     range->set_start_value(CurrentTmDate(-2));
     range->set_end_value(CurrentTmDate(-3));
     handler->Search(&context, &request, &response);
@@ -273,7 +273,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     handler->Search(&context, &request, &response);
 
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
-    std::string *file_id = search_in_files_param.add_file_id_array();
+    std::string* file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
 }
@@ -323,8 +323,8 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     //test empty row record
     handler->Insert(&context, &request, &vector_ids);
 
-    for (auto &record : record_array) {
-        ::milvus::grpc::RowRecord *grpc_record = request.add_row_record_array();
+    for (auto& record : record_array) {
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
         for (size_t i = 0; i < record.size(); i++) {
             grpc_record->add_vector_data(record[i]);
         }
@@ -341,7 +341,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     request.clear_row_record_array();
     vector_ids.clear_vector_id_array();
     for (uint64_t i = 0; i < 10; ++i) {
-        ::milvus::grpc::RowRecord *grpc_record = request.add_row_record_array();
+        ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
         for (size_t j = 0; j < 10; j++) {
             grpc_record->add_vector_data(record_array[i][j]);
         }
@@ -431,12 +431,12 @@ class DummyTask : public milvus::server::grpc::GrpcBaseTask {
     }
 
     static milvus::server::grpc::BaseTaskPtr
-    Create(std::string &dummy) {
+    Create(std::string& dummy) {
         return std::shared_ptr<milvus::server::grpc::GrpcBaseTask>(new DummyTask(dummy));
     }
 
  public:
-    explicit DummyTask(std::string &dummy) : GrpcBaseTask(dummy) {
+    explicit DummyTask(std::string& dummy) : GrpcBaseTask(dummy) {
     }
 };
 

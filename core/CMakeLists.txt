@@ -32,15 +32,19 @@ string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
 message(STATUS "Build time = ${BUILD_TIME}")
 
 MACRO (GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
-    execute_process(COMMAND "git" symbolic-ref --short HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    if(GIT_BRANCH_NAME STREQUAL "")
+        execute_process(COMMAND "git" symbolic-ref --short -q HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    endif()
 ENDMACRO (GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
+message(STATUS "GIT_BRANCH_NAME = ${GIT_BRANCH_NAME}")
 if(NOT GIT_BRANCH_NAME STREQUAL "")
     string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
 endif()
 
-set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
+set(MILVUS_VERSION "0.5.1")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
 
 find_package(ClangTools)
@@ -71,7 +75,7 @@ if(MILVUS_VERSION_MAJOR STREQUAL ""
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h)
 
 message(STATUS "Milvus version: "
         "${MILVUS_VERSION_MAJOR}.${MILVUS_VERSION_MINOR}.${MILVUS_VERSION_PATCH} "

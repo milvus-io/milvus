@@ -21,8 +21,8 @@
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(milvus::scheduler::JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors)
-    : Job(id, JobType::SEARCH), topk_(topk), nq_(nq), nprobe_(nprobe), vectors_(vectors) {
+SearchJob::SearchJob(uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors)
+    : Job(JobType::SEARCH), topk_(topk), nq_(nq), nprobe_(nprobe), vectors_(vectors) {
 }
 
 bool
@@ -49,18 +49,38 @@ void
 SearchJob::SearchDone(size_t index_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     index_files_.erase(index_id);
-    cv_.notify_all();
+    if (index_files_.empty()) {
+        cv_.notify_all();
+    }
+
     SERVER_LOG_DEBUG << "SearchJob " << id() << " finish index file: " << index_id;
 }
 
-ResultSet&
-SearchJob::GetResult() {
-    return result_;
+ResultIds&
+SearchJob::GetResultIds() {
+    return result_ids_;
+}
+
+ResultDistances&
+SearchJob::GetResultDistances() {
+    return result_distances_;
 }
 
 Status&
 SearchJob::GetStatus() {
     return status_;
+}
+
+json
+SearchJob::Dump() const {
+    json ret{
+        {"topk", topk_},
+        {"nq", nq_},
+        {"nprobe", nprobe_},
+    };
+    auto base = Job::Dump();
+    ret.insert(base.begin(), base.end());
+    return ret;
 }
 
 }  // namespace scheduler

@@ -136,7 +136,7 @@ DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
 
         // scheduler will determine when to delete table files
         auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
-        scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(0, table_id, meta_ptr_, nres);
+        scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(table_id, meta_ptr_, nres);
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitAndDelete();
     } else {
@@ -336,20 +336,20 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-              QueryResults& results) {
+              ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result = Query(table_id, k, nq, nprobe, vectors, dates, results);
+    Status result = Query(table_id, k, nq, nprobe, vectors, dates, result_ids, result_distances);
 
     return result;
 }
 
 Status
 DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-              const meta::DatesT& dates, QueryResults& results) {
+              const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -372,14 +372,15 @@ DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t npr
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(table_id, file_id_array, k, nq, nprobe, vectors, results);
+    status = QueryAsync(table_id, file_id_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
     return status;
 }
 
 Status
 DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-              uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+              uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+              ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -413,7 +414,7 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(table_id, file_id_array, k, nq, nprobe, vectors, results);
+    status = QueryAsync(table_id, file_id_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
     return status;
 }
@@ -432,14 +433,14 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
-                   uint64_t nprobe, const float* vectors, QueryResults& results) {
+                   uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     server::CollectQueryMetrics metrics(nq);
 
     TimeRecorder rc("");
 
     // step 1: get files to search
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(0, k, nq, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(k, nq, nprobe, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -453,7 +454,8 @@ DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& fi
     }
 
     // step 3: construct results
-    results = job->GetResult();
+    result_ids = job->GetResultIds();
+    result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
 
     return Status::OK();
@@ -754,7 +756,7 @@ DBImpl::BackgroundBuildIndex() {
     Status status;
 
     if (!to_index_files.empty()) {
-        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
+        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
 
         // step 2: put build index task to scheduler
         for (auto& file : to_index_files) {

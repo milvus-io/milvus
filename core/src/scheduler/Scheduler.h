@@ -25,16 +25,18 @@
 #include <unordered_map>
 
 #include "ResourceMgr.h"
+#include "interface/interfaces.h"
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxyu): refactor, not friendly to unittest, logical in framework code
-class Scheduler {
+class Scheduler : public interface::dumpable {
  public:
-    explicit Scheduler(ResourceMgrWPtr res_mgr);
+    explicit Scheduler(ResourceMgrPtr res_mgr);
+
+    ~Scheduler();
 
     Scheduler(const Scheduler&) = delete;
     Scheduler(Scheduler&&) = delete;
@@ -57,11 +59,8 @@ class Scheduler {
     void
     PostEvent(const EventPtr& event);
 
-    /*
-     * Dump as string;
-     */
-    std::string
-    Dump();
+    json
+    Dump() const override;
 
  private:
     /******** Events ********/
@@ -121,7 +120,7 @@ class Scheduler {
 
     std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
 
-    ResourceMgrWPtr res_mgr_;
+    ResourceMgrPtr res_mgr_;
     std::queue<EventPtr> event_queue_;
     std::thread worker_thread_;
     std::mutex event_mutex_;
