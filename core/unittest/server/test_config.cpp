@@ -123,6 +123,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     s = config.LoadConfigFile(config_path + INVALID_CONFIG_FILE);
     ASSERT_FALSE(s.ok());
+    s = config.LoadConfigFile(config_path + "dummy.yaml");
+    ASSERT_FALSE(s.ok());
 
     /* server config */
     s = config.SetServerConfigAddress("0.0.0");
@@ -167,7 +169,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     s = config.SetDBConfigInsertBufferSize("a");
     ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigInsertBufferSize("-1");
+    s = config.SetDBConfigInsertBufferSize("0");
     ASSERT_FALSE(s.ok());
     s = config.SetDBConfigInsertBufferSize("2048");
     ASSERT_FALSE(s.ok());
@@ -185,7 +187,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     /* cache config */
     s = config.SetCacheConfigCpuCacheCapacity("a");
     ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheCapacity("-1");
+    s = config.SetCacheConfigCpuCacheCapacity("0");
     ASSERT_FALSE(s.ok());
     s = config.SetCacheConfigCpuCacheCapacity("2048");
     ASSERT_FALSE(s.ok());
@@ -214,7 +216,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     s = config.SetEngineConfigOmpThreadNum("a");
     ASSERT_FALSE(s.ok());
-    s = config.SetEngineConfigOmpThreadNum("-1");
+    s = config.SetEngineConfigOmpThreadNum("10000");
     ASSERT_FALSE(s.ok());
 
     s = config.SetEngineConfigGpuSearchThreshold("-1");
