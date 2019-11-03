@@ -401,8 +401,7 @@ Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
-                      "server_config.deploy_mode is not one of "
-                      "single, cluster_readonly, and cluster_writable.");
+                      "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
     }
     return Status::OK();
 }
