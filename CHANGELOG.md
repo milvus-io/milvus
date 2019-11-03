@@ -29,6 +29,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#149 - Improve large query optimizer pass
 - \#156 - Not return error when search_resources and index_build_device set cpu
 - \#159 - Change the configuration name from 'use_gpu_threshold' to 'gpu_search_threshold'
+- \#168 - Improve result reduce
+- \#175 - add invalid config unittest
 
 ## Task
 
