@@ -17,7 +17,7 @@
 
 ## What is Milvus
 
-Milvus is an open source similarity search engine for massive feature vectors. Designed with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
+Milvus is the world's fastest similarity search engine for massive feature vectors. Designed with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
 Milvus provides stable Python, Java and C++ APIs.
 
