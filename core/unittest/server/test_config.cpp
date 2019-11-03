@@ -229,3 +229,4 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetResourceConfigIndexBuildDevice("gpu16");
     ASSERT_FALSE(s.ok());
 }
+
