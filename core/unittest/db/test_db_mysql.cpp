@@ -81,7 +81,8 @@ TEST_F(MySqlDBTest, DB_TEST) {
     ASSERT_EQ(target_ids.size(), qb);
 
     std::thread search([&]() {
-        milvus::engine::QueryResults results;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(5));
 
@@ -96,25 +97,25 @@ TEST_F(MySqlDBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
+            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
-            for (auto k = 0; k < qb; ++k) {
+            for (auto i = 0; i < qb; ++i) {
 //                std::cout << results[k][0].first << " " << target_ids[k] << std::endl;
 //                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 bool exists = false;
-                for (auto &result : results[k]) {
-                    if (result.first == target_ids[k]) {
+                for (auto t = 0; t < k; t++) {
+                    if (result_ids[i * k + t] == target_ids[i]) {
                         exists = true;
                     }
                 }
                 ASSERT_TRUE(exists);
                 ss.str("");
-                ss << "Result [" << k << "]:";
-                for (auto result : results[k]) {
-                    ss << result.first << " ";
+                ss << "Result [" << i << "]:";
+                for (auto t = 0; t < k; t++) {
+                    ss << result_ids[i * k + t] << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }
@@ -188,8 +189,9 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
 
     sleep(2); // wait until build index finish
 
-    milvus::engine::QueryResults results;
-    stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+    stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
 }
 
