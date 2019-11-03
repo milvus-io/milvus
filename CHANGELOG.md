@@ -2,7 +2,18 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# Milvus 0.5.1 (TODO)
+# Milvus 0.5.2 (TODO)
+
+## Bug
+
+## Feature
+
+## Improvement
+
+## Task
+- \#181 Update CHANGELOGS.md and milvus version
+
+# Milvus 0.5.1 (2019-11-04)
 
 ## Bug
 - \#134 - JFrog cache error
