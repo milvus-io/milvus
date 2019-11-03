@@ -5,10 +5,33 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.1 (TODO)
 
 ## Bug
-## Improvement
-- \#64 - Improvement dump function in scheduler
+- \#134 - JFrog cache error
+- \#161 - Search IVFSQHybrid crash on gpu
+- \#169 - IVF_FLAT search out of memory
 
 ## Feature
+- \#90 - The server start error messages could be improved to enhance user experience
+- \#104 - test_scheduler core dump
+- \#115 - Using new structure for tasktable
+- \#139 - New config option use_gpu_threshold
+- \#146 - Add only GPU and only CPU version for IVF_SQ8 and IVF_FLAT
+- \#164 - Add CPU version for building index
+
+## Improvement
+- \#64 - Improvement dump function in scheduler
+- \#80 - Print version information into log during server start
+- \#82 - Move easyloggingpp into "external" directory
+- \#92 - Speed up CMake build process
+- \#96 - Remove .a file in milvus/lib for docker-version
+- \#118 - Using shared_ptr instead of weak_ptr to avoid performance loss
+- \#122 - Add unique id for Job
+- \#130 - Set task state MOVED after resource copy it completed
+- \#149 - Improve large query optimizer pass
+- \#156 - Not return error when search_resources and index_build_device set cpu
+- \#159 - Change the configuration name from 'use_gpu_threshold' to 'gpu_search_threshold'
+- \#168 - Improve result reduce
+- \#175 - add invalid config unittest
+
 ## Task
 
 # Milvus 0.5.0 (2019-10-21)

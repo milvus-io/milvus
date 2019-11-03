@@ -55,8 +55,8 @@ load_simple_config() {
     // get resources
     auto gpu_ids = get_gpu_pool();
 
-    int32_t build_gpu_id;
-    config.GetResourceConfigIndexBuildDevice(build_gpu_id);
+    int32_t index_build_device_id;
+    config.GetResourceConfigIndexBuildDevice(index_build_device_id);
 
     // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
@@ -70,91 +70,21 @@ load_simple_config() {
     for (auto& gpu_id : gpu_ids) {
         ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
         ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
-        if (build_gpu_id == gpu_id) {
+        if (index_build_device_id == gpu_id) {
             find_build_gpu_id = true;
         }
     }
 
-    if (not find_build_gpu_id) {
+    if (not find_build_gpu_id && index_build_device_id != server::CPU_DEVICE_ID) {
         ResMgrInst::GetInstance()->Add(
-            ResourceFactory::Create(std::to_string(build_gpu_id), "GPU", build_gpu_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(build_gpu_id), pcie);
+            ResourceFactory::Create(std::to_string(index_build_device_id), "GPU", index_build_device_id, true, true));
+        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(index_build_device_id), pcie);
     }
-}
-
-void
-load_advance_config() {
-    //    try {
-    //        server::ConfigNode &config = server::Config::GetInstance().GetConfig(server::CONFIG_RESOURCE);
-    //
-    //        if (config.GetChildren().empty()) throw "resource_config null exception";
-    //
-    //        auto resources = config.GetChild(server::CONFIG_RESOURCES).GetChildren();
-    //
-    //        if (resources.empty()) throw "Children of resource_config null exception";
-    //
-    //        for (auto &resource : resources) {
-    //            auto &resname = resource.first;
-    //            auto &resconf = resource.second;
-    //            auto type = resconf.GetValue(server::CONFIG_RESOURCE_TYPE);
-    ////        auto memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_MEMORY);
-    //            auto device_id = resconf.GetInt64Value(server::CONFIG_RESOURCE_DEVICE_ID);
-    ////            auto enable_loader = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_LOADER);
-    //            auto enable_loader = true;
-    //            auto enable_executor = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_EXECUTOR);
-    //            auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY);
-    //            auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
-    //            auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM);
-    //
-    //            auto res = ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
-    //                                                                              type,
-    //                                                                              device_id,
-    //                                                                              enable_loader,
-    //                                                                              enable_executor));
-    //
-    //            if (res.lock()->type() == ResourceType::GPU) {
-    //                auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY, 300);
-    //                auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY, 300);
-    //                auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM, 2);
-    //                pinned_memory = 1024 * 1024 * pinned_memory;
-    //                temp_memory = 1024 * 1024 * temp_memory;
-    //                knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id,
-    //                                                                        pinned_memory,
-    //                                                                        temp_memory,
-    //                                                                        resource_num);
-    //            }
-    //        }
-    //
-    //        knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
-    //
-    //        auto connections = config.GetChild(server::CONFIG_RESOURCE_CONNECTIONS).GetChildren();
-    //        if (connections.empty()) throw "connections config null exception";
-    //        for (auto &conn : connections) {
-    //            auto &connect_name = conn.first;
-    //            auto &connect_conf = conn.second;
-    //            auto connect_speed = connect_conf.GetInt64Value(server::CONFIG_SPEED_CONNECTIONS);
-    //            auto connect_endpoint = connect_conf.GetValue(server::CONFIG_ENDPOINT_CONNECTIONS);
-    //
-    //            std::string delimiter = "===";
-    //            std::string left = connect_endpoint.substr(0, connect_endpoint.find(delimiter));
-    //            std::string right = connect_endpoint.substr(connect_endpoint.find(delimiter) + 3,
-    //                                                        connect_endpoint.length());
-    //
-    //            auto connection = Connection(connect_name, connect_speed);
-    //            ResMgrInst::GetInstance()->Connect(left, right, connection);
-    //        }
-    //    } catch (const char *msg) {
-    //        SERVER_LOG_ERROR << msg;
-    //        // TODO(wxyu): throw exception instead
-    //        exit(-1);
-    ////        throw std::exception();
-    //    }
 }
 
 void
 StartSchedulerService() {
     load_simple_config();
-    //    load_advance_config();
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
     JobMgrInst::GetInstance()->Start();

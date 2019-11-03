@@ -54,7 +54,7 @@ class TestSearchBase:
     """
     @pytest.fixture(
         scope="function",
-        params=[1, 99, 101, 1024, 2048, 2049]
+        params=[1, 99, 1024, 2048, 2049]
     )
     def get_top_k(self, request):
         yield request.param
@@ -220,7 +220,6 @@ class TestSearchBase:
         scope="function",
         params=[
             (get_last_day(2), get_last_day(1)),
-            (get_last_day(2), get_current_day()),
             (get_next_day(1), get_next_day(2))
         ]
     )
@@ -482,8 +481,9 @@ class TestSearchBase:
 """
 
 class TestSearchParamsInvalid(object):
-    index_params = random.choice(gen_index_params())
-    logging.getLogger().info(index_params)
+    nlist = 16384
+    index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+    logging.getLogger().info(index_param)
 
     def init_data(self, connect, table, nb=100):
         '''
@@ -528,7 +528,7 @@ class TestSearchParamsInvalid(object):
     def get_top_k(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_search_with_invalid_top_k(self, connect, table, get_top_k):
         '''
         target: test search fuction, with the wrong top_k
@@ -539,9 +539,12 @@ class TestSearchParamsInvalid(object):
         logging.getLogger().info(top_k)
         nprobe = 1
         query_vecs = gen_vectors(1, dim)
-        with pytest.raises(Exception) as e:
+        if isinstance(top_k, int):
             status, result = connect.search_vectors(table, top_k, nprobe, query_vecs)
-        res = connect.server_version()
+            assert not status.OK()
+        else:
+            with pytest.raises(Exception) as e:
+                status, result = connect.search_vectors(table, top_k, nprobe, query_vecs)
 
     @pytest.mark.level(2)
     def test_search_with_invalid_top_k_ip(self, connect, ip_table, get_top_k):
@@ -554,10 +557,12 @@ class TestSearchParamsInvalid(object):
         logging.getLogger().info(top_k)
         nprobe = 1
         query_vecs = gen_vectors(1, dim)
-        with pytest.raises(Exception) as e:
+        if isinstance(top_k, int):
             status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
-        res = connect.server_version()
-
+            assert not status.OK()
+        else:
+            with pytest.raises(Exception) as e:
+                status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
     """
     Test search table with invalid nprobe
     """
@@ -568,7 +573,7 @@ class TestSearchParamsInvalid(object):
     def get_nprobes(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_search_with_invalid_nrpobe(self, connect, table, get_nprobes):
         '''
         target: test search fuction, with the wrong top_k
@@ -579,7 +584,7 @@ class TestSearchParamsInvalid(object):
         nprobe = get_nprobes
         logging.getLogger().info(nprobe)
         query_vecs = gen_vectors(1, dim)
-        if isinstance(nprobe, int) and nprobe > 0:
+        if isinstance(nprobe, int):
             status, result = connect.search_vectors(table, top_k, nprobe, query_vecs)
             assert not status.OK()
         else:
@@ -597,7 +602,7 @@ class TestSearchParamsInvalid(object):
         nprobe = get_nprobes
         logging.getLogger().info(nprobe)
         query_vecs = gen_vectors(1, dim)
-        if isinstance(nprobe, int) and nprobe > 0:
+        if isinstance(nprobe, int):
             status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
             assert not status.OK()
         else:
@@ -614,7 +619,7 @@ class TestSearchParamsInvalid(object):
     def get_query_ranges(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_search_flat_with_invalid_query_range(self, connect, table, get_query_ranges):
         '''
         target: test search fuction, with the wrong query_range

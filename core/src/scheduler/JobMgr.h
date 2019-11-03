@@ -28,13 +28,14 @@
 #include <vector>
 
 #include "ResourceMgr.h"
+#include "interface/interfaces.h"
 #include "job/Job.h"
 #include "task/Task.h"
 
 namespace milvus {
 namespace scheduler {
 
-class JobMgr {
+class JobMgr : public interface::dumpable {
  public:
     explicit JobMgr(ResourceMgrPtr res_mgr);
 
@@ -43,6 +44,9 @@ class JobMgr {
 
     void
     Stop();
+
+    json
+    Dump() const override;
 
  public:
     void

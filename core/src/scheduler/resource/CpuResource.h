@@ -28,11 +28,6 @@ class CpuResource : public Resource {
  public:
     explicit CpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
 
-    inline std::string
-    Dump() const override {
-        return "<CpuResource, name=" + name_ + ">";
-    }
-
     friend std::ostream&
     operator<<(std::ostream& out, const CpuResource& resource);
 

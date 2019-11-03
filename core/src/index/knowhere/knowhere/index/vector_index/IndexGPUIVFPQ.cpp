@@ -16,8 +16,10 @@
 // under the License.
 
 #include <faiss/IndexIVFPQ.h>
-#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
+#include <faiss/index_factory.h>
+
 #include <memory>
 
 #include "knowhere/adapter/VectorAdapter.h"

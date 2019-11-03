@@ -26,7 +26,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 
-constexpr int DEVICEID = 0;
+int DEVICEID = 0;
 constexpr int64_t DIM = 128;
 constexpr int64_t NB = 10000;
 constexpr int64_t NQ = 10;

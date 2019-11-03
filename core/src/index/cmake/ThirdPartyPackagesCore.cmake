@@ -244,11 +244,14 @@ if(CUSTOMIZATION)
         # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
         # set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
         # set(FAISS_MD5 "c89ea8e655f5cdf58f42486f13614714") # commit-id 9c28a1cbb88f41fa03b03d7204106201ad33276b branch-0.2.1
-        set(FAISS_MD5 "87fdd86351ffcaf3f80dc26ade63c44b") # commit-id 841a156e67e8e22cd8088e1b58c00afbf2efc30b branch-0.2.1
+        # set(FAISS_MD5 "87fdd86351ffcaf3f80dc26ade63c44b") # commit-id 841a156e67e8e22cd8088e1b58c00afbf2efc30b branch-0.2.1
+        # set(FAISS_MD5 "f3b2ce3364c3fa7febd3aa7fdd0fe380") # commit-id 694e03458e6b69ce8a62502f71f69a614af5af8f branch-0.3.0
+        # set(FAISS_MD5 "bb30722c22390ce5f6759ccb216c1b2a") # commit-id d324db297475286afe107847c7fb7a0f9dc7e90e branch-0.3.0
+        set(FAISS_MD5 "2293cdb209c3718e3b19f3edae8b32b3") # commit-id a13c1205dc52977a9ad3b33a14efa958604a8bff branch-0.3.0
     endif()
 else()
-    set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/v1.5.3.tar.gz")
-    set(FAISS_MD5 "0bc12737b23def156f6a1eb782050135")
+    set(FAISS_SOURCE_URL "https://github.com/milvus-io/faiss/archive/1.6.0.tar.gz")
+    set(FAISS_MD5 "eb96d84f98b078a9eec04a796f5c792e")
 endif()
 message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
 
@@ -299,12 +302,29 @@ macro(build_arrow)
             ${EP_COMMON_CMAKE_ARGS}
             -DARROW_BUILD_STATIC=ON
             -DARROW_BUILD_SHARED=OFF
-            -DARROW_PARQUET=OFF
             -DARROW_USE_GLOG=OFF
             -DCMAKE_INSTALL_PREFIX=${ARROW_PREFIX}
-            "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
+            -DARROW_CUDA=OFF
+            -DARROW_FLIGHT=OFF
+            -DARROW_GANDIVA=OFF
+            -DARROW_GANDIVA_JAVA=OFF
+            -DARROW_HDFS=OFF
+            -DARROW_HIVESERVER2=OFF
+            -DARROW_ORC=OFF
+            -DARROW_PARQUET=OFF
+            -DARROW_PLASMA=OFF
+            -DARROW_PLASMA_JAVA_CLIENT=OFF
+            -DARROW_PYTHON=OFF
+            -DARROW_WITH_BZ2=OFF
+            -DARROW_WITH_ZLIB=OFF
+            -DARROW_WITH_LZ4=OFF
+            -DARROW_WITH_SNAPPY=OFF
+            -DARROW_WITH_ZSTD=OFF
+            -DARROW_WITH_BROTLI=OFF
             -DCMAKE_BUILD_TYPE=Release
-            -DARROW_DEPENDENCY_SOURCE=BUNDLED) #Build all arrow dependencies from source instead of calling find_package first
+            -DARROW_DEPENDENCY_SOURCE=BUNDLED #Build all arrow dependencies from source instead of calling find_package first
+            -DBOOST_SOURCE=AUTO #try to find BOOST in the system default locations and build from source if not found
+            )
 
     
     if(USE_JFROG_CACHE STREQUAL "ON")

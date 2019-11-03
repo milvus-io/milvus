@@ -16,8 +16,8 @@
 // under the License.
 
 #include "sdk/grpc/ClientProxy.h"
-#include "../../../version.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "src/version.h"
 
 #include <memory>
 #include <string>

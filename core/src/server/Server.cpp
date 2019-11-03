@@ -25,6 +25,7 @@
 #include "server/DBWrapper.h"
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "src/version.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
@@ -179,6 +180,9 @@ Server::Start() {
         tzset();
 
         InitLog(log_config_file_);
+
+        // print version information
+        SERVER_LOG_INFO << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
 
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();

@@ -20,19 +20,12 @@
 #include <iostream>
 #include <thread>
 
-#include <faiss/AutoTune.h>
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/IndexIVFPQ.h"
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #include "unittest/Helper.h"
@@ -51,6 +44,9 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
         ParameterType parameter_type;
         std::tie(index_type, parameter_type) = GetParam();
         // Init_with_default();
+        //        nb = 1000000;
+        //        nq = 1000;
+        //        k = 1000;
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type);
@@ -59,16 +55,6 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
     void
     TearDown() override {
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
-    }
-
-    knowhere::VectorIndexPtr
-    ChooseTodo() {
-        std::vector<std::string> gpu_idx{"GPUIVFSQ"};
-        auto finder = std::find(gpu_idx.cbegin(), gpu_idx.cend(), index_type);
-        if (finder != gpu_idx.cend()) {
-            return knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, knowhere::Config());
-        }
-        return index_;
     }
 
  protected:
@@ -100,8 +86,7 @@ TEST_P(IVFTest, ivf_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
 
-    auto new_idx = ChooseTodo();
-    auto result = new_idx->Search(query_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 }
@@ -134,8 +119,7 @@ TEST_P(IVFTest, ivf_serialize) {
 
         index_->set_index_model(model);
         index_->Add(base_dataset, conf);
-        auto new_idx = ChooseTodo();
-        auto result = new_idx->Search(query_dataset, conf);
+        auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
     }
 
@@ -159,8 +143,7 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
-        auto new_idx = ChooseTodo();
-        auto result = new_idx->Search(query_dataset, conf);
+        auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
     }
 }
@@ -176,8 +159,7 @@ TEST_P(IVFTest, clone_test) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto new_idx = ChooseTodo();
-    auto result = new_idx->Search(query_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
@@ -211,12 +193,6 @@ TEST_P(IVFTest, clone_test) {
     //    }
 
     {
-        if (index_type == "IVFSQHybrid") {
-            return;
-        }
-    }
-
-    {
         // copy from gpu to cpu
         std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
@@ -235,6 +211,10 @@ TEST_P(IVFTest, clone_test) {
                 },
                 knowhere::KnowhereException);
         }
+    }
+
+    if (index_type == "IVFSQHybrid") {
+        return;
     }
 
     {
@@ -277,8 +257,7 @@ TEST_P(IVFTest, gpu_seal_test) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto new_idx = ChooseTodo();
-    auto result = new_idx->Search(query_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
 
     auto cpu_idx = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
