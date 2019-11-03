@@ -44,7 +44,7 @@ if(NOT GIT_BRANCH_NAME STREQUAL "")
     string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
 endif()
 
-set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
+set(MILVUS_VERSION "0.5.1")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
 
 find_package(ClangTools)
