@@ -29,7 +29,7 @@ namespace scheduler {
 
 class LoadCompletedEvent : public Event {
  public:
-    LoadCompletedEvent(std::weak_ptr<Resource> resource, TaskTableItemPtr task_table_item)
+    LoadCompletedEvent(std::shared_ptr<Resource> resource, TaskTableItemPtr task_table_item)
         : Event(EventType::LOAD_COMPLETED, std::move(resource)), task_table_item_(std::move(task_table_item)) {
     }
 

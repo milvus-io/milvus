@@ -25,13 +25,14 @@
 #include <utility>
 #include <vector>
 
+#include "interface/interfaces.h"
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-class ResourceMgr {
+class ResourceMgr : public interface::dumpable {
  public:
     ResourceMgr() = default;
 
@@ -74,7 +75,6 @@ class ResourceMgr {
         return gpu_resources_;
     }
 
-    // TODO(wxyu): why return shared pointer
     inline std::vector<ResourcePtr>
     GetAllResources() {
         return resources_;
@@ -103,8 +103,8 @@ class ResourceMgr {
 
  public:
     /******** Utility Functions ********/
-    std::string
-    Dump();
+    json
+    Dump() const override;
 
     std::string
     DumpTaskTables();

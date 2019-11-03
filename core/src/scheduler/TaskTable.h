@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "CircleQueue.h"
 #include "event/Event.h"
 #include "interface/interfaces.h"
 #include "task/SearchTask.h"
@@ -54,11 +55,15 @@ struct TaskTimestamp : public interface::dumpable {
     uint64_t finish = 0;
 
     json
-    Dump() override;
+    Dump() const override;
 };
 
+struct TaskTableItem;
+using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
+
 struct TaskTableItem : public interface::dumpable {
-    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {
+    explicit TaskTableItem(TaskTableItemPtr f = nullptr)
+        : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex(), from(std::move(f)) {
     }
 
     TaskTableItem(const TaskTableItem& src) = delete;
@@ -69,6 +74,7 @@ struct TaskTableItem : public interface::dumpable {
     TaskTableItemState state;  // the state;
     std::mutex mutex;
     TaskTimestamp timestamp;
+    TaskTableItemPtr from;
 
     bool
     IsFinish();
@@ -92,18 +98,22 @@ struct TaskTableItem : public interface::dumpable {
     Moved();
 
     json
-    Dump() override;
+    Dump() const override;
 };
-
-using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 
 class TaskTable : public interface::dumpable {
  public:
-    TaskTable() = default;
+    TaskTable() : table_(1ULL << 16ULL) {
+    }
 
     TaskTable(const TaskTable&) = delete;
     TaskTable(TaskTable&&) = delete;
 
+ public:
+    json
+    Dump() const override;
+
+ public:
     inline void
     RegisterSubscriber(std::function<void(void)> subscriber) {
         subscriber_ = std::move(subscriber);
@@ -113,67 +123,36 @@ class TaskTable : public interface::dumpable {
      * Put one task;
      */
     void
-    Put(TaskPtr task);
+    Put(TaskPtr task, TaskTableItemPtr from = nullptr);
 
-    /*
-     * Put tasks back of task table;
-     * Called by DBImpl;
-     */
-    void
-    Put(std::vector<TaskPtr>& tasks);
+    size_t
+    TaskToExecute();
 
-    /*
-     * Return task table item reference;
-     */
-    TaskTableItemPtr
-    Get(uint64_t index);
-
-    /*
-     * TODO(wxyu): BIG GC
-     * Remove sequence task which is DONE or MOVED from front;
-     * Called by ?
-     */
-    //    void
-    //    Clear();
-
-    /*
-     * Return true if task table empty, otherwise false;
-     */
-    inline bool
-    Empty() {
-        return table_.empty();
-    }
-
-    /*
-     * Return size of task table;
-     */
-    inline size_t
-    Size() {
-        return table_.size();
-    }
-
- public:
-    TaskTableItemPtr& operator[](uint64_t index) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return table_[index];
-    }
-
-    std::deque<TaskTableItemPtr>::iterator
-    begin() {
-        return table_.begin();
-    }
-
-    std::deque<TaskTableItemPtr>::iterator
-    end() {
-        return table_.end();
-    }
-
- public:
     std::vector<uint64_t>
     PickToLoad(uint64_t limit);
 
     std::vector<uint64_t>
     PickToExecute(uint64_t limit);
+
+ public:
+    inline const TaskTableItemPtr& operator[](uint64_t index) {
+        return table_[index];
+    }
+
+    inline const TaskTableItemPtr&
+    at(uint64_t index) {
+        return table_[index];
+    }
+
+    inline size_t
+    capacity() {
+        return table_.capacity();
+    }
+
+    inline size_t
+    size() {
+        return table_.size();
+    }
 
  public:
     /******** Action ********/
@@ -240,17 +219,9 @@ class TaskTable : public interface::dumpable {
         return table_[index]->Moved();
     }
 
- public:
-    /*
-     * Dump;
-     */
-    json
-    Dump() override;
-
  private:
     std::uint64_t id_ = 0;
-    mutable std::mutex mutex_;
-    std::deque<TaskTableItemPtr> table_;
+    CircleQueue<TaskTableItemPtr> table_;
     std::function<void(void)> subscriber_ = nullptr;
 
     // cache last finish avoid Pick task from begin always

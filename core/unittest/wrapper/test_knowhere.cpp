@@ -16,20 +16,16 @@
 // under the License.
 
 #include "wrapper/KnowhereResource.h"
+#include "wrapper/utils.h"
 #include "server/Config.h"
 
 #include <gtest/gtest.h>
 
-namespace {
-
-static const char* CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
-static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
-
-} // namespace
-
-TEST(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+TEST_F(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
+    std::string config_path(CONFIG_PATH);
+    config_path += CONFIG_FILE;
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(config_path);
     ASSERT_TRUE(s.ok());
 
     milvus::engine::KnowhereResource::Initialize();

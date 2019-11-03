@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "Job.h"
+#include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 
 namespace milvus {
@@ -37,13 +38,13 @@ namespace scheduler {
 using engine::meta::TableFileSchemaPtr;
 
 using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
-using IdDistPair = std::pair<int64_t, double>;
-using Id2DistVec = std::vector<IdDistPair>;
-using ResultSet = std::vector<Id2DistVec>;
+
+using ResultIds = engine::ResultIds;
+using ResultDistances = engine::ResultDistances;
 
 class SearchJob : public Job {
  public:
-    SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
+    SearchJob(uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
 
  public:
     bool
@@ -55,11 +56,17 @@ class SearchJob : public Job {
     void
     SearchDone(size_t index_id);
 
-    ResultSet&
-    GetResult();
+    ResultIds&
+    GetResultIds();
+
+    ResultDistances&
+    GetResultDistances();
 
     Status&
     GetStatus();
+
+    json
+    Dump() const override;
 
  public:
     uint64_t
@@ -87,6 +94,11 @@ class SearchJob : public Job {
         return index_files_;
     }
 
+    std::mutex&
+    mutex() {
+        return mutex_;
+    }
+
  private:
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
@@ -96,7 +108,8 @@ class SearchJob : public Job {
 
     Id2IndexMap index_files_;
     // TODO: column-base better ?
-    ResultSet result_;
+    ResultIds result_ids_;
+    ResultDistances result_distances_;
     Status status_;
 
     std::mutex mutex_;

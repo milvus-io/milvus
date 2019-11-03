@@ -27,6 +27,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "scheduler/interface/interfaces.h"
+
 namespace milvus {
 namespace scheduler {
 
@@ -39,7 +41,7 @@ enum class JobType {
 
 using JobId = std::uint64_t;
 
-class Job {
+class Job : public interface::dumpable {
  public:
     inline JobId
     id() const {
@@ -51,12 +53,14 @@ class Job {
         return type_;
     }
 
+    json
+    Dump() const override;
+
  protected:
-    Job(JobId id, JobType type) : id_(id), type_(type) {
-    }
+    explicit Job(JobType type);
 
  private:
-    JobId id_;
+    JobId id_ = 0;
     JobType type_;
 };
 
