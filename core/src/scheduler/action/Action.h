@@ -28,19 +28,20 @@ namespace scheduler {
 class Action {
  public:
     static void
-    PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self);
+    PushTaskToNeighbourRandomly(TaskTableItemPtr task_item, const ResourcePtr& self);
 
     static void
-    PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self);
+    PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& self);
 
     static void
-    PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest);
+    PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest);
 
     static void
-    DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource, std::shared_ptr<LoadCompletedEvent> event);
+    DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
+                              std::shared_ptr<LoadCompletedEvent> event);
 
     static void
-    SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+    SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                         std::shared_ptr<LoadCompletedEvent> event);
 };
 

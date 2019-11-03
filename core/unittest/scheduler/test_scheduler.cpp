@@ -165,7 +165,7 @@ TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
     }
 
     sleep(3);
-    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
+    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().size(), NUM);
 }
 
 TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {

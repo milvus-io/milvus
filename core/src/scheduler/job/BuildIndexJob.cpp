@@ -23,8 +23,8 @@
 namespace milvus {
 namespace scheduler {
 
-BuildIndexJob::BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr, engine::DBOptions options)
-    : Job(id, JobType::BUILD), meta_ptr_(std::move(meta_ptr)), options_(std::move(options)) {
+BuildIndexJob::BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options)
+    : Job(JobType::BUILD), meta_ptr_(std::move(meta_ptr)), options_(std::move(options)) {
 }
 
 bool
@@ -50,8 +50,21 @@ void
 BuildIndexJob::BuildIndexDone(size_t to_index_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     to_index_files_.erase(to_index_id);
-    cv_.notify_all();
+    if (to_index_files_.empty()) {
+        cv_.notify_all();
+    }
+
     SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
+}
+
+json
+BuildIndexJob::Dump() const {
+    json ret{
+        {"number_of_to_index_file", to_index_files_.size()},
+    };
+    auto base = Job::Dump();
+    ret.insert(base.begin(), base.end());
+    return ret;
 }
 
 }  // namespace scheduler

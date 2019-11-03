@@ -32,6 +32,22 @@ operator<<(std::ostream& out, const Resource& resource) {
     return out;
 }
 
+std::string
+ToString(ResourceType type) {
+    switch (type) {
+        case ResourceType::DISK: {
+            return "DISK";
+        }
+        case ResourceType::CPU: {
+            return "CPU";
+        }
+        case ResourceType::GPU: {
+            return "GPU";
+        }
+        default: { return "UNKNOWN"; }
+    }
+}
+
 Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor)
     : name_(std::move(name)),
       type_(type),
@@ -89,14 +105,25 @@ Resource::WakeupExecutor() {
     exec_cv_.notify_one();
 }
 
+json
+Resource::Dump() const {
+    json ret{
+        {"device_id", device_id_},
+        {"name", name_},
+        {"type", ToString(type_)},
+        {"task_average_cost", TaskAvgCost()},
+        {"task_total_cost", total_cost_},
+        {"total_tasks", total_task_},
+        {"running", running_},
+        {"enable_loader", enable_loader_},
+        {"enable_executor", enable_executor_},
+    };
+    return ret;
+}
+
 uint64_t
 Resource::NumOfTaskToExec() {
-    uint64_t count = 0;
-    for (auto& task : task_table_) {
-        if (task->state == TaskTableItemState::LOADED)
-            ++count;
-    }
-    return count;
+    return task_table_.TaskToExecute();
 }
 
 TaskTableItemPtr
@@ -105,7 +132,7 @@ Resource::pick_task_load() {
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
-            return task_table_.Get(index);
+            return task_table_.at(index);
         // else try next
     }
     return nullptr;
@@ -123,7 +150,7 @@ Resource::pick_task_execute() {
         }
 
         if (task_table_.Execute(index)) {
-            return task_table_.Get(index);
+            return task_table_.at(index);
         }
         //        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
         //            if (task_table_.Get(index)->task->path().Current() == task_table_.Get(index)->task->path().Last()
@@ -153,6 +180,10 @@ Resource::loader_function() {
             }
             LoadFile(task_item->task);
             task_item->Loaded();
+            if (task_item->from) {
+                task_item->from->Moved();
+                task_item->from = nullptr;
+            }
             if (subscriber_) {
                 auto event = std::make_shared<LoadCompletedEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));

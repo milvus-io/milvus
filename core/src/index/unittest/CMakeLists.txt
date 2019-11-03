@@ -20,7 +20,7 @@ set(basic_libs
         )
 
 set(util_srcs
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
+        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
@@ -86,5 +86,6 @@ install(TARGETS test_gpuresource DESTINATION unittest)
 install(TARGETS test_customized_index DESTINATION unittest)
 
 #add_subdirectory(faiss_ori)
+#add_subdirectory(faiss_benchmark)
 add_subdirectory(test_nsg)
 

@@ -1,5 +1,16 @@
+#!/usr/bin/env groovy
+
+String cron_timezone = "TZ=Asia/Shanghai"
+String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
+cron_string =  BRANCH_NAME == "0.5.1" ? "H 1 * * * " : cron_string
+
 pipeline {
     agent none
+
+    triggers {
+        cron """${cron_timezone}
+            ${cron_string}"""
+    }
 
     options {
         timestamps()
@@ -7,7 +18,6 @@ pipeline {
 
     parameters{
         choice choices: ['Release', 'Debug'], description: '', name: 'BUILD_TYPE'
-        string defaultValue: 'cf1434e7-5a4b-4d25-82e8-88d667aef9e5', description: 'GIT CREDENTIALS ID', name: 'GIT_CREDENTIALS_ID', trim: true
         string defaultValue: 'registry.zilliz.com', description: 'DOCKER REGISTRY URL', name: 'DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
         string defaultValue: 'http://192.168.1.202/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
@@ -47,7 +57,7 @@ pipeline {
                             steps {
                                 container('milvus-build-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/build.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                     }
                                 }
                             }
@@ -56,7 +66,7 @@ pipeline {
                             steps {
                                 container('milvus-build-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/coverage.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                     }
                                 }
                             }
@@ -65,7 +75,7 @@ pipeline {
                             steps {
                                 container('milvus-build-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/package.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                     }
                                 }
                             }
@@ -87,7 +97,7 @@ pipeline {
                             steps {
                                 container('publish-images'){
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/publishImages.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
                                     }
                                 }
                             }
@@ -109,7 +119,7 @@ pipeline {
                             steps {
                                 container('milvus-test-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/deploySingle2Dev.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/deploySingle2Dev.groovy"
                                     }
                                 }
                             }
@@ -119,7 +129,12 @@ pipeline {
                             steps {
                                 container('milvus-test-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/singleDevTest.groovy"
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest) {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
+                                        } else {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                        }
                                     }
                                 }
                             }
@@ -129,7 +144,7 @@ pipeline {
                             steps {
                                 container('milvus-test-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/cleanupSingleDev.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                     }
                                 }
                             }
@@ -139,7 +154,7 @@ pipeline {
                         unsuccessful {
                             container('milvus-test-env') {
                                 script {
-                                    load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/cleanupSingleDev.groovy"
+                                    load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                 }
                             }
                         }
@@ -150,3 +165,9 @@ pipeline {
     }
 }
 
+boolean isTimeTriggeredBuild() {
+    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
+        return true
+    }
+    return false
+}
