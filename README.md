@@ -5,8 +5,8 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.0-orange)
-![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
+![Release](https://img.shields.io/badge/release-v0.5.1-orange)
+![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
 
 [中文版](README_CN.md) 
 
@@ -46,7 +46,7 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) for upcoming featu
 
 Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](CONTRIBUTING.md) for detailed contribution workflow. This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
 
-We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) to track issues and bugs. For general questions and public discussions, please join our community.
+We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issues and bugs. For general questions and public discussions, please join our community.
 
 ## Join our community
 
