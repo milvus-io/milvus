@@ -26,7 +26,7 @@ See the [Milvus install guide](https://www.milvus.io/docs/en/userguide/install_m
 
 To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/en/reference/milvus_config/).
 
-### Try your first Milvus program
+#### Try your first Milvus program
 
 Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/) or [Java example code](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples). 
 
