@@ -14,8 +14,8 @@ Milvus 旨在帮助用户实现海量非结构化数据的近似检索和分析�
 3. nvidia-docker run --rm -d -p 19530:19530 -v /tmp/milvus/db:/opt/milvus/db milvusdb/milvus:0.5.0-d102119-ede20b
 4. sudo chown -R $USER:$USER /tmp/milvus
 5. cp mishards/.env.example mishards/.env
-6
-7. 在python mishards/main.py #.env配置mishards监听19532端口
+6. 在python mishards/main.py #.env配置mishards监听19532端口
+7. make probe port=19532 #健康检查
 ```
 
 ### 容器启动实例
@@ -23,10 +23,12 @@ Milvus 旨在帮助用户实现海量非结构化数据的近似检索和分析�
 
 **启动**
 ```
+cd milvus/shards
 1. 安装docker-compose
 2. make build
 3. make deploy #监听19531端口
 4. make clean_deploy #清理服务
+5. make probe_deplopy #健康检查
 ```
 
 **打开Jaeger UI**
@@ -45,19 +47,21 @@ Milvus 旨在帮助用户实现海量非结构化数据的近似检索和分析�
 
 **步骤**
 ```
-1. cd milvus/shards/kubernetes_demo/
-2. ./start.sh allup
-3. watch -n 1 kubectl get pods -n milvus -o wide 查看所有pod状态，等待所有pod都处于Runing状态
-4. kubectl get service -n milvus 查看milvus-proxy-servers的EXTERNAL-IP和PORT, 这就是mishards集群的服务地址
+cd milvus/shards
+1. make deploy_cluster #启动集群
+2. make probe_cluster #健康检查
+3. make clean_cluster #关闭集群
 ```
 
 **扩容计算实例**
 ```
+cd milvus/shards/kubernetes_demo/
 ./start.sh scale-ro-server 2 扩容计算实例到2
 ```
 
 **扩容代理器实例**
 ```
+cd milvus/shards/kubernetes_demo/
 ./start.sh scale-proxy 2 扩容代理服务器实例到2
 ```
 
