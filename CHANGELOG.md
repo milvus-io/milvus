@@ -2,6 +2,17 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
+# Milvus 0.6.0 (TODO)
+
+## Bug
+
+## Feature
+
+## Improvement
+
+## Task
+
+
 # Milvus 0.5.2 (TODO)
 
 ## Bug
