@@ -14,7 +14,7 @@ clean_deploy:
 probe_deploy:
 	docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c "python all_in_one/probe_test.py"
 cluster:
-	cd kubernetes_demo;./start.sh baseup;./start.sh appup;cd -
+	cd kubernetes_demo;./start.sh baseup;sleep 10;./start.sh appup;cd -
 clean_cluster:
 	cd kubernetes_demo;./start.sh cleanup;cd -
 cluster_status:
