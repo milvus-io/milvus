@@ -705,7 +705,7 @@ CheckResource(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    if (s.compare(0, 3, "gpu")) {
+    if (s.compare(0, 3, "gpu") == 0) {
         int32_t gpu_index = std::stoi(s.substr(3));
         if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
             std::string msg = "Invalid search resource: " + value +
