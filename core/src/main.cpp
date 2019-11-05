@@ -32,7 +32,7 @@
 INITIALIZE_EASYLOGGINGPP
 
 void
-print_help(const std::string &app_name) {
+print_help(const std::string& app_name) {
     std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
     std::cout << "  Options:" << std::endl;
     std::cout << "   -h --help                 Print this help" << std::endl;
@@ -61,15 +61,15 @@ print_banner() {
 }
 
 int
-main(int argc, char *argv[]) {
+main(int argc, char* argv[]) {
     print_banner();
 
-    static struct option long_options[] = {{"conf_file",     required_argument, nullptr, 'c'},
+    static struct option long_options[] = {{"conf_file", required_argument, nullptr, 'c'},
                                            {"log_conf_file", required_argument, nullptr, 'l'},
-                                           {"help",          no_argument,       nullptr, 'h'},
-                                           {"daemon",        no_argument,       nullptr, 'd'},
-                                           {"pid_file",      required_argument, nullptr, 'p'},
-                                           {nullptr, 0,                         nullptr, 0}};
+                                           {"help", no_argument, nullptr, 'h'},
+                                           {"daemon", no_argument, nullptr, 'd'},
+                                           {"pid_file", required_argument, nullptr, 'p'},
+                                           {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
     int64_t start_daemonized = 0;
@@ -78,7 +78,7 @@ main(int argc, char *argv[]) {
     std::string pid_filename;
     std::string app_name = argv[0];
 
-    milvus::server::Server &server = milvus::server::Server::GetInstance();
+    milvus::server::Server& server = milvus::server::Server::GetInstance();
     milvus::Status s;
 
     if (argc < 2) {
@@ -90,21 +90,21 @@ main(int argc, char *argv[]) {
     while ((value = getopt_long(argc, argv, "c:l:p:dh", long_options, &option_index)) != -1) {
         switch (value) {
             case 'c': {
-                char *config_filename_ptr = strdup(optarg);
+                char* config_filename_ptr = strdup(optarg);
                 config_filename = config_filename_ptr;
                 free(config_filename_ptr);
                 std::cout << "Loading configuration from: " << config_filename << std::endl;
                 break;
             }
             case 'l': {
-                char *log_filename_ptr = strdup(optarg);
+                char* log_filename_ptr = strdup(optarg);
                 log_config_file = log_filename_ptr;
                 free(log_filename_ptr);
                 std::cout << "Initializing log config from: " << log_config_file << std::endl;
                 break;
             }
             case 'p': {
-                char *pid_filename_ptr = strdup(optarg);
+                char* pid_filename_ptr = strdup(optarg);
                 pid_filename = pid_filename_ptr;
                 free(pid_filename_ptr);
                 std::cout << pid_filename << std::endl;
@@ -147,7 +147,7 @@ main(int argc, char *argv[]) {
 
     return EXIT_SUCCESS;
 
-    FAIL:
+FAIL:
     std::cout << "Milvus server exit..." << std::endl;
     return EXIT_FAILURE;
 }

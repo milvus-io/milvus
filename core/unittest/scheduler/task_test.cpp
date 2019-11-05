@@ -15,11 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "scheduler/task/SearchTask.h"
-#include "scheduler/task/BuildIndexTask.h"
 #include <gtest/gtest.h>
-
+#include "scheduler/task/BuildIndexTask.h"
+#include "scheduler/task/SearchTask.h"
 
 namespace milvus {
 namespace scheduler {
@@ -34,7 +32,5 @@ TEST(TaskTest, INVALID_INDEX) {
     build_task->Execute();
 }
 
-} // namespace scheduler
-} // namespace milvus
-
-
+}  // namespace scheduler
+}  // namespace milvus

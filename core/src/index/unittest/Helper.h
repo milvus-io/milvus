@@ -39,7 +39,7 @@ constexpr int64_t TEMPMEM = 1024 * 1024 * 300;
 constexpr int64_t RESNUM = 2;
 
 knowhere::IVFIndexPtr
-IndexFactory(const std::string &type) {
+IndexFactory(const std::string& type) {
     if (type == "IVF") {
         return std::make_shared<knowhere::IVF>();
     } else if (type == "IVFPQ") {
@@ -67,15 +67,15 @@ enum class ParameterType {
 };
 
 class ParamGenerator {
-public:
-    static ParamGenerator &
+ public:
+    static ParamGenerator&
     GetInstance() {
         static ParamGenerator instance;
         return instance;
     }
 
     knowhere::Config
-    Gen(const ParameterType &type) {
+    Gen(const ParameterType& type) {
         if (type == ParameterType::ivf) {
             auto tempconf = std::make_shared<knowhere::IVFCfg>();
             tempconf->d = DIM;
@@ -113,7 +113,7 @@ public:
 #include <gtest/gtest.h>
 
 class TestGpuIndexBase : public ::testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
 #ifdef MILVUS_GPU_VERSION

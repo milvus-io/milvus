@@ -21,9 +21,9 @@
 #include <faiss/IndexIVF.h>
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
-#include <faiss/index_io.h>
-#include <faiss/index_factory.h>
 #include <faiss/clone_index.h>
+#include <faiss/index_factory.h>
+#include <faiss/index_io.h>
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuCloner.h>
@@ -240,7 +240,6 @@ IVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int6
 
 VectorIndexPtr
 IVF::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
-
 #ifdef MILVUS_GPU_VERSION
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {

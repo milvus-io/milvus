@@ -170,7 +170,6 @@ ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSc
 
 Status
 ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
-
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
@@ -192,7 +191,6 @@ ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
 
 Status
 ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
-
 #ifdef MILVUS_GPU_VERSION
 
     cudaDeviceProp deviceProp;

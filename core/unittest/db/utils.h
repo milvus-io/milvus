@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <gtest/gtest.h>
@@ -23,35 +22,42 @@
 #include <memory>
 
 #include "db/DB.h"
-#include "db/meta/SqliteMetaImpl.h"
 #include "db/meta/MySQLMetaImpl.h"
-#include "scheduler/SchedInst.h"
+#include "db/meta/SqliteMetaImpl.h"
 #include "scheduler/ResourceFactory.h"
+#include "scheduler/SchedInst.h"
 
 #define TIMING
 
 #ifdef TIMING
 #define INIT_TIMER auto start = std::chrono::high_resolution_clock::now();
-#define START_TIMER  start = std::chrono::high_resolution_clock::now();
-#define STOP_TIMER(name)  LOG(DEBUG) << "RUNTIME of " << name << ": " << \
-    std::chrono::duration_cast<std::chrono::milliseconds>( \
-            std::chrono::high_resolution_clock::now()-start).count() << " ms ";
+#define START_TIMER start = std::chrono::high_resolution_clock::now();
+#define STOP_TIMER(name)                                                                                            \
+    LOG(DEBUG) << "RUNTIME of " << name << ": "                                                                     \
+               << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
+                                                                        start)                                      \
+                      .count()                                                                                      \
+               << " ms ";
 #else
 #define INIT_TIMER
 #define START_TIMER
 #define STOP_TIMER(name)
 #endif
 
-static const char *CONFIG_PATH = "/tmp/milvus_test";
-static const char *CONFIG_FILE = "/server_config.yaml";
+static const char* CONFIG_PATH = "/tmp/milvus_test";
+static const char* CONFIG_FILE = "/server_config.yaml";
 
 class BaseTest : public ::testing::Test {
  protected:
-    void InitLog();
+    void
+    InitLog();
 
-    void SetUp() override;
-    void TearDown() override;
-    virtual milvus::engine::DBOptions GetOptions();
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+    virtual milvus::engine::DBOptions
+    GetOptions();
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -59,33 +65,38 @@ class DBTest : public BaseTest {
  protected:
     milvus::engine::DBPtr db_;
 
-    void SetUp() override;
-    void TearDown() override;
+    void
+    SetUp() override;
+    void
+    TearDown() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest2 : public DBTest {
  protected:
-    milvus::engine::DBOptions GetOptions() override;
+    milvus::engine::DBOptions
+    GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class EngineTest : public DBTest {
-};
+class EngineTest : public DBTest {};
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MetaTest : public BaseTest {
  protected:
     std::shared_ptr<milvus::engine::meta::SqliteMetaImpl> impl_;
 
-    void SetUp() override;
-    void TearDown() override;
+    void
+    SetUp() override;
+    void
+    TearDown() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MySqlDBTest : public DBTest {
  protected:
-    milvus::engine::DBOptions GetOptions() override;
+    milvus::engine::DBOptions
+    GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -93,15 +104,16 @@ class MySqlMetaTest : public BaseTest {
  protected:
     std::shared_ptr<milvus::engine::meta::MySQLMetaImpl> impl_;
 
-    void SetUp() override;
-    void TearDown() override;
-    milvus::engine::DBOptions GetOptions() override;
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+    milvus::engine::DBOptions
+    GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class MemManagerTest : public MetaTest {
-};
+class MemManagerTest : public MetaTest {};
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class MemManagerTest2 : public DBTest {
-};
+class MemManagerTest2 : public DBTest {};

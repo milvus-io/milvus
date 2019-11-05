@@ -15,21 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "utils/SignalUtil.h"
+#include "db/engine/ExecutionEngine.h"
+#include "utils/BlockingQueue.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
+#include "utils/LogUtil.h"
+#include "utils/SignalUtil.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
-#include "utils/BlockingQueue.h"
-#include "utils/LogUtil.h"
 #include "utils/ValidationUtil.h"
-#include "db/engine/ExecutionEngine.h"
 
-#include <thread>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <boost/filesystem.hpp>
+#include <thread>
 
 namespace {
 
@@ -40,7 +40,7 @@ CopyStatus(milvus::Status& st1, milvus::Status& st2) {
     st1 = st2;
 }
 
-} // namespace
+}  // namespace
 
 TEST(UtilTest, EXCEPTION_TEST) {
     std::string err_msg = "failed";
@@ -69,7 +69,7 @@ TEST(UtilTest, COMMON_TEST) {
     std::string path3 = path2 + "abcdef";
     milvus::Status status = milvus::server::CommonUtil::CreateDirectory(path3);
     ASSERT_TRUE(status.ok());
-    //test again
+    // test again
     status = milvus::server::CommonUtil::CreateDirectory(path3);
     ASSERT_TRUE(status.ok());
 
@@ -77,7 +77,7 @@ TEST(UtilTest, COMMON_TEST) {
 
     status = milvus::server::CommonUtil::DeleteDirectory(path1);
     ASSERT_TRUE(status.ok());
-    //test again
+    // test again
     status = milvus::server::CommonUtil::DeleteDirectory(path1);
     ASSERT_TRUE(status.ok());
 
@@ -181,7 +181,7 @@ TEST(UtilTest, LOG_TEST) {
 TEST(UtilTest, TIMERECORDER_TEST) {
     for (int64_t log_level = 0; log_level <= 6; log_level++) {
         if (log_level == 5) {
-            continue; //skip fatal
+            continue;  // skip fatal
         }
         milvus::TimeRecorder rc("time", log_level);
         rc.RecordSection("end");
@@ -282,9 +282,9 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
 #endif
         ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexType(i).code(), milvus::SERVER_SUCCESS);
     }
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexType(
-        (int)milvus::engine::EngineType::MAX_VALUE + 1).code(),
-              milvus::SERVER_INVALID_INDEX_TYPE);
+    ASSERT_EQ(
+        milvus::server::ValidationUtil::ValidateTableIndexType((int)milvus::engine::EngineType::MAX_VALUE + 1).code(),
+        milvus::SERVER_INVALID_INDEX_TYPE);
 
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexNlist(0).code(), milvus::SERVER_INVALID_INDEX_NLIST);
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexNlist(100).code(), milvus::SERVER_SUCCESS);
@@ -360,21 +360,11 @@ TEST(ValidationUtilTest, VALIDATE_DBURI_TEST) {
 TEST(UtilTest, ROLLOUTHANDLER_TEST) {
     std::string dir1 = "/tmp/milvus_test";
     std::string dir2 = "/tmp/milvus_test/log_test";
-    std::string filename[6] = {
-        "log_global.log",
-        "log_debug.log",
-        "log_warning.log",
-        "log_trace.log",
-        "log_error.log",
-        "log_fatal.log"};
+    std::string filename[6] = {"log_global.log", "log_debug.log", "log_warning.log",
+                               "log_trace.log",  "log_error.log", "log_fatal.log"};
 
-    el::Level list[6] = {
-        el::Level::Global,
-        el::Level::Debug,
-        el::Level::Warning,
-        el::Level::Trace,
-        el::Level::Error,
-        el::Level::Fatal};
+    el::Level list[6] = {el::Level::Global, el::Level::Debug, el::Level::Warning,
+                         el::Level::Trace,  el::Level::Error, el::Level::Fatal};
 
     mkdir(dir1.c_str(), S_IRWXU);
     mkdir(dir2.c_str(), S_IRWXU);

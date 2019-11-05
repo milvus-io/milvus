@@ -15,14 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
 #include <gtest/gtest-death-test.h>
+#include <gtest/gtest.h>
 
 #include "config/YamlConfigMgr.h"
-#include "utils/CommonUtil.h"
-#include "utils/ValidationUtil.h"
 #include "server/Config.h"
 #include "server/utils.h"
+#include "utils/CommonUtil.h"
+#include "utils/ValidationUtil.h"
 
 namespace {
 
@@ -30,7 +30,7 @@ static constexpr uint64_t KB = 1024;
 static constexpr uint64_t MB = KB * 1024;
 static constexpr uint64_t GB = MB * 1024;
 
-} // namespace
+}  // namespace
 
 TEST_F(ConfigTest, CONFIG_TEST) {
     milvus::server::ConfigMgr* config_mgr = milvus::server::YamlConfigMgr::GetInstance();
