@@ -19,7 +19,7 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-cuda_add_executable(test_scheduler
+add_executable(test_scheduler
         ${common_files}
         ${entry_file}
         ${test_files}

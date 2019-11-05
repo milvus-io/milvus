@@ -20,7 +20,9 @@
 #include "db/engine/ExecutionEngine.h"
 
 #include <arpa/inet.h>
+#ifdef MILVUS_GPU_VERSION
 #include <cuda_runtime.h>
+#endif
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -168,6 +170,8 @@ ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSc
 
 Status
 ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
+
+#ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
     if (cuda_err != cudaSuccess) {
@@ -181,12 +185,16 @@ ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+#endif
 
     return Status::OK();
 }
 
 Status
 ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
+
+#ifdef MILVUS_GPU_VERSION
+
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
@@ -196,6 +204,8 @@ ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
     }
 
     memory = deviceProp.totalGlobalMem;
+#endif
+
     return Status::OK();
 }
 

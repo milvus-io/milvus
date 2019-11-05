@@ -41,6 +41,15 @@ macro(define_option_string name description default)
 endmacro()
 
 #----------------------------------------------------------------------
+set_option_category("CPU version")
+
+if(MILVUS_CPU_VERSION)
+    define_option(KNOWHERE_CPU_VERSION "Build CPU version only" ON)
+else()
+    define_option(KNOWHERE_CPU_VERSION "Build CPU version only" OFF)
+endif()
+
+#----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
 set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "AUTO")
@@ -70,7 +79,7 @@ define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
-define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+define_option(BUILD_FAISS_WITH_MKL "Build FAISS with MKL" OFF)
 
 #----------------------------------------------------------------------
 if(MSVC)

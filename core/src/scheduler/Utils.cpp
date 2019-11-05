@@ -19,7 +19,9 @@
 #include "server/Config.h"
 #include "utils/Log.h"
 
+#ifdef MILVUS_GPU_VERSION
 #include <cuda_runtime.h>
+#endif
 #include <chrono>
 #include <set>
 #include <string>
@@ -38,7 +40,9 @@ get_current_timestamp() {
 uint64_t
 get_num_gpu() {
     int n_devices = 0;
+#ifdef MILVUS_GPU_VERSION
     cudaGetDeviceCount(&n_devices);
+#endif
     return n_devices;
 }
 

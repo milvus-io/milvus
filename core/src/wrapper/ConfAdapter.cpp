@@ -109,7 +109,7 @@ IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
+    conf->gpu_id = conf->gpu_id;
     conf->nbits = 8;
     MatchBase(conf);
     return conf;

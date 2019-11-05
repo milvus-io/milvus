@@ -27,7 +27,9 @@
 #include "cache/CpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
 #include "utils/CommonUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -68,9 +70,15 @@ static const char
                    "  use_blas_threshold: 20\n"
                    "\n"
                    "resource_config:\n"
+#ifdef MILVUS_CPU_VERSION
+                   "  search_resources:\n"
+                   "    - cpu\n"
+                   "  index_build_device: cpu           # CPU used for building index";
+#else
                    "  search_resources:\n"
                    "    - gpu0\n"
                    "  index_build_device: gpu0          # GPU used for building index";
+#endif
 
 void
 WriteToFile(const std::string& file_path, const char* content) {
@@ -118,15 +126,18 @@ BaseTest::InitLog() {
 void
 BaseTest::SetUp() {
     InitLog();
-
+#ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
+#endif
 }
 
 void
 BaseTest::TearDown() {
     milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
     milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
+#ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
 }
 
 milvus::engine::DBOptions

@@ -19,12 +19,12 @@
 
 
 cmake_minimum_required(VERSION 3.14)
-message(STATUS "---------------core--------------")
+message(STATUS "------------------------------KNOWHERE-----------------------------------")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
-set(KNOWHERE_VERSION "0.1.0")
+set(KNOWHERE_VERSION "0.5.0")
 string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" KNOWHERE_BASE_VERSION "${KNOWHERE_VERSION}")
-project(knowhere VERSION "${KNOWHERE_BASE_VERSION}" LANGUAGES CUDA C CXX)
+project(knowhere VERSION "${KNOWHERE_BASE_VERSION}" LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 14)
 
 set(KNOWHERE_VERSION_MAJOR "${knowhere_VERSION_MAJOR}")
@@ -44,17 +44,6 @@ message(STATUS "Knowhere version: "
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif(NOT CMAKE_BUILD_TYPE)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
-else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
-endif()
-MESSAGE(STATUS "CMAKE_CXX_FLAGS" ${CMAKE_CXX_FLAGS})
-
-find_package(CUDA)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     message(STATUS "building milvus_engine on x86 architecture")
@@ -77,14 +66,38 @@ message(STATUS "Build type = ${BUILD_TYPE}")
 
 set(INDEX_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(INDEX_BINARY_DIR ${PROJECT_BINARY_DIR})
-message(STATUS "Core source dir: ${PROJECT_SOURCE_DIR}")
-message(STATUS "Core binary dir: ${PROJECT_BINARY_DIR}")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${INDEX_SOURCE_DIR}/cmake")
 
 include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
+
+set(KNOWHERE_GPU_VERSION false)
+if (MILVUS_CPU_VERSION OR KNOWHERE_CPU_VERSION)
+    message(STATUS "Building Knowhere CPU version")
+    add_compile_definitions("MILVUS_CPU_VERSION")
+else ()
+    message(STATUS "Building Knowhere GPU version")
+    add_compile_definitions("MILVUS_GPU_VERSION")
+    set(KNOWHERE_GPU_VERSION true)
+    enable_language(CUDA)
+    find_package(CUDA 10 REQUIRED)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
+endif ()
+
 include(ThirdPartyPackagesCore)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    if (KNOWHERE_GPU_VERSION)
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
+    endif ()
+else ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    if (KNOWHERE_GPU_VERSION)
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
+    endif ()
+endif ()
 
 add_subdirectory(knowhere)
 
@@ -94,7 +107,7 @@ endif()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
-if(BUILD_UNIT_TEST STREQUAL "ON")
+if(KNOWHERE_BUILD_TESTS)
     add_subdirectory(unittest)
 endif()
 

@@ -1,0 +1,3 @@
+#cmakedefine MILVUS_VERSION "@MILVUS_VERSION@"
+#cmakedefine BUILD_TYPE "@BUILD_TYPE@"
+#cmakedefine BUILD_TIME @BUILD_TIME@

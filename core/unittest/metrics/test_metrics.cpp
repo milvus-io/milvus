@@ -75,8 +75,7 @@ TEST_F(MetricTest, METRIC_TEST) {
     }
 
     std::thread search([&]() {
-//        milvus::engine::ResultIds result_ids;
-//        milvus::engine::ResultDistances result_distances;
+        milvus::engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -91,7 +90,7 @@ TEST_F(MetricTest, METRIC_TEST) {
             prev_count = count;
 
             START_TIMER;
-//            stat = db_->Query(group_name, k, qb, qxb, result_ids, result_distances);
+//            stat = db_->Query(group_name, k, qb, qxb, results);
             ss << "Search " << j << " With Size " << (float) (count * group_dim * sizeof(float)) / (1024 * 1024)
                << " M";
 
