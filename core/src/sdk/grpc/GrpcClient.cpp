@@ -134,20 +134,20 @@ GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids, const ::milvus::grpc::
 }
 
 Status
-GrpcClient::Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list,
+GrpcClient::Search(::milvus::grpc::TopKQueryResult& topk_query_result,
                    const ::milvus::grpc::SearchParam& search_param) {
     ::milvus::grpc::TopKQueryResult query_result;
     ClientContext context;
-    ::grpc::Status grpc_status = stub_->Search(&context, search_param, &topk_query_result_list);
+    ::grpc::Status grpc_status = stub_->Search(&context, search_param, &topk_query_result);
 
     if (!grpc_status.ok()) {
         std::cerr << "SearchVector rpc failed!" << std::endl;
         std::cerr << grpc_status.error_message() << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
-    if (topk_query_result_list.status().error_code() != grpc::SUCCESS) {
-        std::cerr << topk_query_result_list.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, topk_query_result_list.status().reason());
+    if (topk_query_result.status().error_code() != grpc::SUCCESS) {
+        std::cerr << topk_query_result.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, topk_query_result.status().reason());
     }
 
     return Status::OK();

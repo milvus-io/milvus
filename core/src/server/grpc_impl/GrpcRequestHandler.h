@@ -145,7 +145,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      */
     ::grpc::Status
     Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
-           ::milvus::grpc::TopKQueryResultList* response) override;
+           ::milvus::grpc::TopKQueryResult* response) override;
 
     /**
      * @brief Internal use query interface
@@ -169,7 +169,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      */
     ::grpc::Status
     SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
-                  ::milvus::grpc::TopKQueryResultList* response) override;
+                  ::milvus::grpc::TopKQueryResult* response) override;
 
     /**
      * @brief Get table schema
