@@ -222,9 +222,7 @@ ClientProxy::Search(const std::string& table_name, const std::vector<RowRecord>&
         search_param.set_nprobe(nprobe);
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
-            for (auto& rec : record.data) {
-                row_record->add_vector_data(rec);
-            }
+            row_record->add_vector_data(record.data.begin(), record.data.end());
         }
 
         // step 2: convert range array
