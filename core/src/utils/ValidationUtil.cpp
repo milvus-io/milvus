@@ -196,8 +196,8 @@ ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
-        std::string msg =
-            "Failed to get gpu properties for gpu" + gpu_index + " , cuda error:" + std::to_string(cuda_err);
+        std::string msg = "Failed to get gpu properties for gpu" + std::to_string(gpu_index) +
+                          " , cuda error:" + std::to_string(cuda_err);
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
