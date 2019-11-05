@@ -44,9 +44,7 @@ ToString(ResourceType type) {
         case ResourceType::GPU: {
             return "GPU";
         }
-        default: {
-            return "UNKNOWN";
-        }
+        default: { return "UNKNOWN"; }
     }
 }
 

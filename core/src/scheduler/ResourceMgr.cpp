@@ -79,9 +79,7 @@ ResourceMgr::Add(ResourcePtr&& resource) {
             gpu_resources_.emplace_back(ResourceWPtr(resource));
             break;
         }
-        default: {
-            break;
-        }
+        default: { break; }
     }
     resources_.emplace_back(resource);
 

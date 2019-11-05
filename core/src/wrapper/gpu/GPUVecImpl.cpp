@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "GPUVecImpl.h"
+#include "wrapper/gpu/GPUVecImpl.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
