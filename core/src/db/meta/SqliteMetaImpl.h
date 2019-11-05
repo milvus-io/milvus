@@ -144,6 +144,7 @@ class SqliteMetaImpl : public Meta {
  private:
     const DBMetaOptions options_;
     std::mutex meta_mutex_;
+    std::mutex genid_mutex_;
 };  // DBMetaImpl
 
 }  // namespace meta
