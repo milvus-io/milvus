@@ -17,4 +17,4 @@
 
 #define MILVUS_VERSION "0.5.0"
 #define BUILD_TYPE "Debug"
-#define BUILD_TIME "2019-11-05 13:39.33"
+#define BUILD_TIME "2019-11-05 18:49.05"
