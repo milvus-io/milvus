@@ -7,6 +7,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 
 ## Feature
+- \#12 - Pure CPU version for Milvus
 
 ## Improvement
 
