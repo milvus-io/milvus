@@ -21,7 +21,7 @@ Milvus は大規模な特徴ベクトルにむかう類似性検索エンジン�
 
 Milvus は安定的な Python、Java 又は C++ APIsを提供します。
 
-Milvus [リリースノート](https://milvus.io/docs/en/Releases/v0.5.0/)を読んで最新バージョンや更新情報を手に入れます。
+Milvus [リリースノート](https://milvus.io/docs/en/release/v0.5.1/)を読んで最新バージョンや更新情報を手に入れます。
 
 - 不均質な計算アーキテクチャー
 
@@ -143,7 +143,7 @@ Milvus Python SDK　をインストールする。
 $ pip install pymilvus==0.2.3
 ```
 
-新しいファイル　`example.py`　を作成し、 [Pythonサンプルコード](https://github.com/milvus-io/pymilvus/blob/master/examples/AdvancedExample.py)を添付してください。
+新しいファイル　`example.py`　を作成し、 [Pythonサンプルコード]( https://github.com/milvus-io/pymilvus/blob/master/examples/advanced_example.py)を添付してください。
 
 サンプルコードを実行する。
 
