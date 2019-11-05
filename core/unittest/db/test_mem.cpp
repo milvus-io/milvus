@@ -15,25 +15,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "gtest/gtest.h"
 
-#include "db/insert/VectorSource.h"
-#include "db/insert/MemTableFile.h"
-#include "db/insert/MemTable.h"
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
+#include "db/insert/MemTable.h"
+#include "db/insert/MemTableFile.h"
+#include "db/insert/VectorSource.h"
 #include "db/meta/MetaConsts.h"
-#include "metrics/Metrics.h"
 #include "db/utils.h"
+#include "metrics/Metrics.h"
 
 #include <boost/filesystem.hpp>
-#include <thread>
+#include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iostream>
-#include <cmath>
 #include <random>
-#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -42,8 +41,7 @@ static constexpr int64_t TABLE_DIM = 256;
 std::string
 GetTableName() {
     auto now = std::chrono::system_clock::now();
-    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
-        now.time_since_epoch()).count();
+    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     static std::string table_name = std::to_string(micros);
     return table_name;
 }
@@ -63,11 +61,10 @@ BuildVectors(int64_t n, std::vector<float>& vectors) {
     vectors.resize(n * TABLE_DIM);
     float* data = vectors.data();
     for (int i = 0; i < n; i++) {
-        for (int j = 0; j < TABLE_DIM; j++)
-            data[TABLE_DIM * i + j] = drand48();
+        for (int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
     }
 }
-} // namespace
+}  // namespace
 
 TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
@@ -86,12 +83,10 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     milvus::engine::VectorSource source(n, vectors.data());
 
     size_t num_vectors_added;
-    milvus::engine::ExecutionEnginePtr execution_engine_ =
-        milvus::engine::EngineFactory::Build(table_file_schema.dimension_,
-                                             table_file_schema.location_,
-                                             (milvus::engine::EngineType)table_file_schema.engine_type_,
-                                             (milvus::engine::MetricType)table_file_schema.metric_type_,
-                                             table_schema.nlist_);
+    milvus::engine::ExecutionEnginePtr execution_engine_ = milvus::engine::EngineFactory::Build(
+        table_file_schema.dimension_, table_file_schema.location_,
+        (milvus::engine::EngineType)table_file_schema.engine_type_,
+        (milvus::engine::MetricType)table_file_schema.metric_type_, table_schema.nlist_);
 
     milvus::engine::IDNumbers vector_ids;
     status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added, vector_ids);
@@ -129,7 +124,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     status = mem_table_file.Add(source, vector_ids);
     ASSERT_TRUE(status.ok());
 
-//    std::cout << mem_table_file.GetCurrentMem() << " " << mem_table_file.GetMemLeft() << std::endl;
+    //    std::cout << mem_table_file.GetCurrentMem() << " " << mem_table_file.GetMemLeft() << std::endl;
 
     vector_ids = source->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
@@ -141,8 +136,8 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     std::vector<float> vectors_128M;
     BuildVectors(n_max, vectors_128M);
 
-    milvus::engine::VectorSourcePtr
-        source_128M = std::make_shared<milvus::engine::VectorSource>(n_max, vectors_128M.data());
+    milvus::engine::VectorSourcePtr source_128M =
+        std::make_shared<milvus::engine::VectorSource>(n_max, vectors_128M.data());
     vector_ids.clear();
     status = mem_table_file.Add(source_128M, vector_ids);
 
@@ -163,8 +158,8 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     std::vector<float> vectors_100;
     BuildVectors(n_100, vectors_100);
 
-    milvus::engine::VectorSourcePtr
-        source_100 = std::make_shared<milvus::engine::VectorSource>(n_100, vectors_100.data());
+    milvus::engine::VectorSourcePtr source_100 =
+        std::make_shared<milvus::engine::VectorSource>(n_100, vectors_100.data());
 
     milvus::engine::MemTable mem_table(GetTableName(), impl_, options);
 
@@ -184,8 +179,8 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     BuildVectors(n_max, vectors_128M);
 
     vector_ids.clear();
-    milvus::engine::VectorSourcePtr
-        source_128M = std::make_shared<milvus::engine::VectorSource>(n_max, vectors_128M.data());
+    milvus::engine::VectorSourcePtr source_128M =
+        std::make_shared<milvus::engine::VectorSource>(n_max, vectors_128M.data());
     status = mem_table.Add(source_128M, vector_ids);
     ASSERT_TRUE(status.ok());
 
@@ -239,7 +234,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
     ASSERT_TRUE(stat.ok());
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));//ensure raw data write to disk
+    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -259,11 +254,10 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(GetTableName(), topk, 1, nprobe, search.data(), result_ids, result_distances);
-        ASSERT_EQ(result_ids[0], pair.first);
-        ASSERT_LT(result_distances[0], 1e-4);
+        milvus::engine::QueryResults results;
+        stat = db_->Query(GetTableName(), topk, 1, nprobe, search.data(), results);
+        ASSERT_EQ(results[0][0].first, pair.first);
+        ASSERT_LT(results[0][0].second, 1e-4);
     }
 }
 
@@ -315,8 +309,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
     BuildVectors(qb, qxb);
 
     std::thread search([&]() {
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
+        milvus::engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -331,17 +324,17 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(GetTableName(), k, qb, 10, qxb.data(), result_ids, result_distances);
+            stat = db_->Query(GetTableName(), k, qb, 10, qxb.data(), results);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
-            for (auto i = 0; i < qb; ++i) {
-                ASSERT_EQ(result_ids[i * k], target_ids[i]);
+            for (auto k = 0; k < qb; ++k) {
+                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
-                ss << "Result [" << i << "]:";
-                for (auto t = 0; t < k; t++) {
-                    ss << result_ids[i * k + t] << " ";
+                ss << "Result [" << k << "]:";
+                for (auto result : results[k]) {
+                    ss << result.first << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }
@@ -402,7 +395,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     ASSERT_EQ(vector_ids[0], nb);
     ASSERT_TRUE(stat.ok());
 
-    nb = 262144; //512M
+    nb = 262144;  // 512M
     xb.clear();
     BuildVectors(nb, xb);
     vector_ids.clear();
@@ -414,7 +407,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     ASSERT_EQ(vector_ids[0], nb / 2);
     ASSERT_TRUE(stat.ok());
 
-    nb = 65536; //128M
+    nb = 65536;  // 128M
     xb.clear();
     BuildVectors(nb, xb);
     vector_ids.clear();
@@ -434,4 +427,3 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
         ASSERT_EQ(vector_ids[i], i + nb);
     }
 }
-

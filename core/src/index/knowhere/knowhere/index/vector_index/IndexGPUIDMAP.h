@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "IndexGPUIVF.h"
+#include "IndexIDMAP.h"
 #include "IndexIVF.h"
 
 #include <memory>
@@ -24,46 +26,38 @@
 
 namespace knowhere {
 
-class IDMAP : public VectorIndex, public FaissBaseIndex {
+class GPUIDMAP : public IDMAP, public GPUIndex {
  public:
-    IDMAP() : FaissBaseIndex(nullptr) {
+    explicit GPUIDMAP(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& res)
+        : IDMAP(std::move(index)), GPUIndex(device_id, res) {
     }
 
-    explicit IDMAP(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
-    }
+    VectorIndexPtr
+    CopyGpuToCpu(const Config& config) override;
 
-    BinarySet
-    Serialize() override;
-    void
-    Load(const BinarySet& index_binary) override;
-    void
-    Train(const Config& config);
-    DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
-    int64_t
-    Count() override;
+    float*
+    GetRawVectors() override;
+
+    int64_t*
+    GetRawIds() override;
+
     VectorIndexPtr
     Clone() override;
-    int64_t
-    Dimension() override;
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-    VectorIndexPtr
-    CopyCpuToGpu(const int64_t& device_id, const Config& config);
-    void
-    Seal() override;
 
-    virtual float*
-    GetRawVectors();
-    virtual int64_t*
-    GetRawIds();
+    VectorIndexPtr
+    CopyGpuToGpu(const int64_t& device_id, const Config& config) override;
 
  protected:
-    virtual void
-    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
-    std::mutex mutex_;
+    void
+    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
+
+    BinarySet
+    SerializeImpl() override;
+
+    void
+    LoadImpl(const BinarySet& index_binary) override;
 };
 
-using IDMAPPtr = std::shared_ptr<IDMAP>;
+using GPUIDMAPPtr = std::shared_ptr<GPUIDMAP>;
 
 }  // namespace knowhere

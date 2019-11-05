@@ -19,8 +19,10 @@
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexIDMAP.h"
+#endif
+
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
@@ -117,7 +119,11 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     }
 
     // TODO(linxj): dev IndexFactory, support more IndexType
+#ifdef MILVUS_GPU_VERSION
     auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+#else
+    auto preprocess_index = std::make_shared<IVF>();
+#endif
     auto model = preprocess_index->Train(dataset, config);
     preprocess_index->set_index_model(model);
     preprocess_index->AddWithoutIds(dataset, config);

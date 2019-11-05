@@ -15,21 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
+#include <gtest/gtest.h>
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/ResourceMgr.h"
+#include "scheduler/SchedInst.h"
 #include "scheduler/Scheduler.h"
 #include "scheduler/task/TestTask.h"
 #include "scheduler/tasklabel/DefaultLabel.h"
-#include "scheduler/SchedInst.h"
 #include "utils/Log.h"
-#include <gtest/gtest.h>
 
 namespace {
 
 namespace ms = milvus::scheduler;
 
-} // namespace
+}  // namespace
 
 TEST(NormalTest, INST_TEST) {
     // ResourceMgr only compose resources, provide unified event
@@ -62,7 +61,7 @@ TEST(NormalTest, INST_TEST) {
         }
     }
 
-    for (auto &task : tasks) {
+    for (auto& task : tasks) {
         task->Wait();
         ASSERT_EQ(task->load_count_, 1);
         ASSERT_EQ(task->exec_count_, 1);

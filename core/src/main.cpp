@@ -25,7 +25,7 @@
 #include "external/easyloggingpp/easylogging++.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
-#include "src/version.h"
+#include "src/config.h"
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 
@@ -52,6 +52,11 @@ print_banner() {
     std::cout << std::endl;
     std::cout << "Welcome to Milvus!" << std::endl;
     std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << std::endl;
+#ifdef MILVUS_CPU_VERSION
+    std::cout << "You are using Milvus CPU version" << std::endl;
+#else
+    std::cout << "You are using Milvus GPU version" << std::endl;
+#endif
     std::cout << std::endl;
 }
 
@@ -95,7 +100,7 @@ main(int argc, char* argv[]) {
                 char* log_filename_ptr = strdup(optarg);
                 log_config_file = log_filename_ptr;
                 free(log_filename_ptr);
-                std::cout << "Initial log config from: " << log_config_file << std::endl;
+                std::cout << "Initializing log config from: " << log_config_file << std::endl;
                 break;
             }
             case 'p': {

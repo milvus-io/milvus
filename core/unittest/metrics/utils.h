@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <gtest/gtest.h>
@@ -23,17 +22,20 @@
 //#include <src/db/MySQLMetaImpl.h>
 
 #include "db/DB.h"
-#include "db/meta/SqliteMetaImpl.h"
 #include "db/meta/MySQLMetaImpl.h"
+#include "db/meta/SqliteMetaImpl.h"
 
 #define TIMING
 
 #ifdef TIMING
 #define INIT_TIMER auto start = std::chrono::high_resolution_clock::now();
-#define START_TIMER  start = std::chrono::high_resolution_clock::now();
-#define STOP_TIMER(name)  LOG(DEBUG) << "RUNTIME of " << name << ": " << \
-    std::chrono::duration_cast<std::chrono::milliseconds>( \
-            std::chrono::high_resolution_clock::now()-start).count() << " ms ";
+#define START_TIMER start = std::chrono::high_resolution_clock::now();
+#define STOP_TIMER(name)                                                                                            \
+    LOG(DEBUG) << "RUNTIME of " << name << ": "                                                                     \
+               << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
+                                                                        start)                                      \
+                      .count()                                                                                      \
+               << " ms ";
 #else
 #define INIT_TIMER
 #define START_TIMER
@@ -41,10 +43,10 @@
 #endif
 
 void
-ASSERT_STATS(milvus::Status &stat);
+ASSERT_STATS(milvus::Status& stat);
 
-//class TestEnv : public ::testing::Environment {
-//public:
+// class TestEnv : public ::testing::Environment {
+// public:
 //
 //    static std::string getURI() {
 //        if (const char* uri = std::getenv("MILVUS_DBMETA_URI")) {
@@ -68,8 +70,12 @@ class MetricTest : public ::testing::Test {
  protected:
     milvus::engine::DBPtr db_;
 
-    void InitLog();
-    void SetUp() override;
-    void TearDown() override;
-    virtual milvus::engine::DBOptions GetOptions();
+    void
+    InitLog();
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+    virtual milvus::engine::DBOptions
+    GetOptions();
 };

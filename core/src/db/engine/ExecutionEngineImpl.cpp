@@ -25,6 +25,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
@@ -92,11 +93,19 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+#endif
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+#endif
             break;
         }
         case EngineType::NSG_MIX: {
@@ -309,13 +318,30 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         return Status::OK();
     }
 #endif
-    try {
-        index_ = index_->CopyToGpu(device_id);
-        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-    } catch (std::exception& e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status(DB_ERROR, e.what());
+
+    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
+        if (index_ == nullptr) {
+            ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
+            return Status(DB_ERROR, "index is null");
+        }
+
+        try {
+            index_ = index_->CopyToGpu(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+        } catch (std::exception& e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status(DB_ERROR, e.what());
+        }
     }
+
+    if (!already_in_cache) {
+        GpuCache(device_id);
+    }
+
     return Status::OK();
 }
 

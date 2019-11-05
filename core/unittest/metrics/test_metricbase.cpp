@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "metrics/Metrics.h"
 
 #include <gtest/gtest.h>

@@ -15,17 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "db/utils.h"
-#include "db/meta/MySQLMetaImpl.h"
 #include "db/Utils.h"
 #include "db/meta/MetaConsts.h"
+#include "db/meta/MySQLMetaImpl.h"
+#include "db/utils.h"
 
-#include <iostream>
-#include <thread>
-#include <stdlib.h>
-#include <time.h>
 #include <gtest/gtest.h>
 #include <mysql++/mysql++.h>
+#include <stdlib.h>
+#include <time.h>
+#include <iostream>
+#include <thread>
 
 TEST_F(MySqlMetaTest, TABLE_TEST) {
     auto table_id = "meta_test_table";
@@ -52,7 +52,7 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
 
     table.table_id_ = "";
     status = impl_->CreateTable(table);
-//    ASSERT_TRUE(status.ok());
+    //    ASSERT_TRUE(status.ok());
 
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
@@ -79,8 +79,8 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     uint64_t cnt = 0;
     status = impl_->Count(table_id, cnt);
-//    ASSERT_TRUE(status.ok());
-//    ASSERT_EQ(cnt, 0UL);
+    //    ASSERT_TRUE(status.ok());
+    //    ASSERT_EQ(cnt, 0UL);
 
     auto file_id = table_file.file_id_;
 
@@ -159,7 +159,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
-    for (auto &file : files_get) {
+    for (auto& file : files_get) {
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
         }
@@ -167,7 +167,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     }
 
     std::vector<int> file_types = {
-        (int) milvus::engine::meta::TableFileSchema::NEW,
+        (int)milvus::engine::meta::TableFileSchema::NEW,
     };
     std::vector<std::string> file_ids;
     status = impl.FilesByType(table_id, file_types, file_ids);
@@ -219,7 +219,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
-    for (auto &file : files_get) {
+    for (auto& file : files_get) {
         if (i >= 5) {
             ASSERT_EQ(file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
         }
@@ -313,16 +313,13 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     milvus::engine::meta::DatesT dates = {table_file.date_};
     std::vector<size_t> ids;
     status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(),
-              to_index_files_cnt + raw_files_cnt + index_files_cnt);
+    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
     status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(),
-              to_index_files_cnt + raw_files_cnt + index_files_cnt);
+    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
     status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(),
-              to_index_files_cnt + raw_files_cnt + index_files_cnt);
+    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
     ids.push_back(size_t(9999999999));
     status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
@@ -335,19 +332,15 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
 
     file_types = {
-        milvus::engine::meta::TableFileSchema::NEW,
-        milvus::engine::meta::TableFileSchema::NEW_MERGE,
-        milvus::engine::meta::TableFileSchema::NEW_INDEX,
-        milvus::engine::meta::TableFileSchema::TO_INDEX,
-        milvus::engine::meta::TableFileSchema::INDEX,
-        milvus::engine::meta::TableFileSchema::RAW,
+        milvus::engine::meta::TableFileSchema::NEW,       milvus::engine::meta::TableFileSchema::NEW_MERGE,
+        milvus::engine::meta::TableFileSchema::NEW_INDEX, milvus::engine::meta::TableFileSchema::TO_INDEX,
+        milvus::engine::meta::TableFileSchema::INDEX,     milvus::engine::meta::TableFileSchema::RAW,
         milvus::engine::meta::TableFileSchema::BACKUP,
     };
     status = impl_->FilesByType(table.table_id_, file_types, file_ids);
     ASSERT_TRUE(status.ok());
-    uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt +
-        backup_files_cnt + new_files_cnt + raw_files_cnt +
-        to_index_files_cnt + index_files_cnt;
+    uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt + backup_files_cnt + new_files_cnt + raw_files_cnt +
+                         to_index_files_cnt + index_files_cnt;
     ASSERT_EQ(file_ids.size(), total_cnt);
 
     status = impl_->DeleteTableFiles(table_id);
