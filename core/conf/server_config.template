@@ -34,7 +34,7 @@ cache_config:
   cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
 
 engine_config:
-  use_blas_threshold: 20            # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times
+  use_blas_threshold: 1100          # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times
                                     # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
   gpu_search_threshold: 1000        # threshold beyond which the search computation is executed on GPUs only
 

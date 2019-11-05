@@ -44,7 +44,7 @@ if(NOT GIT_BRANCH_NAME STREQUAL "")
     string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
 endif()
 
-set(MILVUS_VERSION "0.5.1")
+set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
 
 find_package(ClangTools)
@@ -71,7 +71,7 @@ if(MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.5.0")
+    set(MILVUS_VERSION "0.5.2")
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
