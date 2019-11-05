@@ -61,11 +61,9 @@ class CacheMgr {
     SetCapacity(int64_t capacity);
 
  protected:
-
     CacheMgr();
 
-    virtual
-    ~CacheMgr();
+    virtual ~CacheMgr();
 
  protected:
     using CachePtr = std::shared_ptr<Cache<ItemObj>>;

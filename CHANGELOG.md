@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Feature
 
 ## Improvement
+- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.52
 
 ## Task
 
