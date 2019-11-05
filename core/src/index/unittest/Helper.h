@@ -46,9 +46,8 @@ IndexFactory(const std::string& type) {
         return std::make_shared<knowhere::IVFPQ>();
     } else if (type == "IVFSQ") {
         return std::make_shared<knowhere::IVFSQ>();
-    }
 #ifdef MILVUS_GPU_VERSION
-    else if (type == "GPUIVF") {
+    } else if (type == "GPUIVF") {
         return std::make_shared<knowhere::GPUIVF>(DEVICEID);
     } else if (type == "GPUIVFPQ") {
         return std::make_shared<knowhere::GPUIVFPQ>(DEVICEID);
@@ -56,8 +55,8 @@ IndexFactory(const std::string& type) {
         return std::make_shared<knowhere::GPUIVFSQ>(DEVICEID);
     } else if (type == "IVFSQHybrid") {
         return std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
-    }
 #endif
+    }
 }
 
 enum class ParameterType {
