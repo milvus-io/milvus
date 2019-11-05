@@ -21,7 +21,9 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
 #include "unittest/utils.h"
@@ -37,7 +39,9 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     void
     SetUp() override {
         // Init_with_default();
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
+#endif
         Generate(256, 1000000 / 100, 1);
         index_ = std::make_shared<knowhere::NSG>();
 
@@ -60,7 +64,9 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 
     void
     TearDown() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 
  protected:

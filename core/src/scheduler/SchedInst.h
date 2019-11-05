@@ -106,6 +106,7 @@ class OptimizerInst {
                         has_cpu = true;
                     }
                 }
+
                 std::vector<PassPtr> pass_list;
                 pass_list.push_back(std::make_shared<LargeSQ8HPass>());
                 pass_list.push_back(std::make_shared<HybridPass>());

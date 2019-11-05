@@ -91,16 +91,15 @@ class DBImpl : public DB {
 
     Status
     Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          ResultIds& result_ids, ResultDistances& result_distances) override;
+          QueryResults& results) override;
 
     Status
     Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) override;
+          const meta::DatesT& dates, QueryResults& results) override;
 
     Status
     Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-          uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-          ResultDistances& result_distances) override;
+          uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
     Status
     Size(uint64_t& result) override;
@@ -108,7 +107,7 @@ class DBImpl : public DB {
  private:
     Status
     QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
-               uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances);
+               uint64_t nprobe, const float* vectors, QueryResults& results);
 
     void
     BackgroundTimerTask();

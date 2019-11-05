@@ -20,7 +20,7 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-cuda_add_executable(test_db
+add_executable(test_db
         ${common_files}
         ${test_files}
         )

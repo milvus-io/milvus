@@ -175,8 +175,7 @@ TEST_F(DBTest, DB_TEST) {
     BuildVectors(qb, qxb);
 
     std::thread search([&]() {
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
+        milvus::engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -191,17 +190,17 @@ TEST_F(DBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), result_ids, result_distances);
+            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
-            for (auto i = 0; i < qb; ++i) {
-                ASSERT_EQ(result_ids[i*k], target_ids[i]);
+            for (auto k = 0; k < qb; ++k) {
+                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
-                ss << "Result [" << i << "]:";
-                for (auto t = 0; t < k; t++) {
-                    ss << result_ids[i * k + t] << " ";
+                ss << "Result [" << k << "]:";
+                for (auto result : results[k]) {
+                    ss << result.first << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }
@@ -285,18 +284,16 @@ TEST_F(DBTest, SEARCH_TEST) {
     db_->CreateIndex(TABLE_NAME, index); // wait until build index finish
 
     {
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), result_ids, result_distances);
+        milvus::engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
         ASSERT_TRUE(stat.ok());
     }
 
     {//search by specify index file
         milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
+        milvus::engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -306,25 +303,22 @@ TEST_F(DBTest, SEARCH_TEST) {
     db_->CreateIndex(TABLE_NAME, index); // wait until build index finish
 
     {
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), result_ids, result_distances);
+        milvus::engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
         ASSERT_TRUE(stat.ok());
     }
 
     {
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, k, 200, 10, xq.data(), result_ids, result_distances);
+        milvus::engine::QueryResults large_nq_results;
+        stat = db_->Query(TABLE_NAME, k, 200, 10, xq.data(), large_nq_results);
         ASSERT_TRUE(stat.ok());
     }
 
     {//search by specify index file
         milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
+        milvus::engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -397,12 +391,11 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
 
     milvus::engine::meta::DatesT dates;
-    milvus::engine::ResultIds result_ids;
-    milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(table_info.table_id_, 1, 1, 1, nullptr, dates, result_ids, result_distances);
+    milvus::engine::QueryResults results;
+    stat = db_->Query(table_info.table_id_, 1, 1, 1, nullptr, dates, results);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
-    stat = db_->Query(table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, result_ids, result_distances);
+    stat = db_->Query(table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, results);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->DeleteTable(table_info.table_id_, dates);

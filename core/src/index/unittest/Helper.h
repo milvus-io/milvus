@@ -18,13 +18,16 @@
 #include <memory>
 #include <string>
 
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#endif
 
 int DEVICEID = 0;
 constexpr int64_t DIM = 128;
@@ -36,22 +39,25 @@ constexpr int64_t TEMPMEM = 1024 * 1024 * 300;
 constexpr int64_t RESNUM = 2;
 
 knowhere::IVFIndexPtr
-IndexFactory(const std::string& type) {
+IndexFactory(const std::string &type) {
     if (type == "IVF") {
         return std::make_shared<knowhere::IVF>();
     } else if (type == "IVFPQ") {
         return std::make_shared<knowhere::IVFPQ>();
-    } else if (type == "GPUIVF") {
+    } else if (type == "IVFSQ") {
+        return std::make_shared<knowhere::IVFSQ>();
+    }
+#ifdef MILVUS_GPU_VERSION
+    else if (type == "GPUIVF") {
         return std::make_shared<knowhere::GPUIVF>(DEVICEID);
     } else if (type == "GPUIVFPQ") {
         return std::make_shared<knowhere::GPUIVFPQ>(DEVICEID);
-    } else if (type == "IVFSQ") {
-        return std::make_shared<knowhere::IVFSQ>();
     } else if (type == "GPUIVFSQ") {
         return std::make_shared<knowhere::GPUIVFSQ>(DEVICEID);
     } else if (type == "IVFSQHybrid") {
         return std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
     }
+#endif
 }
 
 enum class ParameterType {
@@ -61,15 +67,15 @@ enum class ParameterType {
 };
 
 class ParamGenerator {
- public:
-    static ParamGenerator&
+public:
+    static ParamGenerator &
     GetInstance() {
         static ParamGenerator instance;
         return instance;
     }
 
     knowhere::Config
-    Gen(const ParameterType& type) {
+    Gen(const ParameterType &type) {
         if (type == ParameterType::ivf) {
             auto tempconf = std::make_shared<knowhere::IVFCfg>();
             tempconf->d = DIM;
@@ -107,14 +113,18 @@ class ParamGenerator {
 #include <gtest/gtest.h>
 
 class TestGpuIndexBase : public ::testing::Test {
- protected:
+protected:
     void
     SetUp() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
+#endif
     }
 
     void
     TearDown() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 };

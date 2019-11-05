@@ -16,7 +16,6 @@
 # specific language governing permissions and limitations
 # under the License.
 #-------------------------------------------------------------------------------
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 
 foreach(dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
@@ -25,8 +24,6 @@ endforeach()
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
@@ -116,10 +113,21 @@ set(unittest_libs
         prometheus-cpp-core
         dl
         z
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-        cudart
-        cublas
         )
+
+if (MILVUS_GPU_VERSION)
+    include_directories("${CUDA_INCLUDE_DIRS}")
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(unittest_libs ${unittest_libs}
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
+            )
+    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
+    set(common_files ${common_files}
+            ${wrapper_gpu_files}
+            )
+endif()
 
 add_subdirectory(db)
 add_subdirectory(wrapper)

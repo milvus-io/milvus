@@ -17,26 +17,19 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
-
-#include <stdint.h>
-#include <utility>
-#include <vector>
+#include <exception>
+#include <string>
 
 namespace milvus {
 namespace engine {
 
-typedef int64_t IDNumber;
-typedef IDNumber* IDNumberPtr;
-typedef std::vector<IDNumber> IDNumbers;
+class WrapperException : public std::exception {
+ public:
+    explicit WrapperException(const std::string& msg);
 
-typedef std::vector<std::pair<IDNumber, double>> QueryResult;
-typedef std::vector<QueryResult> QueryResults;
+    const char* what() const noexcept override;
 
-struct TableIndex {
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t nlist_ = 16384;
-    int32_t metric_type_ = (int)MetricType::L2;
+    const std::string msg;
 };
 
 }  // namespace engine

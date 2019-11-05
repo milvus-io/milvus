@@ -314,6 +314,7 @@ TEST(ValidationUtilTest, VALIDATE_NPROBE_TEST) {
     ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchNprobe(101, schema).code(), milvus::SERVER_SUCCESS);
 }
 
+#ifdef MILVUS_GPU_VERSION
 TEST(ValidationUtilTest, VALIDATE_GPU_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateGpuIndex(0).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateGpuIndex(100).code(), milvus::SERVER_SUCCESS);
@@ -322,6 +323,7 @@ TEST(ValidationUtilTest, VALIDATE_GPU_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::GetGpuMemory(0, memory).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::GetGpuMemory(100, memory).code(), milvus::SERVER_SUCCESS);
 }
+#endif
 
 TEST(ValidationUtilTest, VALIDATE_IPADDRESS_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateIpAddress("127.0.0.1").code(), milvus::SERVER_SUCCESS);
