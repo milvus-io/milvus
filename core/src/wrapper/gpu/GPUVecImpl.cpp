@@ -15,16 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "wrapper/VecImpl.h"
 #include "GPUVecImpl.h"
-#include "src/wrapper/DataTransfer.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIDMAP.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "src/wrapper/DataTransfer.h"
 #include "utils/Log.h"
+#include "wrapper/VecImpl.h"
 
 /*
  * no parameter check in this layer.
@@ -33,7 +33,6 @@
 
 namespace milvus {
 namespace engine {
-
 
 // TODO(linxj): add lock here.
 Status

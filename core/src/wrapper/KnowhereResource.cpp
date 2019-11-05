@@ -34,7 +34,6 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
 KnowhereResource::Initialize() {
-
 #ifdef MILVUS_GPU_VERSION
 
     struct GpuResourceSetting {

@@ -29,15 +29,16 @@
 
 INITIALIZE_EASYLOGGINGPP
 
+using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
-using ::testing::Combine;
 
 class KnowhereWrapperTest
-        : public DataGenBase,
-          public TestWithParam<::std::tuple<milvus::engine::IndexType, std::string, int, int, int, int>> {
-protected:
-    void SetUp() override {
+    : public DataGenBase,
+      public TestWithParam<::std::tuple<milvus::engine::IndexType, std::string, int, int, int, int>> {
+ protected:
+    void
+    SetUp() override {
 #ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 #endif
@@ -53,45 +54,36 @@ protected:
         conf->gpu_id = DEVICEID;
     }
 
-    void TearDown() override {
+    void
+    TearDown() override {
 #ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
 #endif
     }
 
-protected:
+ protected:
     milvus::engine::IndexType index_type;
     milvus::engine::VecIndexPtr index_ = nullptr;
     knowhere::Config conf;
 };
 
-INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
-                        Values(
-                                //["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
+INSTANTIATE_TEST_CASE_P(
+    WrapperParam, KnowhereWrapperTest,
+    Values(
+//["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
 #ifdef MILVUS_GPU_VERSION
         std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_GPU, "Default", DIM, NB, 10, 10),
-        std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_MIX,
-        "Default",
-        64,
-        100000,
-        10,
-        10),
-//                            std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_GPU, "Default", DIM, NB, 10, 10),
+        std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_MIX, "Default", 64, 100000, 10, 10),
+        //                            std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_GPU, "Default", DIM, NB,
+        //                            10, 10),
         std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_GPU, "Default", DIM, NB, 10, 10),
         std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_MIX, "Default", DIM, NB, 10, 10),
 //                            std::make_tuple(IndexType::NSG_MIX, "Default", 128, 250000, 10, 10),
 #endif
-//                            std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default", 128, 250000, 10, 10),
+        //                            std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default", 128, 250000, 10, 10),
         std::make_tuple(milvus::engine::IndexType::FAISS_IDMAP, "Default", 64, 100000, 10, 10),
-        std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_CPU,
-        "Default",
-        64,
-        100000,
-        10,
-        10),
-        std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_CPU, "Default", DIM, NB, 10, 10)
-)
-);
+        std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_CPU, "Default", 64, 100000, 10, 10),
+        std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_CPU, "Default", DIM, NB, 10, 10)));
 
 TEST_P(KnowhereWrapperTest, BASE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);

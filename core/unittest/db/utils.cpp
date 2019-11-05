@@ -15,18 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
+#include <boost/filesystem.hpp>
 #include <iostream>
-#include <thread>
 #include <memory>
 #include <string>
-#include <boost/filesystem.hpp>
+#include <thread>
 
-#include "db/utils.h"
-#include "cache/GpuCacheMgr.h"
 #include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
+#include "db/utils.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
@@ -36,70 +35,71 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-static const char
-    * CONFIG_STR = "# All the following configurations are default values.\n"
-                   "\n"
-                   "server_config:\n"
-                   "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
-                   "  port: 19530                       # port range: 1025 ~ 65534\n"
-                   "  deploy_mode: single               \n"
-                   "  time_zone: UTC+8\n"
-                   "\n"
-                   "db_config:\n"
-                   "  primary_path: /tmp/milvus         # path used to store data and meta\n"
-                   "  secondary_path:                   # path used to store data only, split by semicolon\n"
-                   "\n"
-                   "  backend_url: sqlite://:@:/        \n"
-                   "                                    \n"
-                   "                                    # Replace 'dialect' with 'mysql' or 'sqlite'\n"
-                   "\n"
-                   "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
-                   "\n"
-                   "metric_config:\n"
-                   "  enable_monitor: false             # enable monitoring or not\n"
-                   "  collector: prometheus             # prometheus\n"
-                   "  prometheus_config:\n"
-                   "    port: 8080                      # port prometheus used to fetch metrics\n"
-                   "\n"
-                   "cache_config:\n"
-                   "  cpu_mem_capacity: 16              # GB, CPU memory used for cache\n"
-                   "  cpu_mem_threshold: 0.85           # percentage of data kept when cache cleanup triggered\n"
-                   "  cache_insert_data: false          # whether load inserted data into cache\n"
-                   "\n"
-                   "engine_config:\n"
-                   "  use_blas_threshold: 20\n"
-                   "\n"
-                   "resource_config:\n"
+static const char* CONFIG_STR =
+    "# All the following configurations are default values.\n"
+    "\n"
+    "server_config:\n"
+    "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
+    "  port: 19530                       # port range: 1025 ~ 65534\n"
+    "  deploy_mode: single               \n"
+    "  time_zone: UTC+8\n"
+    "\n"
+    "db_config:\n"
+    "  primary_path: /tmp/milvus         # path used to store data and meta\n"
+    "  secondary_path:                   # path used to store data only, split by semicolon\n"
+    "\n"
+    "  backend_url: sqlite://:@:/        \n"
+    "                                    \n"
+    "                                    # Replace 'dialect' with 'mysql' or 'sqlite'\n"
+    "\n"
+    "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
+    "\n"
+    "metric_config:\n"
+    "  enable_monitor: false             # enable monitoring or not\n"
+    "  collector: prometheus             # prometheus\n"
+    "  prometheus_config:\n"
+    "    port: 8080                      # port prometheus used to fetch metrics\n"
+    "\n"
+    "cache_config:\n"
+    "  cpu_mem_capacity: 16              # GB, CPU memory used for cache\n"
+    "  cpu_mem_threshold: 0.85           # percentage of data kept when cache cleanup triggered\n"
+    "  cache_insert_data: false          # whether load inserted data into cache\n"
+    "\n"
+    "engine_config:\n"
+    "  use_blas_threshold: 20\n"
+    "\n"
+    "resource_config:\n"
 #ifdef MILVUS_CPU_VERSION
-                   "  search_resources:\n"
-                   "    - cpu\n"
-                   "  index_build_device: cpu           # CPU used for building index";
+    "  search_resources:\n"
+    "    - cpu\n"
+    "  index_build_device: cpu           # CPU used for building index";
 #else
-                   "  search_resources:\n"
-                   "    - gpu0\n"
-                   "  index_build_device: gpu0          # GPU used for building index";
+    "  search_resources:\n"
+    "    - gpu0\n"
+    "  index_build_device: gpu0          # GPU used for building index";
 #endif
 
 void
 WriteToFile(const std::string& file_path, const char* content) {
     std::fstream fs(file_path.c_str(), std::ios_base::out);
 
-    //write data to file
+    // write data to file
     fs << content;
     fs.close();
 }
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
-    explicit DBTestEnvironment(const std::string& uri)
-        : uri_(uri) {
+    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {
     }
 
-    std::string getURI() const {
+    std::string
+    getURI() const {
         return uri_;
     }
 
-    void SetUp() override {
+    void
+    SetUp() override {
         getURI();
     }
 
@@ -109,17 +109,14 @@ class DBTestEnvironment : public ::testing::Environment {
 
 DBTestEnvironment* test_env = nullptr;
 
-} // namespace
-
-
+}  // namespace
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 BaseTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
-    defaultConf.set(el::Level::Debug,
-                    el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
+    defaultConf.set(el::Level::Debug, el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
@@ -260,7 +257,7 @@ MySqlMetaTest::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int
-main(int argc, char **argv) {
+main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     std::string uri;

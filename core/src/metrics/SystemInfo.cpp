@@ -214,7 +214,6 @@ SystemInfo::CPUPercent() {
 
 std::vector<uint64_t>
 SystemInfo::GPUMemoryTotal() {
-
     // get GPU usage percent
     if (!initialized_)
         Init();

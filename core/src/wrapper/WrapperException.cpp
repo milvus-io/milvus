@@ -20,9 +20,11 @@
 namespace milvus {
 namespace engine {
 
-WrapperException::WrapperException(const std::string &msg) : msg(msg) {}
+WrapperException::WrapperException(const std::string& msg) : msg(msg) {
+}
 
-const char *WrapperException::what() const noexcept {
+const char*
+WrapperException::what() const noexcept {
     return msg.c_str();
 }
 

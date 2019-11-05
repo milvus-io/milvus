@@ -30,38 +30,38 @@ set(CMAKE_CXX_STANDARD 14)
 set(KNOWHERE_VERSION_MAJOR "${knowhere_VERSION_MAJOR}")
 set(KNOWHERE_VERSION_MINOR "${knowhere_VERSION_MINOR}")
 set(KNOWHERE_VERSION_PATCH "${knowhere_VERSION_PATCH}")
-if(KNOWHERE_VERSION_MAJOR STREQUAL ""
+if (KNOWHERE_VERSION_MAJOR STREQUAL ""
         OR KNOWHERE_VERSION_MINOR STREQUAL ""
         OR KNOWHERE_VERSION_PATCH STREQUAL "")
     message(FATAL_ERROR "Failed to determine Knowhere version from '${KNOWHERE_VERSION}'")
-endif()
+endif ()
 
 message(STATUS "Knowhere version: "
         "${KNOWHERE_VERSION_MAJOR}.${KNOWHERE_VERSION_MINOR}.${KNOWHERE_VERSION_PATCH} "
         "(full: '${KNOWHERE_VERSION}')")
 
 # if no build build type is specified, default to release builds
-if(NOT CMAKE_BUILD_TYPE)
+if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
-endif(NOT CMAKE_BUILD_TYPE)
+endif (NOT CMAKE_BUILD_TYPE)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     message(STATUS "building milvus_engine on x86 architecture")
     set(KNOWHERE_BUILD_ARCH x86_64)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
     message(STATUS "building milvus_engine on ppc architecture")
     set(KNOWHERE_BUILD_ARCH ppc64le)
-else()
+else ()
     message(WARNING "unknown processor type")
     message(WARNING "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
     set(KNOWHERE_BUILD_ARCH unknown)
-endif()
+endif ()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "release")
-else()
+else ()
     set(BUILD_TYPE "debug")
-endif()
+endif ()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
 set(INDEX_SOURCE_DIR ${PROJECT_SOURCE_DIR})
@@ -103,12 +103,12 @@ add_subdirectory(knowhere)
 
 if (BUILD_COVERAGE STREQUAL "ON")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-endif()
+endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
-if(KNOWHERE_BUILD_TESTS)
+if (KNOWHERE_BUILD_TESTS)
     add_subdirectory(unittest)
-endif()
+endif ()
 
 config_summary()

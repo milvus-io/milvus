@@ -709,7 +709,7 @@ CheckResource(const std::string& value) {
         int32_t gpu_index = std::stoi(s.substr(3));
         if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
             std::string msg = "Invalid search resource: " + value +
-                          ". Possible reason: resource_config.search_resources does not match your hardware.";
+                              ". Possible reason: resource_config.search_resources does not match your hardware.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -1019,8 +1019,7 @@ Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
 
     if (str != "cpu") {
         value = std::stoi(str.substr(3));
-    }
-    else {
+    } else {
         value = -1;
     }
 

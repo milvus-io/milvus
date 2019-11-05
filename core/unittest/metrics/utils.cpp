@@ -15,14 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include <iostream>
-#include <thread>
-#include <string>
 #include <boost/filesystem.hpp>
+#include <iostream>
+#include <string>
+#include <thread>
 
-#include "metrics/utils.h"
 #include "db/DBFactory.h"
+#include "metrics/utils.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -30,13 +29,16 @@ namespace {
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
-    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {}
+    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {
+    }
 
-    std::string getURI() const {
+    std::string
+    getURI() const {
         return uri_;
     }
 
-    void SetUp() override {
+    void
+    SetUp() override {
         getURI();
     }
 
@@ -46,36 +48,40 @@ class DBTestEnvironment : public ::testing::Environment {
 
 DBTestEnvironment* test_env = nullptr;
 
-} // namespace
+}  // namespace
 
-void MetricTest::InitLog() {
+void
+MetricTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
-    defaultConf.set(el::Level::Debug,
-            el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
+    defaultConf.set(el::Level::Debug, el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-milvus::engine::DBOptions MetricTest::GetOptions() {
+milvus::engine::DBOptions
+MetricTest::GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
 
-void MetricTest::SetUp() {
+void
+MetricTest::SetUp() {
     boost::filesystem::remove_all("/tmp/milvus_test");
     InitLog();
     auto options = GetOptions();
     db_ = milvus::engine::DBFactory::Build(options);
 }
 
-void MetricTest::TearDown() {
+void
+MetricTest::TearDown() {
     db_->Stop();
     boost::filesystem::remove_all("/tmp/milvus_test");
 }
 
-int main(int argc, char **argv) {
+int
+main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     std::string uri;

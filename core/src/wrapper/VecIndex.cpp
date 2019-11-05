@@ -28,12 +28,12 @@
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
-#include "wrapper/gpu/GPUVecImpl.h"
+#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
-#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "wrapper/gpu/GPUVecImpl.h"
 #endif
 
 namespace milvus {
@@ -168,7 +168,9 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
         }
-        default: { return nullptr; }
+        default: {
+            return nullptr;
+        }
     }
     return std::make_shared<VecIndexImpl>(index, type);
 }
@@ -276,7 +278,9 @@ ConvertToCpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFSQ8_MIX: {
             return IndexType::FAISS_IVFSQ8_CPU;
         }
-        default: { return type; }
+        default: {
+            return type;
+        }
     }
 }
 
@@ -291,7 +295,9 @@ ConvertToGpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFSQ8_CPU: {
             return IndexType::FAISS_IVFSQ8_GPU;
         }
-        default: { return type; }
+        default: {
+            return type;
+        }
     }
 }
 

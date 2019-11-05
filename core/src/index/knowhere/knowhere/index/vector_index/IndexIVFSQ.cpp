@@ -62,7 +62,6 @@ IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
 
 VectorIndexPtr
 IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
-
 #ifdef MILVUS_GPU_VERSION
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {

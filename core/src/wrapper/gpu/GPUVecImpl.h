@@ -20,46 +20,47 @@
 #include <memory>
 #include <utility>
 
-#include "wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/VectorIndex.h"
+#include "wrapper/VecImpl.h"
+#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace engine {
 
 class IVFMixIndex : public VecIndexImpl {
-public:
-    explicit IVFMixIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType &type)
-            : VecIndexImpl(std::move(index), type) {
+ public:
+    explicit IVFMixIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
+        : VecIndexImpl(std::move(index), type) {
     }
 
     Status
-    BuildAll(const int64_t &nb, const float *xb, const int64_t *ids, const Config &cfg, const int64_t &nt,
-             const float *xt) override;
+    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
+             const float* xt) override;
 
     Status
-    Load(const knowhere::BinarySet &index_binary) override;
+    Load(const knowhere::BinarySet& index_binary) override;
 };
 
 class IVFHybridIndex : public IVFMixIndex {
-public:
-    explicit IVFHybridIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType &type)
-            : IVFMixIndex(std::move(index), type) {
+ public:
+    explicit IVFHybridIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
+        : IVFMixIndex(std::move(index), type) {
     }
 
     knowhere::QuantizerPtr
-    LoadQuantizer(const Config &conf) override;
+    LoadQuantizer(const Config& conf) override;
 
     Status
-    SetQuantizer(const knowhere::QuantizerPtr &q) override;
+    SetQuantizer(const knowhere::QuantizerPtr& q) override;
 
     Status
     UnsetQuantizer() override;
 
     std::pair<VecIndexPtr, knowhere::QuantizerPtr>
-    CopyToGpuWithQuantizer(const int64_t &device_id, const Config &cfg) override;
+    CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) override;
 
     VecIndexPtr
-    LoadData(const knowhere::QuantizerPtr &q, const Config &conf) override;
+    LoadData(const knowhere::QuantizerPtr& q, const Config& conf) override;
 };
 
 }  // namespace engine

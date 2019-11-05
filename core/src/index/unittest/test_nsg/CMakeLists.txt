@@ -19,9 +19,9 @@ set(interface_src
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNSG.cpp
         )
 
-if(NOT TARGET test_nsg)
+if (NOT TARGET test_nsg)
     add_executable(test_nsg test_nsg.cpp ${interface_src} ${nsg_src} ${util_srcs} ${ivf_srcs})
-endif()
+endif ()
 
 target_link_libraries(test_nsg ${depend_libs} ${unittest_libs} ${basic_libs})
 ##############################

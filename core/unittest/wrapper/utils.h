@@ -15,19 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <gtest/gtest.h>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <vector>
-#include <cstdlib>
-#include <cstdio>
-#include <fstream>
 
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "wrapper/VecIndex.h"
 #include "wrapper/utils.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 class DataGenBase;
 
@@ -41,31 +40,29 @@ constexpr int64_t PINMEM = 1024 * 1024 * 200;
 constexpr int64_t TEMPMEM = 1024 * 1024 * 300;
 constexpr int64_t RESNUM = 2;
 
-static const char *CONFIG_PATH = "/tmp/milvus_test";
-static const char *CONFIG_FILE = "/server_config.yaml";
+static const char* CONFIG_PATH = "/tmp/milvus_test";
+static const char* CONFIG_FILE = "/server_config.yaml";
 
 class KnowhereTest : public ::testing::Test {
  protected:
-    void SetUp() override;
-    void TearDown() override;
+    void
+    SetUp() override;
+    void
+    TearDown() override;
 };
 
 class DataGenBase {
  public:
-    virtual void GenData(const int& dim, const int& nb, const int& nq, float* xb, float* xq, int64_t* ids,
-                         const int& k, int64_t* gt_ids, float* gt_dis);
+    virtual void
+    GenData(const int& dim, const int& nb, const int& nq, float* xb, float* xq, int64_t* ids, const int& k,
+            int64_t* gt_ids, float* gt_dis);
 
-    virtual void GenData(const int& dim,
-                         const int& nb,
-                         const int& nq,
-                         std::vector<float>& xb,
-                         std::vector<float>& xq,
-                         std::vector<int64_t>& ids,
-                         const int& k,
-                         std::vector<int64_t>& gt_ids,
-                         std::vector<float>& gt_dis);
+    virtual void
+    GenData(const int& dim, const int& nb, const int& nq, std::vector<float>& xb, std::vector<float>& xq,
+            std::vector<int64_t>& ids, const int& k, std::vector<int64_t>& gt_ids, std::vector<float>& gt_dis);
 
-    void AssertResult(const std::vector<int64_t>& ids, const std::vector<float>& dis);
+    void
+    AssertResult(const std::vector<int64_t>& ids, const std::vector<float>& dis);
 
     int dim = DIM;
     int nb = NB;
@@ -82,12 +79,14 @@ class DataGenBase {
 
 class ParamGenerator {
  public:
-    static ParamGenerator& GetInstance() {
+    static ParamGenerator&
+    GetInstance() {
         static ParamGenerator instance;
         return instance;
     }
 
-    knowhere::Config Gen(const milvus::engine::IndexType& type) {
+    knowhere::Config
+    Gen(const milvus::engine::IndexType& type) {
         switch (type) {
             case milvus::engine::IndexType::FAISS_IDMAP: {
                 auto tempconf = std::make_shared<knowhere::Cfg>();
@@ -114,36 +113,34 @@ class ParamGenerator {
                 tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
-//            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
-//            case milvus::engine::IndexType::FAISS_IVFPQ_GPU: {
-//                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
-//                tempconf->nlist = 100;
-//                tempconf->nprobe = 16;
-//                tempconf->nbits = 8;
-//                tempconf->m = 8;
-//                tempconf->metric_type = knowhere::METRICTYPE::L2;
-//                return tempconf;
-//            }
-//            case milvus::engine::IndexType::NSG_MIX: {
-//                auto tempconf = std::make_shared<knowhere::NSGCfg>();
-//                tempconf->nlist = 100;
-//                tempconf->nprobe = 16;
-//                tempconf->search_length = 8;
-//                tempconf->knng = 200;
-//                tempconf->search_length = 40; // TODO(linxj): be 20 when search
-//                tempconf->out_degree = 60;
-//                tempconf->candidate_pool_size = 200;
-//                tempconf->metric_type = knowhere::METRICTYPE::L2;
-//                return tempconf;
-//            }
+                //            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
+                //            case milvus::engine::IndexType::FAISS_IVFPQ_GPU: {
+                //                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
+                //                tempconf->nlist = 100;
+                //                tempconf->nprobe = 16;
+                //                tempconf->nbits = 8;
+                //                tempconf->m = 8;
+                //                tempconf->metric_type = knowhere::METRICTYPE::L2;
+                //                return tempconf;
+                //            }
+                //            case milvus::engine::IndexType::NSG_MIX: {
+                //                auto tempconf = std::make_shared<knowhere::NSGCfg>();
+                //                tempconf->nlist = 100;
+                //                tempconf->nprobe = 16;
+                //                tempconf->search_length = 8;
+                //                tempconf->knng = 200;
+                //                tempconf->search_length = 40; // TODO(linxj): be 20 when search
+                //                tempconf->out_degree = 60;
+                //                tempconf->candidate_pool_size = 200;
+                //                tempconf->metric_type = knowhere::METRICTYPE::L2;
+                //                return tempconf;
+                //            }
         }
     }
 };
 
-
-//class SanityCheck : public DataGenBase {
+// class SanityCheck : public DataGenBase {
 // public:
 //    void GenData(const int &dim, const int &nb, const int &nq, float *xb, float *xq, long *ids,
 //                 const int &k, long *gt_ids, float *gt_dis) override;
 //};
-

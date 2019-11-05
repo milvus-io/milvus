@@ -27,7 +27,8 @@ class WrapperException : public std::exception {
  public:
     explicit WrapperException(const std::string& msg);
 
-    const char* what() const noexcept override;
+    const char*
+    what() const noexcept override;
 
     const std::string msg;
 };

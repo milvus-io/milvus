@@ -22,8 +22,8 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 #include "Helper.h"
 #include "unittest/utils.h"

@@ -15,15 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <gtest/gtest.h>
 
-#include "scheduler/resource/Resource.h"
+#include "scheduler/Algorithm.h"
+#include "scheduler/ResourceFactory.h"
 #include "scheduler/ResourceMgr.h"
 #include "scheduler/resource/CpuResource.h"
-#include "scheduler/ResourceFactory.h"
-#include "scheduler/Algorithm.h"
-
+#include "scheduler/resource/Resource.h"
 
 namespace milvus {
 namespace scheduler {
@@ -103,6 +101,5 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     }
 }
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

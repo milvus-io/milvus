@@ -123,7 +123,9 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
             Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_, resource);
             break;
         }
-        default: { break; }
+        default: {
+            break;
+        }
     }
     resource->WakeupLoader();
 }
