@@ -63,6 +63,7 @@ static const char* CONFIG_STR =
     "  index_build_device: cpu           # CPU used for building index";
 #else
     "  search_resources:\n"
+    "    - cpu\n"
     "    - gpu0\n"
     "  index_build_device: gpu0          # GPU used for building index";
 #endif

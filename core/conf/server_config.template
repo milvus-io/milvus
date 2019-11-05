@@ -32,9 +32,9 @@ cache_config:
   cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
   cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
 
-#  Uncomment the following config if you are using GPU version
-#  gpu_cache_capacity: 4             # GB, GPU memory used for cache, must be a positive integer
-#  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
+# Skip the following config if you are using GPU version
+  gpu_cache_capacity: 4             # GB, GPU memory used for cache, must be a positive integer
+  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
 
 engine_config:
   use_blas_threshold: 20            # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times
@@ -44,4 +44,5 @@ engine_config:
 resource_config:
   search_resources:                 # define the CPU / GPUs used for search computation, must be in format: cpu / gpux
     - cpu
-  index_build_device: cpu           # CPU / GPU used for building index, must be in format: cpu / gpux
+    - gpu0
+  index_build_device: gpu0           # CPU / GPU used for building index, must be in format: cpu / gpux
