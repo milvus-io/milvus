@@ -35,6 +35,8 @@
 #include "status.pb.h"
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
+#include <vector>
+
 #define PROTOBUF_INTERNAL_EXPORT_milvus_2eproto
 PROTOBUF_NAMESPACE_OPEN
 namespace internal {
@@ -863,6 +865,7 @@ class RowRecord :
   float vector_data(int index) const;
   void set_vector_data(int index, float value);
   void add_vector_data(float value);
+  void add_vector_data(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
       vector_data() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
@@ -1014,6 +1017,8 @@ class InsertParam :
   ::PROTOBUF_NAMESPACE_ID::int64 row_id_array(int index) const;
   void set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
   void add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+          std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
       row_id_array() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
@@ -1646,6 +1651,8 @@ class TopKQueryResult :
   ::PROTOBUF_NAMESPACE_ID::int64 ids(int index) const;
   void set_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
   void add_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_ids(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+      std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
       ids() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
@@ -1657,6 +1664,8 @@ class TopKQueryResult :
   float distances(int index) const;
   void set_distances(int index, float value);
   void add_distances(float value);
+  void add_distances(std::vector<float>::const_iterator begin,
+      std::vector<float>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
       distances() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
@@ -3144,6 +3153,11 @@ inline void RowRecord::add_vector_data(float value) {
   vector_data_.Add(value);
   // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
 }
+inline void RowRecord::add_vector_data(std::vector<float>::const_iterator begin,
+        std::vector<float>::const_iterator end) {
+  vector_data_.Add(begin, end);
+  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
+}
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
 RowRecord::vector_data() const {
   // @@protoc_insertion_point(field_list:milvus.grpc.RowRecord.vector_data)
@@ -3258,6 +3272,11 @@ inline void InsertParam::set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::in
 inline void InsertParam::add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value) {
   row_id_array_.Add(value);
   // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
+}
+inline void InsertParam::add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+        std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end) {
+    row_id_array_.Add(begin, end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 InsertParam::row_id_array() const {
@@ -3694,6 +3713,11 @@ inline void TopKQueryResult::add_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
   ids_.Add(value);
   // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.ids)
 }
+inline void TopKQueryResult::add_ids(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+        std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end) {
+  ids_.Add(begin, end);
+  // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.ids)
+}
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 TopKQueryResult::ids() const {
   // @@protoc_insertion_point(field_list:milvus.grpc.TopKQueryResult.ids)
@@ -3722,6 +3746,11 @@ inline void TopKQueryResult::set_distances(int index, float value) {
 }
 inline void TopKQueryResult::add_distances(float value) {
   distances_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.distances)
+}
+inline void TopKQueryResult::add_distances(std::vector<float>::const_iterator begin,
+        std::vector<float>::const_iterator end) {
+  distances_.Add(begin, end);
   // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.distances)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&

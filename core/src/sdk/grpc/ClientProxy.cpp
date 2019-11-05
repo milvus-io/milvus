@@ -188,23 +188,19 @@ ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>&
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            for (size_t i = 0; i < record.data.size(); i++) {
-                grpc_record->add_vector_data(record.data[i]);
-            }
+            grpc_record->add_vector_data(record.data.begin(), record.data.end());
         }
 
         // Single thread
         ::milvus::grpc::VectorIds vector_ids;
         if (!id_array.empty()) {
-            for (auto i = 0; i < id_array.size(); i++) {
-                insert_param.add_row_id_array(id_array[i]);
-            }
+            /* set user's ids */
+            insert_param.add_row_id_array(id_array.begin(), id_array.end());
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);
-            for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
-                id_array.push_back(vector_ids.vector_id_array(i));
-            }
+            /* return Milvus generated ids back to user */
+            id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
         }
 #endif
     } catch (std::exception& ex) {
