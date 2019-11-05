@@ -49,7 +49,7 @@ class SqliteMetaImpl : public Meta {
     AllTables(std::vector<TableSchema>& table_schema_array) override;
 
     Status
-    DeleteTable(const std::string& table_id) override;
+    DropTable(const std::string& table_id) override;
 
     Status
     DeleteTableFiles(const std::string& table_id) override;
@@ -58,14 +58,10 @@ class SqliteMetaImpl : public Meta {
     CreateTableFile(TableFileSchema& file_schema) override;
 
     Status
-    DropPartitionsByDates(const std::string& table_id, const DatesT& dates) override;
+    DropDataByDate(const std::string& table_id, const DatesT& dates) override;
 
     Status
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
-
-    Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                std::vector<std::string>& file_ids) override;
 
     Status
     UpdateTableIndex(const std::string& table_id, const TableIndex& index) override;
@@ -74,19 +70,31 @@ class SqliteMetaImpl : public Meta {
     UpdateTableFlag(const std::string& table_id, int64_t flag) override;
 
     Status
+    UpdateTableFile(TableFileSchema& file_schema) override;
+
+    Status
+    UpdateTableFilesToIndex(const std::string& table_id) override;
+
+    Status
+    UpdateTableFiles(TableFilesSchema& files) override;
+
+    Status
     DescribeTableIndex(const std::string& table_id, TableIndex& index) override;
 
     Status
     DropTableIndex(const std::string& table_id) override;
 
     Status
-    UpdateTableFilesToIndex(const std::string& table_id) override;
+    CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag) override;
 
     Status
-    UpdateTableFile(TableFileSchema& file_schema) override;
+    DropPartition(const std::string& partition_name) override;
 
     Status
-    UpdateTableFiles(TableFilesSchema& files) override;
+    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) override;
+
+    Status
+    GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
 
     Status
     FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
@@ -99,10 +107,14 @@ class SqliteMetaImpl : public Meta {
     FilesToIndex(TableFilesSchema&) override;
 
     Status
-    Archive() override;
+    FilesByType(const std::string& table_id, const std::vector<int>& file_types,
+                std::vector<std::string>& file_ids) override;
 
     Status
     Size(uint64_t& result) override;
+
+    Status
+    Archive() override;
 
     Status
     CleanUp() override;

@@ -203,19 +203,19 @@ class CmdTask : public GrpcBaseTask {
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class DeleteByRangeTask : public GrpcBaseTask {
+class DeleteByDateTask : public GrpcBaseTask {
  public:
     static BaseTaskPtr
-    Create(const ::milvus::grpc::DeleteByRangeParam* delete_by_range_param);
+    Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
 
  protected:
-    explicit DeleteByRangeTask(const ::milvus::grpc::DeleteByRangeParam* delete_by_range_param);
+    explicit DeleteByDateTask(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
 
     Status
     OnExecute() override;
 
  private:
-    const ::milvus::grpc::DeleteByRangeParam* delete_by_range_param_;
+    const ::milvus::grpc::DeleteByDateParam* delete_by_range_param_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -265,6 +265,55 @@ class DropIndexTask : public GrpcBaseTask {
 
  private:
     std::string table_name_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CreatePartitionTask : public GrpcBaseTask {
+ public:
+    static BaseTaskPtr
+    Create(const ::milvus::grpc::PartitionParam* partition_param);
+
+ protected:
+    explicit CreatePartitionTask(const ::milvus::grpc::PartitionParam* partition_param);
+
+    Status
+    OnExecute() override;
+
+ private:
+    const ::milvus::grpc::PartitionParam* partition_param_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class ShowPartitionsTask : public GrpcBaseTask {
+ public:
+    static BaseTaskPtr
+    Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
+
+ protected:
+    ShowPartitionsTask(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
+
+    Status
+    OnExecute() override;
+
+ private:
+    std::string table_name_;
+    ::milvus::grpc::PartitionList* partition_list_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class DropPartitionTask : public GrpcBaseTask {
+ public:
+    static BaseTaskPtr
+    Create(const ::milvus::grpc::PartitionParam* partition_param);
+
+ protected:
+    explicit DropPartitionTask(const ::milvus::grpc::PartitionParam* partition_param);
+
+    Status
+    OnExecute() override;
+
+ private:
+    const ::milvus::grpc::PartitionParam* partition_param_;
 };
 
 }  // namespace grpc

@@ -236,7 +236,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         vector_ids.push_back(i);
     }
 
-    stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
     ASSERT_TRUE(stat.ok());
 
     std::this_thread::sleep_for(std::chrono::seconds(3));//ensure raw data write to disk
@@ -259,9 +259,11 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
+
+        std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(GetTableName(), topk, 1, nprobe, search.data(), result_ids, result_distances);
+        stat = db_->Query(GetTableName(), tags, topk, 1, nprobe, search.data(), result_ids, result_distances);
         ASSERT_EQ(result_ids[0], pair.first);
         ASSERT_LT(result_distances[0], 1e-4);
     }
@@ -285,7 +287,7 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
         std::vector<float> xb;
         BuildVectors(nb, xb);
         milvus::engine::IDNumbers vector_ids;
-        stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+        stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
         ASSERT_TRUE(stat.ok());
     }
     auto end_time = METRICS_NOW_TIME;
@@ -331,7 +333,8 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(GetTableName(), k, qb, 10, qxb.data(), result_ids, result_distances);
+            std::vector<std::string> tags;
+            stat = db_->Query(GetTableName(), tags, k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
@@ -354,10 +357,10 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 0) {
-            db_->InsertVectors(GetTableName(), qb, qxb.data(), target_ids);
+            db_->InsertVectors(GetTableName(), "", qb, qxb.data(), target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+            db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -386,7 +389,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
         vector_ids[i] = i;
     }
 
-    stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids[0], 0);
     ASSERT_TRUE(stat.ok());
 
@@ -398,7 +401,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     for (auto i = 0; i < nb; i++) {
         vector_ids[i] = i + nb;
     }
-    stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids[0], nb);
     ASSERT_TRUE(stat.ok());
 
@@ -410,7 +413,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     for (auto i = 0; i < nb; i++) {
         vector_ids[i] = i + nb / 2;
     }
-    stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids[0], nb / 2);
     ASSERT_TRUE(stat.ok());
 
@@ -418,7 +421,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     xb.clear();
     BuildVectors(nb, xb);
     vector_ids.clear();
-    stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
     ASSERT_TRUE(stat.ok());
 
     nb = 100;
@@ -429,7 +432,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     for (auto i = 0; i < nb; i++) {
         vector_ids[i] = i + nb;
     }
-    stat = db_->InsertVectors(GetTableName(), nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
     for (auto i = 0; i < nb; i++) {
         ASSERT_EQ(vector_ids[i], i + nb);
     }

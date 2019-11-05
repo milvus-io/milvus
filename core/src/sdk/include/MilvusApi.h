@@ -64,7 +64,7 @@ struct TableSchema {
 
 /**
  * @brief Range information
- * for DATE partition, the format is like: 'year-month-day'
+ * for DATE range, the format is like: 'year-month-day'
  */
 struct Range {
     std::string start_value;  ///< Range start
@@ -101,6 +101,17 @@ struct IndexParam {
     IndexType index_type;
     int32_t nlist;
 };
+
+/**
+ * @brief partition parameters
+ */
+struct PartitionParam {
+    std::string table_name;
+    std::string partition_name;
+    std::string partition_tag;
+};
+
+using PartitionList = std::vector<PartitionParam>;
 
 /**
  * @brief SDK main class
@@ -195,7 +206,7 @@ class Connection {
      *
      * This method is used to create table
      *
-     * @param table_name, table name is going to be tested.
+     * @param table_name, target table's name.
      *
      * @return Indicate if table is cexist
      */
@@ -205,9 +216,9 @@ class Connection {
     /**
      * @brief Delete table method
      *
-     * This method is used to delete table.
+     * This method is used to delete table(and its partitions).
      *
-     * @param table_name, table name is going to be deleted.
+     * @param table_name, target table's name.
      *
      * @return Indicate if table is delete successfully.
      */
@@ -217,7 +228,7 @@ class Connection {
     /**
      * @brief Create index method
      *
-     * This method is used to create index for whole table
+     * This method is used to create index for whole table(and its partitions).
      *
      * @param IndexParam
      *  table_name, table name is going to be create index.
@@ -235,14 +246,15 @@ class Connection {
      *
      * This method is used to add vector array to table.
      *
-     * @param table_name, table_name is inserted.
+     * @param table_name, target table's name.
+     * @param partition_tag, target partition's tag, keep empty if no partition.
      * @param record_array, vector array is inserted.
      * @param id_array, after inserted every vector is given a id.
      *
      * @return Indicate if vector array are inserted successfully
      */
     virtual Status
-    Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
+    Insert(const std::string& table_name, const std::string& partition_tag, const std::vector<RowRecord>& record_array,
            std::vector<int64_t>& id_array) = 0;
 
     /**
@@ -250,7 +262,8 @@ class Connection {
      *
      * This method is used to query vector in table.
      *
-     * @param table_name, table_name is queried.
+     * @param table_name, target table's name, keep empty if no partition.
+     * @param partition_tags, target partitions.
      * @param query_record_array, all vector are going to be queried.
      * @param query_range_array, time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
@@ -259,16 +272,16 @@ class Connection {
      * @return Indicate if query is successful.
      */
     virtual Status
-    Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
-           const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
-           std::vector<TopKQueryResult>& topk_query_result_array) = 0;
+    Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
+           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           int64_t nprobe, std::vector<TopKQueryResult>& topk_query_result_array) = 0;
 
     /**
      * @brief Show table description
      *
      * This method is used to show table information.
      *
-     * @param table_name, which table is show.
+     * @param table_name, target table's name.
      * @param table_schema, table_schema is given when operation is successful.
      *
      * @return Indicate if this operation is successful.
@@ -281,8 +294,8 @@ class Connection {
      *
      * This method is used to get table row count.
      *
-     * @param table_name, table's name.
-     * @param row_count, table total row count.
+     * @param table_name, target table's name.
+     * @param row_count, table total row count(including partitions).
      *
      * @return Indicate if this operation is successful.
      */
@@ -331,21 +344,28 @@ class Connection {
     virtual std::string
     ServerStatus() const = 0;
 
+    /**
+     * @brief dump server tasks information
+     *
+     * This method is internal used.
+     *
+     * @return Server status.
+     */
     virtual std::string
     DumpTaskTables() const = 0;
 
     /**
-     * @brief delete tables by range
+     * @brief delete tables by date range
      *
-     * This method is used to delete tables by range.
+     * This method is used to delete table data by date range.
      *
+     * @param table_name, target table's name.
      * @param Range, table range to delete.
-     * @param table_name
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteByRange(Range& range, const std::string& table_name) = 0;
+    DeleteByDate(const std::string& table_name, const Range& range) = 0;
 
     /**
      * @brief preload table
@@ -364,9 +384,10 @@ class Connection {
      *
      * This method is used to describe index
      *
-     * @param table_name
+     * @param table_name, target table's name.
+     * @param index_param, returned index information.
      *
-     * @return index informations and indicate if this operation is successful.
+     * @return Indicate if this operation is successful.
      */
     virtual Status
     DescribeIndex(const std::string& table_name, IndexParam& index_param) const = 0;
@@ -374,14 +395,53 @@ class Connection {
     /**
      * @brief drop index
      *
-     * This method is used to drop index
+     * This method is used to drop index of table(and its partitions)
      *
-     * @param table_name
+     * @param table_name, target table's name.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
     DropIndex(const std::string& table_name) const = 0;
+
+    /**
+     * @brief Create partition method
+     *
+     * This method is used to create table partition
+     *
+     * @param param, use to provide partition information to be created.
+     *
+     * @return Indicate if partition is created successfully
+     */
+    virtual Status
+    CreatePartition(const PartitionParam& param) = 0;
+
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to create table
+     *
+     * @param table_name, table name is going to be tested.
+     * @param partition_array, partition array of the table.
+     *
+     * @return Indicate if this operation is successful
+     */
+    virtual Status
+    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const = 0;
+
+    /**
+     * @brief Delete partition method
+     *
+     * This method is used to delete table partition.
+     *
+     * @param param, target partition to be deleted.
+     *      NOTE: if param.table_name is empty, you must specify param.partition_name,
+     *          else you can specify param.table_name and param.tag and let the param.partition_name be empty
+     *
+     * @return Indicate if partition is delete successfully.
+     */
+    virtual Status
+    DropPartition(const PartitionParam& param) = 0;
 };
 
 }  // namespace milvus

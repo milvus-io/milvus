@@ -17,12 +17,12 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-
 aux_source_directory(src src_files)
 
 add_executable(sdk_simple
         main.cpp
         ${src_files}
+        ${util_files}
         )
 
 target_link_libraries(sdk_simple

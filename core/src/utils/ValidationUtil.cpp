@@ -167,6 +167,19 @@ ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSc
 }
 
 Status
+ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
+    for (auto& tag : partition_tags) {
+        if (tag.empty()) {
+            std::string msg = "Invalid partition tag: " + tag + ". " + "Partition tag should not be empty.";
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_NPROBE, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
