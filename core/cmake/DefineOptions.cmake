@@ -43,7 +43,7 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("CPU version")
 
-define_option(MILVUS_CPU_VERSION "Build CPU version only" ON)
+define_option(MILVUS_CPU_VERSION "Build CPU version only" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
