@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.2 (TODO)
 
 ## Bug
+- \#194 - Search faild: message="Table file doesn't exist"
 
 ## Feature
 
