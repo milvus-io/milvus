@@ -19,7 +19,6 @@
 
 #include "db/engine/ExecutionEngine.h"
 
-#include <faiss/Index.h>
 #include <stdint.h>
 #include <utility>
 #include <vector>
@@ -27,13 +26,12 @@
 namespace milvus {
 namespace engine {
 
-using IDNumber = faiss::Index::idx_t;
-
+typedef int64_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
-typedef std::vector<faiss::Index::idx_t> ResultIds;
-typedef std::vector<faiss::Index::distance_t> ResultDistances;
+typedef std::vector<std::pair<IDNumber, double>> QueryResult;
+typedef std::vector<QueryResult> QueryResults;
 
 struct TableIndex {
     int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;

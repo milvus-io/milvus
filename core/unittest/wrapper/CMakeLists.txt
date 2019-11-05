@@ -17,7 +17,13 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
+set(test_files
+        test_knowhere.cpp
+        test_wrapper.cpp)
+if (MILVUS_GPU_VERSION)
+    set(test_files ${test_files}
+            test_hybrid_index.cpp)
+endif ()
 
 set(wrapper_files
         ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp

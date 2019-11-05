@@ -15,19 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include <gtest/gtest.h>
-#include <chrono>
-
-static const char* CONFIG_PATH = "/tmp/milvus_test/";
-static const char* VALID_CONFIG_FILE = "valid_config.yaml";
-static const char* INVALID_CONFIG_FILE = "invalid_config.conf";
-
-class ConfigTest : public ::testing::Test {
- protected:
-    void
-    SetUp() override;
-    void
-    TearDown() override;
-};
+#define MILVUS_VERSION "0.5.0"
+#define BUILD_TYPE "Debug"
+#define BUILD_TIME "2019-11-05 18:49.05"

@@ -16,22 +16,22 @@
 // under the License.
 
 #include <gtest/gtest.h>
-#include <thread>
 #include <boost/filesystem.hpp>
+#include <thread>
 
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/grpc_impl/GrpcRequestScheduler.h"
 #include "server/grpc_impl/GrpcRequestTask.h"
-#include "src/version.h"
+#include "src/config.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 
-#include "server/DBWrapper.h"
-#include "server/Config.h"
-#include "scheduler/SchedInst.h"
 #include "scheduler/ResourceFactory.h"
+#include "scheduler/SchedInst.h"
+#include "server/Config.h"
+#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 
 namespace {
@@ -71,18 +71,18 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
-//        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
-//        DBWrapper::GetInstance().GetInstance().StartService();
-//        DBWrapper::GetInstance().GetInstance().StopService();
-//
-//        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
-//        DBWrapper::GetInstance().GetInstance().StartService();
-//        DBWrapper::GetInstance().GetInstance().StopService();
+        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
+        //        DBWrapper::GetInstance().GetInstance().StartService();
+        //        DBWrapper::GetInstance().GetInstance().StopService();
+        //
+        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
+        //        DBWrapper::GetInstance().GetInstance().StartService();
+        //        DBWrapper::GetInstance().GetInstance().StopService();
 
         milvus::server::Config::GetInstance().SetResourceConfigMode("single");
         milvus::server::DBWrapper::GetInstance().StartService();
 
-        //initialize handler, create table
+        // initialize handler, create table
         handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>();
         ::grpc::ServerContext context;
         ::milvus::grpc::TableSchema request;
@@ -108,8 +108,7 @@ class RpcHandlerTest : public testing::Test {
 };
 
 void
-BuildVectors(int64_t from, int64_t to,
-             std::vector<std::vector<float >>& vector_record_array) {
+BuildVectors(int64_t from, int64_t to, std::vector<std::vector<float>>& vector_record_array) {
     if (to <= from) {
         return;
     }
@@ -135,13 +134,13 @@ CurrentTmDate(int64_t offset_day = 0) {
     tm t;
     gmtime_r(&tt, &t);
 
-    std::string str = std::to_string(t.tm_year + 1900) + "-" + std::to_string(t.tm_mon + 1)
-                      + "-" + std::to_string(t.tm_mday);
+    std::string str =
+        std::to_string(t.tm_year + 1900) + "-" + std::to_string(t.tm_mon + 1) + "-" + std::to_string(t.tm_mday);
 
     return str;
 }
 
-} // namespace
+}  // namespace
 
 TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ::grpc::ServerContext context;
@@ -173,7 +172,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
     int error_code = response.error_code();
-//    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
+    //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     ::milvus::grpc::TableName table_name;
     ::milvus::grpc::IndexParam index_param;
@@ -214,25 +213,25 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResultList response;
-    //test null input
+    // test null input
     handler->Search(&context, nullptr, &response);
 
-    //test invalid table name
+    // test invalid table name
     handler->Search(&context, &request, &response);
 
-    //test table not exist
+    // test table not exist
     request.set_table_name("test3");
     handler->Search(&context, &request, &response);
 
-    //test invalid topk
+    // test invalid topk
     request.set_table_name(TABLE_NAME);
     handler->Search(&context, &request, &response);
 
-    //test invalid nprobe
+    // test invalid nprobe
     request.set_topk(10);
     handler->Search(&context, &request, &response);
 
-    //test empty query record array
+    // test empty query record array
     request.set_nprobe(32);
     handler->Search(&context, &request, &response);
 
@@ -245,7 +244,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
             grpc_record->add_vector_data(record[i]);
         }
     }
-    //insert vectors
+    // insert vectors
     insert_param.set_table_name(TABLE_NAME);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
@@ -260,7 +259,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     }
     handler->Search(&context, &request, &response);
 
-    //test search with range
+    // test search with range
     ::milvus::grpc::Range* range = request.mutable_query_range_array()->Add();
     range->set_start_value(CurrentTmDate(-2));
     range->set_end_value(CurrentTmDate(-3));
@@ -284,26 +283,26 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::milvus::grpc::Status response;
     std::string tablename = "tbl";
 
-    //create table test
-    //test null input
+    // create table test
+    // test null input
     handler->CreateTable(&context, nullptr, &response);
-    //test invalid table name
+    // test invalid table name
     handler->CreateTable(&context, &tableschema, &response);
-    //test invalid table dimension
+    // test invalid table dimension
     tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
-    //test invalid index file size
+    // test invalid index file size
     tableschema.set_dimension(TABLE_DIM);
-//    handler->CreateTable(&context, &tableschema, &response);
-    //test invalid index metric type
+    //    handler->CreateTable(&context, &tableschema, &response);
+    // test invalid index metric type
     tableschema.set_index_file_size(INDEX_FILE_SIZE);
     handler->CreateTable(&context, &tableschema, &response);
-    //test table already exist
+    // test table already exist
     tableschema.set_metric_type(1);
     handler->CreateTable(&context, &tableschema, &response);
 
-    //describe table test
-    //test invalid table name
+    // describe table test
+    // test invalid table name
     ::milvus::grpc::TableName table_name;
     ::milvus::grpc::TableSchema table_schema;
     handler->DescribeTable(&context, &table_name, &table_schema);
@@ -316,11 +315,11 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
-    //Insert vectors
-    //test invalid table name
+    // Insert vectors
+    // test invalid table name
     handler->Insert(&context, &request, &vector_ids);
     request.set_table_name(tablename);
-    //test empty row record
+    // test empty row record
     handler->Insert(&context, &request, &vector_ids);
 
     for (auto& record : record_array) {
@@ -329,12 +328,12 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
             grpc_record->add_vector_data(record[i]);
         }
     }
-    //test vector_id size not equal to row record size
+    // test vector_id size not equal to row record size
     vector_ids.clear_vector_id_array();
     vector_ids.add_vector_id_array(1);
     handler->Insert(&context, &request, &vector_ids);
 
-    //normally test
+    // normally test
     vector_ids.clear_vector_id_array();
     handler->Insert(&context, &request, &vector_ids);
 
@@ -348,33 +347,31 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     }
     handler->Insert(&context, &request, &vector_ids);
 
-
-    //show tables
+    // show tables
     ::milvus::grpc::Command cmd;
     ::milvus::grpc::TableNameList table_name_list;
     status = handler->ShowTables(&context, &cmd, &table_name_list);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    //Count Table
+    // Count Table
     ::milvus::grpc::TableRowCount count;
     table_name.Clear();
     status = handler->CountTable(&context, &table_name, &count);
     table_name.set_table_name(tablename);
     status = handler->CountTable(&context, &table_name, &count);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
-//    ASSERT_EQ(count.table_row_count(), vector_ids.vector_id_array_size());
+    //    ASSERT_EQ(count.table_row_count(), vector_ids.vector_id_array_size());
 
-
-    //Preload Table
+    // Preload Table
     table_name.Clear();
     status = handler->PreloadTable(&context, &table_name, &response);
     table_name.set_table_name(TABLE_NAME);
     status = handler->PreloadTable(&context, &table_name, &response);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-    //Drop table
+    // Drop table
     table_name.set_table_name("");
-    //test invalid table name
+    // test invalid table name
     ::grpc::Status grpc_status = handler->DropTable(&context, &table_name, &response);
     table_name.set_table_name(tablename);
     grpc_status = handler->DropTable(&context, &table_name, &response);
@@ -410,7 +407,7 @@ TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
 
     ::grpc::Status grpc_status = handler->DeleteByRange(&context, &request, &status);
     int error_code = status.error_code();
-//    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
+    //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     request.mutable_range()->set_start_value("test6");
     grpc_status = handler->DeleteByRange(&context, &request, &status);
@@ -451,7 +448,7 @@ class RpcSchedulerTest : public testing::Test {
     std::shared_ptr<DummyTask> task_ptr;
 };
 
-} // namespace
+}  // namespace
 
 TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto status = task_ptr->Execute();
@@ -469,4 +466,3 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 
     milvus::server::grpc::GrpcRequestScheduler::GetInstance().Stop();
 }
-

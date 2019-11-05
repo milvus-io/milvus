@@ -20,11 +20,9 @@
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
 
-include_directories(${CUDA_TOOLKIT_ROOT_DIR}/include)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-#this statement must put here, since the INDEX_INCLUDE_DIRS is defined in code/CMakeList.txt
 add_subdirectory(index)
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
@@ -109,35 +107,45 @@ set(boost_lib
         libboost_serialization.a
         )
 
-set(cuda_lib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-        cudart
-        cublas
-        )
-
 set(third_party_libs
         sqlite
         ${client_grpc_lib}
         yaml-cpp
         ${prometheus_lib}
-        ${cuda_lib}
         mysqlpp
         zlib
         ${boost_lib}
         )
 
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+if (MILVUS_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
+            )
     set(third_party_libs ${third_party_libs}
-        gperftools
-        libunwind
-        )
+            ${cuda_lib}
+            )
+    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
+    set(engine_files ${engine_files}
+            ${wrapper_gpu_files}
+            )
 endif ()
 
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+    set(third_party_libs ${third_party_libs}
+            gperftools
+            libunwind
+            )
+endif ()
+
 set(engine_libs
         pthread
         libgomp.a
         libgfortran.a
+        dl
         )
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
@@ -147,11 +155,11 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
             )
 endif ()
 
-cuda_add_library(milvus_engine STATIC ${engine_files})
+add_library(milvus_engine STATIC ${engine_files})
 target_link_libraries(milvus_engine
         knowhere
-        ${engine_libs}
         ${third_party_libs}
+        ${engine_libs}
         )
 
 add_library(metrics STATIC ${metrics_files})
@@ -165,8 +173,6 @@ target_link_libraries(metrics ${metrics_lib})
 
 set(server_libs
         milvus_engine
-        pthread
-        dl
         metrics
         )
 

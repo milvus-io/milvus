@@ -93,9 +93,11 @@ static const char* CONFIG_RESOURCE_MODE = "mode";
 static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
 static const char* CONFIG_RESOURCE_SEARCH_RESOURCES = "search_resources";
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE = "index_build_device";
+#ifdef MILVUS_CPU_VERSION
+static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu";
+#else
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "gpu0";
-
-const int32_t CPU_DEVICE_ID = -1;
+#endif
 
 class Config {
  public:

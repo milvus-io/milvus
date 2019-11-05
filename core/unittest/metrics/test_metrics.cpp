@@ -15,19 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <gtest/gtest.h>
 #include <chrono>
 #include <map>
 #include <memory>
 #include <string>
 #include <thread>
-#include <gtest/gtest.h>
 
 #include "cache/CpuCacheMgr.h"
-#include "server/Config.h"
-#include "metrics/Metrics.h"
-#include "metrics/utils.h"
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
+#include "metrics/Metrics.h"
+#include "metrics/utils.h"
+#include "server/Config.h"
 
 TEST_F(MetricTest, METRIC_TEST) {
     milvus::server::Config::GetInstance().SetMetricConfigCollector("zabbix");
@@ -36,15 +36,15 @@ TEST_F(MetricTest, METRIC_TEST) {
     milvus::server::Metrics::GetInstance();
 
     milvus::server::SystemInfo::GetInstance().Init();
-//    server::Metrics::GetInstance().Init();
-//    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
+    //    server::Metrics::GetInstance().Init();
+    //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
     milvus::server::Metrics::GetInstance().Init();
 
-//    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
+    //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
     std::cout << milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
 
-    static const char *group_name = "test_group";
+    static const char* group_name = "test_group";
     static const int group_dim = 256;
 
     milvus::engine::meta::TableSchema group_info;
@@ -61,22 +61,21 @@ TEST_F(MetricTest, METRIC_TEST) {
 
     int d = 256;
     int nb = 50;
-    float *xb = new float[d * nb];
+    float* xb = new float[d * nb];
     for (int i = 0; i < nb; i++) {
         for (int j = 0; j < d; j++) xb[d * i + j] = drand48();
         xb[d * i] += i / 2000.;
     }
 
     int qb = 5;
-    float *qxb = new float[d * qb];
+    float* qxb = new float[d * qb];
     for (int i = 0; i < qb; i++) {
         for (int j = 0; j < d; j++) qxb[d * i + j] = drand48();
         qxb[d * i] += i / 2000.;
     }
 
     std::thread search([&]() {
-//        milvus::engine::ResultIds result_ids;
-//        milvus::engine::ResultDistances result_distances;
+        milvus::engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -91,17 +90,16 @@ TEST_F(MetricTest, METRIC_TEST) {
             prev_count = count;
 
             START_TIMER;
-//            stat = db_->Query(group_name, k, qb, qxb, result_ids, result_distances);
-            ss << "Search " << j << " With Size " << (float) (count * group_dim * sizeof(float)) / (1024 * 1024)
-               << " M";
+            //            stat = db_->Query(group_name, k, qb, qxb, results);
+            ss << "Search " << j << " With Size " << (float)(count * group_dim * sizeof(float)) / (1024 * 1024) << " M";
 
             for (auto k = 0; k < qb; ++k) {
-//                ASSERT_EQ(results[k][0].first, target_ids[k]);
+                //                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
                 ss << "Result [" << k << "]:";
-//                for (auto result : results[k]) {
-//                    ss << result.first << " ";
-//                }
+                //                for (auto result : results[k]) {
+                //                    ss << result.first << " ";
+                //                }
             }
             ASSERT_TRUE(count >= prev_count);
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -154,5 +152,3 @@ TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
 
     milvus::server::MetricCollector metric_collector();
 }
-
-

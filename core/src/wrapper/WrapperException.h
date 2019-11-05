@@ -17,17 +17,21 @@
 
 #pragma once
 
-#include <gtest/gtest.h>
-#include <chrono>
+#include <exception>
+#include <string>
 
-static const char* CONFIG_PATH = "/tmp/milvus_test/";
-static const char* VALID_CONFIG_FILE = "valid_config.yaml";
-static const char* INVALID_CONFIG_FILE = "invalid_config.conf";
+namespace milvus {
+namespace engine {
 
-class ConfigTest : public ::testing::Test {
- protected:
-    void
-    SetUp() override;
-    void
-    TearDown() override;
+class WrapperException : public std::exception {
+ public:
+    explicit WrapperException(const std::string& msg);
+
+    const char*
+    what() const noexcept override;
+
+    const std::string msg;
 };
+
+}  // namespace engine
+}  // namespace milvus
