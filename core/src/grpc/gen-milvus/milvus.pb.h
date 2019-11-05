@@ -48,7 +48,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[19]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[17]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -75,9 +75,6 @@ extern IndexParamDefaultTypeInternal _IndexParam_default_instance_;
 class InsertParam;
 class InsertParamDefaultTypeInternal;
 extern InsertParamDefaultTypeInternal _InsertParam_default_instance_;
-class QueryResult;
-class QueryResultDefaultTypeInternal;
-extern QueryResultDefaultTypeInternal _QueryResult_default_instance_;
 class Range;
 class RangeDefaultTypeInternal;
 extern RangeDefaultTypeInternal _Range_default_instance_;
@@ -105,9 +102,6 @@ extern TableRowCountDefaultTypeInternal _TableRowCount_default_instance_;
 class TableSchema;
 class TableSchemaDefaultTypeInternal;
 extern TableSchemaDefaultTypeInternal _TableSchema_default_instance_;
-class TopKQueryResult;
-class TopKQueryResultDefaultTypeInternal;
-extern TopKQueryResultDefaultTypeInternal _TopKQueryResult_default_instance_;
 class TopKQueryResultList;
 class TopKQueryResultListDefaultTypeInternal;
 extern TopKQueryResultListDefaultTypeInternal _TopKQueryResultList_default_instance_;
@@ -123,7 +117,6 @@ template<> ::milvus::grpc::DeleteByRangeParam* Arena::CreateMaybeMessage<::milvu
 template<> ::milvus::grpc::Index* Arena::CreateMaybeMessage<::milvus::grpc::Index>(Arena*);
 template<> ::milvus::grpc::IndexParam* Arena::CreateMaybeMessage<::milvus::grpc::IndexParam>(Arena*);
 template<> ::milvus::grpc::InsertParam* Arena::CreateMaybeMessage<::milvus::grpc::InsertParam>(Arena*);
-template<> ::milvus::grpc::QueryResult* Arena::CreateMaybeMessage<::milvus::grpc::QueryResult>(Arena*);
 template<> ::milvus::grpc::Range* Arena::CreateMaybeMessage<::milvus::grpc::Range>(Arena*);
 template<> ::milvus::grpc::RowRecord* Arena::CreateMaybeMessage<::milvus::grpc::RowRecord>(Arena*);
 template<> ::milvus::grpc::SearchInFilesParam* Arena::CreateMaybeMessage<::milvus::grpc::SearchInFilesParam>(Arena*);
@@ -133,7 +126,6 @@ template<> ::milvus::grpc::TableName* Arena::CreateMaybeMessage<::milvus::grpc::
 template<> ::milvus::grpc::TableNameList* Arena::CreateMaybeMessage<::milvus::grpc::TableNameList>(Arena*);
 template<> ::milvus::grpc::TableRowCount* Arena::CreateMaybeMessage<::milvus::grpc::TableRowCount>(Arena*);
 template<> ::milvus::grpc::TableSchema* Arena::CreateMaybeMessage<::milvus::grpc::TableSchema>(Arena*);
-template<> ::milvus::grpc::TopKQueryResult* Arena::CreateMaybeMessage<::milvus::grpc::TopKQueryResult>(Arena*);
 template<> ::milvus::grpc::TopKQueryResultList* Arena::CreateMaybeMessage<::milvus::grpc::TopKQueryResultList>(Arena*);
 template<> ::milvus::grpc::VectorIds* Arena::CreateMaybeMessage<::milvus::grpc::VectorIds>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
@@ -1530,281 +1522,6 @@ class SearchInFilesParam :
 };
 // -------------------------------------------------------------------
 
-class QueryResult :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.QueryResult) */ {
- public:
-  QueryResult();
-  virtual ~QueryResult();
-
-  QueryResult(const QueryResult& from);
-  QueryResult(QueryResult&& from) noexcept
-    : QueryResult() {
-    *this = ::std::move(from);
-  }
-
-  inline QueryResult& operator=(const QueryResult& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline QueryResult& operator=(QueryResult&& from) noexcept {
-    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
-      if (this != &from) InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return GetMetadataStatic().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return GetMetadataStatic().reflection;
-  }
-  static const QueryResult& default_instance();
-
-  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const QueryResult* internal_default_instance() {
-    return reinterpret_cast<const QueryResult*>(
-               &_QueryResult_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    9;
-
-  friend void swap(QueryResult& a, QueryResult& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(QueryResult* other) {
-    if (other == this) return;
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  inline QueryResult* New() const final {
-    return CreateMaybeMessage<QueryResult>(nullptr);
-  }
-
-  QueryResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<QueryResult>(arena);
-  }
-  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const QueryResult& from);
-  void MergeFrom(const QueryResult& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  #else
-  bool MergePartialFromCodedStream(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
-  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  void SerializeWithCachedSizes(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
-  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
-      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
-  int GetCachedSize() const final { return _cached_size_.Get(); }
-
-  private:
-  inline void SharedCtor();
-  inline void SharedDtor();
-  void SetCachedSize(int size) const final;
-  void InternalSwap(QueryResult* other);
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.grpc.QueryResult";
-  }
-  private:
-  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
-    return nullptr;
-  }
-  inline void* MaybeArenaPtr() const {
-    return nullptr;
-  }
-  public:
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
-  private:
-  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
-    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
-    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
-  }
-
-  public:
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kIdFieldNumber = 1,
-    kDistanceFieldNumber = 2,
-  };
-  // int64 id = 1;
-  void clear_id();
-  ::PROTOBUF_NAMESPACE_ID::int64 id() const;
-  void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
-
-  // double distance = 2;
-  void clear_distance();
-  double distance() const;
-  void set_distance(double value);
-
-  // @@protoc_insertion_point(class_scope:milvus.grpc.QueryResult)
- private:
-  class _Internal;
-
-  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::int64 id_;
-  double distance_;
-  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  friend struct ::TableStruct_milvus_2eproto;
-};
-// -------------------------------------------------------------------
-
-class TopKQueryResult :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.TopKQueryResult) */ {
- public:
-  TopKQueryResult();
-  virtual ~TopKQueryResult();
-
-  TopKQueryResult(const TopKQueryResult& from);
-  TopKQueryResult(TopKQueryResult&& from) noexcept
-    : TopKQueryResult() {
-    *this = ::std::move(from);
-  }
-
-  inline TopKQueryResult& operator=(const TopKQueryResult& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline TopKQueryResult& operator=(TopKQueryResult&& from) noexcept {
-    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
-      if (this != &from) InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return GetMetadataStatic().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return GetMetadataStatic().reflection;
-  }
-  static const TopKQueryResult& default_instance();
-
-  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const TopKQueryResult* internal_default_instance() {
-    return reinterpret_cast<const TopKQueryResult*>(
-               &_TopKQueryResult_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    10;
-
-  friend void swap(TopKQueryResult& a, TopKQueryResult& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(TopKQueryResult* other) {
-    if (other == this) return;
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  inline TopKQueryResult* New() const final {
-    return CreateMaybeMessage<TopKQueryResult>(nullptr);
-  }
-
-  TopKQueryResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<TopKQueryResult>(arena);
-  }
-  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const TopKQueryResult& from);
-  void MergeFrom(const TopKQueryResult& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  #else
-  bool MergePartialFromCodedStream(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
-  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  void SerializeWithCachedSizes(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
-  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
-      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
-  int GetCachedSize() const final { return _cached_size_.Get(); }
-
-  private:
-  inline void SharedCtor();
-  inline void SharedDtor();
-  void SetCachedSize(int size) const final;
-  void InternalSwap(TopKQueryResult* other);
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.grpc.TopKQueryResult";
-  }
-  private:
-  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
-    return nullptr;
-  }
-  inline void* MaybeArenaPtr() const {
-    return nullptr;
-  }
-  public:
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
-  private:
-  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
-    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
-    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
-  }
-
-  public:
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kQueryResultArraysFieldNumber = 1,
-  };
-  // repeated .milvus.grpc.QueryResult query_result_arrays = 1;
-  int query_result_arrays_size() const;
-  void clear_query_result_arrays();
-  ::milvus::grpc::QueryResult* mutable_query_result_arrays(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::QueryResult >*
-      mutable_query_result_arrays();
-  const ::milvus::grpc::QueryResult& query_result_arrays(int index) const;
-  ::milvus::grpc::QueryResult* add_query_result_arrays();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::QueryResult >&
-      query_result_arrays() const;
-
-  // @@protoc_insertion_point(class_scope:milvus.grpc.TopKQueryResult)
- private:
-  class _Internal;
-
-  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::QueryResult > query_result_arrays_;
-  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  friend struct ::TableStruct_milvus_2eproto;
-};
-// -------------------------------------------------------------------
-
 class TopKQueryResultList :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.TopKQueryResultList) */ {
  public:
@@ -1847,7 +1564,7 @@ class TopKQueryResultList :
                &_TopKQueryResultList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    9;
 
   friend void swap(TopKQueryResultList& a, TopKQueryResultList& b) {
     a.Swap(&b);
@@ -1918,19 +1635,19 @@ class TopKQueryResultList :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kTopkQueryResultFieldNumber = 2,
+    kQueryResultBinaryFieldNumber = 2,
     kStatusFieldNumber = 1,
   };
-  // repeated .milvus.grpc.TopKQueryResult topk_query_result = 2;
-  int topk_query_result_size() const;
-  void clear_topk_query_result();
-  ::milvus::grpc::TopKQueryResult* mutable_topk_query_result(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::TopKQueryResult >*
-      mutable_topk_query_result();
-  const ::milvus::grpc::TopKQueryResult& topk_query_result(int index) const;
-  ::milvus::grpc::TopKQueryResult* add_topk_query_result();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::TopKQueryResult >&
-      topk_query_result() const;
+  // bytes query_result_binary = 2;
+  void clear_query_result_binary();
+  const std::string& query_result_binary() const;
+  void set_query_result_binary(const std::string& value);
+  void set_query_result_binary(std::string&& value);
+  void set_query_result_binary(const char* value);
+  void set_query_result_binary(const void* value, size_t size);
+  std::string* mutable_query_result_binary();
+  std::string* release_query_result_binary();
+  void set_allocated_query_result_binary(std::string* query_result_binary);
 
   // .milvus.grpc.Status status = 1;
   bool has_status() const;
@@ -1945,7 +1662,7 @@ class TopKQueryResultList :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::TopKQueryResult > topk_query_result_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr query_result_binary_;
   ::milvus::grpc::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -1994,7 +1711,7 @@ class StringReply :
                &_StringReply_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    10;
 
   friend void swap(StringReply& a, StringReply& b) {
     a.Swap(&b);
@@ -2141,7 +1858,7 @@ class BoolReply :
                &_BoolReply_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    11;
 
   friend void swap(BoolReply& a, BoolReply& b) {
     a.Swap(&b);
@@ -2282,7 +1999,7 @@ class TableRowCount :
                &_TableRowCount_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    12;
 
   friend void swap(TableRowCount& a, TableRowCount& b) {
     a.Swap(&b);
@@ -2423,7 +2140,7 @@ class Command :
                &_Command_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    13;
 
   friend void swap(Command& a, Command& b) {
     a.Swap(&b);
@@ -2560,7 +2277,7 @@ class Index :
                &_Index_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    14;
 
   friend void swap(Index& a, Index& b) {
     a.Swap(&b);
@@ -2698,7 +2415,7 @@ class IndexParam :
                &_IndexParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    17;
+    15;
 
   friend void swap(IndexParam& a, IndexParam& b) {
     a.Swap(&b);
@@ -2855,7 +2572,7 @@ class DeleteByRangeParam :
                &_DeleteByRangeParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    18;
+    16;
 
   friend void swap(DeleteByRangeParam& a, DeleteByRangeParam& b) {
     a.Swap(&b);
@@ -3875,72 +3592,6 @@ inline void SearchInFilesParam::set_allocated_search_param(::milvus::grpc::Searc
 
 // -------------------------------------------------------------------
 
-// QueryResult
-
-// int64 id = 1;
-inline void QueryResult::clear_id() {
-  id_ = PROTOBUF_LONGLONG(0);
-}
-inline ::PROTOBUF_NAMESPACE_ID::int64 QueryResult::id() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.QueryResult.id)
-  return id_;
-}
-inline void QueryResult::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  
-  id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.QueryResult.id)
-}
-
-// double distance = 2;
-inline void QueryResult::clear_distance() {
-  distance_ = 0;
-}
-inline double QueryResult::distance() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.QueryResult.distance)
-  return distance_;
-}
-inline void QueryResult::set_distance(double value) {
-  
-  distance_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.QueryResult.distance)
-}
-
-// -------------------------------------------------------------------
-
-// TopKQueryResult
-
-// repeated .milvus.grpc.QueryResult query_result_arrays = 1;
-inline int TopKQueryResult::query_result_arrays_size() const {
-  return query_result_arrays_.size();
-}
-inline void TopKQueryResult::clear_query_result_arrays() {
-  query_result_arrays_.Clear();
-}
-inline ::milvus::grpc::QueryResult* TopKQueryResult::mutable_query_result_arrays(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.query_result_arrays)
-  return query_result_arrays_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::QueryResult >*
-TopKQueryResult::mutable_query_result_arrays() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.TopKQueryResult.query_result_arrays)
-  return &query_result_arrays_;
-}
-inline const ::milvus::grpc::QueryResult& TopKQueryResult::query_result_arrays(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.query_result_arrays)
-  return query_result_arrays_.Get(index);
-}
-inline ::milvus::grpc::QueryResult* TopKQueryResult::add_query_result_arrays() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.query_result_arrays)
-  return query_result_arrays_.Add();
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::QueryResult >&
-TopKQueryResult::query_result_arrays() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.TopKQueryResult.query_result_arrays)
-  return query_result_arrays_;
-}
-
-// -------------------------------------------------------------------
-
 // TopKQueryResultList
 
 // .milvus.grpc.Status status = 1;
@@ -3988,34 +3639,55 @@ inline void TopKQueryResultList::set_allocated_status(::milvus::grpc::Status* st
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResultList.status)
 }
 
-// repeated .milvus.grpc.TopKQueryResult topk_query_result = 2;
-inline int TopKQueryResultList::topk_query_result_size() const {
-  return topk_query_result_.size();
+// bytes query_result_binary = 2;
+inline void TopKQueryResultList::clear_query_result_binary() {
+  query_result_binary_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline void TopKQueryResultList::clear_topk_query_result() {
-  topk_query_result_.Clear();
+inline const std::string& TopKQueryResultList::query_result_binary() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResultList.query_result_binary)
+  return query_result_binary_.GetNoArena();
 }
-inline ::milvus::grpc::TopKQueryResult* TopKQueryResultList::mutable_topk_query_result(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResultList.topk_query_result)
-  return topk_query_result_.Mutable(index);
+inline void TopKQueryResultList::set_query_result_binary(const std::string& value) {
+  
+  query_result_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResultList.query_result_binary)
 }
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::TopKQueryResult >*
-TopKQueryResultList::mutable_topk_query_result() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.TopKQueryResultList.topk_query_result)
-  return &topk_query_result_;
+inline void TopKQueryResultList::set_query_result_binary(std::string&& value) {
+  
+  query_result_binary_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.TopKQueryResultList.query_result_binary)
 }
-inline const ::milvus::grpc::TopKQueryResult& TopKQueryResultList::topk_query_result(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResultList.topk_query_result)
-  return topk_query_result_.Get(index);
+inline void TopKQueryResultList::set_query_result_binary(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  query_result_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.TopKQueryResultList.query_result_binary)
 }
-inline ::milvus::grpc::TopKQueryResult* TopKQueryResultList::add_topk_query_result() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResultList.topk_query_result)
-  return topk_query_result_.Add();
+inline void TopKQueryResultList::set_query_result_binary(const void* value, size_t size) {
+  
+  query_result_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.TopKQueryResultList.query_result_binary)
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::TopKQueryResult >&
-TopKQueryResultList::topk_query_result() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.TopKQueryResultList.topk_query_result)
-  return topk_query_result_;
+inline std::string* TopKQueryResultList::mutable_query_result_binary() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResultList.query_result_binary)
+  return query_result_binary_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* TopKQueryResultList::release_query_result_binary() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResultList.query_result_binary)
+  
+  return query_result_binary_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void TopKQueryResultList::set_allocated_query_result_binary(std::string* query_result_binary) {
+  if (query_result_binary != nullptr) {
+    
+  } else {
+    
+  }
+  query_result_binary_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), query_result_binary);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResultList.query_result_binary)
 }
 
 // -------------------------------------------------------------------
@@ -4591,10 +4263,6 @@ inline void DeleteByRangeParam::set_allocated_table_name(std::string* table_name
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

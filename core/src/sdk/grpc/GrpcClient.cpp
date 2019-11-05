@@ -136,7 +136,6 @@ GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids, const ::milvus::grpc::
 Status
 GrpcClient::Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list,
                    const ::milvus::grpc::SearchParam& search_param) {
-    ::milvus::grpc::TopKQueryResult query_result;
     ClientContext context;
     ::grpc::Status grpc_status = stub_->Search(&context, search_param, &topk_query_result_list);
 

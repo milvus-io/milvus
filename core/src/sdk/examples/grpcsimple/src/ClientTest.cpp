@@ -62,16 +62,16 @@ PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& sear
     std::cout << "Returned result count: " << topk_query_result_array.size() << std::endl;
 
     int32_t index = 0;
-    for (auto& result : topk_query_result_array) {
-        auto search_id = search_record_array[index].first;
-        index++;
-        std::cout << "No." << std::to_string(index) << " vector " << std::to_string(search_id) << " top "
-                  << std::to_string(result.query_result_arrays.size()) << " search result:" << std::endl;
-        for (auto& item : result.query_result_arrays) {
-            std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
-            std::cout << std::endl;
-        }
-    }
+    //    for (auto& result : topk_query_result_array) {
+    //        auto search_id = search_record_array[index].first;
+    //        index++;
+    //        std::cout << "No." << std::to_string(index) << " vector " << std::to_string(search_id) << " top "
+    //                  << std::to_string(result.query_result_arrays.size()) << " search result:" << std::endl;
+    //        for (auto& item : result.query_result_arrays) {
+    //            std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
+    //            std::cout << std::endl;
+    //        }
+    //    }
 
     BLOCK_SPLITER
 }
@@ -169,15 +169,15 @@ CheckResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_rec
             const std::vector<milvus::TopKQueryResult>& topk_query_result_array) {
     BLOCK_SPLITER
     int64_t index = 0;
-    for (auto& result : topk_query_result_array) {
-        auto result_id = result.query_result_arrays[0].id;
-        auto search_id = search_record_array[index++].first;
-        if (result_id != search_id) {
-            std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
-        } else {
-            std::cout << "Check result sucessfully" << std::endl;
-        }
-    }
+    //    for (auto& result : topk_query_result_array) {
+    //        auto result_id = result.query_result_arrays[0].id;
+    //        auto search_id = search_record_array[index++].first;
+    //        if (result_id != search_id) {
+    //            std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
+    //        } else {
+    //            std::cout << "Check result sucessfully" << std::endl;
+    //        }
+    //    }
     BLOCK_SPLITER
 }
 

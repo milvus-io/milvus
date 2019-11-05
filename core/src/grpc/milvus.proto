@@ -84,24 +84,9 @@ message SearchInFilesParam {
 /**
  * @brief Query result params
  */
-message QueryResult {
-    int64 id = 1;
-    double distance = 2;
-}
-
-/**
- * @brief TopK query result
- */
-message TopKQueryResult {
-    repeated QueryResult query_result_arrays = 1;
-}
-
-/**
- * @brief List of topK query result
- */
 message TopKQueryResultList {
     Status status = 1;
-    repeated TopKQueryResult topk_query_result = 2;
+    bytes query_result_binary = 2;
 }
 
 /**

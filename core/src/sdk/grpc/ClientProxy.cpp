@@ -243,17 +243,28 @@ ClientProxy::Search(const std::string& table_name, const std::vector<RowRecord>&
         Status status = client_ptr_->Search(topk_query_result_list, search_param);
 
         // step 4: convert result array
-        for (uint64_t i = 0; i < topk_query_result_list.topk_query_result_size(); ++i) {
-            TopKQueryResult result;
-            for (uint64_t j = 0; j < topk_query_result_list.topk_query_result(i).query_result_arrays_size(); ++j) {
-                QueryResult query_result;
-                query_result.id = topk_query_result_list.topk_query_result(i).query_result_arrays(j).id();
-                query_result.distance = topk_query_result_list.topk_query_result(i).query_result_arrays(j).distance();
-                result.query_result_arrays.emplace_back(query_result);
-            }
+        std::vector<int64_t> id_array(query_range_array.size() * topk);
+        std::vector<float> distance_array(query_range_array.size() * topk);
 
-            topk_query_result_array.emplace_back(result);
-        }
+        size_t start_idx = sizeof(int64_t) * 2;
+        size_t id_size = sizeof(int64_t) * query_range_array.size() * topk;
+        memcpy(&id_array[0], &topk_query_result_list.query_result_binary()[start_idx], id_size);
+        size_t dis_size = sizeof(float) * query_range_array.size() * topk;
+        memcpy(&distance_array[0], &topk_query_result_list.query_result_binary()[start_idx + id_size], dis_size);
+        //        topk_query_result_array.
+        //        for (uint64_t i = 0; i < topk_query_result_list.topk_query_result_size(); ++i) {
+        //            TopKQueryResult result;
+        //            for (uint64_t j = 0; j < topk_query_result_list.topk_query_result(i).query_result_arrays_size();
+        //            ++j) {
+        //                QueryResult query_result;
+        //                query_result.id = topk_query_result_list.topk_query_result(i).query_result_arrays(j).id();
+        //                query_result.distance =
+        //                topk_query_result_list.topk_query_result(i).query_result_arrays(j).distance();
+        //                result.query_result_arrays.emplace_back(query_result);
+        //            }
+        //
+        //            topk_query_result_array.emplace_back(result);
+        //        }
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to search vectors: " + std::string(ex.what()));

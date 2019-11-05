@@ -90,7 +90,9 @@ struct QueryResult {
  * @brief TopK query result
  */
 struct TopKQueryResult {
-    std::vector<QueryResult> query_result_arrays;  ///< TopK query result
+    std::vector<int64_t> id_array;       ///< Output result
+    std::vector<double> distance_array;  ///< Vector similarity distance
+    //    std::vector<QueryResult> query_result_arrays;  ///< TopK query result
 };
 
 /**
