@@ -541,16 +541,16 @@ InsertTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchTask::SearchTask(const ::milvus::grpc::SearchParam* search_vector_infos,
-                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResultList* response)
+                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response)
     : GrpcBaseTask(DQL_TASK_GROUP),
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
-      topk_result_list(response) {
+      topk_result_(response) {
 }
 
 BaseTaskPtr
 SearchTask::Create(const ::milvus::grpc::SearchParam* search_vector_infos,
-                   const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResultList* response) {
+                   const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response) {
     if (search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
@@ -668,40 +668,25 @@ SearchTask::OnExecute() {
             return Status::OK();  // empty table
         }
 
-        size_t result_k = result_ids.size() / record_count;
+        if (result_ids.size() != result_distances.size()) {
+            ErrorCode error_code = SERVER_ILLEGAL_SEARCH_RESULT;
+            std::string error_msg = "The search result ids and distances mis-match.";
+            return Status(error_code, error_msg);
+        }
 
         // step 7: construct result array
-        std::vector<unsigned char> nq_array(8);
-        std::vector<unsigned char> topk_array(8);
-        memcpy(&nq_array[0], &record_count, sizeof(int64_t));
-        memcpy(&topk_array[0], &top_k, sizeof(int64_t));
-        std::string nq_str(nq_array.begin(), nq_array.end());
-        std::string topk_str(topk_array.begin(), topk_array.end());
+        topk_result_->set_nq(record_count);
+        topk_result_->set_topk(top_k);
 
-        std::string result_string;
-        result_string.append(nq_str);
-        result_string.append(topk_str);
+        std::vector<unsigned char> ids_array(sizeof(int64_t) * result_ids.size());
+        memcpy(ids_array.data(), result_ids.data(), result_ids.size() * sizeof(int64_t));
+        std::string id_str(ids_array.begin(), ids_array.end());
+        topk_result_->set_ids_binary(id_str);
 
-        std::string id_str, dis_str;
-        for (size_t i = 0; i < record_count; ++i) {
-            std::vector<unsigned char> id_byte_array(8);
-            std::vector<unsigned char> dis_byte_array(4);
-            for (size_t j = 0; j < result_k; ++j) {
-                size_t idx = i * result_k + j;
-                memcpy(&id_byte_array[0], &result_ids[idx], sizeof(int64_t));
-                memcpy(&dis_byte_array[0], &result_distances[idx], sizeof(float));
-
-                std::string id(id_byte_array.begin(), id_byte_array.end());
-                id_str.append(id);
-                std::string dis(dis_byte_array.begin(), dis_byte_array.end());
-                dis_str.append(dis);
-            }
-        }
-        result_string.append(id_str);
-        result_string.append(dis_str);
-        topk_result_list->set_query_result_binary(result_string);
-
-        std::cout << topk_result_list->query_result_binary().size() << std::endl;
+        std::vector<unsigned char> dis_array(sizeof(float) * result_distances.size());
+        memcpy(dis_array.data(), result_distances.data(), result_distances.size() * sizeof(float));
+        std::string dis_str(dis_array.begin(), dis_array.end());
+        topk_result_->set_distances_binary(dis_str);
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

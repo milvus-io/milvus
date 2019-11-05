@@ -202,9 +202,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::milvus::grpc::VectorIds vector_ids;
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
-        for (size_t i = 0; i < record.size(); i++) {
-            grpc_record->add_vector_data(record[i]);
-        }
+        grpc_record->add_vector_data(record.begin(), record.end());
     }
     handler->Insert(&context, &request, &vector_ids);
     ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
@@ -213,7 +211,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
 TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::SearchParam request;
-    ::milvus::grpc::TopKQueryResultList response;
+    ::milvus::grpc::TopKQueryResult response;
     //test null input
     handler->Search(&context, nullptr, &response);
 
@@ -241,9 +239,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::milvus::grpc::InsertParam insert_param;
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-        for (size_t i = 0; i < record.size(); i++) {
-            grpc_record->add_vector_data(record[i]);
-        }
+        grpc_record->add_vector_data(record.begin(), record.end());
     }
     //insert vectors
     insert_param.set_table_name(TABLE_NAME);
@@ -254,9 +250,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     BuildVectors(0, 10, record_array);
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* row_record = request.add_query_record_array();
-        for (auto& rec : record) {
-            row_record->add_vector_data(rec);
-        }
+        row_record->add_vector_data(record.begin(), record.end());
     }
     handler->Search(&context, &request, &response);
 
@@ -325,9 +319,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
 
     for (auto& record : record_array) {
         ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
-        for (size_t i = 0; i < record.size(); i++) {
-            grpc_record->add_vector_data(record[i]);
-        }
+        grpc_record->add_vector_data(record.begin(), record.end());
     }
     //test vector_id size not equal to row record size
     vector_ids.clear_vector_id_array();
@@ -342,9 +334,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     vector_ids.clear_vector_id_array();
     for (uint64_t i = 0; i < 10; ++i) {
         ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
-        for (size_t j = 0; j < 10; j++) {
-            grpc_record->add_vector_data(record_array[i][j]);
-        }
+        grpc_record->add_vector_data(record_array[i].begin(), record_array[i].end());
     }
     handler->Insert(&context, &request, &vector_ids);
 

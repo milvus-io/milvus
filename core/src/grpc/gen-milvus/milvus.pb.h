@@ -102,9 +102,9 @@ extern TableRowCountDefaultTypeInternal _TableRowCount_default_instance_;
 class TableSchema;
 class TableSchemaDefaultTypeInternal;
 extern TableSchemaDefaultTypeInternal _TableSchema_default_instance_;
-class TopKQueryResultList;
-class TopKQueryResultListDefaultTypeInternal;
-extern TopKQueryResultListDefaultTypeInternal _TopKQueryResultList_default_instance_;
+class TopKQueryResult;
+class TopKQueryResultDefaultTypeInternal;
+extern TopKQueryResultDefaultTypeInternal _TopKQueryResult_default_instance_;
 class VectorIds;
 class VectorIdsDefaultTypeInternal;
 extern VectorIdsDefaultTypeInternal _VectorIds_default_instance_;
@@ -126,7 +126,7 @@ template<> ::milvus::grpc::TableName* Arena::CreateMaybeMessage<::milvus::grpc::
 template<> ::milvus::grpc::TableNameList* Arena::CreateMaybeMessage<::milvus::grpc::TableNameList>(Arena*);
 template<> ::milvus::grpc::TableRowCount* Arena::CreateMaybeMessage<::milvus::grpc::TableRowCount>(Arena*);
 template<> ::milvus::grpc::TableSchema* Arena::CreateMaybeMessage<::milvus::grpc::TableSchema>(Arena*);
-template<> ::milvus::grpc::TopKQueryResultList* Arena::CreateMaybeMessage<::milvus::grpc::TopKQueryResultList>(Arena*);
+template<> ::milvus::grpc::TopKQueryResult* Arena::CreateMaybeMessage<::milvus::grpc::TopKQueryResult>(Arena*);
 template<> ::milvus::grpc::VectorIds* Arena::CreateMaybeMessage<::milvus::grpc::VectorIds>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -862,7 +862,8 @@ class RowRecord :
   void clear_vector_data();
   float vector_data(int index) const;
   void set_vector_data(int index, float value);
-  void add_vector_data(float value);
+//  void add_vector_data(float value);
+    void add_vector_data(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
       vector_data() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
@@ -1013,7 +1014,9 @@ class InsertParam :
   void clear_row_id_array();
   ::PROTOBUF_NAMESPACE_ID::int64 row_id_array(int index) const;
   void set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
-  void add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
+//  void add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
+    void add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+                          std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
       row_id_array() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
@@ -1522,23 +1525,23 @@ class SearchInFilesParam :
 };
 // -------------------------------------------------------------------
 
-class TopKQueryResultList :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.TopKQueryResultList) */ {
+class TopKQueryResult :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.TopKQueryResult) */ {
  public:
-  TopKQueryResultList();
-  virtual ~TopKQueryResultList();
+  TopKQueryResult();
+  virtual ~TopKQueryResult();
 
-  TopKQueryResultList(const TopKQueryResultList& from);
-  TopKQueryResultList(TopKQueryResultList&& from) noexcept
-    : TopKQueryResultList() {
+  TopKQueryResult(const TopKQueryResult& from);
+  TopKQueryResult(TopKQueryResult&& from) noexcept
+    : TopKQueryResult() {
     *this = ::std::move(from);
   }
 
-  inline TopKQueryResultList& operator=(const TopKQueryResultList& from) {
+  inline TopKQueryResult& operator=(const TopKQueryResult& from) {
     CopyFrom(from);
     return *this;
   }
-  inline TopKQueryResultList& operator=(TopKQueryResultList&& from) noexcept {
+  inline TopKQueryResult& operator=(TopKQueryResult&& from) noexcept {
     if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
       if (this != &from) InternalSwap(&from);
     } else {
@@ -1556,37 +1559,37 @@ class TopKQueryResultList :
   static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
     return GetMetadataStatic().reflection;
   }
-  static const TopKQueryResultList& default_instance();
+  static const TopKQueryResult& default_instance();
 
   static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const TopKQueryResultList* internal_default_instance() {
-    return reinterpret_cast<const TopKQueryResultList*>(
-               &_TopKQueryResultList_default_instance_);
+  static inline const TopKQueryResult* internal_default_instance() {
+    return reinterpret_cast<const TopKQueryResult*>(
+               &_TopKQueryResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     9;
 
-  friend void swap(TopKQueryResultList& a, TopKQueryResultList& b) {
+  friend void swap(TopKQueryResult& a, TopKQueryResult& b) {
     a.Swap(&b);
   }
-  inline void Swap(TopKQueryResultList* other) {
+  inline void Swap(TopKQueryResult* other) {
     if (other == this) return;
     InternalSwap(other);
   }
 
   // implements Message ----------------------------------------------
 
-  inline TopKQueryResultList* New() const final {
-    return CreateMaybeMessage<TopKQueryResultList>(nullptr);
+  inline TopKQueryResult* New() const final {
+    return CreateMaybeMessage<TopKQueryResult>(nullptr);
   }
 
-  TopKQueryResultList* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<TopKQueryResultList>(arena);
+  TopKQueryResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<TopKQueryResult>(arena);
   }
   void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
   void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const TopKQueryResultList& from);
-  void MergeFrom(const TopKQueryResultList& from);
+  void CopyFrom(const TopKQueryResult& from);
+  void MergeFrom(const TopKQueryResult& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -1607,10 +1610,10 @@ class TopKQueryResultList :
   inline void SharedCtor();
   inline void SharedDtor();
   void SetCachedSize(int size) const final;
-  void InternalSwap(TopKQueryResultList* other);
+  void InternalSwap(TopKQueryResult* other);
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.grpc.TopKQueryResultList";
+    return "milvus.grpc.TopKQueryResult";
   }
   private:
   inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
@@ -1635,19 +1638,33 @@ class TopKQueryResultList :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kQueryResultBinaryFieldNumber = 2,
+    kIdsBinaryFieldNumber = 4,
+    kDistancesBinaryFieldNumber = 5,
     kStatusFieldNumber = 1,
+    kNqFieldNumber = 2,
+    kTopkFieldNumber = 3,
   };
-  // bytes query_result_binary = 2;
-  void clear_query_result_binary();
-  const std::string& query_result_binary() const;
-  void set_query_result_binary(const std::string& value);
-  void set_query_result_binary(std::string&& value);
-  void set_query_result_binary(const char* value);
-  void set_query_result_binary(const void* value, size_t size);
-  std::string* mutable_query_result_binary();
-  std::string* release_query_result_binary();
-  void set_allocated_query_result_binary(std::string* query_result_binary);
+  // bytes ids_binary = 4;
+  void clear_ids_binary();
+  const std::string& ids_binary() const;
+  void set_ids_binary(const std::string& value);
+  void set_ids_binary(std::string&& value);
+  void set_ids_binary(const char* value);
+  void set_ids_binary(const void* value, size_t size);
+  std::string* mutable_ids_binary();
+  std::string* release_ids_binary();
+  void set_allocated_ids_binary(std::string* ids_binary);
+
+  // bytes distances_binary = 5;
+  void clear_distances_binary();
+  const std::string& distances_binary() const;
+  void set_distances_binary(const std::string& value);
+  void set_distances_binary(std::string&& value);
+  void set_distances_binary(const char* value);
+  void set_distances_binary(const void* value, size_t size);
+  std::string* mutable_distances_binary();
+  std::string* release_distances_binary();
+  void set_allocated_distances_binary(std::string* distances_binary);
 
   // .milvus.grpc.Status status = 1;
   bool has_status() const;
@@ -1657,13 +1674,26 @@ class TopKQueryResultList :
   ::milvus::grpc::Status* mutable_status();
   void set_allocated_status(::milvus::grpc::Status* status);
 
-  // @@protoc_insertion_point(class_scope:milvus.grpc.TopKQueryResultList)
+  // int64 nq = 2;
+  void clear_nq();
+  ::PROTOBUF_NAMESPACE_ID::int64 nq() const;
+  void set_nq(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 topk = 3;
+  void clear_topk();
+  ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
+  void set_topk(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.grpc.TopKQueryResult)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr query_result_binary_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr ids_binary_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr distances_binary_;
   ::milvus::grpc::Status* status_;
+  ::PROTOBUF_NAMESPACE_ID::int64 nq_;
+  ::PROTOBUF_NAMESPACE_ID::int64 topk_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -3118,9 +3148,14 @@ inline void RowRecord::set_vector_data(int index, float value) {
   vector_data_.Set(index, value);
   // @@protoc_insertion_point(field_set:milvus.grpc.RowRecord.vector_data)
 }
-inline void RowRecord::add_vector_data(float value) {
-  vector_data_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
+//inline void RowRecord::add_vector_data(float value) {
+//  vector_data_.Add(value);
+//  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
+//}
+inline void RowRecord::add_vector_data(std::vector<float>::const_iterator begin,
+                                       std::vector<float>::const_iterator end) {
+    vector_data_.Add(begin, end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
 RowRecord::vector_data() const {
@@ -3233,9 +3268,14 @@ inline void InsertParam::set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::in
   row_id_array_.Set(index, value);
   // @@protoc_insertion_point(field_set:milvus.grpc.InsertParam.row_id_array)
 }
-inline void InsertParam::add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  row_id_array_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
+//inline void InsertParam::add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value) {
+//  row_id_array_.Add(value);
+//  // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
+//}
+inline void InsertParam::add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+                                          std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end) {
+    row_id_array_.Add(begin, end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 InsertParam::row_id_array() const {
@@ -3592,35 +3632,35 @@ inline void SearchInFilesParam::set_allocated_search_param(::milvus::grpc::Searc
 
 // -------------------------------------------------------------------
 
-// TopKQueryResultList
+// TopKQueryResult
 
 // .milvus.grpc.Status status = 1;
-inline bool TopKQueryResultList::has_status() const {
+inline bool TopKQueryResult::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::grpc::Status& TopKQueryResultList::status() const {
+inline const ::milvus::grpc::Status& TopKQueryResult::status() const {
   const ::milvus::grpc::Status* p = status_;
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResultList.status)
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.status)
   return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
       &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::grpc::Status* TopKQueryResultList::release_status() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResultList.status)
+inline ::milvus::grpc::Status* TopKQueryResult::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResult.status)
   
   ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::grpc::Status* TopKQueryResultList::mutable_status() {
+inline ::milvus::grpc::Status* TopKQueryResult::mutable_status() {
   
   if (status_ == nullptr) {
     auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResultList.status)
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.status)
   return status_;
 }
-inline void TopKQueryResultList::set_allocated_status(::milvus::grpc::Status* status) {
+inline void TopKQueryResult::set_allocated_status(::milvus::grpc::Status* status) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
@@ -3636,58 +3676,137 @@ inline void TopKQueryResultList::set_allocated_status(::milvus::grpc::Status* st
     
   }
   status_ = status;
-  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResultList.status)
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResult.status)
 }
 
-// bytes query_result_binary = 2;
-inline void TopKQueryResultList::clear_query_result_binary() {
-  query_result_binary_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+// int64 nq = 2;
+inline void TopKQueryResult::clear_nq() {
+  nq_ = PROTOBUF_LONGLONG(0);
 }
-inline const std::string& TopKQueryResultList::query_result_binary() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResultList.query_result_binary)
-  return query_result_binary_.GetNoArena();
+inline ::PROTOBUF_NAMESPACE_ID::int64 TopKQueryResult::nq() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.nq)
+  return nq_;
 }
-inline void TopKQueryResultList::set_query_result_binary(const std::string& value) {
+inline void TopKQueryResult::set_nq(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  query_result_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResultList.query_result_binary)
+  nq_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.nq)
 }
-inline void TopKQueryResultList::set_query_result_binary(std::string&& value) {
+
+// int64 topk = 3;
+inline void TopKQueryResult::clear_topk() {
+  topk_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 TopKQueryResult::topk() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.topk)
+  return topk_;
+}
+inline void TopKQueryResult::set_topk(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  query_result_binary_.SetNoArena(
+  topk_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.topk)
+}
+
+// bytes ids_binary = 4;
+inline void TopKQueryResult::clear_ids_binary() {
+  ids_binary_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& TopKQueryResult::ids_binary() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.ids_binary)
+  return ids_binary_.GetNoArena();
+}
+inline void TopKQueryResult::set_ids_binary(const std::string& value) {
+  
+  ids_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.ids_binary)
+}
+inline void TopKQueryResult::set_ids_binary(std::string&& value) {
+  
+  ids_binary_.SetNoArena(
     &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.TopKQueryResultList.query_result_binary)
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.TopKQueryResult.ids_binary)
 }
-inline void TopKQueryResultList::set_query_result_binary(const char* value) {
+inline void TopKQueryResult::set_ids_binary(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
   
-  query_result_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.TopKQueryResultList.query_result_binary)
+  ids_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.TopKQueryResult.ids_binary)
 }
-inline void TopKQueryResultList::set_query_result_binary(const void* value, size_t size) {
+inline void TopKQueryResult::set_ids_binary(const void* value, size_t size) {
   
-  query_result_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+  ids_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
       ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.TopKQueryResultList.query_result_binary)
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.TopKQueryResult.ids_binary)
 }
-inline std::string* TopKQueryResultList::mutable_query_result_binary() {
+inline std::string* TopKQueryResult::mutable_ids_binary() {
   
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResultList.query_result_binary)
-  return query_result_binary_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.ids_binary)
+  return ids_binary_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline std::string* TopKQueryResultList::release_query_result_binary() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResultList.query_result_binary)
+inline std::string* TopKQueryResult::release_ids_binary() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResult.ids_binary)
   
-  return query_result_binary_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  return ids_binary_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline void TopKQueryResultList::set_allocated_query_result_binary(std::string* query_result_binary) {
-  if (query_result_binary != nullptr) {
+inline void TopKQueryResult::set_allocated_ids_binary(std::string* ids_binary) {
+  if (ids_binary != nullptr) {
     
   } else {
     
   }
-  query_result_binary_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), query_result_binary);
-  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResultList.query_result_binary)
+  ids_binary_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ids_binary);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResult.ids_binary)
+}
+
+// bytes distances_binary = 5;
+inline void TopKQueryResult::clear_distances_binary() {
+  distances_binary_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& TopKQueryResult::distances_binary() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.distances_binary)
+  return distances_binary_.GetNoArena();
+}
+inline void TopKQueryResult::set_distances_binary(const std::string& value) {
+  
+  distances_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.distances_binary)
+}
+inline void TopKQueryResult::set_distances_binary(std::string&& value) {
+  
+  distances_binary_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.TopKQueryResult.distances_binary)
+}
+inline void TopKQueryResult::set_distances_binary(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  distances_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.TopKQueryResult.distances_binary)
+}
+inline void TopKQueryResult::set_distances_binary(const void* value, size_t size) {
+  
+  distances_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.TopKQueryResult.distances_binary)
+}
+inline std::string* TopKQueryResult::mutable_distances_binary() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.distances_binary)
+  return distances_binary_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* TopKQueryResult::release_distances_binary() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResult.distances_binary)
+  
+  return distances_binary_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void TopKQueryResult::set_allocated_distances_binary(std::string* distances_binary) {
+  if (distances_binary != nullptr) {
+    
+  } else {
+    
+  }
+  distances_binary_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), distances_binary);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResult.distances_binary)
 }
 
 // -------------------------------------------------------------------

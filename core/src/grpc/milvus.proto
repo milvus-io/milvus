@@ -84,9 +84,12 @@ message SearchInFilesParam {
 /**
  * @brief Query result params
  */
-message TopKQueryResultList {
+message TopKQueryResult {
     Status status = 1;
-    bytes query_result_binary = 2;
+    int64 nq = 2;
+    int64 topk = 3;
+    bytes ids_binary = 4;
+    bytes distances_binary = 5;
 }
 
 /**
@@ -212,7 +215,7 @@ service MilvusService {
      *
      * @return query result array.
      */
-    rpc Search(SearchParam) returns (TopKQueryResultList) {}
+    rpc Search(SearchParam) returns (TopKQueryResult) {}
 
     /**
      * @brief Internal use query interface
@@ -226,7 +229,7 @@ service MilvusService {
      *
      * @return query result array.
      */
-    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResultList) {}
+    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResult) {}
 
     /**
      * @brief Get table schema

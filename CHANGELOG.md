@@ -7,6 +7,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 
 ## Feature
+- \#204 - improve grpc performance in search
 
 ## Improvement
 
