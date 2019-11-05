@@ -31,7 +31,6 @@
 #include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
 
 namespace knowhere {
 

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 
 #include <faiss/AutoTune.h>
 #include <faiss/IndexFlat.h>
