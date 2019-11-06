@@ -1,0 +1,2 @@
+We did some modify in gen-milvus, if you run './cpp-gen.sh', generated code will coverage the modify, which may cause some API unavailable.
+So before you run './cpp-gen.sh', make sure to move the changes in old version to new generated code.
