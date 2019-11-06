@@ -1,3 +1,4 @@
+language: cpp
 sudo: required
 dist: bionic
 addons:
