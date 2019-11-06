@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Improvement
 - \#207 - Add more unittest for config set/get
+- \#208 - optimize unittest to support run single test more easily
 
 ## Task
 

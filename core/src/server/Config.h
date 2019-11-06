@@ -186,7 +186,8 @@ class Config {
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
     std::string
-    GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim);
+    GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim = ",",
+                         const std::string& default_value = "");
 
  public:
     /* server config */

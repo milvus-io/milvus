@@ -17,7 +17,12 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
+set(test_files
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_cache.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_config.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_rpc.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_util.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
