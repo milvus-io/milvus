@@ -20,6 +20,7 @@
 #include <string.h>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 //#include <gperftools/profiler.h>
 
@@ -676,17 +677,19 @@ SearchTask::OnExecute() {
 
         // step 7: construct result array
         topk_result_->set_nq(record_count);
-        topk_result_->set_topk(top_k);
+        topk_result_->set_topk(result_ids.size() / record_count);
 
-        std::vector<unsigned char> ids_array(sizeof(int64_t) * result_ids.size());
-        memcpy(ids_array.data(), result_ids.data(), result_ids.size() * sizeof(int64_t));
-        std::string id_str(ids_array.begin(), ids_array.end());
-        topk_result_->set_ids_binary(id_str);
+        std::string ids_str;
+        size_t ids_len = sizeof(int64_t) * result_ids.size();
+        ids_str.resize(ids_len);
+        memcpy((void*)(ids_str.data()), result_ids.data(), ids_len);
+        topk_result_->set_ids_binary(std::move(ids_str));
 
-        std::vector<unsigned char> dis_array(sizeof(float) * result_distances.size());
-        memcpy(dis_array.data(), result_distances.data(), result_distances.size() * sizeof(float));
-        std::string dis_str(dis_array.begin(), dis_array.end());
-        topk_result_->set_distances_binary(dis_str);
+        std::string distances_str;
+        size_t distances_len = sizeof(float) * result_distances.size();
+        distances_str.resize(distances_len);
+        memcpy((void*)(distances_str.data()), result_distances.data(), distances_len);
+        topk_result_->set_distances_binary(std::move(distances_str));
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

@@ -862,8 +862,8 @@ class RowRecord :
   void clear_vector_data();
   float vector_data(int index) const;
   void set_vector_data(int index, float value);
-//  void add_vector_data(float value);
-    void add_vector_data(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end);
+  //void add_vector_data(float value);
+  void add_vector_data(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
       vector_data() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
@@ -1014,9 +1014,9 @@ class InsertParam :
   void clear_row_id_array();
   ::PROTOBUF_NAMESPACE_ID::int64 row_id_array(int index) const;
   void set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
-//  void add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
-    void add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
-                          std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end);
+  //void add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+                        std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
       row_id_array() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
@@ -3154,8 +3154,8 @@ inline void RowRecord::set_vector_data(int index, float value) {
 //}
 inline void RowRecord::add_vector_data(std::vector<float>::const_iterator begin,
                                        std::vector<float>::const_iterator end) {
-    vector_data_.Add(begin, end);
-    // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
+  vector_data_.Add(begin, end);
+  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
 RowRecord::vector_data() const {
@@ -3274,8 +3274,8 @@ inline void InsertParam::set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::in
 //}
 inline void InsertParam::add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
                                           std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end) {
-    row_id_array_.Add(begin, end);
-    // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
+  row_id_array_.Add(begin, end);
+  // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 InsertParam::row_id_array() const {
