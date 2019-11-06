@@ -1,0 +1,11 @@
+sudo: required
+dist: bionic
+addons:
+  apt:
+    update: true
+    packages:
+      - cmake-3.14
+install:
+  - source $TRAVIS_BUILD_DIR/ci/travis/install_dependency.sh
+script:
+  - $TRAVIS_BUILD_DIR/ci/travis/travis_build.sh
