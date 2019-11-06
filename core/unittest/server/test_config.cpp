@@ -19,10 +19,11 @@
 #include <gtest/gtest-death-test.h>
 
 #include "config/YamlConfigMgr.h"
-#include "utils/CommonUtil.h"
-#include "utils/ValidationUtil.h"
 #include "server/Config.h"
 #include "server/utils.h"
+#include "utils/CommonUtil.h"
+#include "utils/ValidationUtil.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace {
 
@@ -98,19 +99,191 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     ASSERT_TRUE(seqs.empty());
 }
 
-TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
+TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
-    ASSERT_TRUE(s.ok());
+    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::Status s;
+    std::string str_val;
+    int32_t int32_val;
+    int64_t int64_val;
+    float float_val;
+    bool bool_val;
 
-    s = config.ValidateConfig();
+    /* server config */
+    std::string server_addr = "192.168.1.155";
+    s = config.SetServerConfigAddress(server_addr);
     ASSERT_TRUE(s.ok());
-
-    config.PrintAll();
-
-    s = config.ResetDefaultConfig();
+    s = config.GetServerConfigAddress(str_val);
     ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == server_addr);
+
+    std::string server_port = "12345";
+    s = config.SetServerConfigPort(server_port);
+    ASSERT_TRUE(s.ok());
+    s = config.GetServerConfigPort(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == server_port);
+
+    std::string server_mode = "cluster_readonly";
+    s = config.SetServerConfigDeployMode(server_mode);
+    ASSERT_TRUE(s.ok());
+    s = config.GetServerConfigDeployMode(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == server_mode);
+
+    std::string server_time_zone = "UTC+6";
+    s = config.SetServerConfigTimeZone(server_time_zone);
+    ASSERT_TRUE(s.ok());
+    s = config.GetServerConfigTimeZone(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == server_time_zone);
+
+    /* db config */
+    std::string db_primary_path = "/home/zilliz";
+    s = config.SetDBConfigPrimaryPath(db_primary_path);
+    ASSERT_TRUE(s.ok());
+    s = config.GetDBConfigPrimaryPath(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == db_primary_path);
+
+    std::string db_secondary_path = "/home/zilliz";
+    s = config.SetDBConfigSecondaryPath(db_secondary_path);
+    ASSERT_TRUE(s.ok());
+    s = config.GetDBConfigSecondaryPath(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == db_secondary_path);
+
+    std::string db_backend_url = "mysql://root:123456@127.0.0.1:19530/milvus";
+    s = config.SetDBConfigBackendUrl(db_backend_url);
+    ASSERT_TRUE(s.ok());
+    s = config.GetDBConfigBackendUrl(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == db_backend_url);
+
+    int32_t db_archive_disk_threshold = 100;
+    s = config.SetDBConfigArchiveDiskThreshold(std::to_string(db_archive_disk_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetDBConfigArchiveDiskThreshold(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == db_archive_disk_threshold);
+
+    int32_t db_archive_days_threshold = 365;
+    s = config.SetDBConfigArchiveDaysThreshold(std::to_string(db_archive_days_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetDBConfigArchiveDaysThreshold(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == db_archive_days_threshold);
+
+    int32_t db_insert_buffer_size = 2;
+    s = config.SetDBConfigInsertBufferSize(std::to_string(db_insert_buffer_size));
+    ASSERT_TRUE(s.ok());
+    s = config.GetDBConfigInsertBufferSize(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == db_insert_buffer_size);
+
+    /* metric config */
+    bool metric_enable_monitor = false;
+    s = config.SetMetricConfigEnableMonitor(std::to_string(metric_enable_monitor));
+    ASSERT_TRUE(s.ok());
+    s = config.GetMetricConfigEnableMonitor(bool_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(bool_val == metric_enable_monitor);
+
+    std::string metric_collector = "prometheus";
+    s = config.SetMetricConfigCollector(metric_collector);
+    ASSERT_TRUE(s.ok());
+    s = config.GetMetricConfigCollector(str_val);
+    ASSERT_TRUE(str_val == metric_collector);
+
+    std::string metric_prometheus_port = "2222";
+    s = config.SetMetricConfigPrometheusPort(metric_prometheus_port);
+    ASSERT_TRUE(s.ok());
+    s = config.GetMetricConfigPrometheusPort(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == metric_prometheus_port);
+
+    /* cache config */
+    int64_t cache_cpu_cache_capacity = 5;
+    s = config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_capacity));
+    ASSERT_TRUE(s.ok());
+    s = config.GetCacheConfigCpuCacheCapacity(int64_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int64_val == cache_cpu_cache_capacity);
+
+    float cache_cpu_cache_threshold = 0.1;
+    s = config.SetCacheConfigCpuCacheThreshold(std::to_string(cache_cpu_cache_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetCacheConfigCpuCacheThreshold(float_val);
+    ASSERT_TRUE(float_val == cache_cpu_cache_threshold);
+
+    int64_t cache_gpu_cache_capacity = 1;
+    s = config.SetCacheConfigGpuCacheCapacity(std::to_string(cache_gpu_cache_capacity));
+    ASSERT_TRUE(s.ok());
+    s = config.GetCacheConfigGpuCacheCapacity(int64_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int64_val == cache_gpu_cache_capacity);
+
+    float cache_gpu_cache_threshold = 0.2;
+    s = config.SetCacheConfigGpuCacheThreshold(std::to_string(cache_gpu_cache_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetCacheConfigGpuCacheThreshold(float_val);
+    ASSERT_TRUE(float_val == cache_gpu_cache_threshold);
+
+    bool cache_insert_data = true;
+    s = config.SetCacheConfigCacheInsertData(std::to_string(cache_insert_data));
+    ASSERT_TRUE(s.ok());
+    s = config.GetCacheConfigCacheInsertData(bool_val);
+    ASSERT_TRUE(bool_val == cache_insert_data);
+
+    /* engine config */
+    int32_t engine_use_blas_threshold = 50;
+    s = config.SetEngineConfigUseBlasThreshold(std::to_string(engine_use_blas_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetEngineConfigUseBlasThreshold(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == engine_use_blas_threshold);
+
+    int32_t engine_omp_thread_num = 8;
+    s = config.SetEngineConfigOmpThreadNum(std::to_string(engine_omp_thread_num));
+    ASSERT_TRUE(s.ok());
+    s = config.GetEngineConfigOmpThreadNum(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == engine_omp_thread_num);
+
+    int32_t engine_gpu_search_threshold = 800;
+    s = config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetEngineConfigGpuSearchThreshold(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == engine_gpu_search_threshold);
+
+    /* resource config */
+    std::string resource_mode = "simple";
+    s = config.SetResourceConfigMode(resource_mode);
+    ASSERT_TRUE(s.ok());
+    s = config.GetResourceConfigMode(str_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(str_val == resource_mode);
+
+    std::vector<std::string> search_resources = {"cpu", "gpu0"};
+    std::vector<std::string> res_vec;
+    std::string res_str;
+    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(search_resources,
+            milvus::server::CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, res_str);
+    s = config.SetResourceConfigSearchResources(res_str);
+    ASSERT_TRUE(s.ok());
+    s = config.GetResourceConfigSearchResources(res_vec);
+    ASSERT_TRUE(s.ok());
+    for (size_t i = 0; i < search_resources.size(); i++) {
+        ASSERT_TRUE(search_resources[i] == res_vec[i]);
+    }
+
+    int32_t resource_index_build_device = 0;
+    s = config.SetResourceConfigIndexBuildDevice("gpu" + std::to_string(resource_index_build_device));
+    ASSERT_TRUE(s.ok());
+    s = config.GetResourceConfigIndexBuildDevice(int32_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int32_val == resource_index_build_device);
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
@@ -226,9 +399,29 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetResourceConfigMode("default");
     ASSERT_FALSE(s.ok());
 
+    s = config.SetResourceConfigSearchResources("gpu10");
+    ASSERT_FALSE(s.ok());
+    s = config.SetResourceConfigSearchResources("cpu");
+    ASSERT_FALSE(s.ok());
+
     s = config.SetResourceConfigIndexBuildDevice("gup2");
     ASSERT_FALSE(s.ok());
     s = config.SetResourceConfigIndexBuildDevice("gpu16");
     ASSERT_FALSE(s.ok());
+}
+
+TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
+    std::string config_path(CONFIG_PATH);
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
+    ASSERT_TRUE(s.ok());
+
+    s = config.ValidateConfig();
+    ASSERT_TRUE(s.ok());
+
+    config.PrintAll();
+
+    s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok());
 }
 

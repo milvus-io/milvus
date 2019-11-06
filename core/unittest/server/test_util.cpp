@@ -117,12 +117,11 @@ TEST(UtilTest, STRINGFUNCTIONS_TEST) {
 
     str = "a,b,c";
     std::vector<std::string> result;
-    auto status = milvus::server::StringHelpFunctions::SplitStringByDelimeter(str, ",", result);
-    ASSERT_TRUE(status.ok());
+    milvus::server::StringHelpFunctions::SplitStringByDelimeter(str, ",", result);
     ASSERT_EQ(result.size(), 3UL);
 
     result.clear();
-    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    auto status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
 

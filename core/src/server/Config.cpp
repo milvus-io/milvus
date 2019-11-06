@@ -25,6 +25,7 @@
 #include "config/YamlConfigMgr.h"
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
+#include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
 namespace milvus {
@@ -337,6 +338,11 @@ Config::ResetDefaultConfig() {
 
     /* resource config */
     s = SetResourceConfigMode(CONFIG_RESOURCE_MODE_DEFAULT);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = SetResourceConfigSearchResources(CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -788,6 +794,17 @@ Config::GetConfigStr(const std::string& parent_key, const std::string& child_key
     return value;
 }
 
+std::string
+Config::GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim) {
+    std::string value;
+    if (!GetConfigValueInMem(parent_key, child_key, value).ok()) {
+        std::vector<std::string> sequence = GetConfigNode(parent_key).GetSequence(child_key);
+        server::StringHelpFunctions::MergeStringWithDelimeter(sequence, delim, value);
+        SetConfigValueInMem(parent_key, child_key, value);
+    }
+    return value;
+}
+
 Status
 Config::GetServerConfigAddress(std::string& value) {
     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
@@ -1011,8 +1028,9 @@ Config::GetResourceConfigMode(std::string& value) {
 
 Status
 Config::GetResourceConfigSearchResources(std::vector<std::string>& value) {
-    ConfigNode resource_config = GetConfigNode(CONFIG_RESOURCE);
-    value = resource_config.GetSequence(CONFIG_RESOURCE_SEARCH_RESOURCES);
+    std::string str = GetConfigSequenceStr(CONFIG_RESOURCE, CONFIG_RESOURCE_SEARCH_RESOURCES,
+                                           CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER);
+    server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, value);
     return CheckResourceConfigSearchResources(value);
 }
 
@@ -1155,7 +1173,7 @@ Config::SetMetricConfigEnableMonitor(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_ENABLE_MONITOR, value);
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, value);
     return Status::OK();
 }
 
@@ -1166,7 +1184,7 @@ Config::SetMetricConfigCollector(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_COLLECTOR, value);
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_COLLECTOR, value);
     return Status::OK();
 }
 
@@ -1177,7 +1195,7 @@ Config::SetMetricConfigPrometheusPort(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_PROMETHEUS_PORT, value);
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_PORT, value);
     return Status::OK();
 }
 
@@ -1189,7 +1207,7 @@ Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
     return Status::OK();
 }
 
@@ -1200,7 +1218,7 @@ Config::SetCacheConfigCpuCacheThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1211,7 +1229,7 @@ Config::SetCacheConfigGpuCacheCapacity(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_CACHE_CAPACITY, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_CAPACITY, value);
     return Status::OK();
 }
 
@@ -1222,7 +1240,7 @@ Config::SetCacheConfigGpuCacheThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1233,7 +1251,7 @@ Config::SetCacheConfigCacheInsertData(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CACHE_INSERT_DATA, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
     return Status::OK();
 }
 
@@ -1245,7 +1263,7 @@ Config::SetEngineConfigUseBlasThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1256,7 +1274,7 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_OMP_THREAD_NUM, value);
+    SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, value);
     return Status::OK();
 }
 
@@ -1267,7 +1285,7 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1279,7 +1297,21 @@ Config::SetResourceConfigMode(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_MODE, value);
+    SetConfigValueInMem(CONFIG_RESOURCE, CONFIG_RESOURCE_MODE, value);
+    return Status::OK();
+}
+
+Status
+Config::SetResourceConfigSearchResources(const std::string& value) {
+    std::vector<std::string> res_vec;
+    server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, res_vec);
+
+    Status s = CheckResourceConfigSearchResources(res_vec);
+    if (!s.ok()) {
+        return s;
+    }
+
+    SetConfigValueInMem(CONFIG_RESOURCE, CONFIG_RESOURCE_SEARCH_RESOURCES, value);
     return Status::OK();
 }
 
@@ -1290,7 +1322,7 @@ Config::SetResourceConfigIndexBuildDevice(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, value);
+    SetConfigValueInMem(CONFIG_RESOURCE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, value);
     return Status::OK();
 }
 
