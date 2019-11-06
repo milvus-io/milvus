@@ -250,8 +250,8 @@ if(CUSTOMIZATION)
         set(FAISS_MD5 "2293cdb209c3718e3b19f3edae8b32b3") # commit-id a13c1205dc52977a9ad3b33a14efa958604a8bff branch-0.3.0
     endif()
 else()
-    set(FAISS_SOURCE_URL "https://github.com/milvus-io/faiss/archive/1.6.0.tar.gz")
-    set(FAISS_MD5 "eb96d84f98b078a9eec04a796f5c792e")
+    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/1.6.0.tar.gz")
+    set(FAISS_MD5 "b02c1a53234f5acc9bea1b0c55524f50")
 endif()
 message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
 
