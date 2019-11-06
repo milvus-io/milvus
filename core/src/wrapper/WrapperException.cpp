@@ -15,8 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "wrapper/WrapperException.h"
 
-#define MILVUS_VERSION "@MILVUS_VERSION@"
-#define BUILD_TYPE "@BUILD_TYPE@"
-#define BUILD_TIME @BUILD_TIME@
+namespace milvus {
+namespace engine {
+
+WrapperException::WrapperException(const std::string& msg) : msg(msg) {
+}
+
+const char*
+WrapperException::what() const noexcept {
+    return msg.c_str();
+}
+
+}  // namespace engine
+}  // namespace milvus

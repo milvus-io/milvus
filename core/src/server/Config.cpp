@@ -162,6 +162,7 @@ Config::ValidateConfig() {
         return s;
     }
 
+#ifdef MILVUS_GPU_VERSION
     int64_t cache_gpu_cache_capacity;
     s = GetCacheConfigGpuCacheCapacity(cache_gpu_cache_capacity);
     if (!s.ok()) {
@@ -173,6 +174,7 @@ Config::ValidateConfig() {
     if (!s.ok()) {
         return s;
     }
+#endif
 
     bool cache_insert_data;
     s = GetCacheConfigCacheInsertData(cache_insert_data);
@@ -401,7 +403,8 @@ Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
-                      "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
+                      "server_config.deploy_mode is not one of "
+                      "single, cluster_readonly, and cluster_writable.");
     }
     return Status::OK();
 }
@@ -589,18 +592,15 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
-        int device_id;
-        Status s = GetResourceConfigIndexBuildDevice(device_id);
+        int gpu_index;
+        Status s = GetResourceConfigIndexBuildDevice(gpu_index);
         if (!s.ok()) {
             return s;
         }
 
-        if (device_id == server::CPU_DEVICE_ID)
-            return Status::OK();
-
         size_t gpu_memory;
-        if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
-            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(device_id);
+        if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
+            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_index);
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         } else if (gpu_cache_capacity >= gpu_memory) {
             std::string msg = "Invalid gpu cache capacity: " + value +
@@ -690,6 +690,13 @@ Config::CheckResourceConfigMode(const std::string& value) {
 
 Status
 CheckGpuDevice(const std::string& value) {
+    std::string s = value;
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+#ifdef MILVUS_CPU_VERSION
+    if (s != "cpu") {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid CPU resource: " + s);
+    }
+#else
     const std::regex pat("gpu(\\d+)");
     std::cmatch m;
     if (!std::regex_match(value.c_str(), m, pat)) {
@@ -704,6 +711,7 @@ CheckGpuDevice(const std::string& value) {
                           ". Possible reason: resource_config.search_resources does not match your hardware.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+#endif
     return Status::OK();
 }
 
@@ -1025,10 +1033,10 @@ Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
         return s;
     }
 
-    if (str == "cpu") {
-        value = CPU_DEVICE_ID;
-    } else {
+    if (str != "cpu") {
         value = std::stoi(str.substr(3));
+    } else {
+        value = -1;
     }
 
     return Status::OK();

@@ -15,14 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-
 #include <gtest/gtest.h>
-#include "scheduler/resource/Resource.h"
 #include "scheduler/event/Event.h"
 #include "scheduler/event/StartUpEvent.h"
-
-
+#include "scheduler/resource/Resource.h"
 
 namespace milvus {
 namespace scheduler {
@@ -51,7 +47,6 @@ TEST(EventTest, FINISH_TASK_EVENT) {
     std::cout << *EventPtr(event);
 }
 
-
 TEST(EventTest, TASKTABLE_UPDATED_EVENT) {
     ResourcePtr res(nullptr);
     auto event = std::make_shared<TaskTableUpdatedEvent>(res);
@@ -60,7 +55,5 @@ TEST(EventTest, TASKTABLE_UPDATED_EVENT) {
     std::cout << *EventPtr(event);
 }
 
-} // namespace scheduler
-} // namespace milvus
-
-
+}  // namespace scheduler
+}  // namespace milvus

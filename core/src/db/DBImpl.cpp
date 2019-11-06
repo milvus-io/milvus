@@ -380,7 +380,6 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& parti
 
     meta::DatesT dates = {utils::GetDate()};
     Status result = Query(table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
-
     return result;
 }
 

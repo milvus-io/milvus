@@ -77,7 +77,6 @@ class DB {
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-
     DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) = 0;
 
     virtual Status

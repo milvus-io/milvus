@@ -15,14 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
 #include <gtest/gtest-death-test.h>
+#include <gtest/gtest.h>
 
 #include "config/YamlConfigMgr.h"
-#include "utils/CommonUtil.h"
-#include "utils/ValidationUtil.h"
 #include "server/Config.h"
 #include "server/utils.h"
+#include "utils/CommonUtil.h"
+#include "utils/ValidationUtil.h"
 
 namespace {
 
@@ -30,7 +30,7 @@ static constexpr uint64_t KB = 1024;
 static constexpr uint64_t MB = KB * 1024;
 static constexpr uint64_t GB = MB * 1024;
 
-} // namespace
+}  // namespace
 
 TEST_F(ConfigTest, CONFIG_TEST) {
     milvus::server::ConfigMgr* config_mgr = milvus::server::YamlConfigMgr::GetInstance();
@@ -112,123 +112,3 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_TRUE(s.ok());
 }
-
-TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
-    std::string config_path(CONFIG_PATH);
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    milvus::Status s;
-
-    s = config.LoadConfigFile("");
-    ASSERT_FALSE(s.ok());
-
-    s = config.LoadConfigFile(config_path + INVALID_CONFIG_FILE);
-    ASSERT_FALSE(s.ok());
-    s = config.LoadConfigFile(config_path + "dummy.yaml");
-    ASSERT_FALSE(s.ok());
-
-    /* server config */
-    s = config.SetServerConfigAddress("0.0.0");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigAddress("0.0.0.256");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetServerConfigPort("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigPort("99999");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetServerConfigDeployMode("cluster");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetServerConfigTimeZone("GM");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigTimeZone("GMT8");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigTimeZone("UTCA");
-    ASSERT_FALSE(s.ok());
-
-    /* db config */
-    s = config.SetDBConfigPrimaryPath("");
-    ASSERT_FALSE(s.ok());
-
-//    s = config.SetDBConfigSecondaryPath("");
-//    ASSERT_FALSE(s.ok());
-
-    s = config.SetDBConfigBackendUrl("http://www.google.com");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigBackendUrl("sqlite://:@:");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigBackendUrl("mysql://root:123456@127.0.0.1/milvus");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetDBConfigArchiveDiskThreshold("0x10");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetDBConfigArchiveDaysThreshold("0x10");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetDBConfigInsertBufferSize("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigInsertBufferSize("0");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigInsertBufferSize("2048");
-    ASSERT_FALSE(s.ok());
-
-    /* metric config */
-    s = config.SetMetricConfigEnableMonitor("Y");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetMetricConfigCollector("zilliz");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetMetricConfigPrometheusPort("0xff");
-    ASSERT_FALSE(s.ok());
-
-    /* cache config */
-    s = config.SetCacheConfigCpuCacheCapacity("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheCapacity("0");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheCapacity("2048");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetCacheConfigCpuCacheThreshold("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheThreshold("1.0");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetCacheConfigGpuCacheCapacity("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigGpuCacheCapacity("128");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetCacheConfigGpuCacheThreshold("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigGpuCacheThreshold("1.0");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetCacheConfigCacheInsertData("N");
-    ASSERT_FALSE(s.ok());
-
-    /* engine config */
-    s = config.SetEngineConfigUseBlasThreshold("0xff");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetEngineConfigOmpThreadNum("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetEngineConfigOmpThreadNum("10000");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetEngineConfigGpuSearchThreshold("-1");
-    ASSERT_FALSE(s.ok());
-
-    /* resource config */
-    s = config.SetResourceConfigMode("default");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetResourceConfigIndexBuildDevice("gup2");
-    ASSERT_FALSE(s.ok());
-    s = config.SetResourceConfigIndexBuildDevice("gpu16");
-    ASSERT_FALSE(s.ok());
-}
-

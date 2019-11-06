@@ -16,24 +16,23 @@
 // under the License.
 
 #include "db/meta/SqliteMetaImpl.h"
+#include "MetaConsts.h"
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
-#include "utils/Log.h"
-#include "utils/Exception.h"
-#include "MetaConsts.h"
 #include "metrics/Metrics.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
+#include <sqlite_orm.h>
 #include <unistd.h>
-#include <sstream>
-#include <iostream>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
-#include <memory>
+#include <iostream>
 #include <map>
+#include <memory>
 #include <set>
-#include <sqlite_orm.h>
-
+#include <sstream>
 
 namespace milvus {
 namespace engine {
@@ -44,7 +43,7 @@ using namespace sqlite_orm;
 namespace {
 
 Status
-HandleException(const std::string &desc, const char *what = nullptr) {
+HandleException(const std::string& desc, const char* what = nullptr) {
     if (what == nullptr) {
         ENGINE_LOG_ERROR << desc;
         return Status(DB_META_TRANSACTION_FAILED, desc);
@@ -55,7 +54,7 @@ HandleException(const std::string &desc, const char *what = nullptr) {
     }
 }
 
-} // namespace
+}  // namespace
 
 inline auto
 StoragePrototype(const std::string &path) {
@@ -90,8 +89,7 @@ StoragePrototype(const std::string &path) {
 using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 
-SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options)
-    : options_(options) {
+SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions& options) : options_(options) {
     Initialize();
 }
 
@@ -99,7 +97,7 @@ SqliteMetaImpl::~SqliteMetaImpl() {
 }
 
 Status
-SqliteMetaImpl::NextTableId(std::string &table_id) {
+SqliteMetaImpl::NextTableId(std::string& table_id) {
     std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
     SimpleIDGenerator g;
@@ -109,7 +107,7 @@ SqliteMetaImpl::NextTableId(std::string &table_id) {
 }
 
 Status
-SqliteMetaImpl::NextFileId(std::string &file_id) {
+SqliteMetaImpl::NextFileId(std::string& file_id) {
     std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
     SimpleIDGenerator g;
@@ -124,14 +122,14 @@ SqliteMetaImpl::ValidateMetaSchema() {
         return;
     }
 
-    //old meta could be recreated since schema changed, throw exception if meta schema is not compatible
+    // old meta could be recreated since schema changed, throw exception if meta schema is not compatible
     auto ret = ConnectorPtr->sync_schema_simulate();
-    if (ret.find(META_TABLES) != ret.end()
-        && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLES]) {
+    if (ret.find(META_TABLES) != ret.end() &&
+        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLES]) {
         throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
     }
-    if (ret.find(META_TABLEFILES) != ret.end()
-        && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
+    if (ret.find(META_TABLEFILES) != ret.end() &&
+        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
         throw Exception(DB_INCOMPATIB_META, "Meta TableFiles schema is created by Milvus old version");
     }
 }
@@ -152,8 +150,8 @@ SqliteMetaImpl::Initialize() {
     ValidateMetaSchema();
 
     ConnectorPtr->sync_schema();
-    ConnectorPtr->open_forever(); // thread safe option
-    ConnectorPtr->pragma.journal_mode(journal_mode::WAL); // WAL => write ahead log
+    ConnectorPtr->open_forever();                          // thread safe option
+    ConnectorPtr->pragma.journal_mode(journal_mode::WAL);  // WAL => write ahead log
 
     CleanUp();
 
@@ -413,34 +411,31 @@ SqliteMetaImpl::DropDataByDate(const std::string &table_id,
     }
 
     try {
-        //sqlite_orm has a bug, 'in' statement cannot handle too many elements
-        //so we split one query into multi-queries, this is a work-around!!
+        // sqlite_orm has a bug, 'in' statement cannot handle too many elements
+        // so we split one query into multi-queries, this is a work-around!!
         std::vector<DatesT> split_dates;
         split_dates.push_back(DatesT());
         const size_t batch_size = 30;
-        for(DateT date : dates) {
+        for (DateT date : dates) {
             DatesT& last_batch = *split_dates.rbegin();
             last_batch.push_back(date);
-            if(last_batch.size() > batch_size) {
+            if (last_batch.size() > batch_size) {
                 split_dates.push_back(DatesT());
             }
         }
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        for(auto& batch_dates : split_dates) {
-            if(batch_dates.empty()) {
+        for (auto& batch_dates : split_dates) {
+            if (batch_dates.empty()) {
                 continue;
             }
 
             ConnectorPtr->update_all(
-                set(
-                    c(&TableFileSchema::file_type_) = (int)TableFileSchema::TO_DELETE,
+                set(c(&TableFileSchema::file_type_) = (int)TableFileSchema::TO_DELETE,
                     c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
-                where(
-                    c(&TableFileSchema::table_id_) == table_id and
-                    in(&TableFileSchema::date_, batch_dates)));
+                where(c(&TableFileSchema::table_id_) == table_id and in(&TableFileSchema::date_, batch_dates)));
         }
 
         ENGINE_LOG_DEBUG << "Successfully drop data by date, table id = " << table_schema.table_id_;
@@ -468,7 +463,6 @@ SqliteMetaImpl::GetTableFiles(const std::string &table_id,
                                           where(c(&TableFileSchema::table_id_) == table_id and
                                                 in(&TableFileSchema::id_, ids) and
                                                 c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE));
-
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
@@ -531,7 +525,7 @@ SqliteMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     try {
         server::MetricCollector metric;
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto tables = ConnectorPtr->select(columns(&TableSchema::state_),
@@ -601,11 +595,11 @@ SqliteMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 }
 
 Status
-SqliteMetaImpl::UpdateTableIndex(const std::string &table_id, const TableIndex &index) {
+SqliteMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& index) {
     try {
         server::MetricCollector metric;
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
@@ -651,7 +645,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string &table_id, const TableIndex &
                 c(&TableFileSchema::file_type_) == (int) TableFileSchema::BACKUP));
 
         ENGINE_LOG_DEBUG << "Successfully update table index, table id = " << table_id;
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         std::string msg = "Encounter exception when update table index: table_id = " + table_id;
         return HandleException(msg, e.what());
     }
@@ -683,7 +677,7 @@ SqliteMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
 }
 
 Status
-SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex &index) {
+SqliteMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index) {
     try {
         server::MetricCollector metric;
 
@@ -700,7 +694,7 @@ SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex &inde
         } else {
             return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
         }
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when describe index", e.what());
     }
 
@@ -708,11 +702,11 @@ SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex &inde
 }
 
 Status
-SqliteMetaImpl::DropTableIndex(const std::string &table_id) {
+SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
     try {
         server::MetricCollector metric;
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         //soft delete index files
@@ -844,43 +838,38 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id,
     server::MetricCollector metric;
 
     try {
-        auto select_columns = columns(&TableFileSchema::id_,
-                                      &TableFileSchema::table_id_,
-                                      &TableFileSchema::file_id_,
-                                      &TableFileSchema::file_type_,
-                                      &TableFileSchema::file_size_,
-                                      &TableFileSchema::row_count_,
-                                      &TableFileSchema::date_,
-                                      &TableFileSchema::engine_type_);
+        auto select_columns =
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
+                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
+                    &TableFileSchema::date_, &TableFileSchema::engine_type_);
 
         auto match_tableid = c(&TableFileSchema::table_id_) == table_id;
 
-        std::vector<int> file_types = {
-            (int) TableFileSchema::RAW,
-            (int) TableFileSchema::TO_INDEX,
-            (int) TableFileSchema::INDEX
-        };
+        std::vector<int> file_types = {(int)TableFileSchema::RAW, (int)TableFileSchema::TO_INDEX,
+                                       (int)TableFileSchema::INDEX};
         auto match_type = in(&TableFileSchema::file_type_, file_types);
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
-        if (!status.ok()) { return status; }
+        if (!status.ok()) {
+            return status;
+        }
 
-        //sqlite_orm has a bug, 'in' statement cannot handle too many elements
-        //so we split one query into multi-queries, this is a work-around!!
+        // sqlite_orm has a bug, 'in' statement cannot handle too many elements
+        // so we split one query into multi-queries, this is a work-around!!
         std::vector<DatesT> split_dates;
         split_dates.push_back(DatesT());
         const size_t batch_size = 30;
-        for(DateT date : dates) {
+        for (DateT date : dates) {
             DatesT& last_batch = *split_dates.rbegin();
             last_batch.push_back(date);
-            if(last_batch.size() > batch_size) {
+            if (last_batch.size() > batch_size) {
                 split_dates.push_back(DatesT());
             }
         }
 
-        //perform query
+        // perform query
         decltype(ConnectorPtr->select(select_columns)) selected;
         if (dates.empty() && ids.empty()) {
             auto filter = where(match_tableid and match_type);
@@ -890,28 +879,28 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id,
             auto filter = where(match_tableid and match_fileid and match_type);
             selected = ConnectorPtr->select(select_columns, filter);
         } else if (!dates.empty() && ids.empty()) {
-            for(auto& batch_dates : split_dates) {
-                if(batch_dates.empty()) {
+            for (auto& batch_dates : split_dates) {
+                if (batch_dates.empty()) {
                     continue;
                 }
                 auto match_date = in(&TableFileSchema::date_, batch_dates);
                 auto filter = where(match_tableid and match_date and match_type);
                 auto batch_selected = ConnectorPtr->select(select_columns, filter);
-                for (auto &file : batch_selected) {
+                for (auto& file : batch_selected) {
                     selected.push_back(file);
                 }
             }
 
         } else if (!dates.empty() && !ids.empty()) {
-            for(auto& batch_dates : split_dates) {
-                if(batch_dates.empty()) {
+            for (auto& batch_dates : split_dates) {
+                if (batch_dates.empty()) {
                     continue;
                 }
                 auto match_fileid = in(&TableFileSchema::id_, ids);
                 auto match_date = in(&TableFileSchema::date_, batch_dates);
                 auto filter = where(match_tableid and match_fileid and match_date and match_type);
                 auto batch_selected = ConnectorPtr->select(select_columns, filter);
-                for (auto &file : batch_selected) {
+                for (auto& file : batch_selected) {
                     selected.push_back(file);
                 }
             }
@@ -919,7 +908,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id,
 
         Status ret;
         TableFileSchema table_file;
-        for (auto &file : selected) {
+        for (auto& file : selected) {
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
             table_file.file_id_ = std::get<2>(file);
@@ -952,20 +941,19 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id,
             ENGINE_LOG_DEBUG << "Collect " << selected.size() << " to-search files";
         }
         return ret;
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when iterate index files", e.what());
     }
 }
 
 Status
-SqliteMetaImpl::FilesToMerge(const std::string &table_id,
-                             DatePartionedTableFilesSchema &files) {
+SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) {
     files.clear();
 
     try {
         server::MetricCollector metric;
 
-        //check table existence
+        // check table existence
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
@@ -973,25 +961,21 @@ SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             return status;
         }
 
-        //get files to merge
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                     &TableFileSchema::table_id_,
-                                                     &TableFileSchema::file_id_,
-                                                     &TableFileSchema::file_type_,
-                                                     &TableFileSchema::file_size_,
-                                                     &TableFileSchema::row_count_,
-                                                     &TableFileSchema::date_,
-                                                     &TableFileSchema::created_on_),
-                                             where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
-                                                 c(&TableFileSchema::table_id_) == table_id),
-                                             order_by(&TableFileSchema::file_size_).desc());
+        // get files to merge
+        auto selected = ConnectorPtr->select(
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
+                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
+                    &TableFileSchema::date_, &TableFileSchema::created_on_),
+            where(c(&TableFileSchema::file_type_) == (int)TableFileSchema::RAW and
+                  c(&TableFileSchema::table_id_) == table_id),
+            order_by(&TableFileSchema::file_size_).desc());
 
         Status result;
-        for (auto &file : selected) {
+        for (auto& file : selected) {
             TableFileSchema table_file;
             table_file.file_size_ = std::get<4>(file);
             if (table_file.file_size_ >= table_schema.index_file_size_) {
-                continue;//skip large file
+                continue;  // skip large file
             }
 
             table_file.id_ = std::get<0>(file);
@@ -1022,7 +1006,7 @@ SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             ENGINE_LOG_DEBUG << "Collect " << selected.size() << " to-merge files";
         }
         return result;
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when iterate merge files", e.what());
     }
 }
@@ -1145,19 +1129,19 @@ SqliteMetaImpl::FilesByType(const std::string &table_id,
 // TODO(myh): Support swap to cloud storage
 Status
 SqliteMetaImpl::Archive() {
-    auto &criterias = options_.archive_conf_.GetCriterias();
+    auto& criterias = options_.archive_conf_.GetCriterias();
     if (criterias.size() == 0) {
         return Status::OK();
     }
 
     for (auto kv : criterias) {
-        auto &criteria = kv.first;
-        auto &limit = kv.second;
+        auto& criteria = kv.first;
+        auto& limit = kv.second;
         if (criteria == engine::ARCHIVE_CONF_DAYS) {
             int64_t usecs = limit * D_SEC * US_PS;
             int64_t now = utils::GetMicroSecTimeStamp();
             try {
-                //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+                // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
                 std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
                 ConnectorPtr->update_all(
@@ -1176,7 +1160,7 @@ SqliteMetaImpl::Archive() {
             uint64_t sum = 0;
             Size(sum);
 
-            int64_t to_delete = (int64_t) sum - limit * G;
+            int64_t to_delete = (int64_t)sum - limit * G;
             DiscardFiles(to_delete);
 
             ENGINE_LOG_DEBUG << "Archive files to free disk";
@@ -1187,19 +1171,18 @@ SqliteMetaImpl::Archive() {
 }
 
 Status
-SqliteMetaImpl::Size(uint64_t &result) {
+SqliteMetaImpl::Size(uint64_t& result) {
     result = 0;
     try {
         auto selected = ConnectorPtr->select(columns(sum(&TableFileSchema::file_size_)),
-                                             where(
-                                                 c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE));
-        for (auto &total_size : selected) {
+                                             where(c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
+        for (auto& total_size : selected) {
             if (!std::get<0>(total_size)) {
                 continue;
             }
-            result += (uint64_t) (*std::get<0>(total_size));
+            result += (uint64_t)(*std::get<0>(total_size));
         }
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when calculte db size", e.what());
     }
 
@@ -1211,7 +1194,7 @@ SqliteMetaImpl::CleanUp() {
     try {
         server::MetricCollector metric;
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         std::vector<int> file_types = {
@@ -1249,11 +1232,11 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
-    //remove to_delete files
+    // remove to_delete files
     try {
         server::MetricCollector metric;
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
@@ -1269,7 +1252,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             TableFileSchema table_file;
-            for (auto &file : files) {
+            for (auto& file : files) {
                 table_file.id_ = std::get<0>(file);
                 table_file.table_id_ = std::get<1>(file);
                 table_file.file_id_ = std::get<2>(file);
@@ -1291,24 +1274,23 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         if (files.size() > 0) {
             ENGINE_LOG_DEBUG << "Clean " << files.size() << " files deleted in " << seconds << " seconds";
         }
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when clean table files", e.what());
     }
 
-    //remove to_delete tables
+    // remove to_delete tables
     try {
         server::MetricCollector metric;
 
-        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
-                                                   &TableSchema::table_id_),
-                                           where(c(&TableSchema::state_) == (int) TableSchema::TO_DELETE));
+        auto tables = ConnectorPtr->select(columns(&TableSchema::id_, &TableSchema::table_id_),
+                                           where(c(&TableSchema::state_) == (int)TableSchema::TO_DELETE));
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
-            for (auto &table : tables) {
-                utils::DeleteTablePath(options_, std::get<1>(table), false);//only delete empty folder
+            for (auto& table : tables) {
+                utils::DeleteTablePath(options_, std::get<1>(table), false);  // only delete empty folder
                 ConnectorPtr->remove<TableSchema>(std::get<0>(table));
             }
 
@@ -1322,16 +1304,16 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         if (tables.size() > 0) {
             ENGINE_LOG_DEBUG << "Remove " << tables.size() << " tables from meta";
         }
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when clean table files", e.what());
     }
 
-    //remove deleted table folder
-    //don't remove table folder until all its files has been deleted
+    // remove deleted table folder
+    // don't remove table folder until all its files has been deleted
     try {
         server::MetricCollector metric;
 
-        for (auto &table_id : table_ids) {
+        for (auto& table_id : table_ids) {
             auto selected = ConnectorPtr->select(columns(&TableFileSchema::file_id_),
                                                  where(c(&TableFileSchema::table_id_) == table_id));
             if (selected.size() == 0) {
@@ -1342,7 +1324,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         if (table_ids.size() > 0) {
             ENGINE_LOG_DEBUG << "Remove " << table_ids.size() << " tables folder";
         }
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when delete table folder", e.what());
     }
 
@@ -1354,14 +1336,11 @@ SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
     try {
         server::MetricCollector metric;
 
-        std::vector<int> file_types = {
-            (int) TableFileSchema::RAW,
-            (int) TableFileSchema::TO_INDEX,
-            (int) TableFileSchema::INDEX
-        };
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::row_count_),
-                                             where(in(&TableFileSchema::file_type_, file_types)
-                                                       and c(&TableFileSchema::table_id_) == table_id));
+        std::vector<int> file_types = {(int)TableFileSchema::RAW, (int)TableFileSchema::TO_INDEX,
+                                       (int)TableFileSchema::INDEX};
+        auto selected = ConnectorPtr->select(
+            columns(&TableFileSchema::row_count_),
+            where(in(&TableFileSchema::file_type_, file_types) and c(&TableFileSchema::table_id_) == table_id));
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
@@ -1372,10 +1351,10 @@ SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
         }
 
         result = 0;
-        for (auto &file : selected) {
+        for (auto& file : selected) {
             result += std::get<0>(file);
         }
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when calculate table file size", e.what());
     }
     return Status::OK();
@@ -1388,7 +1367,7 @@ SqliteMetaImpl::DropAll() {
     try {
         ConnectorPtr->drop_table(META_TABLES);
         ConnectorPtr->drop_table(META_TABLEFILES);
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return HandleException("Encounter exception when drop all meta", e.what());
     }
 

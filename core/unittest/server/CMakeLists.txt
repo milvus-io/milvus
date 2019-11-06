@@ -47,7 +47,7 @@ set(server_test_files
         ${test_files}
         )
 
-cuda_add_executable(test_server ${server_test_files})
+add_executable(test_server ${server_test_files})
 
 set(client_grpc_lib
         grpcpp_channelz

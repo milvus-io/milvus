@@ -16,7 +16,9 @@
 // under the License.
 
 #include "wrapper/KnowhereResource.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
 #include "server/Config.h"
 
 #include <map>
@@ -32,6 +34,8 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
 KnowhereResource::Initialize() {
+#ifdef MILVUS_GPU_VERSION
+
     struct GpuResourceSetting {
         int64_t pinned_memory = 300 * M_BYTE;
         int64_t temp_memory = 300 * M_BYTE;
@@ -73,12 +77,16 @@ KnowhereResource::Initialize() {
                                                                 iter->second.temp_memory, iter->second.resource_num);
     }
 
+#endif
+
     return Status::OK();
 }
 
 Status
 KnowhereResource::Finalize() {
+#ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().Free();  // free gpu resource.
+#endif
     return Status::OK();
 }
 

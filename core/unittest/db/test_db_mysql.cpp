@@ -15,21 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "db/utils.h"
+#include "db/Constants.h"
 #include "db/DB.h"
 #include "db/DBImpl.h"
-#include "db/Constants.h"
 #include "db/meta/MetaConsts.h"
+#include "db/utils.h"
 
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
 
-#include <thread>
 #include <random>
+#include <thread>
 
 namespace {
 
-static const char *TABLE_NAME = "test_group";
+static const char* TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
@@ -39,22 +39,22 @@ BuildTableSchema() {
     milvus::engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
     table_info.table_id_ = TABLE_NAME;
-    table_info.engine_type_ = (int) milvus::engine::EngineType::FAISS_IDMAP;
+    table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     return table_info;
 }
 
 void
-BuildVectors(int64_t n, std::vector<float> &vectors) {
+BuildVectors(int64_t n, std::vector<float>& vectors) {
     vectors.clear();
     vectors.resize(n * TABLE_DIM);
-    float *data = vectors.data();
+    float* data = vectors.data();
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
         data[TABLE_DIM * i] += i / 2000.;
     }
 }
 
-} // namespace
+}  // namespace
 
 TEST_F(MySqlDBTest, DB_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
@@ -175,9 +175,9 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     }
 
     // result data
-    //std::vector<long> nns_gt(k*nq);
+    // std::vector<long> nns_gt(k*nq);
     std::vector<int64_t> nns(k * nq);  // nns = nearst neg search
-    //std::vector<float> dis_gt(k*nq);
+    // std::vector<float> dis_gt(k*nq);
     std::vector<float> dis(k * nq);
 
     // insert data
@@ -188,13 +188,12 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-    sleep(2); // wait until build index finish
+    sleep(2);  // wait until build index finish
 
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
-
     ASSERT_TRUE(stat.ok());
 }
 
@@ -206,7 +205,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     stat = db_->AllTables(table_schema_array);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
-    for (auto &schema : table_schema_array) {
+    for (auto& schema : table_schema_array) {
         if (schema.table_id_ == TABLE_NAME) {
             bfound = true;
             break;
@@ -246,7 +245,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 TEST_F(MySqlDBTest, DELETE_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
-//    std::cout << stat.ToString() << std::endl;
+    //    std::cout << stat.ToString() << std::endl;
 
     milvus::engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;

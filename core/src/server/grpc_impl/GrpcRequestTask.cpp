@@ -28,7 +28,7 @@
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "server/Server.h"
-#include "src/version.h"
+#include "src/config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -662,8 +662,8 @@ SearchTask::OnExecute() {
             status = DBWrapper::DB()->Query(table_name_, partition_tags, (size_t)top_k, record_count, nprobe,
                                             vec_f.data(), dates, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
-                                            vec_f.data(), dates, result_ids, result_distances);
+            status = DBWrapper::DB()->QueryByFileID(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
+                                                    vec_f.data(), dates, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
