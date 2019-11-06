@@ -1,8 +1,18 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
+# Milvus 0.5.3 (TODO)
 
-# Milvus 0.5.2 (TODO)
+## Bug
+
+## Feature
+
+## Improvement
+- \#207 - Add more unittest for config set/get
+
+## Task
+
+# Milvus 0.5.2 (2019-11-05)
 
 ## Bug
 - \#194 - Search faild: message="Table file doesn't exist"
@@ -10,7 +20,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Feature
 
 ## Improvement
-- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.52
+- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.5.2
 
 ## Task
 

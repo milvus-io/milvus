@@ -43,8 +43,11 @@ class StringHelpFunctions {
     // ,b,                | b |
     // ,,                 |   |
     // a                    a
-    static Status
+    static void
     SplitStringByDelimeter(const std::string& str, const std::string& delimeter, std::vector<std::string>& result);
+
+    static void
+    MergeStringWithDelimeter(const std::vector<std::string>& strs, const std::string& delimeter, std::string& result);
 
     // assume the table has two columns, quote='\"', delimeter=','
     //  a,b             a | b
