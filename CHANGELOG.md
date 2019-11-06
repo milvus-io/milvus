@@ -10,6 +10,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Improvement
 - \#207 - Add more unittest for config set/get
 - \#208 - optimize unittest to support run single test more easily
+- \#204 - improve grpc performance in search
 
 ## Task
 
@@ -19,7 +20,6 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#194 - Search faild: message="Table file doesn't exist"
 
 ## Feature
-- \#204 - improve grpc performance in search
 
 ## Improvement
 - \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.5.2
