@@ -17,7 +17,11 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
+set(test_files
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_metricbase.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_metrics.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_prometheus.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
 add_executable(test_metrics
         ${common_files}

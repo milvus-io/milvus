@@ -795,11 +795,16 @@ Config::GetConfigStr(const std::string& parent_key, const std::string& child_key
 }
 
 std::string
-Config::GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim) {
+Config::GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim,
+                             const std::string& default_value) {
     std::string value;
     if (!GetConfigValueInMem(parent_key, child_key, value).ok()) {
         std::vector<std::string> sequence = GetConfigNode(parent_key).GetSequence(child_key);
-        server::StringHelpFunctions::MergeStringWithDelimeter(sequence, delim, value);
+        if (sequence.empty()) {
+            value = default_value;
+        } else {
+            server::StringHelpFunctions::MergeStringWithDelimeter(sequence, delim, value);
+        }
         SetConfigValueInMem(parent_key, child_key, value);
     }
     return value;
@@ -1028,8 +1033,9 @@ Config::GetResourceConfigMode(std::string& value) {
 
 Status
 Config::GetResourceConfigSearchResources(std::vector<std::string>& value) {
-    std::string str = GetConfigSequenceStr(CONFIG_RESOURCE, CONFIG_RESOURCE_SEARCH_RESOURCES,
-                                           CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER);
+    std::string str =
+        GetConfigSequenceStr(CONFIG_RESOURCE, CONFIG_RESOURCE_SEARCH_RESOURCES,
+                             CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT);
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, value);
     return CheckResourceConfigSearchResources(value);
 }
