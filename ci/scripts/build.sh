@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -e
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
@@ -76,10 +76,6 @@ fi
 
 pushd ${CORE_BUILD_DIR}
 
-# remove make cache since build.sh -l use default variables
-# force update the variables each time
-make rebuild_cache
-
 CMAKE_CMD="cmake \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -91,33 +87,6 @@ ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
 
-if [[ ${RUN_CPPLINT} == "ON" ]]; then
-    # cpplint check
-    make lint
-    if [ $? -ne 0 ]; then
-        echo "ERROR! cpplint check failed"
-        exit 1
-    fi
-    echo "cpplint check passed!"
-
-    # clang-format check
-    make check-clang-format
-    if [ $? -ne 0 ]; then
-        echo "ERROR! clang-format check failed"
-        exit 1
-    fi
-    echo "clang-format check passed!"
-
-#    # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        rm -f CMakeCache.txt
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
-else
-    # compile and build
-    make -j8 || exit 1
-    make install || exit 1
-fi
+# compile and build
+make -j8 || exit 1
+make install || exit 1
