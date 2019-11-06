@@ -40,12 +40,15 @@ class Cache {
         return usage_;
     }
 
+    // unit: BYTE
     int64_t
     capacity() const {
         return capacity_;
-    }  // unit: BYTE
+    }
+
+    // unit: BYTE
     void
-    set_capacity(int64_t capacity);  // unit: BYTE
+    set_capacity(int64_t capacity);
 
     double
     freemem_percent() const {
@@ -59,16 +62,22 @@ class Cache {
 
     size_t
     size() const;
+
     bool
     exists(const std::string& key);
+
     ItemObj
     get(const std::string& key);
+
     void
     insert(const std::string& key, const ItemObj& item);
+
     void
     erase(const std::string& key);
+
     void
     print();
+
     void
     clear();
 

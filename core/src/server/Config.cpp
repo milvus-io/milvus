@@ -689,7 +689,7 @@ Config::CheckResourceConfigMode(const std::string& value) {
 }
 
 Status
-CheckResource(const std::string& value) {
+CheckGpuDevice(const std::string& value) {
     std::string s = value;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 #ifdef MILVUS_CPU_VERSION
@@ -697,21 +697,19 @@ CheckResource(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid CPU resource: " + s);
     }
 #else
-    const std::regex pat("cpu|gpu(\\d+)");
-    std::smatch m;
-    if (!std::regex_match(s, m, pat)) {
-        std::string msg = "Invalid search resource: " + value +
-                          ". Possible reason: resource_config.search_resources is not in the format of cpux or gpux";
+    const std::regex pat("gpu(\\d+)");
+    std::cmatch m;
+    if (!std::regex_match(value.c_str(), m, pat)) {
+        std::string msg = "Invalid gpu device: " + value +
+                          ". Possible reason: resource_config.search_resources does not match your hardware.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    if (s.compare(0, 3, "gpu") == 0) {
-        int32_t gpu_index = std::stoi(s.substr(3));
-        if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
-            std::string msg = "Invalid search resource: " + value +
-                              ". Possible reason: resource_config.search_resources does not match your hardware.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
+    int32_t gpu_index = std::stoi(value.substr(3));
+    if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
+        std::string msg = "Invalid gpu device: " + value +
+                          ". Possible reason: resource_config.search_resources does not match your hardware.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 #endif
     return Status::OK();
@@ -726,20 +724,38 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    for (auto& resource : value) {
-        auto status = CheckResource(resource);
-        if (!status.ok()) {
-            return Status(SERVER_INVALID_ARGUMENT, status.message());
+    bool cpu_found = false, gpu_found = false;
+    for (auto& device : value) {
+        if (device == "cpu") {
+            cpu_found = true;
+            continue;
         }
+        if (CheckGpuDevice(device).ok()) {
+            gpu_found = true;
+        } else {
+            std::string msg = "Invalid search resource: " + device +
+                              ". Possible reason: resource_config.search_resources does not match your hardware.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+
+    if (cpu_found && !gpu_found) {
+        std::string msg =
+            "Invalid search resource. Possible reason: resource_config.search_resources has only CPU resource.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }
 
 Status
 Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
-    auto status = CheckResource(value);
-    if (!status.ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, status.message());
+    // if (value == "cpu") {
+    //     return Status::OK();
+    // }
+    if (!CheckGpuDevice(value).ok()) {
+        std::string msg = "Invalid index build device: " + value +
+                          ". Possible reason: resource_config.index_build_device does not match your hardware.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }

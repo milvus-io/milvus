@@ -15,6 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#define MILVUS_VERSION "0.5.0"
+#define MILVUS_VERSION "0.6.0"
 #define BUILD_TYPE "Debug"
-#define BUILD_TIME "2019-11-05 18:49.05"
+#define BUILD_TIME "2019-11-06 11:38.52"
