@@ -150,9 +150,9 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 }
 
 ::grpc::Status
-GrpcRequestHandler::DeleteByRange(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByRangeParam* request,
-                                  ::milvus::grpc::Status* response) {
-    BaseTaskPtr task_ptr = DeleteByRangeTask::Create(request);
+GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
+                                 ::milvus::grpc::Status* response) {
+    BaseTaskPtr task_ptr = DeleteByDateTask::Create(request);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     response->set_error_code(grpc_status.error_code());
@@ -186,6 +186,36 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                               ::milvus::grpc::Status* response) {
     BaseTaskPtr task_ptr = DropIndexTask::Create(request->table_name());
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->set_reason(grpc_status.reason());
+    response->set_error_code(grpc_status.error_code());
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
+                                    ::milvus::grpc::Status* response) {
+    BaseTaskPtr task_ptr = CreatePartitionTask::Create(request);
+    GrpcRequestScheduler::ExecTask(task_ptr, response);
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                                   ::milvus::grpc::PartitionList* response) {
+    BaseTaskPtr task_ptr = ShowPartitionsTask::Create(request->table_name(), response);
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->mutable_status()->set_reason(grpc_status.reason());
+    response->mutable_status()->set_error_code(grpc_status.error_code());
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
+                                  ::milvus::grpc::Status* response) {
+    BaseTaskPtr task_ptr = DropPartitionTask::Create(request);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     response->set_reason(grpc_status.reason());

@@ -17,7 +17,18 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${MILVUS_SOURCE_DIR}/src/sdk/examples/utils util_files)
 
-add_subdirectory(simple)
-add_subdirectory(partition)
+aux_source_directory(src src_files)
+
+add_executable(sdk_partition
+        main.cpp
+        ${src_files}
+        ${util_files}
+        )
+
+target_link_libraries(sdk_partition
+        milvus_sdk
+        pthread
+        )
+
+install(TARGETS sdk_partition DESTINATION bin)
