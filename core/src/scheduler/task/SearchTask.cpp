@@ -219,8 +219,11 @@ XSearchTask::Execute() {
 
             // step 3: pick up topk result
             auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
-            XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
-                                              search_job->GetResult());
+            {
+                std::unique_lock<std::mutex> lock(search_job->mutex());
+                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
+                                                  search_job->GetResultIds(), search_job->GetResultDistances());
+            }
 
             span = rc.RecordSection(hdr + ", reduce topk");
             //            search_job->AccumReduceCost(span);
@@ -240,71 +243,69 @@ XSearchTask::Execute() {
 }
 
 void
-XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance,
-                                  uint64_t input_k, uint64_t nq, uint64_t topk, bool ascending,
-                                  scheduler::ResultSet& result) {
-    if (result.empty()) {
-        result.resize(nq);
+XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
+                                  size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
+                                  scheduler::ResultDistances& tar_distances) {
+    if (src_ids.empty()) {
+        return;
     }
 
+    size_t tar_k = tar_ids.size() / nq;
+    size_t buf_k = std::min(topk, src_k + tar_k);
+
+    scheduler::ResultIds buf_ids(nq * buf_k, -1);
+    scheduler::ResultDistances buf_distances(nq * buf_k, 0.0);
+
     for (uint64_t i = 0; i < nq; i++) {
-        scheduler::Id2DistVec result_buf;
-        auto& result_i = result[i];
+        size_t buf_k_j = 0, src_k_j = 0, tar_k_j = 0;
+        size_t buf_idx, src_idx, tar_idx;
 
-        if (result[i].empty()) {
-            result_buf.resize(input_k, scheduler::IdDistPair(-1, 0.0));
-            uint64_t input_k_multi_i = topk * i;
-            for (auto k = 0; k < input_k; ++k) {
-                uint64_t idx = input_k_multi_i + k;
-                auto& result_buf_item = result_buf[k];
-                result_buf_item.first = input_ids[idx];
-                result_buf_item.second = input_distance[idx];
+        size_t buf_k_multi_i = buf_k * i;
+        size_t src_k_multi_i = topk * i;
+        size_t tar_k_multi_i = tar_k * i;
+
+        while (buf_k_j < buf_k && src_k_j < src_k && tar_k_j < tar_k) {
+            src_idx = src_k_multi_i + src_k_j;
+            tar_idx = tar_k_multi_i + tar_k_j;
+            buf_idx = buf_k_multi_i + buf_k_j;
+
+            if ((ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
+                (!ascending && src_distances[src_idx] > tar_distances[tar_idx])) {
+                buf_ids[buf_idx] = src_ids[src_idx];
+                buf_distances[buf_idx] = src_distances[src_idx];
+                src_k_j++;
+            } else {
+                buf_ids[buf_idx] = tar_ids[tar_idx];
+                buf_distances[buf_idx] = tar_distances[tar_idx];
+                tar_k_j++;
             }
-        } else {
-            size_t tar_size = result_i.size();
-            uint64_t output_k = std::min(topk, input_k + tar_size);
-            result_buf.resize(output_k, scheduler::IdDistPair(-1, 0.0));
-            size_t buf_k = 0, src_k = 0, tar_k = 0;
-            uint64_t src_idx;
-            uint64_t input_k_multi_i = topk * i;
-            while (buf_k < output_k && src_k < input_k && tar_k < tar_size) {
-                src_idx = input_k_multi_i + src_k;
-                auto& result_buf_item = result_buf[buf_k];
-                auto& result_item = result_i[tar_k];
-                if ((ascending && input_distance[src_idx] < result_item.second) ||
-                    (!ascending && input_distance[src_idx] > result_item.second)) {
-                    result_buf_item.first = input_ids[src_idx];
-                    result_buf_item.second = input_distance[src_idx];
-                    src_k++;
-                } else {
-                    result_buf_item = result_item;
-                    tar_k++;
+            buf_k_j++;
+        }
+
+        if (buf_k_j < buf_k) {
+            if (src_k_j < src_k) {
+                while (buf_k_j < buf_k && src_k_j < src_k) {
+                    buf_idx = buf_k_multi_i + buf_k_j;
+                    src_idx = src_k_multi_i + src_k_j;
+                    buf_ids[buf_idx] = src_ids[src_idx];
+                    buf_distances[buf_idx] = src_distances[src_idx];
+                    src_k_j++;
+                    buf_k_j++;
                 }
-                buf_k++;
-            }
-
-            if (buf_k < output_k) {
-                if (src_k < input_k) {
-                    while (buf_k < output_k && src_k < input_k) {
-                        src_idx = input_k_multi_i + src_k;
-                        auto& result_buf_item = result_buf[buf_k];
-                        result_buf_item.first = input_ids[src_idx];
-                        result_buf_item.second = input_distance[src_idx];
-                        src_k++;
-                        buf_k++;
-                    }
-                } else {
-                    while (buf_k < output_k && tar_k < tar_size) {
-                        result_buf[buf_k] = result_i[tar_k];
-                        tar_k++;
-                        buf_k++;
-                    }
+            } else {
+                while (buf_k_j < buf_k && tar_k_j < tar_k) {
+                    buf_idx = buf_k_multi_i + buf_k_j;
+                    tar_idx = tar_k_multi_i + tar_k_j;
+                    buf_ids[buf_idx] = tar_ids[tar_idx];
+                    buf_distances[buf_idx] = tar_distances[tar_idx];
+                    tar_k_j++;
+                    buf_k_j++;
                 }
             }
         }
-
-        result_i.swap(result_buf);
     }
+    tar_ids.swap(buf_ids);
+    tar_distances.swap(buf_distances);
 }
 
 // void

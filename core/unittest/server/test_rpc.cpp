@@ -380,6 +380,44 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 }
 
+TEST_F(RpcHandlerTest, PARTITION_TEST) {
+    ::grpc::ServerContext context;
+    ::milvus::grpc::TableSchema table_schema;
+    ::milvus::grpc::Status response;
+    std::string str_table_name = "tbl_partition";
+    table_schema.set_table_name(str_table_name);
+    table_schema.set_dimension(TABLE_DIM);
+    table_schema.set_index_file_size(INDEX_FILE_SIZE);
+    table_schema.set_metric_type(1);
+    handler->CreateTable(&context, &table_schema, &response);
+
+    ::milvus::grpc::PartitionParam partition_param;
+    partition_param.set_table_name(str_table_name);
+    std::string partition_name = "tbl_partition_0";
+    partition_param.set_partition_name(partition_name);
+    std::string partition_tag = "0";
+    partition_param.set_tag(partition_tag);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+
+    ::milvus::grpc::TableName table_name;
+    table_name.set_table_name(str_table_name);
+    ::milvus::grpc::PartitionList partition_list;
+    handler->ShowPartitions(&context, &table_name, &partition_list);
+    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+    ASSERT_EQ(partition_list.partition_array_size(), 1);
+
+    ::milvus::grpc::PartitionParam partition_parm;
+    partition_parm.set_table_name(str_table_name);
+    partition_parm.set_tag(partition_tag);
+    handler->DropPartition(&context, &partition_parm, &response);
+    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+
+    partition_parm.set_partition_name(partition_name);
+    handler->DropPartition(&context, &partition_parm, &response);
+    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+}
+
 TEST_F(RpcHandlerTest, CMD_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::Command command;
@@ -396,26 +434,26 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
 
 TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     ::grpc::ServerContext context;
-    ::milvus::grpc::DeleteByRangeParam request;
+    ::milvus::grpc::DeleteByDateParam request;
     ::milvus::grpc::Status status;
-    handler->DeleteByRange(&context, nullptr, &status);
-    handler->DeleteByRange(&context, &request, &status);
+    handler->DeleteByDate(&context, nullptr, &status);
+    handler->DeleteByDate(&context, &request, &status);
 
     request.set_table_name(TABLE_NAME);
     request.mutable_range()->set_start_value(CurrentTmDate(-3));
     request.mutable_range()->set_end_value(CurrentTmDate(-2));
 
-    ::grpc::Status grpc_status = handler->DeleteByRange(&context, &request, &status);
+    ::grpc::Status grpc_status = handler->DeleteByDate(&context, &request, &status);
     int error_code = status.error_code();
     //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     request.mutable_range()->set_start_value("test6");
-    grpc_status = handler->DeleteByRange(&context, &request, &status);
+    grpc_status = handler->DeleteByDate(&context, &request, &status);
     request.mutable_range()->set_start_value(CurrentTmDate(-2));
     request.mutable_range()->set_end_value("test6");
-    grpc_status = handler->DeleteByRange(&context, &request, &status);
+    grpc_status = handler->DeleteByDate(&context, &request, &status);
     request.mutable_range()->set_end_value(CurrentTmDate(-2));
-    grpc_status = handler->DeleteByRange(&context, &request, &status);
+    grpc_status = handler->DeleteByDate(&context, &request, &status);
 }
 
 //////////////////////////////////////////////////////////////////////

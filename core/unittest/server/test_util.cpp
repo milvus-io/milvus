@@ -136,6 +136,10 @@ TEST(UtilTest, STRINGFUNCTIONS_TEST) {
     status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
+
+    ASSERT_TRUE(milvus::server::StringHelpFunctions::IsRegexMatch("abc", "abc"));
+    ASSERT_TRUE(milvus::server::StringHelpFunctions::IsRegexMatch("a8c", "a\\d."));
+    ASSERT_FALSE(milvus::server::StringHelpFunctions::IsRegexMatch("abc", "a\\dc"));
 }
 
 TEST(UtilTest, BLOCKINGQUEUE_TEST) {
@@ -312,6 +316,13 @@ TEST(ValidationUtilTest, VALIDATE_NPROBE_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateSearchNprobe(10, schema).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchNprobe(0, schema).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchNprobe(101, schema).code(), milvus::SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, VALIDATE_PARTITION_TAGS) {
+    std::vector<std::string> partition_tags = {"abc"};
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);
+    partition_tags.push_back("");
+    ASSERT_NE(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);
 }
 
 #ifdef MILVUS_GPU_VERSION

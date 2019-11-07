@@ -15,30 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "sdk/examples/utils/TimeRecorder.h"
 
-#include "db/engine/ExecutionEngine.h"
+#include <iostream>
 
-#include <faiss/Index.h>
-#include <stdint.h>
-#include <utility>
-#include <vector>
+namespace milvus_sdk {
 
-namespace milvus {
-namespace engine {
+TimeRecorder::TimeRecorder(const std::string& title) : title_(title) {
+    start_ = std::chrono::system_clock::now();
+    std::cout << title_ << " begin..." << std::endl;
+}
 
-typedef int64_t IDNumber;
-typedef IDNumber* IDNumberPtr;
-typedef std::vector<IDNumber> IDNumbers;
+TimeRecorder::~TimeRecorder() {
+    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+    int64_t span = (std::chrono::duration_cast<std::chrono::milliseconds>(end - start_)).count();
+    std::cout << title_ << " totally cost: " << span << " ms" << std::endl;
+}
 
-typedef std::vector<faiss::Index::idx_t> ResultIds;
-typedef std::vector<faiss::Index::distance_t> ResultDistances;
-
-struct TableIndex {
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t nlist_ = 16384;
-    int32_t metric_type_ = (int)MetricType::L2;
-};
-
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus_sdk
