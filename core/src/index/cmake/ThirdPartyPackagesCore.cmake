@@ -247,7 +247,8 @@ if(CUSTOMIZATION)
         # set(FAISS_MD5 "87fdd86351ffcaf3f80dc26ade63c44b") # commit-id 841a156e67e8e22cd8088e1b58c00afbf2efc30b branch-0.2.1
         # set(FAISS_MD5 "f3b2ce3364c3fa7febd3aa7fdd0fe380") # commit-id 694e03458e6b69ce8a62502f71f69a614af5af8f branch-0.3.0
         # set(FAISS_MD5 "bb30722c22390ce5f6759ccb216c1b2a") # commit-id d324db297475286afe107847c7fb7a0f9dc7e90e branch-0.3.0
-        set(FAISS_MD5 "2293cdb209c3718e3b19f3edae8b32b3") # commit-id a13c1205dc52977a9ad3b33a14efa958604a8bff branch-0.3.0
+	# set(FAISS_MD5 "2293cdb209c3718e3b19f3edae8b32b3") # commit-id a13c1205dc52977a9ad3b33a14efa958604a8bff branch-0.3.0
+	set(FAISS_MD5 "3632192f06b70e5f3fac8e2f08ced503") # commit-id fbd5b7566466c5665bb646f2b2f911c8544090f5 branch-0.3.0
     endif()
 else()
     set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/1.6.0.tar.gz")
