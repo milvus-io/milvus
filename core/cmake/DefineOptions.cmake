@@ -82,18 +82,6 @@ define_option(MILVUS_WITH_GRPC "Build with GRPC" ON)
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
 #----------------------------------------------------------------------
-if (MSVC)
-    set_option_category("MSVC")
-
-    define_option(MSVC_LINK_VERBOSE
-            "Pass verbose linking options when linking libraries and executables"
-            OFF)
-
-    define_option(MILVUS_USE_STATIC_CRT "Build MILVUS with statically linked CRT" OFF)
-endif ()
-
-
-#----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 
 unset(MILVUS_BUILD_TESTS CACHE)
