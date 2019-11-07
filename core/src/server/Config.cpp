@@ -307,6 +307,7 @@ Config::ResetDefaultConfig() {
         return s;
     }
 
+#ifdef MILVUS_GPU_VERSION
     s = SetCacheConfigGpuCacheCapacity(CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT);
     if (!s.ok()) {
         return s;
@@ -316,6 +317,7 @@ Config::ResetDefaultConfig() {
     if (!s.ok()) {
         return s;
     }
+#endif
 
     s = SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT);
     if (!s.ok()) {
