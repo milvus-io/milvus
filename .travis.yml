@@ -5,7 +5,8 @@ addons:
   apt:
     update: true
 before_install:
-  - wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | sudo tar --strip-components=1 -xz -C /usr/local
+  - wget -O cmake.sh https://cmake.org/files/v3.14/cmake-3.14.0-Linux-x86_64.sh
+  - sudo sh cmake.sh --skip-license --exclude-subdir --prefix=/usr/local
 install:
   - source $TRAVIS_BUILD_DIR/ci/travis/install_dependency.sh
 script:
