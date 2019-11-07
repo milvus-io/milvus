@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget && \
     sh -c 'echo deb https://apt.repos.intel.com/mkl all main > /etc/apt/sources.list.d/intel-mkl.list' && \
     apt-get update && apt-get install -y --no-install-recommends \
     git flex bison gfortran lsb-core \
-    curl libtool automake libboost-all-dev libssl-dev pkg-config libcurl4-openssl-dev \
+    curl libtool automake libboost-all-dev libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
     clang-format-6.0 clang-tidy-6.0 \
     lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.4-243 intel-mkl-core-2019.4-243 && \
     apt-get remove --purge -y && \
