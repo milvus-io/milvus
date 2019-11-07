@@ -92,12 +92,19 @@ static const char* CONFIG_RESOURCE = "resource_config";
 static const char* CONFIG_RESOURCE_MODE = "mode";
 static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
 static const char* CONFIG_RESOURCE_SEARCH_RESOURCES = "search_resources";
+static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER = ",";
+#ifdef MILVUS_CPU_VERSION
+static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu";
+#else
+static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu,gpu0";
+#endif
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE = "index_build_device";
 #ifdef MILVUS_CPU_VERSION
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu";
 #else
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "gpu0";
 #endif
+const int32_t CPU_DEVICE_ID = -1;
 
 class Config {
  public:
@@ -185,6 +192,9 @@ class Config {
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
+    std::string
+    GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim = ",",
+                         const std::string& default_value = "");
 
  public:
     /* server config */
@@ -305,6 +315,8 @@ class Config {
     /* resource config */
     Status
     SetResourceConfigMode(const std::string& value);
+    Status
+    SetResourceConfigSearchResources(const std::string& value);
     Status
     SetResourceConfigIndexBuildDevice(const std::string& value);
 
