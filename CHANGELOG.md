@@ -8,6 +8,8 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
+- \#229 - Change default compile option to CPU version
+- \#230 - add MKL/OpenBlas message at server start
 
 ## Improvement
 
