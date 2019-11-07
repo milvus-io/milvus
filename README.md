@@ -56,7 +56,8 @@ To connect with other users and contributors, welcome to join our [Slack channel
 
 We greatly appreciate the help of the following people.
 
-- [akihoni](https://github.com/akihoni) found a broken link and a small typo in the README file.
+- [akihoni](https://github.com/akihoni) provided the CN version of README, and found a broken link in the doc.
+- [goodhamgupta](https://github.com/goodhamgupta) fixed a filename typo in the bootcamp doc.
 
 ## Resources
 
