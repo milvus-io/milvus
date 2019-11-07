@@ -51,7 +51,13 @@ print_banner() {
     std::cout << " /_/  /_/___/____/___/\\____/___/     " << std::endl;
     std::cout << std::endl;
     std::cout << "Welcome to Milvus!" << std::endl;
-    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << std::endl;
+    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << ", with "
+#ifdef WITH_MKL
+              << "MKL"
+#else
+              << "OpenBLAS"
+#endif
+              << " library." << std::endl;
 #ifdef MILVUS_CPU_VERSION
     std::cout << "You are using Milvus CPU version" << std::endl;
 #else
@@ -137,7 +143,7 @@ main(int argc, char* argv[]) {
 
     s = server.Start();
     if (s.ok()) {
-        std::cout << "Milvus server start successfully." << std::endl;
+        std::cout << "Milvus server started successfully!" << std::endl;
     } else {
         goto FAIL;
     }
