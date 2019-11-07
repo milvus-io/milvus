@@ -57,22 +57,22 @@ PrintTableSchema(const milvus::TableSchema& tb_schema) {
 
 void
 PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-                  const std::vector<milvus::TopKQueryResult>& topk_query_result_array) {
+                  const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
-    std::cout << "Returned result count: " << topk_query_result_array.size() << std::endl;
+    size_t nq = topk_query_result.row_num;
+    size_t topk = topk_query_result.topk;
+    std::cout << "Returned result count: " << nq * topk << std::endl;
 
     int32_t index = 0;
-    for (auto& result : topk_query_result_array) {
+    for (size_t i = 0; i < nq; i++) {
         auto search_id = search_record_array[index].first;
         index++;
-        std::cout << "No." << std::to_string(index) << " vector " << std::to_string(search_id) << " top "
-                  << std::to_string(result.query_result_arrays.size()) << " search result:" << std::endl;
-        for (auto& item : result.query_result_arrays) {
-            std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
-            std::cout << std::endl;
+        std::cout << "No." << index << " vector " << search_id << " top " << topk << " search result:" << std::endl;
+        for (size_t j = 0; j < topk; j++) {
+            size_t idx = i * nq + j;
+            std::cout << "\t" << topk_query_result.ids[idx] << "\t" << topk_query_result.distances[idx] << std::endl;
         }
     }
-
     BLOCK_SPLITER
 }
 
@@ -166,11 +166,13 @@ class TimeRecorder {
 
 void
 CheckResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-            const std::vector<milvus::TopKQueryResult>& topk_query_result_array) {
+            const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
+    size_t nq = topk_query_result.row_num;
+    size_t result_k = topk_query_result.topk;
     int64_t index = 0;
-    for (auto& result : topk_query_result_array) {
-        auto result_id = result.query_result_arrays[0].id;
+    for (size_t i = 0; i < nq; i++) {
+        auto result_id = topk_query_result.ids[i * result_k];
         auto search_id = search_record_array[index++].first;
         if (result_id != search_id) {
             std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
@@ -196,19 +198,18 @@ DoSearch(std::shared_ptr<milvus::Connection> conn,
     }
 
     auto start = std::chrono::high_resolution_clock::now();
-    std::vector<milvus::TopKQueryResult> topk_query_result_array;
+    milvus::TopKQueryResult topk_query_result;
     {
         TimeRecorder rc(phase_name);
-        milvus::Status stat =
-            conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 32, topk_query_result_array);
+        milvus::Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 32, topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
     }
     auto finish = std::chrono::high_resolution_clock::now();
     std::cout << "SEARCHVECTOR COST: "
               << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
-    PrintSearchResult(search_record_array, topk_query_result_array);
-    CheckResult(search_record_array, topk_query_result_array);
+    PrintSearchResult(search_record_array, topk_query_result);
+    CheckResult(search_record_array, topk_query_result);
 }
 }  // namespace
 
