@@ -17,7 +17,7 @@ Milvus 是一款开源的、针对海量特征向量的相似性搜索引擎。�
 
 Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及 C++ 的 API 接口。
 
-通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.1/) 获取最新版本的功能和更新。
+通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.2/) 获取最新版本的功能和更新。
 
 ## 开始使用 Milvus
 
