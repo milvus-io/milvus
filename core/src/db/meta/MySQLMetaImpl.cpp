@@ -173,6 +173,7 @@ MySQLMetaImpl::~MySQLMetaImpl() {
 
 Status
 MySQLMetaImpl::NextTableId(std::string& table_id) {
+    std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
     SimpleIDGenerator g;
     ss << g.GetNextIDNumber();
@@ -182,6 +183,7 @@ MySQLMetaImpl::NextTableId(std::string& table_id) {
 
 Status
 MySQLMetaImpl::NextFileId(std::string& file_id) {
+    std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
     SimpleIDGenerator g;
     ss << g.GetNextIDNumber();

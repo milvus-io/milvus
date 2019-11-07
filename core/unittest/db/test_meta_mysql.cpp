@@ -185,7 +185,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
 
     options.archive_conf_ = milvus::engine::ArchiveConf("delete", "disk:11");
     int mode = milvus::engine::DBOptions::MODE::SINGLE;
-    auto impl = milvus::engine::meta::MySQLMetaImpl(options, mode);
+    milvus::engine::meta::MySQLMetaImpl impl(options, mode);
     auto table_id = "meta_test_group";
 
     milvus::engine::meta::TableSchema table;
