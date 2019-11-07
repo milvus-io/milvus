@@ -5,7 +5,7 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.1-yellowgreen)
+![Release](https://img.shields.io/badge/release-v0.5.2-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
 
 [中文版](README_CN.md) 
@@ -18,7 +18,7 @@ For more detailed introduction of Milvus and its architecture, see [Milvus overv
 
 Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and C++ APIs. 
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.1/).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.2/).
 
 ## Get started
 

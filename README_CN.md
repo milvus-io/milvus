@@ -4,8 +4,10 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.1-yellowgreen)
-![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
+![Release](https://img.shields.io/badge/release-v0.5.2-orange)
+![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
+
+# 欢迎来到 Milvus
 
 ## Milvus 是什么
 
