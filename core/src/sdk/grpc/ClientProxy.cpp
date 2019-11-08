@@ -237,12 +237,12 @@ ClientProxy::Search(const std::string& table_name, const std::vector<RowRecord>&
         Status status = client_ptr_->Search(result, search_param);
 
         // step 4: convert result array
-        topk_query_result.row_num = result.nq();
-        topk_query_result.topk = result.topk();
-        topk_query_result.ids.resize(result.ids_binary().size());
-        memcpy(topk_query_result.ids.data(), result.ids_binary().data(), result.ids_binary().size());
-        topk_query_result.distances.resize(result.distances_binary().size());
-        memcpy(topk_query_result.distances.data(), result.distances_binary().data(), result.distances_binary().size());
+        topk_query_result.row_num = result.row_num();
+        topk_query_result.ids.resize(result.ids().size());
+        memcpy(topk_query_result.ids.data(), result.ids().data(), result.ids().size() * sizeof(int64_t));
+        topk_query_result.distances.resize(result.distances().size());
+        memcpy(topk_query_result.distances.data(), result.distances().data(),
+               result.distances().size() * sizeof(float));
 
         return status;
     } catch (std::exception& ex) {

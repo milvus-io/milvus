@@ -60,7 +60,7 @@ PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& sear
                   const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
     size_t nq = topk_query_result.row_num;
-    size_t topk = topk_query_result.topk;
+    size_t topk = topk_query_result.ids.size() / nq;
     std::cout << "Returned result count: " << nq * topk << std::endl;
 
     int32_t index = 0;
@@ -169,7 +169,7 @@ CheckResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_rec
             const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
     size_t nq = topk_query_result.row_num;
-    size_t result_k = topk_query_result.topk;
+    size_t result_k = topk_query_result.ids.size() / nq;
     int64_t index = 0;
     for (size_t i = 0; i < nq; i++) {
         auto result_id = topk_query_result.ids[i * result_k];
