@@ -4,6 +4,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.3 (TODO)
 
 ## Bug
+- \#258 - Bytes type in proto cause big-endian/little-endian problem
 
 ## Feature
 

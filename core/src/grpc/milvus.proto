@@ -86,10 +86,9 @@ message SearchInFilesParam {
  */
 message TopKQueryResult {
     Status status = 1;
-    int64 nq = 2;
-    int64 topk = 3;
-    bytes ids_binary = 4;
-    bytes distances_binary = 5;
+    int64 row_num = 2;
+    repeated int64 ids = 3;
+    repeated float distances = 4;
 }
 
 /**
