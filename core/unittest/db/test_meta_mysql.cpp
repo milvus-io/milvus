@@ -74,7 +74,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     milvus::engine::meta::DatesT dates;
     dates.push_back(milvus::engine::utils::GetDate());
-    status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
+    status = impl_->DropDataByDate(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     uint64_t cnt = 0;
@@ -95,7 +95,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     for (auto i = 2; i < 10; ++i) {
         dates.push_back(milvus::engine::utils::GetDateWithDelta(-1 * i));
     }
-    status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
+    status = impl_->DropDataByDate(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     table_file.date_ = milvus::engine::utils::GetDateWithDelta(-2);
@@ -106,7 +106,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     dates.clear();
     dates.push_back(table_file.date_);
-    status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
+    status = impl_->DropDataByDate(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     std::vector<size_t> ids = {table_file.id_};
@@ -346,7 +346,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     status = impl_->DeleteTableFiles(table_id);
     ASSERT_TRUE(status.ok());
 
-    status = impl_->DeleteTable(table_id);
+    status = impl_->DropTable(table_id);
     ASSERT_TRUE(status.ok());
 
     status = impl_->CleanUpFilesWithTTL(0UL);
