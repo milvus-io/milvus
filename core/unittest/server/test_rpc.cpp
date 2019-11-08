@@ -245,7 +245,6 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     insert_param.set_table_name(TABLE_NAME);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
-    sleep(7);
 
     BuildVectors(0, 10, record_array);
     for (auto& record : record_array) {
