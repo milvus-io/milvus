@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.6.0 (TODO)
 
 ## Bug
+- \#246 - Exclude src/external folder from code coverage for jenkin ci
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
