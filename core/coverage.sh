@@ -122,8 +122,6 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "*/src/server/Server.cpp" \
     "*/src/server/DBWrapper.cpp" \
     "*/src/server/grpc_impl/GrpcServer.cpp" \
-    "*/easylogging++.h" \
-    "*/easylogging++.cc" \
     "*/src/external/*"
 
 if [ $? -ne 0 ]; then
