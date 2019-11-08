@@ -20,6 +20,7 @@
 #include <string.h>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 //#include <gperftools/profiler.h>
 
@@ -541,16 +542,16 @@ InsertTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchTask::SearchTask(const ::milvus::grpc::SearchParam* search_vector_infos,
-                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResultList* response)
+                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response)
     : GrpcBaseTask(DQL_TASK_GROUP),
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
-      topk_result_list(response) {
+      topk_result_(response) {
 }
 
 BaseTaskPtr
 SearchTask::Create(const ::milvus::grpc::SearchParam* search_vector_infos,
-                   const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResultList* response) {
+                   const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response) {
     if (search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
@@ -671,15 +672,20 @@ SearchTask::OnExecute() {
         size_t result_k = result_ids.size() / record_count;
 
         // step 7: construct result array
-        for (size_t i = 0; i < record_count; i++) {
-            ::milvus::grpc::TopKQueryResult* topk_query_result = topk_result_list->add_topk_query_result();
-            for (size_t j = 0; j < result_k; j++) {
-                ::milvus::grpc::QueryResult* grpc_result = topk_query_result->add_query_result_arrays();
-                size_t idx = i * result_k + j;
-                grpc_result->set_id(result_ids[idx]);
-                grpc_result->set_distance(result_distances[idx]);
-            }
-        }
+        topk_result_->set_nq(record_count);
+        topk_result_->set_topk(result_ids.size() / record_count);
+
+        std::string ids_str;
+        size_t ids_len = sizeof(int64_t) * result_ids.size();
+        ids_str.resize(ids_len);
+        memcpy((void*)(ids_str.data()), result_ids.data(), ids_len);
+        topk_result_->set_ids_binary(std::move(ids_str));
+
+        std::string distances_str;
+        size_t distances_len = sizeof(float) * result_distances.size();
+        distances_str.resize(distances_len);
+        memcpy((void*)(distances_str.data()), result_distances.data(), distances_len);
+        topk_result_->set_distances_binary(std::move(distances_str));
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");
