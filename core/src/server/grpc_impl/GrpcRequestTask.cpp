@@ -669,23 +669,10 @@ SearchTask::OnExecute() {
             return Status::OK();  // empty table
         }
 
-        size_t result_k = result_ids.size() / record_count;
-
         // step 7: construct result array
-        topk_result_->set_nq(record_count);
-        topk_result_->set_topk(result_ids.size() / record_count);
-
-        std::string ids_str;
-        size_t ids_len = sizeof(int64_t) * result_ids.size();
-        ids_str.resize(ids_len);
-        memcpy((void*)(ids_str.data()), result_ids.data(), ids_len);
-        topk_result_->set_ids_binary(std::move(ids_str));
-
-        std::string distances_str;
-        size_t distances_len = sizeof(float) * result_distances.size();
-        distances_str.resize(distances_len);
-        memcpy((void*)(distances_str.data()), result_distances.data(), distances_len);
-        topk_result_->set_distances_binary(std::move(distances_str));
+        topk_result_->set_row_num(record_count);
+        topk_result_->add_ids(result_ids.begin(), result_ids.end());
+        topk_result_->add_distances(result_distances.begin(), result_distances.end());
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

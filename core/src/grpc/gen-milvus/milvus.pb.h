@@ -1638,33 +1638,35 @@ class TopKQueryResult :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIdsBinaryFieldNumber = 4,
-    kDistancesBinaryFieldNumber = 5,
+    kIdsFieldNumber = 3,
+    kDistancesFieldNumber = 4,
     kStatusFieldNumber = 1,
-    kNqFieldNumber = 2,
-    kTopkFieldNumber = 3,
+    kRowNumFieldNumber = 2,
   };
-  // bytes ids_binary = 4;
-  void clear_ids_binary();
-  const std::string& ids_binary() const;
-  void set_ids_binary(const std::string& value);
-  void set_ids_binary(std::string&& value);
-  void set_ids_binary(const char* value);
-  void set_ids_binary(const void* value, size_t size);
-  std::string* mutable_ids_binary();
-  std::string* release_ids_binary();
-  void set_allocated_ids_binary(std::string* ids_binary);
+  // repeated int64 ids = 3;
+  int ids_size() const;
+  void clear_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 ids(int index) const;
+  void set_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+//  void add_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_ids(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+               std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_ids();
 
-  // bytes distances_binary = 5;
-  void clear_distances_binary();
-  const std::string& distances_binary() const;
-  void set_distances_binary(const std::string& value);
-  void set_distances_binary(std::string&& value);
-  void set_distances_binary(const char* value);
-  void set_distances_binary(const void* value, size_t size);
-  std::string* mutable_distances_binary();
-  std::string* release_distances_binary();
-  void set_allocated_distances_binary(std::string* distances_binary);
+  // repeated float distances = 4;
+  int distances_size() const;
+  void clear_distances();
+  float distances(int index) const;
+  void set_distances(int index, float value);
+//  void add_distances(float value);
+  void add_distances(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
+      distances() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
+      mutable_distances();
 
   // .milvus.grpc.Status status = 1;
   bool has_status() const;
@@ -1674,26 +1676,22 @@ class TopKQueryResult :
   ::milvus::grpc::Status* mutable_status();
   void set_allocated_status(::milvus::grpc::Status* status);
 
-  // int64 nq = 2;
-  void clear_nq();
-  ::PROTOBUF_NAMESPACE_ID::int64 nq() const;
-  void set_nq(::PROTOBUF_NAMESPACE_ID::int64 value);
-
-  // int64 topk = 3;
-  void clear_topk();
-  ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
-  void set_topk(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // int64 row_num = 2;
+  void clear_row_num();
+  ::PROTOBUF_NAMESPACE_ID::int64 row_num() const;
+  void set_row_num(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.TopKQueryResult)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr ids_binary_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr distances_binary_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > ids_;
+  mutable std::atomic<int> _ids_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > distances_;
+  mutable std::atomic<int> _distances_cached_byte_size_;
   ::milvus::grpc::Status* status_;
-  ::PROTOBUF_NAMESPACE_ID::int64 nq_;
-  ::PROTOBUF_NAMESPACE_ID::int64 topk_;
+  ::PROTOBUF_NAMESPACE_ID::int64 row_num_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -3154,8 +3152,8 @@ inline void RowRecord::set_vector_data(int index, float value) {
 //}
 inline void RowRecord::add_vector_data(std::vector<float>::const_iterator begin,
                                        std::vector<float>::const_iterator end) {
-  vector_data_.Add(begin, end);
-  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
+    vector_data_.Add(begin, end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
 RowRecord::vector_data() const {
@@ -3274,8 +3272,8 @@ inline void InsertParam::set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::in
 //}
 inline void InsertParam::add_row_id_array(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
                                           std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end) {
-  row_id_array_.Add(begin, end);
-  // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
+    row_id_array_.Add(begin, end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 InsertParam::row_id_array() const {
@@ -3679,134 +3677,87 @@ inline void TopKQueryResult::set_allocated_status(::milvus::grpc::Status* status
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResult.status)
 }
 
-// int64 nq = 2;
-inline void TopKQueryResult::clear_nq() {
-  nq_ = PROTOBUF_LONGLONG(0);
+// int64 row_num = 2;
+inline void TopKQueryResult::clear_row_num() {
+  row_num_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 TopKQueryResult::nq() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.nq)
-  return nq_;
+inline ::PROTOBUF_NAMESPACE_ID::int64 TopKQueryResult::row_num() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.row_num)
+  return row_num_;
 }
-inline void TopKQueryResult::set_nq(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void TopKQueryResult::set_row_num(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  nq_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.nq)
+  row_num_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.row_num)
 }
 
-// int64 topk = 3;
-inline void TopKQueryResult::clear_topk() {
-  topk_ = PROTOBUF_LONGLONG(0);
+// repeated int64 ids = 3;
+inline int TopKQueryResult::ids_size() const {
+  return ids_.size();
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 TopKQueryResult::topk() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.topk)
-  return topk_;
+inline void TopKQueryResult::clear_ids() {
+  ids_.Clear();
 }
-inline void TopKQueryResult::set_topk(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  
-  topk_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.topk)
+inline ::PROTOBUF_NAMESPACE_ID::int64 TopKQueryResult::ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.ids)
+  return ids_.Get(index);
 }
-
-// bytes ids_binary = 4;
-inline void TopKQueryResult::clear_ids_binary() {
-  ids_binary_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+inline void TopKQueryResult::set_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.ids)
 }
-inline const std::string& TopKQueryResult::ids_binary() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.ids_binary)
-  return ids_binary_.GetNoArena();
+//inline void TopKQueryResult::add_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+//  ids_.Add(value);
+//  // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.ids)
+//}
+inline void TopKQueryResult::add_ids(std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator begin,
+                                     std::vector<::PROTOBUF_NAMESPACE_ID::int64>::const_iterator end) {
+    ids_.Add(begin,end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.ids)
 }
-inline void TopKQueryResult::set_ids_binary(const std::string& value) {
-  
-  ids_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.ids_binary)
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+TopKQueryResult::ids() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.TopKQueryResult.ids)
+  return ids_;
 }
-inline void TopKQueryResult::set_ids_binary(std::string&& value) {
-  
-  ids_binary_.SetNoArena(
-    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.TopKQueryResult.ids_binary)
-}
-inline void TopKQueryResult::set_ids_binary(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  
-  ids_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.TopKQueryResult.ids_binary)
-}
-inline void TopKQueryResult::set_ids_binary(const void* value, size_t size) {
-  
-  ids_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-      ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.TopKQueryResult.ids_binary)
-}
-inline std::string* TopKQueryResult::mutable_ids_binary() {
-  
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.ids_binary)
-  return ids_binary_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline std::string* TopKQueryResult::release_ids_binary() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResult.ids_binary)
-  
-  return ids_binary_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline void TopKQueryResult::set_allocated_ids_binary(std::string* ids_binary) {
-  if (ids_binary != nullptr) {
-    
-  } else {
-    
-  }
-  ids_binary_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ids_binary);
-  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResult.ids_binary)
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+TopKQueryResult::mutable_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.TopKQueryResult.ids)
+  return &ids_;
 }
 
-// bytes distances_binary = 5;
-inline void TopKQueryResult::clear_distances_binary() {
-  distances_binary_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+// repeated float distances = 4;
+inline int TopKQueryResult::distances_size() const {
+  return distances_.size();
 }
-inline const std::string& TopKQueryResult::distances_binary() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.distances_binary)
-  return distances_binary_.GetNoArena();
+inline void TopKQueryResult::clear_distances() {
+  distances_.Clear();
 }
-inline void TopKQueryResult::set_distances_binary(const std::string& value) {
-  
-  distances_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.distances_binary)
+inline float TopKQueryResult::distances(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.distances)
+  return distances_.Get(index);
 }
-inline void TopKQueryResult::set_distances_binary(std::string&& value) {
-  
-  distances_binary_.SetNoArena(
-    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.TopKQueryResult.distances_binary)
+inline void TopKQueryResult::set_distances(int index, float value) {
+  distances_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.TopKQueryResult.distances)
 }
-inline void TopKQueryResult::set_distances_binary(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  
-  distances_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.TopKQueryResult.distances_binary)
+//inline void TopKQueryResult::add_distances(float value) {
+//  distances_.Add(value);
+//  // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.distances)
+//}
+inline void TopKQueryResult::add_distances(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end) {
+    distances_.Add(begin, end);
+    // @@protoc_insertion_point(field_add:milvus.grpc.TopKQueryResult.distances)
 }
-inline void TopKQueryResult::set_distances_binary(const void* value, size_t size) {
-  
-  distances_binary_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-      ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.TopKQueryResult.distances_binary)
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
+TopKQueryResult::distances() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.TopKQueryResult.distances)
+  return distances_;
 }
-inline std::string* TopKQueryResult::mutable_distances_binary() {
-  
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.distances_binary)
-  return distances_binary_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline std::string* TopKQueryResult::release_distances_binary() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResult.distances_binary)
-  
-  return distances_binary_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline void TopKQueryResult::set_allocated_distances_binary(std::string* distances_binary) {
-  if (distances_binary != nullptr) {
-    
-  } else {
-    
-  }
-  distances_binary_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), distances_binary);
-  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TopKQueryResult.distances_binary)
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
+TopKQueryResult::mutable_distances() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.TopKQueryResult.distances)
+  return &distances_;
 }
 
 // -------------------------------------------------------------------
