@@ -138,8 +138,8 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
 }
 
 Status
-ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
-                    std::vector<int64_t>& id_array) {
+ClientProxy::Insert(const std::string& table_name, const std::string& partition_tag,
+                    const std::vector<RowRecord>& record_array, std::vector<int64_t>& id_array) {
     Status status = Status::OK();
     try {
 ////////////////////////////////////////////////////////////////////////////
@@ -185,6 +185,7 @@ ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>&
 #else
         ::milvus::grpc::InsertParam insert_param;
         insert_param.set_table_name(table_name);
+        insert_param.set_partition_tag(partition_tag);
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
@@ -215,15 +216,18 @@ ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>&
 }
 
 Status
-ClientProxy::Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
-                    const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
-                    std::vector<TopKQueryResult>& topk_query_result_array) {
+ClientProxy::Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
+                    const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
+                    int64_t topk, int64_t nprobe, std::vector<TopKQueryResult>& topk_query_result_array) {
     try {
         // step 1: convert vectors data
         ::milvus::grpc::SearchParam search_param;
         search_param.set_table_name(table_name);
         search_param.set_topk(topk);
         search_param.set_nprobe(nprobe);
+        for (auto& tag : partiton_tags) {
+            search_param.add_partition_tag_array(tag);
+        }
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
             for (auto& rec : record.data) {
@@ -349,13 +353,13 @@ ClientProxy::DumpTaskTables() const {
 }
 
 Status
-ClientProxy::DeleteByRange(milvus::Range& range, const std::string& table_name) {
+ClientProxy::DeleteByDate(const std::string& table_name, const milvus::Range& range) {
     try {
-        ::milvus::grpc::DeleteByRangeParam delete_by_range_param;
+        ::milvus::grpc::DeleteByDateParam delete_by_range_param;
         delete_by_range_param.set_table_name(table_name);
         delete_by_range_param.mutable_range()->set_start_value(range.start_value);
         delete_by_range_param.mutable_range()->set_end_value(range.end_value);
-        return client_ptr_->DeleteByRange(delete_by_range_param);
+        return client_ptr_->DeleteByDate(delete_by_range_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to delete by range: " + std::string(ex.what()));
     }
@@ -398,6 +402,53 @@ ClientProxy::DropIndex(const std::string& table_name) const {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to drop index: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::CreatePartition(const PartitionParam& partition_param) {
+    try {
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_table_name(partition_param.table_name);
+        grpc_partition_param.set_partition_name(partition_param.partition_name);
+        grpc_partition_param.set_tag(partition_param.partition_tag);
+        Status status = client_ptr_->CreatePartition(grpc_partition_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "fail to create partition: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::ShowPartitions(const std::string& table_name, PartitionList& partition_array) const {
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        ::milvus::grpc::PartitionList grpc_partition_list;
+        Status status = client_ptr_->ShowPartitions(grpc_table_name, grpc_partition_list);
+        partition_array.resize(grpc_partition_list.partition_array_size());
+        for (uint64_t i = 0; i < grpc_partition_list.partition_array_size(); ++i) {
+            partition_array[i].table_name = grpc_partition_list.partition_array(i).table_name();
+            partition_array[i].partition_name = grpc_partition_list.partition_array(i).partition_name();
+            partition_array[i].partition_tag = grpc_partition_list.partition_array(i).tag();
+        }
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "fail to show partitions: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::DropPartition(const PartitionParam& partition_param) {
+    try {
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_table_name(partition_param.table_name);
+        grpc_partition_param.set_partition_name(partition_param.partition_name);
+        grpc_partition_param.set_tag(partition_param.partition_tag);
+        Status status = client_ptr_->DropPartition(grpc_partition_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "fail to drop partition: " + std::string(ex.what()));
     }
 }
 

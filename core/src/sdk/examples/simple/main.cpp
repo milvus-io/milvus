@@ -20,7 +20,7 @@
 #include <cstring>
 #include <string>
 
-#include "src/ClientTest.h"
+#include "sdk/examples/simple/src/ClientTest.h"
 
 void
 print_help(const std::string& app_name);

@@ -216,6 +216,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     s = config.GetCacheConfigCpuCacheThreshold(float_val);
     ASSERT_TRUE(float_val == cache_cpu_cache_threshold);
 
+#ifdef MILVUS_GPU_VERSION
     int64_t cache_gpu_cache_capacity = 1;
     s = config.SetCacheConfigGpuCacheCapacity(std::to_string(cache_gpu_cache_capacity));
     ASSERT_TRUE(s.ok());
@@ -228,6 +229,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     s = config.GetCacheConfigGpuCacheThreshold(float_val);
     ASSERT_TRUE(float_val == cache_gpu_cache_threshold);
+#endif
 
     bool cache_insert_data = true;
     s = config.SetCacheConfigCacheInsertData(std::to_string(cache_insert_data));

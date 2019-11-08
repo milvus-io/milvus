@@ -17,28 +17,20 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
+#include <chrono>
+#include <string>
 
-#include <faiss/Index.h>
-#include <stdint.h>
-#include <utility>
-#include <vector>
+namespace milvus_sdk {
 
-namespace milvus {
-namespace engine {
+class TimeRecorder {
+ public:
+    explicit TimeRecorder(const std::string& title);
 
-typedef int64_t IDNumber;
-typedef IDNumber* IDNumberPtr;
-typedef std::vector<IDNumber> IDNumbers;
+    ~TimeRecorder();
 
-typedef std::vector<faiss::Index::idx_t> ResultIds;
-typedef std::vector<faiss::Index::distance_t> ResultDistances;
-
-struct TableIndex {
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t nlist_ = 16384;
-    int32_t metric_type_ = (int)MetricType::L2;
+ private:
+    std::string title_;
+    std::chrono::system_clock::time_point start_;
 };
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus_sdk
