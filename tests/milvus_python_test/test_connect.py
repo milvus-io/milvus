@@ -273,7 +273,8 @@ class TestConnect:
         milvus = Milvus()
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         with pytest.raises(Exception) as e:
-            milvus.connect(host=args["ip"], port=19540, uri=uri_value, timeout=1)
+            res = milvus.connect(host=args["ip"], port=39540, uri=uri_value, timeout=1)
+            logger.getLogger().info(res)
         assert not milvus.connected()
 
     def _test_add_vector_and_disconnect_concurrently(self):
