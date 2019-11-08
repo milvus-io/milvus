@@ -83,7 +83,6 @@ struct RowRecord {
  */
 struct TopKQueryResult {
     int64_t row_num;
-    int64_t topk;
     std::vector<int64_t> ids;
     std::vector<float> distances;
 };
