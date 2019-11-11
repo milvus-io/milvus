@@ -19,9 +19,10 @@ BUILD_COVERAGE="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
 CPU_VERSION="ON"
+WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "o:t:b:gulcjh" arg
+while getopts "o:t:b:gulcjmh" arg
 do
         case $arg in
              o)
@@ -49,6 +50,9 @@ do
              j)
                 USE_JFROG_CACHE="ON"
                 ;;
+             m)
+                WITH_MKL="ON"
+                ;;
              h) # help
                 echo "
 
@@ -61,10 +65,11 @@ parameter:
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
 -j: use jfrog cache build directory(default: OFF)
+-m: build with MKL(default: OFF)
 -h: help
 
 usage:
-./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} [-u] [-l] [-c] [-j] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} [-u] [-l] [-c] [-j] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -89,6 +94,7 @@ CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
+-DBUILD_FAISS_WITH_MKL=${WITH_MKL} \
 -DARROW_SOURCE=AUTO \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
