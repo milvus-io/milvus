@@ -5,7 +5,7 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.1-yellowgreen)
+![Release](https://img.shields.io/badge/release-v0.5.2-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
@@ -18,7 +18,7 @@ For more detailed introduction of Milvus and its architecture, see [Milvus overv
 
 Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and C++ APIs. 
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.0/).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.2/).
 
 ## Get started
 
@@ -56,7 +56,8 @@ To connect with other users and contributors, welcome to join our [Slack channel
 
 We greatly appreciate the help of the following people.
 
-- [akihoni](https://github.com/akihoni) found a broken link and a small typo in the README file.
+- [akihoni](https://github.com/akihoni) provided the CN version of README, and found a broken link in the doc.
+- [goodhamgupta](https://github.com/goodhamgupta) fixed a filename typo in the bootcamp doc.
 
 ## Resources
 

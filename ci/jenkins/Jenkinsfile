@@ -2,7 +2,7 @@
 
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
-cron_string =  BRANCH_NAME == "0.5.1" ? "H 1 * * * " : cron_string
+cron_string =  BRANCH_NAME == "0.5.2" ? "H 1 * * * " : cron_string
 
 pipeline {
     agent none
