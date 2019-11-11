@@ -18,6 +18,7 @@ sudo apt-get install -y -q --no-install-recommends \
   lsb-core \
   libtool \
   automake \
+  ccache \
   pkg-config \
   libboost-filesystem-dev \
   libboost-system-dev \
