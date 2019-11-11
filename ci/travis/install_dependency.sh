@@ -28,6 +28,7 @@ sudo apt-get install -y -q --no-install-recommends \
   ccache \
   pkg-config \
   libarrow-dev \
+  libjemalloc-dev \
   libboost-filesystem-dev \
   libboost-system-dev \
   libboost-regex-dev \
