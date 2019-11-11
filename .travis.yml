@@ -2,10 +2,16 @@ language: cpp
 cache: ccache
 sudo: required
 dist: bionic
+
 addons:
   apt:
     update: true
+
+before_install:
+  - source ci/travis/before-install.sh
+
 install:
   - source $TRAVIS_BUILD_DIR/ci/travis/install_dependency.sh
+
 script:
   - $TRAVIS_BUILD_DIR/ci/travis/travis_build.sh
