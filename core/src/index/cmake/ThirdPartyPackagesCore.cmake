@@ -50,9 +50,14 @@ endmacro()
 
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        #message(STATUS "Finding ${DEPENDENCY_NAME} package")
-        #message(STATUS "${DEPENDENCY_NAME} package not found")
-        build_dependency(${DEPENDENCY_NAME})
+        if (${DEPENDENCY_NAME} STREQUAL "ARROW")
+            find_package(${DEPENDENCY_NAME} MODULE)
+            if (NOT ${${DEPENDENCY_NAME}_FOUND})
+                build_dependency(${DEPENDENCY_NAME})
+            endif ()
+        else()
+            build_dependency(${DEPENDENCY_NAME})
+        endif()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
@@ -130,17 +135,6 @@ if (USE_JFROG_CACHE STREQUAL "ON")
         file(MAKE_DIRECTORY ${THIRDPARTY_PACKAGE_CACHE})
     endif ()
 endif ()
-
-macro(resolve_dependency DEPENDENCY_NAME)
-    if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        #disable find_package for now
-        build_dependency(${DEPENDENCY_NAME})
-    elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
-        build_dependency(${DEPENDENCY_NAME})
-    elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
-        find_package(${DEPENDENCY_NAME} REQUIRED)
-    endif ()
-endmacro()
 
 # ----------------------------------------------------------------------
 # ExternalProject options
@@ -412,7 +406,7 @@ if (KNOWHERE_WITH_ARROW AND NOT TARGET arrow_ep)
 
     resolve_dependency(ARROW)
 
-    link_directories(SYSTEM ${ARROW_PREFIX}/lib/)
+    link_directories(SYSTEM ${ARROW_LIBRARY_DIRS})
     include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 endif ()
 
