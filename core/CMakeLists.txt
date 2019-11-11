@@ -118,6 +118,18 @@ include(DefineOptions)
 include(BuildUtils)
 include(ThirdPartyPackages)
 
+if(MILVUS_USE_CCACHE)
+  find_program(CCACHE_FOUND ccache)
+  if(CCACHE_FOUND)
+    message(STATUS "Using ccache: ${CCACHE_FOUND}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
+    # let ccache preserve C++ comments, because some of them may be
+    # meaningful to the compiler
+    set(ENV{CCACHE_COMMENTS} "1")
+  endif(CCACHE_FOUND)
+endif()
+
 set(MILVUS_CPU_VERSION false)
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Milvus GPU version")

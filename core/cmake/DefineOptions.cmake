@@ -57,6 +57,8 @@ define_option_string(MILVUS_DEPENDENCY_SOURCE
         "BUNDLED"
         "SYSTEM")
 
+define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
+
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
