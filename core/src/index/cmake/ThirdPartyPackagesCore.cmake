@@ -714,9 +714,8 @@ macro(build_faiss)
 
     if (BUILD_FAISS_WITH_MKL)
 
-        find_path(MKL_LIB_PATH
+        find_library(MKL_LIB_PATH
                 NAMES "libmkl_intel_ilp64.a" "libmkl_gnu_thread.a" "libmkl_core.a"
-                PATHS /opt
                 PATH_SUFFIXES "intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64/")
         if (${MKL_LIB_PATH} STREQUAL "MKL_LIB_PATH-NOTFOUND")
             message(FATAL_ERROR "Could not find MKL libraries")
