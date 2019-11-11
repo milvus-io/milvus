@@ -1,7 +1,10 @@
 language: cpp
-cache: ccache
 sudo: required
 dist: bionic
+
+cache:
+  directories:
+    - $HOME/.ccache
 
 addons:
   apt:
