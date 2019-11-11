@@ -5,9 +5,12 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.6.0 (TODO)
 
 ## Bug
+- \#246 - Exclude src/external folder from code coverage for jenkin ci
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
+- \#77 - Support table partition
+- \#226 - Experimental shards middleware for Milvus
 
 ## Improvement
 
@@ -84,7 +87,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-658 - Fix SQ8 Hybrid can't search
 - MS-665 - IVF_SQ8H search crash when no GPU resource in search_resources
 - \#9 - Change default gpu_cache_capacity to 4
-- \#20 - C++ sdk example get grpc error 
+- \#20 - C++ sdk example get grpc error
 - \#23 - Add unittest to improve code coverage
 - \#31 - make clang-format failed after run build.sh -l
 - \#39 - Create SQ8H index hang if using github server version
@@ -136,7 +139,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-635 - Add compile option to support customized faiss
 - MS-660 - add ubuntu_build_deps.sh
 - \#18 - Add all test cases
-	
+
 # Milvus 0.4.0 (2019-09-12)
 
 ## Bug
@@ -345,11 +348,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-82 - Update server startup welcome message
 - MS-83 - Update vecwise to Milvus
 - MS-77 - Performance issue of post-search action
-- MS-22 - Enhancement for MemVector size control 
+- MS-22 - Enhancement for MemVector size control
 - MS-92 - Unify behavior of debug and release build
 - MS-98 - Install all unit test to installation directory
 - MS-115 - Change is_startup of metric_config switch from true to on
-- MS-122 - Archive criteria config 
+- MS-122 - Archive criteria config
 - MS-124 - HasTable interface
 - MS-126 - Add more error code
 - MS-128 - Change default db path
