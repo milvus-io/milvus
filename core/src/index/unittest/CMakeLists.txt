@@ -6,7 +6,7 @@ include_directories(${INDEX_SOURCE_DIR})
 set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss
-        arrow "${ARROW_PREFIX}/lib/libjemalloc_pic.a"
+        arrow "${ARROW_LIB_DIR}/libjemalloc_pic.a"
         )
 if (BUILD_FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
