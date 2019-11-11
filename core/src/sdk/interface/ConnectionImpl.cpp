@@ -83,16 +83,16 @@ ConnectionImpl::CreateIndex(const IndexParam& index_param) {
 }
 
 Status
-ConnectionImpl::Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
-                       std::vector<int64_t>& id_array) {
-    return client_proxy_->Insert(table_name, record_array, id_array);
+ConnectionImpl::Insert(const std::string& table_name, const std::string& partition_tag,
+                       const std::vector<RowRecord>& record_array, std::vector<int64_t>& id_array) {
+    return client_proxy_->Insert(table_name, partition_tag, record_array, id_array);
 }
 
 Status
-ConnectionImpl::Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
-                       const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
-                       std::vector<TopKQueryResult>& topk_query_result_array) {
-    return client_proxy_->Search(table_name, query_record_array, query_range_array, topk, nprobe,
+ConnectionImpl::Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
+                       const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
+                       int64_t topk, int64_t nprobe, std::vector<TopKQueryResult>& topk_query_result_array) {
+    return client_proxy_->Search(table_name, partiton_tags, query_record_array, query_range_array, topk, nprobe,
                                  topk_query_result_array);
 }
 
@@ -127,8 +127,8 @@ ConnectionImpl::DumpTaskTables() const {
 }
 
 Status
-ConnectionImpl::DeleteByRange(Range& range, const std::string& table_name) {
-    return client_proxy_->DeleteByRange(range, table_name);
+ConnectionImpl::DeleteByDate(const std::string& table_name, const Range& range) {
+    return client_proxy_->DeleteByDate(table_name, range);
 }
 
 Status
@@ -144,6 +144,21 @@ ConnectionImpl::DescribeIndex(const std::string& table_name, IndexParam& index_p
 Status
 ConnectionImpl::DropIndex(const std::string& table_name) const {
     return client_proxy_->DropIndex(table_name);
+}
+
+Status
+ConnectionImpl::CreatePartition(const PartitionParam& param) {
+    return client_proxy_->CreatePartition(param);
+}
+
+Status
+ConnectionImpl::ShowPartitions(const std::string& table_name, PartitionList& partition_array) const {
+    return client_proxy_->ShowPartitions(table_name, partition_array);
+}
+
+Status
+ConnectionImpl::DropPartition(const PartitionParam& param) {
+    return client_proxy_->DropPartition(param);
 }
 
 }  // namespace milvus

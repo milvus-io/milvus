@@ -25,6 +25,7 @@
 #include "config/YamlConfigMgr.h"
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
+#include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
 namespace milvus {
@@ -306,6 +307,7 @@ Config::ResetDefaultConfig() {
         return s;
     }
 
+#ifdef MILVUS_GPU_VERSION
     s = SetCacheConfigGpuCacheCapacity(CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT);
     if (!s.ok()) {
         return s;
@@ -315,6 +317,7 @@ Config::ResetDefaultConfig() {
     if (!s.ok()) {
         return s;
     }
+#endif
 
     s = SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT);
     if (!s.ok()) {
@@ -339,6 +342,11 @@ Config::ResetDefaultConfig() {
 
     /* resource config */
     s = SetResourceConfigMode(CONFIG_RESOURCE_MODE_DEFAULT);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = SetResourceConfigSearchResources(CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -403,8 +411,7 @@ Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
-                      "server_config.deploy_mode is not one of "
-                      "single, cluster_readonly, and cluster_writable.");
+                      "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
     }
     return Status::OK();
 }
@@ -592,15 +599,15 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
-        int gpu_index;
-        Status s = GetResourceConfigIndexBuildDevice(gpu_index);
+        int device_id;
+        Status s = GetResourceConfigIndexBuildDevice(device_id);
         if (!s.ok()) {
             return s;
         }
 
         size_t gpu_memory;
-        if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
-            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(gpu_index);
+        if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
+            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(device_id);
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         } else if (gpu_cache_capacity >= gpu_memory) {
             std::string msg = "Invalid gpu cache capacity: " + value +
@@ -689,29 +696,33 @@ Config::CheckResourceConfigMode(const std::string& value) {
 }
 
 Status
-CheckGpuDevice(const std::string& value) {
+CheckResource(const std::string& value) {
     std::string s = value;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+
 #ifdef MILVUS_CPU_VERSION
     if (s != "cpu") {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid CPU resource: " + s);
     }
 #else
-    const std::regex pat("gpu(\\d+)");
-    std::cmatch m;
-    if (!std::regex_match(value.c_str(), m, pat)) {
-        std::string msg = "Invalid gpu device: " + value +
-                          ". Possible reason: resource_config.search_resources does not match your hardware.";
+    const std::regex pat("cpu|gpu(\\d+)");
+    std::smatch m;
+    if (!std::regex_match(s, m, pat)) {
+        std::string msg = "Invalid search resource: " + value +
+                          ". Possible reason: resource_config.search_resources is not in the format of cpux or gpux";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    int32_t gpu_index = std::stoi(value.substr(3));
-    if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
-        std::string msg = "Invalid gpu device: " + value +
-                          ". Possible reason: resource_config.search_resources does not match your hardware.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+    if (s.compare(0, 3, "gpu") == 0) {
+        int32_t gpu_index = std::stoi(s.substr(3));
+        if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
+            std::string msg = "Invalid search resource: " + value +
+                              ". Possible reason: resource_config.search_resources does not match your hardware.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
 #endif
+
     return Status::OK();
 }
 
@@ -724,38 +735,20 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
-    bool cpu_found = false, gpu_found = false;
-    for (auto& device : value) {
-        if (device == "cpu") {
-            cpu_found = true;
-            continue;
+    for (auto& resource : value) {
+        auto status = CheckResource(resource);
+        if (!status.ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, status.message());
         }
-        if (CheckGpuDevice(device).ok()) {
-            gpu_found = true;
-        } else {
-            std::string msg = "Invalid search resource: " + device +
-                              ". Possible reason: resource_config.search_resources does not match your hardware.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-    }
-
-    if (cpu_found && !gpu_found) {
-        std::string msg =
-            "Invalid search resource. Possible reason: resource_config.search_resources has only CPU resource.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }
 
 Status
 Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
-    // if (value == "cpu") {
-    //     return Status::OK();
-    // }
-    if (!CheckGpuDevice(value).ok()) {
-        std::string msg = "Invalid index build device: " + value +
-                          ". Possible reason: resource_config.index_build_device does not match your hardware.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+    auto status = CheckResource(value);
+    if (!status.ok()) {
+        return Status(SERVER_INVALID_ARGUMENT, status.message());
     }
     return Status::OK();
 }
@@ -791,6 +784,22 @@ Config::GetConfigStr(const std::string& parent_key, const std::string& child_key
     std::string value;
     if (!GetConfigValueInMem(parent_key, child_key, value).ok()) {
         value = GetConfigNode(parent_key).GetValue(child_key, default_value);
+        SetConfigValueInMem(parent_key, child_key, value);
+    }
+    return value;
+}
+
+std::string
+Config::GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim,
+                             const std::string& default_value) {
+    std::string value;
+    if (!GetConfigValueInMem(parent_key, child_key, value).ok()) {
+        std::vector<std::string> sequence = GetConfigNode(parent_key).GetSequence(child_key);
+        if (sequence.empty()) {
+            value = default_value;
+        } else {
+            server::StringHelpFunctions::MergeStringWithDelimeter(sequence, delim, value);
+        }
         SetConfigValueInMem(parent_key, child_key, value);
     }
     return value;
@@ -1019,8 +1028,10 @@ Config::GetResourceConfigMode(std::string& value) {
 
 Status
 Config::GetResourceConfigSearchResources(std::vector<std::string>& value) {
-    ConfigNode resource_config = GetConfigNode(CONFIG_RESOURCE);
-    value = resource_config.GetSequence(CONFIG_RESOURCE_SEARCH_RESOURCES);
+    std::string str =
+        GetConfigSequenceStr(CONFIG_RESOURCE, CONFIG_RESOURCE_SEARCH_RESOURCES,
+                             CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT);
+    server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, value);
     return CheckResourceConfigSearchResources(value);
 }
 
@@ -1033,10 +1044,10 @@ Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
         return s;
     }
 
-    if (str != "cpu") {
-        value = std::stoi(str.substr(3));
+    if (str == "cpu") {
+        value = CPU_DEVICE_ID;
     } else {
-        value = -1;
+        value = std::stoi(str.substr(3));
     }
 
     return Status::OK();
@@ -1163,7 +1174,7 @@ Config::SetMetricConfigEnableMonitor(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_ENABLE_MONITOR, value);
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, value);
     return Status::OK();
 }
 
@@ -1174,7 +1185,7 @@ Config::SetMetricConfigCollector(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_COLLECTOR, value);
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_COLLECTOR, value);
     return Status::OK();
 }
 
@@ -1185,7 +1196,7 @@ Config::SetMetricConfigPrometheusPort(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_PROMETHEUS_PORT, value);
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_PORT, value);
     return Status::OK();
 }
 
@@ -1197,7 +1208,7 @@ Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
     return Status::OK();
 }
 
@@ -1208,7 +1219,7 @@ Config::SetCacheConfigCpuCacheThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1219,7 +1230,7 @@ Config::SetCacheConfigGpuCacheCapacity(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_CACHE_CAPACITY, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_CAPACITY, value);
     return Status::OK();
 }
 
@@ -1230,7 +1241,7 @@ Config::SetCacheConfigGpuCacheThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1241,7 +1252,7 @@ Config::SetCacheConfigCacheInsertData(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CACHE_INSERT_DATA, value);
+    SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
     return Status::OK();
 }
 
@@ -1253,7 +1264,7 @@ Config::SetEngineConfigUseBlasThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1264,7 +1275,7 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_OMP_THREAD_NUM, value);
+    SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, value);
     return Status::OK();
 }
 
@@ -1275,7 +1286,7 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1287,7 +1298,21 @@ Config::SetResourceConfigMode(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_MODE, value);
+    SetConfigValueInMem(CONFIG_RESOURCE, CONFIG_RESOURCE_MODE, value);
+    return Status::OK();
+}
+
+Status
+Config::SetResourceConfigSearchResources(const std::string& value) {
+    std::vector<std::string> res_vec;
+    server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, res_vec);
+
+    Status s = CheckResourceConfigSearchResources(res_vec);
+    if (!s.ok()) {
+        return s;
+    }
+
+    SetConfigValueInMem(CONFIG_RESOURCE, CONFIG_RESOURCE_SEARCH_RESOURCES, value);
     return Status::OK();
 }
 
@@ -1298,7 +1323,7 @@ Config::SetResourceConfigIndexBuildDevice(const std::string& value) {
         return s;
     }
 
-    SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, value);
+    SetConfigValueInMem(CONFIG_RESOURCE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, value);
     return Status::OK();
 }
 

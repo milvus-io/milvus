@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-db-disk
+  namespace: milvus
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: default
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-log-disk
+  namespace: milvus
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: default
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-mysql-disk
+  namespace: milvus
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: default
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-redis-disk
+  namespace: milvus
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: default
+  resources:
+    requests:
+      storage: 5Gi
