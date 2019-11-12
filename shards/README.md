@@ -1,5 +1,7 @@
 # Mishards - An Experimental Sharding Middleware 
 
+[中文版](README_CN.md)
+
 Milvus aims to achieve efficient similarity search and analytics for massive-scale vectors. A standalone Milvus instance can easily handle vector search among billion-scale vectors. However, for 10 billion, 100 billion or even larger datasets, a Milvus cluster is needed. 
 
 Ideally, this cluster can be accessed and used just as the standalone instance, meanwhile it satisfies the business requirements such as low latency and high concurrency.
