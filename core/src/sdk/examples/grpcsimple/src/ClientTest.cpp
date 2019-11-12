@@ -42,7 +42,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 5;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::gpu_ivfsq8;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t N_LIST = 15000;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
