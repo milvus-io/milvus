@@ -28,10 +28,10 @@ Imported targets
 
 This module defines the following :prop_tgt:`IMPORTED` targets:
 
-``GTest::GTest``
+``gtest``
   The Google Test ``gtest`` library, if found; adds Thread::Thread
   automatically
-``GTest::Main``
+``gtest_main``
   The Google Test ``gtest_main`` library, if found
 ``GMock::GMock``
   The Google Mock ``gmock`` library, if found
@@ -80,7 +80,7 @@ Example usage
     find_package(GTest REQUIRED)
 
     add_executable(foo foo.cc)
-    target_link_libraries(foo GTest::GTest GTest::Main)
+    target_link_libraries(foo gtest gtest_main)
 
     add_test(AllTestsInFoo foo)
 
@@ -228,51 +228,51 @@ if(GTEST_FOUND)
 
     find_package(Threads QUIET)
 
-    if(NOT TARGET GTest::GTest)
+    if(NOT TARGET gtest)
         __gtest_determine_library_type(GTEST_LIBRARY)
-        add_library(GTest::GTest ${GTEST_LIBRARY_TYPE} IMPORTED)
+        add_library(gtest ${GTEST_LIBRARY_TYPE} IMPORTED)
         if(TARGET Threads::Threads)
-            set_target_properties(GTest::GTest PROPERTIES
+            set_target_properties(gtest PROPERTIES
                 INTERFACE_LINK_LIBRARIES Threads::Threads)
         endif()
         if(GTEST_LIBRARY_TYPE STREQUAL "SHARED")
-            set_target_properties(GTest::GTest PROPERTIES
+            set_target_properties(gtest PROPERTIES
                 INTERFACE_COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
         endif()
         if(GTEST_INCLUDE_DIRS)
-            set_target_properties(GTest::GTest PROPERTIES
+            set_target_properties(gtest PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIRS}")
         endif()
-        __gtest_import_library(GTest::GTest GTEST_LIBRARY "")
-        __gtest_import_library(GTest::GTest GTEST_LIBRARY "RELEASE")
-        __gtest_import_library(GTest::GTest GTEST_LIBRARY "DEBUG")
+        __gtest_import_library(gtest GTEST_LIBRARY "")
+        __gtest_import_library(gtest GTEST_LIBRARY "RELEASE")
+        __gtest_import_library(gtest GTEST_LIBRARY "DEBUG")
     endif()
-    if(NOT TARGET GTest::Main)
+    if(NOT TARGET gtest_main)
         __gtest_determine_library_type(GTEST_MAIN_LIBRARY)
-        add_library(GTest::Main ${GTEST_MAIN_LIBRARY_TYPE} IMPORTED)
-        set_target_properties(GTest::Main PROPERTIES
-            INTERFACE_LINK_LIBRARIES "GTest::GTest")
-        __gtest_import_library(GTest::Main GTEST_MAIN_LIBRARY "")
-        __gtest_import_library(GTest::Main GTEST_MAIN_LIBRARY "RELEASE")
-        __gtest_import_library(GTest::Main GTEST_MAIN_LIBRARY "DEBUG")
+        add_library(gtest_main ${GTEST_MAIN_LIBRARY_TYPE} IMPORTED)
+        set_target_properties(gtest_main PROPERTIES
+            INTERFACE_LINK_LIBRARIES "gtest")
+        __gtest_import_library(gtest_main GTEST_MAIN_LIBRARY "")
+        __gtest_import_library(gtest_main GTEST_MAIN_LIBRARY "RELEASE")
+        __gtest_import_library(gtest_main GTEST_MAIN_LIBRARY "DEBUG")
     endif()
-    if(NOT TARGET GTest::GMock)
+    if(NOT TARGET gmock)
         __gtest_determine_library_type(GMOCK_LIBRARY)
-        add_library(GTest::GMock ${GMOCK_LIBRARY_TYPE} IMPORTED)
+        add_library(gmock ${GMOCK_LIBRARY_TYPE} IMPORTED)
         if(TARGET Threads::Threads)
-            set_target_properties(GTest::GMock PROPERTIES
+            set_target_properties(gmock PROPERTIES
                 INTERFACE_LINK_LIBRARIES Threads::Threads)
         endif()
         if(GMOCK_LIBRARY_TYPE STREQUAL "SHARED")
-            set_target_properties(GTest::GMock PROPERTIES
+            set_target_properties(gmock PROPERTIES
                 INTERFACE_COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
         endif()
         if(GTEST_INCLUDE_DIRS)
-            set_target_properties(GTest::GMock PROPERTIES
+            set_target_properties(gmock PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIRS}")
         endif()
-        __gtest_import_library(GTest::GMock GMOCK_LIBRARY "")
-        __gtest_import_library(GTest::GMock GMOCK_LIBRARY "RELEASE")
-        __gtest_import_library(GTest::GMock GMOCK_LIBRARY "DEBUG")
+        __gtest_import_library(gmock GMOCK_LIBRARY "")
+        __gtest_import_library(gmock GMOCK_LIBRARY "RELEASE")
+        __gtest_import_library(gmock GMOCK_LIBRARY "DEBUG")
     endif()
 endif()
