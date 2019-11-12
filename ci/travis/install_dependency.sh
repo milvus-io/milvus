@@ -19,8 +19,6 @@ APT_LINE
 sudo apt-get update -qq
 
 sudo apt-get install -y -q --no-install-recommends \
-  flex \
-  bison \
   gfortran \
   lsb-core \
   libtool \
