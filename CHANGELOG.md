@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#12 - Pure CPU version for Milvus
 - \#77 - Support table partition
 - \#226 - Experimental shards middleware for Milvus
+- \#284 - Change C++ SDK to shread library
 
 ## Improvement
 
