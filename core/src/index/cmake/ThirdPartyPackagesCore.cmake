@@ -286,6 +286,7 @@ macro(build_arrow)
     set(ARROW_STATIC_LIB
             "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
+    set(ARROW_LIB_DIR "${ARROW_PREFIX}/lib")
     set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
 
     set(ARROW_CMAKE_ARGS
@@ -382,7 +383,7 @@ macro(build_arrow)
                 )
     endif ()
 
-    file(MAKE_DIRECTORY "${ARROW_PREFIX}/include")
+    file(MAKE_DIRECTORY "${ARROW_INCLUDE_DIR}")
     add_library(arrow STATIC IMPORTED)
     set_target_properties(arrow
             PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
@@ -392,8 +393,8 @@ macro(build_arrow)
     set(JEMALLOC_PREFIX "${INDEX_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
 
     add_custom_command(TARGET arrow_ep POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_PREFIX}/lib/
-            COMMAND ${CMAKE_COMMAND} -E copy ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a ${ARROW_PREFIX}/lib/
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_LIB_DIR}
+            COMMAND ${CMAKE_COMMAND} -E copy ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a ${ARROW_LIB_DIR}
             DEPENDS ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a)
 
 endmacro()
@@ -402,7 +403,7 @@ if (KNOWHERE_WITH_ARROW AND NOT TARGET arrow_ep)
 
     resolve_dependency(ARROW)
 
-    link_directories(SYSTEM ${ARROW_LIBRARY_DIRS})
+    link_directories(SYSTEM ${ARROW_LIB_DIR})
     include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 endif ()
 
