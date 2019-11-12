@@ -48,7 +48,7 @@ define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "AUTO")
+set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 
 define_option_string(MILVUS_DEPENDENCY_SOURCE
         "Method to use for acquiring MILVUS's build dependencies"
