@@ -7,7 +7,7 @@ If you don't want to build entire milvus project, you can do the following steps
  $ cd [Milvus root path]/core
  $ ./build.sh -l
  
- # build C++ SDK project
+ # build C++ sdk project
  $ cd [Milvus root path]/core/cmake_build
  $ make -C src/sdk
 ```
@@ -15,20 +15,20 @@ If you don't want to build entire milvus project, you can do the following steps
 ### Try C++ example
 
 Firstly you need to launch a milvus server.
-If you build whole milvus project, just run:
+If you already build entire milvus project, just run:
 ```shell
  # start milvus server
  $ cd [Milvus root path]/core
  $ ./start_server.sh
 ```
-You also can pull milvus release docker image to launch milvus server.
+You also can pull milvus release docker image to launch milvus server:
 ```shell
  # pull milvus docker image and start milvus server
  $ docker pull milvusdb/milvus:latest
  $ docker run --runtime=nvidia -p 19530:19530 -d milvusdb/milvus:latest
 ```
 
-To run C++ example, use below command:
+Run C++ example:
 
 ```shell
  # run milvus C++ example
@@ -38,7 +38,7 @@ To run C++ example, use below command:
 
 ### Make your own C++ client project
 
-Firstly create a project folder. And copy C++ sdk header and library into the folder.
+Firstly create a project folder. And copy C++ sdk header and library files into the folder.
 ```shell
  # create project folder
  $ mkdir MyMilvusClient
@@ -50,7 +50,7 @@ Firstly create a project folder. And copy C++ sdk header and library into the fo
  $ cp [Milvus root path]/core/src/sdk/include/Status.h .
 ```
 
-Create a main.cpp under the project folder, and include C++ sdk headers:
+Create main.cpp under the project folder, and paste the following code into the file:
 ```shell
 #include "./MilvusApi.h"
 #include "./Status.h"
@@ -68,7 +68,7 @@ int main() {
 }
 ```
 
-Create a CMakeList.txt under the project folder, and paste the follow code into the file:
+Create CMakeList.txt under the project folder, and paste the following code into the file:
 ```shell
  cmake_minimum_required(VERSION 3.14)
  project(test)
@@ -79,7 +79,17 @@ Create a CMakeList.txt under the project folder, and paste the follow code into 
          ${PROJECT_SOURCE_DIR}/libmilvus_sdk.so)
 ```
 
-Build the client project:
+Now there are 5 files in your project:
+```shell
+MyMilvusClient
+ |-CMakeList.txt
+ |-main.cpp
+ |-libmilvus_sdk.so
+ |-MilvusApi.h
+ |-Status.h
+  ```
+
+Build the project:
 ```shell
  $ mkdir cmake_build
  $ cd cmake_build
