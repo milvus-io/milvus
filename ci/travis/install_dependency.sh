@@ -25,7 +25,6 @@ sudo apt-get install -y -q --no-install-recommends \
   automake \
   ccache \
   pkg-config \
-  libgtest-dev \
   libarrow-dev \
   libjemalloc-dev \
   libboost-serialization-dev \
