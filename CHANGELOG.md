@@ -12,7 +12,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#204 - improve grpc performance in search
 - \#207 - Add more unittest for config set/get
 - \#208 - optimize unittest to support run single test more easily
-- \#284 - Change C++ SDK to shread library
+- \#284 - Change C++ SDK to shared library
 
 ## Task
 
