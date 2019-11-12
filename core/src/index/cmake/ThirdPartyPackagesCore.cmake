@@ -401,7 +401,7 @@ endmacro()
 
 if (KNOWHERE_WITH_ARROW AND NOT TARGET arrow_ep)
 
-    resolve_dependency(ARROW)
+    resolve_dependency(Arrow)
 
     link_directories(SYSTEM ${ARROW_LIB_DIR})
     include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
