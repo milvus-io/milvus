@@ -16,7 +16,7 @@
 
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
 
-        ARROW
+        Arrow
         FAISS
         GTest
         LAPACK
@@ -33,7 +33,7 @@ foreach (DEPENDENCY ${KNOWHERE_THIRDPARTY_DEPENDENCIES})
 endforeach ()
 
 macro(build_dependency DEPENDENCY_NAME)
-    if ("${DEPENDENCY_NAME}" STREQUAL "ARROW")
+    if ("${DEPENDENCY_NAME}" STREQUAL "Arrow")
         build_arrow()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "LAPACK")
         build_lapack()
@@ -50,13 +50,9 @@ endmacro()
 
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        if (${DEPENDENCY_NAME} STREQUAL "ARROW")
-            find_package(Arrow MODULE)
-            if (NOT ${${DEPENDENCY_NAME}_FOUND})
-                build_dependency(${DEPENDENCY_NAME})
-            endif ()
-        else()
-            build_dependency(${DEPENDENCY_NAME})
+        find_package(${DEPENDENCY_NAME} MODULE)
+        if(NOT ${${DEPENDENCY_NAME}_FOUND})
+          build_dependency(${DEPENDENCY_NAME})
         endif()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
