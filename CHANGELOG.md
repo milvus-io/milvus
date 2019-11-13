@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - \#246 - Exclude src/external folder from code coverage for jenkin ci
+- \#248 - Reside src/external in thirdparty
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
