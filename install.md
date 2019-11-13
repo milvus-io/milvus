@@ -26,8 +26,10 @@ $ cd [Milvus root path]/core
 $ ./build.sh -t Debug
 or 
 $ ./build.sh -t Release
+```
 
-For GPU version, add -g option
+By default, it will build CPU version. To build GPU version, add `-g` option
+```
 $ ./build.sh -g
 ```
 
