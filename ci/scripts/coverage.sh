@@ -46,7 +46,7 @@ parameter:
 -h: help
 
 usage:
-./coverage.sh -o \${INSTALL_PREFIX} -b \$${CORE_BUILD_DIR} -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} [-h]
+./coverage.sh -o \${INSTALL_PREFIX} -b \${CORE_BUILD_DIR} -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} [-h]
                 "
                 exit 0
                 ;;
