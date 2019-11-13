@@ -1,6 +1,21 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
+# Milvus 0.5.3 (TODO)
+
+## Bug
+- \#258 - Bytes type in proto cause big-endian/little-endian problem
+
+## Feature
+
+## Improvement
+- \#204 - improve grpc performance in search
+- \#207 - Add more unittest for config set/get
+- \#208 - optimize unittest to support run single test more easily
+- \#284 - Change C++ SDK to shared library
+- \#260 - C++ SDK README
+
+## Task
 
 # Milvus 0.5.2 (2019-11-07)
 
@@ -10,7 +25,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Feature
 
 ## Improvement
-- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.52
+- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.5.2
 
 ## Task
 

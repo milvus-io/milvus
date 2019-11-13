@@ -20,6 +20,7 @@
 #include <string.h>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 //#include <gperftools/profiler.h>
 
@@ -541,16 +542,16 @@ InsertTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchTask::SearchTask(const ::milvus::grpc::SearchParam* search_vector_infos,
-                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResultList* response)
+                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response)
     : GrpcBaseTask(DQL_TASK_GROUP),
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
-      topk_result_list(response) {
+      topk_result_(response) {
 }
 
 BaseTaskPtr
 SearchTask::Create(const ::milvus::grpc::SearchParam* search_vector_infos,
-                   const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResultList* response) {
+                   const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response) {
     if (search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
@@ -668,18 +669,10 @@ SearchTask::OnExecute() {
             return Status::OK();  // empty table
         }
 
-        size_t result_k = result_ids.size() / record_count;
-
         // step 7: construct result array
-        for (size_t i = 0; i < record_count; i++) {
-            ::milvus::grpc::TopKQueryResult* topk_query_result = topk_result_list->add_topk_query_result();
-            for (size_t j = 0; j < result_k; j++) {
-                ::milvus::grpc::QueryResult* grpc_result = topk_query_result->add_query_result_arrays();
-                size_t idx = i * result_k + j;
-                grpc_result->set_id(result_ids[idx]);
-                grpc_result->set_distance(result_distances[idx]);
-            }
-        }
+        topk_result_->set_row_num(record_count);
+        topk_result_->add_ids(result_ids.begin(), result_ids.end());
+        topk_result_->add_distances(result_distances.begin(), result_distances.end());
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

@@ -79,18 +79,12 @@ struct RowRecord {
 };
 
 /**
- * @brief Query result
- */
-struct QueryResult {
-    int64_t id;       ///< Output result
-    double distance;  ///< Vector similarity distance
-};
-
-/**
  * @brief TopK query result
  */
 struct TopKQueryResult {
-    std::vector<QueryResult> query_result_arrays;  ///< TopK query result
+    int64_t row_num;
+    std::vector<int64_t> ids;
+    std::vector<float> distances;
 };
 
 /**
@@ -261,7 +255,7 @@ class Connection {
     virtual Status
     Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
            const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
-           std::vector<TopKQueryResult>& topk_query_result_array) = 0;
+           TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show table description
