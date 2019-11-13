@@ -228,7 +228,7 @@ endforeach ()
 if (DEFINED ENV{FAISS_SOURCE_URL})
     set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
 else ()
-    set(FAISS_SOURCE_URL "https://github.com/milvus-io/faiss/archive/${FAISS_VERSION}.tar.gz")
+    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz")
     set(FAISS_MD5 "b02c1a53234f5acc9bea1b0c55524f50")
 endif ()
 
