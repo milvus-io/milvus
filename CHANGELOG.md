@@ -16,6 +16,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#260 - C++ SDK README
+- \#314 - add Find FAISS in CMake
 
 ## Task
 
