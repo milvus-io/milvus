@@ -435,7 +435,7 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                     break;
                 }
                 case MODE_GPU: {
-                    faiss::gpu::GpuIndexIVF *gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF *>(index);
+                    faiss::gpu::GpuIndexIVF* gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF*>(index);
                     gpu_index_ivf->setNumProbes(nprobe);
                 }
             }
@@ -552,7 +552,7 @@ TEST(FAISSTEST, BENCHMARK) {
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
 
-    test_ann_hdf5("sift-128-euclidean", "IDMap", "Flat", MODE_CPU,SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IDMap", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
     test_ann_hdf5("sift-128-euclidean", "IDMap", "Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
@@ -562,9 +562,12 @@ TEST(FAISSTEST, BENCHMARK) {
     test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -577,8 +580,11 @@ TEST(FAISSTEST, BENCHMARK) {
     test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
 #endif
 }
