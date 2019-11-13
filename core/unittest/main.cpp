@@ -18,7 +18,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "external/easyloggingpp/easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 
 INITIALIZE_EASYLOGGINGPP
 

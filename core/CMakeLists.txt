@@ -110,6 +110,7 @@ endif ()
 set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
+set(MILVUS_THIRDPARTY_SRC ${PROJECT_SOURCE_DIR}/thirdparty)
 
 include(ExternalProject)
 include(DefineOptions)

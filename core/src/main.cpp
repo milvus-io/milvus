@@ -22,7 +22,7 @@
 #include <cstring>
 #include <string>
 
-#include "external/easyloggingpp/easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
 #include "src/config.h"

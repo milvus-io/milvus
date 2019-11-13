@@ -27,7 +27,7 @@ set(basic_libs
         )
 
 set(util_srcs
-        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/adapter/Structure.cpp
