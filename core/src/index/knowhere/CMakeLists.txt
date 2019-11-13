@@ -54,7 +54,7 @@ set(depend_libs
         gfortran
         pthread
         )
-if (BUILD_FAISS_WITH_MKL)
+if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
             "-Wl,--start-group \
             ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
