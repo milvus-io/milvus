@@ -17,7 +17,11 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
+set(test_files
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_hybrid_index.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_knowhere.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
 set(wrapper_files
         ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp

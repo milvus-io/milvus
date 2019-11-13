@@ -75,7 +75,7 @@ pipeline {
                             steps {
                                 container('milvus-build-env') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/packaging.groovy"
                                     }
                                 }
                             }
