@@ -1,27 +1,27 @@
-### Build C++ sdk
+### Build C++ SDK
 
-The C++ sdk source code is under milvus/core/src/sdk. Build entire milvus project will also build the sdk project. 
-If you don't want to build entire milvus project, you can do the following steps:
+The C++ SDK source code is under milvus/core/src/sdk. Build entire milvus project will also build the C++ SDK project. 
+If you don't want to build the entire milvus project, follow below steps:
 ```shell
  # generate make files
  $ cd [Milvus root path]/core
  $ ./build.sh -l
  
- # build C++ sdk project
+ # build C++ SDK project
  $ cd [Milvus root path]/core/cmake_build
  $ make -C src/sdk
 ```
 
 ### Try C++ example
 
-Firstly you need to launch a milvus server.
-If you already build entire milvus project, just run:
+Firstly, you need to start a Milvus server.
+If you've already built the entire milvus project, just start Milvus server with the following command:
 ```shell
  # start milvus server
  $ cd [Milvus root path]/core
  $ ./start_server.sh
 ```
-You also can pull milvus release docker image to launch milvus server:
+You can also use Docker to start Milvus server:
 ```shell
  # pull milvus docker image and start milvus server
  $ docker pull milvusdb/milvus:latest
@@ -38,7 +38,7 @@ Run C++ example:
 
 ### Make your own C++ client project
 
-Firstly create a project folder. And copy C++ sdk header and library files into the folder.
+Create a folder for the project, and copy C++ SDK header and library files into it.
 ```shell
  # create project folder
  $ mkdir MyMilvusClient
@@ -50,7 +50,7 @@ Firstly create a project folder. And copy C++ sdk header and library files into 
  $ cp [Milvus root path]/core/src/sdk/include/Status.h .
 ```
 
-Create main.cpp under the project folder, and paste the following code into the file:
+Create file main.cpp in the project folder, and copy the following code into it:
 ```shell
 #include "./MilvusApi.h"
 #include "./Status.h"
@@ -68,7 +68,7 @@ int main() {
 }
 ```
 
-Create CMakeList.txt under the project folder, and paste the following code into the file:
+Create file CMakeList.txt in the project folder, and copy the following code into it:
 ```shell
  cmake_minimum_required(VERSION 3.14)
  project(test)
