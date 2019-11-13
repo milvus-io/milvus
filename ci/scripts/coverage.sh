@@ -9,17 +9,21 @@ done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 INSTALL_PREFIX="/opt/milvus"
-CMAKE_BUILD_DIR="${SCRIPTS_DIR}/../../../core/cmake_build"
+MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
+CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=123456
 MYSQL_HOST='127.0.0.1'
 MYSQL_PORT='3306'
 
-while getopts "o:u:p:t:h" arg
+while getopts "o:b:u:p:t:h" arg
 do
         case $arg in
              o)
                 INSTALL_PREFIX=$OPTARG
+                ;;
+             b)
+                CORE_BUILD_DIR=$OPTARG # CORE_BUILD_DIR
                 ;;
              u)
                 MYSQL_USER_NAME=$OPTARG
@@ -35,13 +39,14 @@ do
 
 parameter:
 -o: milvus install prefix(default: /opt/milvus)
+-b: core code build directory
 -u: mysql account
 -p: mysql password
 -t: mysql host
 -h: help
 
 usage:
-./coverage.sh -o \${INSTALL_PREFIX} -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} [-h]
+./coverage.sh -o \${INSTALL_PREFIX} -b \$${CORE_BUILD_DIR} -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} [-h]
                 "
                 exit 0
                 ;;
@@ -63,12 +68,14 @@ FILE_INFO_OUTPUT="output.info"
 FILE_INFO_OUTPUT_NEW="output_new.info"
 DIR_LCOV_OUTPUT="lcov_out"
 
-DIR_GCNO="${CMAKE_BUILD_DIR}"
+DIR_GCNO="${CORE_BUILD_DIR}"
 DIR_UNITTEST="${INSTALL_PREFIX}/unittest"
 
+cd ${SCRIPTS_DIR}
+
 # delete old code coverage info files
-rm -rf lcov_out
-rm -f FILE_INFO_BASE FILE_INFO_MILVUS FILE_INFO_OUTPUT FILE_INFO_OUTPUT_NEW
+rm -rf ${DIR_LCOV_OUTPUT}
+rm -f ${FILE_INFO_BASE} ${FILE_INFO_MILVUS} ${FILE_INFO_OUTPUT} ${FILE_INFO_OUTPUT_NEW}
 
 MYSQL_DB_NAME=milvus_`date +%s%N`
 
