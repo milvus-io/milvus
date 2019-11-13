@@ -225,28 +225,12 @@ foreach (_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach ()
 
-if (CUSTOMIZATION)
-    execute_process(COMMAND wget -q --method HEAD ${FAISS_URL} RESULT_VARIABLE return_code)
-    message(STATUS "Check the remote cache file ${FAISS_URL}. return code = ${return_code}")
-    if (NOT return_code EQUAL 0)
-        MESSAGE(FATAL_ERROR "Can't access to ${FAISS_URL}")
-    else ()
-        set(FAISS_SOURCE_URL ${FAISS_URL})
-        # set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
-        # set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
-        # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
-        # set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
-        # set(FAISS_MD5 "c89ea8e655f5cdf58f42486f13614714") # commit-id 9c28a1cbb88f41fa03b03d7204106201ad33276b branch-0.2.1
-        # set(FAISS_MD5 "87fdd86351ffcaf3f80dc26ade63c44b") # commit-id 841a156e67e8e22cd8088e1b58c00afbf2efc30b branch-0.2.1
-        # set(FAISS_MD5 "f3b2ce3364c3fa7febd3aa7fdd0fe380") # commit-id 694e03458e6b69ce8a62502f71f69a614af5af8f branch-0.3.0
-        # set(FAISS_MD5 "bb30722c22390ce5f6759ccb216c1b2a") # commit-id d324db297475286afe107847c7fb7a0f9dc7e90e branch-0.3.0
-        set(FAISS_MD5 "2293cdb209c3718e3b19f3edae8b32b3") # commit-id a13c1205dc52977a9ad3b33a14efa958604a8bff branch-0.3.0
-    endif ()
+if (DEFINED ENV{FAISS_SOURCE_URL})
+    set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
 else ()
-    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/1.6.0.tar.gz")
+    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz")
     set(FAISS_MD5 "b02c1a53234f5acc9bea1b0c55524f50")
 endif ()
-message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
 
 if (DEFINED ENV{KNOWHERE_ARROW_URL})
     set(ARROW_SOURCE_URL "$ENV{KNOWHERE_ARROW_URL}")

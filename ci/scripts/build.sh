@@ -15,6 +15,7 @@ CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="/opt/milvus"
+FAISS_ROOT=""
 BUILD_COVERAGE="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
@@ -22,7 +23,7 @@ GPU_VERSION="OFF"
 WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "o:t:b:gulcjmh" arg
+while getopts "o:t:b:f:gulcjmh" arg
 do
         case $arg in
              o)
@@ -33,6 +34,9 @@ do
                 ;;
              b)
                 CORE_BUILD_DIR=$OPTARG # CORE_BUILD_DIR
+                ;;
+             f)
+                FAISS_ROOT=$OPTARG # FAISS ROOT PATH
                 ;;
              g)
                 GPU_VERSION="ON";
@@ -60,6 +64,7 @@ parameter:
 -o: install prefix(default: /opt/milvus)
 -t: build type(default: Debug)
 -b: core code build directory
+-f: faiss root path
 -g: gpu version
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
@@ -69,7 +74,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} [-u] [-l] [-c] [-j] [-m] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-u] [-l] [-c] [-j] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -94,8 +99,10 @@ CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
--DBUILD_FAISS_WITH_MKL=${WITH_MKL} \
+-DFAISS_ROOT=${FAISS_ROOT} \
+-DFAISS_WITH_MKL=${WITH_MKL} \
 -DArrow_SOURCE=AUTO \
+-DFAISS_SOURCE=AUTO \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
