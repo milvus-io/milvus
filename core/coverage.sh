@@ -122,7 +122,7 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "*/src/server/Server.cpp" \
     "*/src/server/DBWrapper.cpp" \
     "*/src/server/grpc_impl/GrpcServer.cpp" \
-    "*/src/external/*"
+    "*/thirdparty/*"
 
 if [ $? -ne 0 ]; then
     echo "generate ${FILE_INFO_OUTPUT_NEW} failed"
