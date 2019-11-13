@@ -13,7 +13,7 @@ if (KNOWHERE_GPU_VERSION)
 
     set(depend_libs
             faiss hdf5
-            arrow ${ARROW_PREFIX}/lib/libjemalloc_pic.a
+            arrow ${ARROW_LIB_DIR}/libjemalloc_pic.a
             )
     if (BUILD_FAISS_WITH_MKL)
         set(depend_libs ${depend_libs}

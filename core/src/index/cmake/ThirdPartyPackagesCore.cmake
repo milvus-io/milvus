@@ -16,7 +16,7 @@
 
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
 
-        ARROW
+        Arrow
         FAISS
         GTest
         LAPACK
@@ -33,7 +33,7 @@ foreach (DEPENDENCY ${KNOWHERE_THIRDPARTY_DEPENDENCIES})
 endforeach ()
 
 macro(build_dependency DEPENDENCY_NAME)
-    if ("${DEPENDENCY_NAME}" STREQUAL "ARROW")
+    if ("${DEPENDENCY_NAME}" STREQUAL "Arrow")
         build_arrow()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "LAPACK")
         build_lapack()
@@ -50,9 +50,10 @@ endmacro()
 
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        #message(STATUS "Finding ${DEPENDENCY_NAME} package")
-        #message(STATUS "${DEPENDENCY_NAME} package not found")
-        build_dependency(${DEPENDENCY_NAME})
+        find_package(${DEPENDENCY_NAME} MODULE)
+        if(NOT ${${DEPENDENCY_NAME}_FOUND})
+          build_dependency(${DEPENDENCY_NAME})
+        endif()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
@@ -130,17 +131,6 @@ if (USE_JFROG_CACHE STREQUAL "ON")
         file(MAKE_DIRECTORY ${THIRDPARTY_PACKAGE_CACHE})
     endif ()
 endif ()
-
-macro(resolve_dependency DEPENDENCY_NAME)
-    if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        #disable find_package for now
-        build_dependency(${DEPENDENCY_NAME})
-    elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
-        build_dependency(${DEPENDENCY_NAME})
-    elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
-        find_package(${DEPENDENCY_NAME} REQUIRED)
-    endif ()
-endmacro()
 
 # ----------------------------------------------------------------------
 # ExternalProject options
@@ -296,6 +286,7 @@ macro(build_arrow)
     set(ARROW_STATIC_LIB
             "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
+    set(ARROW_LIB_DIR "${ARROW_PREFIX}/lib")
     set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
 
     set(ARROW_CMAKE_ARGS
@@ -392,7 +383,7 @@ macro(build_arrow)
                 )
     endif ()
 
-    file(MAKE_DIRECTORY "${ARROW_PREFIX}/include")
+    file(MAKE_DIRECTORY "${ARROW_INCLUDE_DIR}")
     add_library(arrow STATIC IMPORTED)
     set_target_properties(arrow
             PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
@@ -402,17 +393,17 @@ macro(build_arrow)
     set(JEMALLOC_PREFIX "${INDEX_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
 
     add_custom_command(TARGET arrow_ep POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_PREFIX}/lib/
-            COMMAND ${CMAKE_COMMAND} -E copy ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a ${ARROW_PREFIX}/lib/
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_LIB_DIR}
+            COMMAND ${CMAKE_COMMAND} -E copy ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a ${ARROW_LIB_DIR}
             DEPENDS ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a)
 
 endmacro()
 
 if (KNOWHERE_WITH_ARROW AND NOT TARGET arrow_ep)
 
-    resolve_dependency(ARROW)
+    resolve_dependency(Arrow)
 
-    link_directories(SYSTEM ${ARROW_PREFIX}/lib/)
+    link_directories(SYSTEM ${ARROW_LIB_DIR})
     include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 endif ()
 

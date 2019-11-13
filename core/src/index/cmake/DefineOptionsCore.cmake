@@ -52,7 +52,7 @@ endif ()
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "AUTO")
+set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 
 define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "Method to use for acquiring KNOWHERE's build dependencies"

@@ -49,7 +49,7 @@ set(depend_libs
         SPTAGLibStatic
         faiss
         arrow
-        ${ARROW_PREFIX}/lib/libjemalloc_pic.a
+        ${ARROW_LIB_DIR}/libjemalloc_pic.a
         gomp
         gfortran
         pthread
