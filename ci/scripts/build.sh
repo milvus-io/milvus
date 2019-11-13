@@ -18,7 +18,7 @@ INSTALL_PREFIX="/opt/milvus"
 BUILD_COVERAGE="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
-CPU_VERSION="ON"
+GPU_VERSION="OFF"
 WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
@@ -35,7 +35,7 @@ do
                 CORE_BUILD_DIR=$OPTARG # CORE_BUILD_DIR
                 ;;
              g)
-                CPU_VERSION="OFF";
+                GPU_VERSION="ON";
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -84,13 +84,13 @@ if [[ ! -d ${CORE_BUILD_DIR} ]]; then
     mkdir ${CORE_BUILD_DIR}
 fi
 
-pushd ${CORE_BUILD_DIR}
+cd ${CORE_BUILD_DIR}
 
 CMAKE_CMD="cmake \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
--DMILVUS_CPU_VERSION=${CPU_VERSION} \
+-DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
@@ -99,6 +99,34 @@ CMAKE_CMD="cmake \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
+
+
+if [[ ${RUN_CPPLINT} == "ON" ]]; then
+    # cpplint check
+    make lint
+    if [ $? -ne 0 ]; then
+        echo "ERROR! cpplint check failed"
+        exit 1
+    fi
+    echo "cpplint check passed!"
+
+    # clang-format check
+    make check-clang-format
+    if [ $? -ne 0 ]; then
+        echo "ERROR! clang-format check failed"
+        exit 1
+    fi
+    echo "clang-format check passed!"
+
+#    # clang-tidy check
+#    make check-clang-tidy
+#    if [ $? -ne 0 ]; then
+#        echo "ERROR! clang-tidy check failed"
+#        rm -f CMakeCache.txt
+#        exit 1
+#    fi
+#    echo "clang-tidy check passed!"
+fi
 
 # compile and build
 make -j8 || exit 1

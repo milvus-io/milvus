@@ -175,7 +175,13 @@ add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 if ("${MILVUS_DB_PATH}" STREQUAL "")
     set(MILVUS_DB_PATH "/tmp/milvus")
 endif ()
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+
+if (MILVUS_GPU_VERSION)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_gpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+else()
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_cpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+endif()
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
 install(DIRECTORY scripts/

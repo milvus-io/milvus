@@ -14,6 +14,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#226 - Experimental shards middleware for Milvus
 
 ## Improvement
+- \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#260 - C++ SDK README
 

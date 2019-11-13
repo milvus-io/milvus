@@ -41,7 +41,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 5;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::gpu_ivfsq8;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t N_LIST = 15000;
 
 milvus::TableSchema
