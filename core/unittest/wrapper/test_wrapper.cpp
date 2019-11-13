@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "external/easyloggingpp/easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 #include "wrapper/VecIndex.h"
 
 #ifdef MILVUS_GPU_VERSION

@@ -6,5 +6,5 @@
 *easylogging++*
 *SqliteMetaImpl.cpp
 *src/grpc*
-*src/external*
+*thirdparty*
 *milvus/include*
