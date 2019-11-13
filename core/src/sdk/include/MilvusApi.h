@@ -31,12 +31,12 @@ namespace milvus {
  * @brief Index Type
  */
 enum class IndexType {
-    invalid = 0,
-    cpu_idmap,
-    gpu_ivfflat,
-    gpu_ivfsq8,
-    mix_nsg,
-    ivfsq8h,
+    INVALID = 0,
+    FLAT = 1,
+    IVFFLAT = 2,
+    IVFSQ8 = 3,
+    NSG = 4,
+    IVFSQ8H = 5,
 };
 
 enum class MetricType {
