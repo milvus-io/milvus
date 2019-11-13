@@ -178,7 +178,7 @@ endif ()
 if (MILVUS_GPU_VERSION)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_gpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
 else()
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_cpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
 endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
