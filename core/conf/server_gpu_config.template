@@ -42,4 +42,4 @@ resource_config:
   search_resources:                 # define the devices used for search computation, must be in format: cpu or gpux
     - cpu
     - gpu0
-  index_build_device: gpu0          # GPU used for building index, must be in format: gpux
+  index_build_device: gpu0          # CPU / GPU used for building index, must be in format: cpu or gpux
