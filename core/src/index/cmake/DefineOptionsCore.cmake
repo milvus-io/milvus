@@ -79,7 +79,7 @@ define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
-define_option(BUILD_FAISS_WITH_MKL "Build FAISS with MKL" OFF)
+define_option(FAISS_WITH_MKL "Build FAISS with MKL" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")

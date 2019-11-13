@@ -24,7 +24,7 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 add_subdirectory(index)
-if (BUILD_FAISS_WITH_MKL)
+if (FAISS_WITH_MKL)
     add_compile_definitions("WITH_MKL")
 endif ()
 

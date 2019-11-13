@@ -21,6 +21,7 @@ set(KNOWHERE_THIRDPARTY_DEPENDENCIES
         GTest
         LAPACK
         OpenBLAS
+        MKL
         )
 
 message(STATUS "Using ${KNOWHERE_DEPENDENCY_SOURCE} approach to find dependencies")
@@ -43,6 +44,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_openblas()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "FAISS")
         build_faiss()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "MKL")
+        build_mkl()
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -51,9 +54,9 @@ endmacro()
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
         find_package(${DEPENDENCY_NAME} MODULE)
-        if(NOT ${${DEPENDENCY_NAME}_FOUND})
-          build_dependency(${DEPENDENCY_NAME})
-        endif()
+        if (NOT ${${DEPENDENCY_NAME}_FOUND})
+            build_dependency(${DEPENDENCY_NAME})
+        endif ()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
@@ -238,11 +241,11 @@ if (CUSTOMIZATION)
         # set(FAISS_MD5 "f3b2ce3364c3fa7febd3aa7fdd0fe380") # commit-id 694e03458e6b69ce8a62502f71f69a614af5af8f branch-0.3.0
         # set(FAISS_MD5 "bb30722c22390ce5f6759ccb216c1b2a") # commit-id d324db297475286afe107847c7fb7a0f9dc7e90e branch-0.3.0
         set(FAISS_MD5 "2293cdb209c3718e3b19f3edae8b32b3") # commit-id a13c1205dc52977a9ad3b33a14efa958604a8bff branch-0.3.0
-    endif()
-else()
+    endif ()
+else ()
     set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/1.6.0.tar.gz")
     set(FAISS_MD5 "b02c1a53234f5acc9bea1b0c55524f50")
-endif()
+endif ()
 message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
 
 if (DEFINED ENV{KNOWHERE_ARROW_URL})
@@ -674,26 +677,44 @@ if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
 endif ()
 
 # ----------------------------------------------------------------------
+# MKL
+
+macro(build_mkl)
+
+    if (FAISS_WITH_MKL)
+        if (EXISTS "/proc/cpuinfo")
+            FILE(READ /proc/cpuinfo PROC_CPUINFO)
+
+            SET(VENDOR_ID_RX "vendor_id[ \t]*:[ \t]*([a-zA-Z]+)\n")
+            STRING(REGEX MATCH "${VENDOR_ID_RX}" VENDOR_ID "${PROC_CPUINFO}")
+            STRING(REGEX REPLACE "${VENDOR_ID_RX}" "\\1" VENDOR_ID "${VENDOR_ID}")
+
+            if (NOT ${VENDOR_ID} STREQUAL "GenuineIntel")
+                set(FAISS_WITH_MKL OFF)
+            endif ()
+        endif ()
+
+        find_path(MKL_LIB_PATH
+                NAMES "libmkl_intel_ilp64.a" "libmkl_gnu_thread.a" "libmkl_core.a"
+                PATH_SUFFIXES "intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64/")
+        if (${MKL_LIB_PATH} STREQUAL "MKL_LIB_PATH-NOTFOUND")
+            message(FATAL_ERROR "Could not find MKL libraries")
+        endif ()
+        message(STATUS "MKL lib path = ${MKL_LIB_PATH}")
+
+        set(MKL_LIBS
+                ${MKL_LIB_PATH}/libmkl_intel_ilp64.a
+                ${MKL_LIB_PATH}/libmkl_gnu_thread.a
+                ${MKL_LIB_PATH}/libmkl_core.a
+                )
+    endif ()
+endmacro()
+
+# ----------------------------------------------------------------------
 # FAISS
 
 macro(build_faiss)
     message(STATUS "Building FAISS-${FAISS_VERSION} from source")
-
-    if (NOT DEFINED BUILD_FAISS_WITH_MKL)
-        set(BUILD_FAISS_WITH_MKL OFF)
-    endif ()
-
-    if (EXISTS "/proc/cpuinfo")
-        FILE(READ /proc/cpuinfo PROC_CPUINFO)
-
-        SET(VENDOR_ID_RX "vendor_id[ \t]*:[ \t]*([a-zA-Z]+)\n")
-        STRING(REGEX MATCH "${VENDOR_ID_RX}" VENDOR_ID "${PROC_CPUINFO}")
-        STRING(REGEX REPLACE "${VENDOR_ID_RX}" "\\1" VENDOR_ID "${VENDOR_ID}")
-
-        if (NOT ${VENDOR_ID} STREQUAL "GenuineIntel")
-            set(BUILD_FAISS_WITH_MKL OFF)
-        endif ()
-    endif ()
 
     set(FAISS_PREFIX "${INDEX_BINARY_DIR}/faiss_ep-prefix/src/faiss_ep")
     set(FAISS_INCLUDE_DIR "${FAISS_PREFIX}/include")
@@ -706,30 +727,11 @@ macro(build_faiss)
             "CXXFLAGS=${EP_CXX_FLAGS}"
             --without-python)
 
-    set(FAISS_CFLAGS ${EP_C_FLAGS})
-    set(FAISS_CXXFLAGS ${EP_CXX_FLAGS})
-
-    if (BUILD_FAISS_WITH_MKL)
-
-        find_path(MKL_LIB_PATH
-                NAMES "libmkl_intel_ilp64.a" "libmkl_gnu_thread.a" "libmkl_core.a"
-                PATH_SUFFIXES "intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64/")
-        if (${MKL_LIB_PATH} STREQUAL "MKL_LIB_PATH-NOTFOUND")
-            message(FATAL_ERROR "Could not find MKL libraries")
-        endif ()
-        message(STATUS "Build Faiss with MKL. MKL lib path = ${MKL_LIB_PATH}")
-
-        set(MKL_LIBS
-                ${MKL_LIB_PATH}/libmkl_intel_ilp64.a
-                ${MKL_LIB_PATH}/libmkl_gnu_thread.a
-                ${MKL_LIB_PATH}/libmkl_core.a
-                )
-
+    if (FAISS_WITH_MKL)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "CPPFLAGS=-DFINTEGER=long -DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
                 "LDFLAGS=-L${MKL_LIB_PATH}"
                 )
-
     else ()
         message(STATUS "Build Faiss with OpenBlas/LAPACK")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
@@ -770,7 +772,7 @@ macro(build_faiss)
                     BUILD_BYPRODUCTS
                     ${FAISS_STATIC_LIB})
 
-            if (NOT BUILD_FAISS_WITH_MKL)
+            if (NOT FAISS_WITH_MKL)
                 ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
             endif ()
 
@@ -800,7 +802,7 @@ macro(build_faiss)
                 BUILD_BYPRODUCTS
                 ${FAISS_STATIC_LIB})
 
-        if (NOT BUILD_FAISS_WITH_MKL)
+        if (NOT FAISS_WITH_MKL)
             ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
         endif ()
 
@@ -815,7 +817,7 @@ macro(build_faiss)
             IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
     )
-    if (BUILD_FAISS_WITH_MKL)
+    if (FAISS_WITH_MKL)
         set_target_properties(
                 faiss
                 PROPERTIES
@@ -834,7 +836,9 @@ endmacro()
 
 if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
 
-    if (NOT BUILD_FAISS_WITH_MKL)
+    if (FAISS_WITH_MKL)
+        resolve_dependency(MKL)
+    else ()
         resolve_dependency(OpenBLAS)
         get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
         include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
