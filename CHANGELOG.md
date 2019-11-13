@@ -11,12 +11,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#12 - Pure CPU version for Milvus
 - \#77 - Support table partition
 - \#226 - Experimental shards middleware for Milvus
-- \#314 - add Find FAISS in CMake
 
 ## Improvement
 - \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#260 - C++ SDK README
+- \#314 - add Find FAISS in CMake
+- \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 
 ## Task
 
