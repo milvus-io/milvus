@@ -89,14 +89,16 @@ Utils::MetricTypeName(const milvus::MetricType& metric_type) {
 std::string
 Utils::IndexTypeName(const milvus::IndexType& index_type) {
     switch (index_type) {
-        case milvus::IndexType::cpu_idmap:
-            return "cpu idmap";
-        case milvus::IndexType::gpu_ivfflat:
-            return "gpu ivflat";
-        case milvus::IndexType::gpu_ivfsq8:
-            return "gpu ivfsq8";
-        case milvus::IndexType::mix_nsg:
-            return "mix nsg";
+        case milvus::IndexType::FLAT:
+            return "FLAT";
+        case milvus::IndexType::IVFFLAT:
+            return "IVFFLAT";
+        case milvus::IndexType::IVFSQ8:
+            return "IVFSQ8";
+        case milvus::IndexType::NSG:
+            return "NSG";
+        case milvus::IndexType::IVFSQ8H:
+            return "IVFSQ8H";
         default:
             return "Unknown index type";
     }
