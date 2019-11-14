@@ -202,14 +202,14 @@ parse_ann_test_name(const std::string& ann_test_name, size_t& dim, faiss::Metric
 int32_t
 GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::idx_t* index, size_t ground_k, size_t k,
                   size_t nq, int32_t index_add_loops) {
-    assert(ground_k <= k);
+    size_t min_k = std::min(ground_k, k);
     int hit = 0;
     for (int i = 0; i < nq; i++) {
         // count the num of results exist in ground truth result set
         // each result replicates INDEX_ADD_LOOPS times
         for (int j_c = 0; j_c < k; j_c++) {
             int r_c = index[i * k + j_c];
-            for (int j_g = 0; j_g < ground_k / index_add_loops; j_g++) {
+            for (int j_g = 0; j_g < min_k / index_add_loops; j_g++) {
                 if (ground_index[i * ground_k + j_g] == r_c) {
                     hit++;
                     continue;
@@ -283,7 +283,11 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         // add index multiple times to get ~1G data set
         for (int i = 0; i < index_add_loops; i++) {
             printf("[%.3f s] No.%d Indexing database, size %ld*%ld\n", elapsed() - t0, i, nb, d);
-            gpu_index->add(nb, xb);
+            std::vector<faiss::Index::idx_t> xids(nb);
+            for (int t = 0; t < nb; t++) {
+                xids[t] = i * nb + t;
+            }
+            gpu_index->add_with_ids(nb, xb, xids.data());
         }
 
         printf("[%.3f s] Coping GPU index to CPU\n", elapsed() - t0);
@@ -359,13 +363,14 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                   const int32_t search_loops) {
     double t0 = elapsed();
 
-    const size_t NQ = 1000, NQ_START = 10, NQ_STEP = 10;
-    const size_t K = 1000, K_START = 100, K_STEP = 10;
+    const std::vector<size_t> NQ = {10, 100};
+    const std::vector<size_t> K = {10, 100, 1000};
     const size_t GK = 100;  // topk of ground truth
 
     std::unordered_map<size_t, std::string> mode_str_map = {
         {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
 
+    double copy_time = 0.0;
     faiss::Index *gpu_index, *index;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
@@ -375,7 +380,6 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
         index_composition.index = cpu_index;
         index_composition.quantizer = nullptr;
 
-        double copy_time;
         switch (query_mode) {
             case MODE_MIX: {
                 index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
@@ -420,34 +424,39 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
     }
 
     for (auto nprobe : nprobes) {
-        switch (query_mode) {
-            case MODE_CPU:
-            case MODE_MIX: {
-                faiss::ParameterSpace params;
-                std::string nprobe_str = "nprobe=" + std::to_string(nprobe);
-                params.set_index_parameters(index, nprobe_str.c_str());
-                break;
-            }
-            case MODE_GPU: {
-                faiss::gpu::GpuIndexIVF* gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF*>(index);
-                gpu_index_ivf->setNumProbes(nprobe);
+        // brute-force need not set nprobe
+        if (index_key.find("IDMap") == std::string::npos) {
+            switch (query_mode) {
+                case MODE_CPU:
+                case MODE_MIX: {
+                    faiss::ParameterSpace params;
+                    std::string nprobe_str = "nprobe=" + std::to_string(nprobe);
+                    params.set_index_parameters(index, nprobe_str.c_str());
+                    break;
+                }
+                case MODE_GPU: {
+                    faiss::gpu::GpuIndexIVF* gpu_index_ivf = dynamic_cast<faiss::gpu::GpuIndexIVF*>(index);
+                    gpu_index_ivf->setNumProbes(nprobe);
+                }
             }
         }
 
         // output buffers
-        faiss::Index::idx_t* I = new faiss::Index::idx_t[NQ * K];
-        faiss::Index::distance_t* D = new faiss::Index::distance_t[NQ * K];
+        faiss::Index::idx_t* I = new faiss::Index::idx_t[NQ.back() * K.back()];
+        faiss::Index::distance_t* D = new faiss::Index::distance_t[NQ.back() * K.back()];
 
         printf("\n%s | %s - %s | nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(),
                mode_str_map[query_mode].c_str(), nprobe);
         printf("======================================================================================\n");
-        for (size_t t_nq = NQ_START; t_nq <= NQ; t_nq *= NQ_STEP) {  // nq = {10, 100, 1000}
-            for (size_t t_k = K_START; t_k <= K; t_k *= K_STEP) {    //  k = {100, 1000}
+        for (size_t j = 0; j < K.size(); j++) {
+            size_t t_k = K[j];
+            for (size_t i = 0; i < NQ.size(); i++) {
+                size_t t_nq = NQ[i];
                 faiss::indexIVF_stats.quantization_time = 0.0;
                 faiss::indexIVF_stats.search_time = 0.0;
 
                 double t_start = elapsed(), t_end;
-                for (int i = 0; i < search_loops; i++) {
+                for (int s = 0; s < search_loops; s++) {
                     index->search(t_nq, xq, t_k, D, I);
                 }
                 t_end = elapsed();
@@ -466,7 +475,7 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 printf("nq = %4ld, k = %4ld, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq, t_k,
                        (t_end - t_start) / search_loops, faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
                        faiss::indexIVF_stats.search_time / 1000 / search_loops,
-                       (hit / float(t_nq * GK / index_add_loops)));
+                       (hit / float(t_nq * std::min(GK, t_k) / index_add_loops)));
             }
         }
         printf("======================================================================================\n");
@@ -479,8 +488,9 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
 }
 
 void
-test_ann_hdf5(const std::string& ann_test_name, const std::string& index_type, const QueryMode query_mode,
-              int32_t index_add_loops, const std::vector<size_t>& nprobes, int32_t search_loops) {
+test_ann_hdf5(const std::string& ann_test_name, const std::string& cluster_type, const std::string& index_type,
+              const QueryMode query_mode, int32_t index_add_loops, const std::vector<size_t>& nprobes,
+              int32_t search_loops) {
     double t0 = elapsed();
 
     faiss::gpu::StandardGpuResources res;
@@ -493,7 +503,7 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_type, c
         return;
     }
 
-    std::string index_key = "IVF16384," + index_type;
+    std::string index_key = cluster_type + "," + index_type;
 
     if (!parse_ann_test_name(ann_test_name, dim, metric_type)) {
         printf("Invalid ann test name: %s\n", ann_test_name.c_str());
@@ -526,7 +536,7 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& index_type, c
  *
  * Dataset 	Dimensions 	Train_size 	Test_size 	Neighbors 	Distance 	Download
  * Fashion-
- *  MNIST   784         60,000      10,000 	    100         Euclidean   HDF5 (217MB)
+    MNIST   784         60,000      10,000 	    100         Euclidean   HDF5 (217MB)
  * GIST     960         1,000,000   1,000       100         Euclidean   HDF5 (3.6GB)
  * GloVe    100         1,183,514   10,000      100         Angular     HDF5 (463MB)
  * GloVe    200         1,183,514   10,000      100         Angular     HDF5 (918MB)
@@ -542,30 +552,39 @@ TEST(FAISSTEST, BENCHMARK) {
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     const int32_t SIFT_INSERT_LOOPS = 2;  // insert twice to get ~1G data set
 
-    test_ann_hdf5("sift-128-euclidean", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IDMap", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IDMap", "Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
-    test_ann_hdf5("sift-128-euclidean", "SQ8", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "Flat", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "Flat", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("sift-128-euclidean", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_CPU, SIFT_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_MIX, SIFT_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("sift-128-euclidean", "IVF16384", "SQ8Hybrid", MODE_GPU, SIFT_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     const int32_t GLOVE_INSERT_LOOPS = 1;
 
-    test_ann_hdf5("glove-200-angular", "Flat", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "Flat", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "Flat", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "Flat", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
-    test_ann_hdf5("glove-200-angular", "SQ8", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
 
 #ifdef CUSTOMIZATION
-    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
-    test_ann_hdf5("glove-200-angular", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes, SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_CPU, GLOVE_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_MIX, GLOVE_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
+    test_ann_hdf5("glove-200-angular", "IVF16384", "SQ8Hybrid", MODE_GPU, GLOVE_INSERT_LOOPS, param_nprobes,
+                  SEARCH_LOOPS);
 #endif
 }

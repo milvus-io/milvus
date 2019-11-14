@@ -61,17 +61,17 @@ class Utils {
 
     static void
     PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-                      const std::vector<milvus::TopKQueryResult>& topk_query_result_array);
+                      const milvus::TopKQueryResult& topk_query_result);
 
     static void
     CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-                      const std::vector<milvus::TopKQueryResult>& topk_query_result_array);
+                      const milvus::TopKQueryResult& topk_query_result);
 
     static void
     DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
              const std::vector<std::string>& partiton_tags, int64_t top_k, int64_t nprobe,
              const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-             std::vector<milvus::TopKQueryResult>& topk_query_result_array);
+             milvus::TopKQueryResult& topk_query_result);
 };
 
 }  // namespace milvus_sdk
