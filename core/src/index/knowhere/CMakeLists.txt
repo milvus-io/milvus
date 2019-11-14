@@ -49,12 +49,12 @@ set(depend_libs
         SPTAGLibStatic
         faiss
         arrow
-        ${ARROW_PREFIX}/lib/libjemalloc_pic.a
+        ${ARROW_LIB_DIR}/libjemalloc_pic.a
         gomp
         gfortran
         pthread
         )
-if (BUILD_FAISS_WITH_MKL)
+if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
             "-Wl,--start-group \
             ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \

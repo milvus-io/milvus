@@ -41,18 +41,18 @@ macro(define_option_string name description default)
 endmacro()
 
 #----------------------------------------------------------------------
-set_option_category("CPU version")
+set_option_category("GPU version")
 
-if (MILVUS_CPU_VERSION)
-    define_option(KNOWHERE_CPU_VERSION "Build CPU version only" ON)
+if (MILVUS_GPU_VERSION)
+    define_option(KNOWHERE_GPU_VERSION "Build GPU version" ON)
 else ()
-    define_option(KNOWHERE_CPU_VERSION "Build CPU version only" OFF)
+    define_option(KNOWHERE_GPU_VERSION "Build GPU version" OFF)
 endif ()
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "AUTO")
+set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 
 define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "Method to use for acquiring KNOWHERE's build dependencies"
@@ -79,18 +79,7 @@ define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
-define_option(BUILD_FAISS_WITH_MKL "Build FAISS with MKL" OFF)
-
-#----------------------------------------------------------------------
-if (MSVC)
-    set_option_category("MSVC")
-
-    define_option(MSVC_LINK_VERBOSE
-            "Pass verbose linking options when linking libraries and executables"
-            OFF)
-
-    define_option(KNOWHERE_USE_STATIC_CRT "Build KNOWHERE with statically linked CRT" OFF)
-endif ()
+define_option(FAISS_WITH_MKL "Build FAISS with MKL" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")

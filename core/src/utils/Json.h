@@ -16,7 +16,7 @@
 // under the License.
 #pragma once
 
-#include "external/nlohmann/json.hpp"
+#include "nlohmann/json.hpp"
 
 namespace milvus {
 using json = nlohmann::json;

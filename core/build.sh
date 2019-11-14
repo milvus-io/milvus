@@ -12,18 +12,12 @@ USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
 CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-CPU_VERSION="OFF"
+GPU_VERSION="OFF" #defaults to CPU version
 WITH_MKL="OFF"
+FAISS_ROOT=""
+FAISS_SOURCE="BUNDLED"
 
-CUSTOMIZED_FAISS_URL="${FAISS_URL:-NONE}"
-wget -q --method HEAD ${CUSTOMIZED_FAISS_URL}
-if [ $? -eq 0 ]; then
-  CUSTOMIZATION="ON"
-else
-  CUSTOMIZATION="OFF"
-fi
-
-while getopts "p:d:t:ulrcgjhxzm" arg
+while getopts "p:d:t:f:ulrcgjhxzm" arg
 do
         case $arg in
              p)
@@ -34,6 +28,10 @@ do
                 ;;
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
+                ;;
+             f)
+                FAISS_ROOT=$OPTARG
+                FAISS_SOURCE="AUTO"
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -51,7 +49,7 @@ do
              c)
                 BUILD_COVERAGE="ON"
                 ;;
-             g)
+             z)
                 PROFILING="ON"
                 ;;
              j)
@@ -60,8 +58,8 @@ do
              x)
                 CUSTOMIZATION="OFF" # force use ori faiss
                 ;;
-             z)
-                CPU_VERSION="ON"
+             g)
+                GPU_VERSION="ON"
                 ;;
              m)
                 WITH_MKL="ON"
@@ -73,18 +71,19 @@ parameter:
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
+-f: faiss root path(default: empty)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
--g: profiling(default: OFF)
+-z: profiling(default: OFF)
 -j: use jfrog cache build directory(default: OFF)
--z: build pure CPU version(default: OFF)
+-g: build GPU version(default: OFF)
 -m: build with MKL(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-g] [-j] [-z] [-m] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-j] [-g] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -109,15 +108,16 @@ CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-DFAISS_ROOT=${FAISS_ROOT} \
+-DFAISS_SOURCE=${FAISS_SOURCE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DMILVUS_ENABLE_PROFILING=${PROFILING} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
 -DCUSTOMIZATION=${CUSTOMIZATION} \
--DFAISS_URL=${CUSTOMIZED_FAISS_URL} \
--DMILVUS_CPU_VERSION=${CPU_VERSION} \
--DBUILD_FAISS_WITH_MKL=${WITH_MKL} \
+-DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DFAISS_WITH_MKL=${WITH_MKL} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
