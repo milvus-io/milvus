@@ -57,7 +57,7 @@ class GrpcClient {
     Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param, Status& status);
 
     Status
-    Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list, const grpc::SearchParam& search_param);
+    Search(::milvus::grpc::TopKQueryResult& topk_query_result, const grpc::SearchParam& search_param);
 
     Status
     DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);

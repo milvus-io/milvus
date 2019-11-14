@@ -75,7 +75,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
 ::grpc::Status
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
-                           ::milvus::grpc::TopKQueryResultList* response) {
+                           ::milvus::grpc::TopKQueryResult* response) {
     std::vector<std::string> file_id_array;
     BaseTaskPtr task_ptr = SearchTask::Create(request, file_id_array, response);
     ::milvus::grpc::Status grpc_status;
@@ -87,7 +87,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
 ::grpc::Status
 GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
-                                  ::milvus::grpc::TopKQueryResultList* response) {
+                                  ::milvus::grpc::TopKQueryResult* response) {
     std::vector<std::string> file_id_array;
     for (int i = 0; i < request->file_id_array_size(); i++) {
         file_id_array.push_back(request->file_id_array(i));
