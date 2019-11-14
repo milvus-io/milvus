@@ -17,11 +17,15 @@
 
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
+#include <faiss/gpu/GpuCloner.h>
+
 #include <memory>
 #include <utility>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 
 namespace knowhere {
@@ -58,6 +62,20 @@ IVFPQ::GenParams(const Config& config) {
 VectorIndexPtr
 IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
     return std::make_shared<IVFPQ>(index);
+}
+
+VectorIndexPtr
+IVFPQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
+        ResScope rs(res, device_id, false);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
+
+        std::shared_ptr<faiss::Index> device_index;
+        device_index.reset(gpu_index);
+        return std::make_shared<GPUIVFPQ>(device_index, device_id, res);
+    } else {
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+    }
 }
 
 }  // namespace knowhere

@@ -116,6 +116,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
             break;
         }
+        case EngineType::FAISS_PQ: {
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;

@@ -168,6 +168,10 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
         }
+        case IndexType::FAISS_IVFPQ_MIX: {
+            index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFPQ_MIX);
+        }
         default: { return nullptr; }
     }
     return std::make_shared<VecIndexImpl>(index, type);
@@ -276,6 +280,10 @@ ConvertToCpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFSQ8_MIX: {
             return IndexType::FAISS_IVFSQ8_CPU;
         }
+        case IndexType::FAISS_IVFPQ_GPU:
+        case IndexType::FAISS_IVFPQ_MIX: {
+            return IndexType::FAISS_IVFPQ_CPU;
+        }
         default: { return type; }
     }
 }
@@ -291,9 +299,12 @@ ConvertToGpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFSQ8_CPU: {
             return IndexType::FAISS_IVFSQ8_GPU;
         }
+        case IndexType::FAISS_IVFPQ_MIX:
+        case IndexType::FAISS_IVFPQ_CPU: {
+            return IndexType::FAISS_IVFPQ_GPU;
+        }
         default: { return type; }
     }
 }
-
 }  // namespace engine
 }  // namespace milvus

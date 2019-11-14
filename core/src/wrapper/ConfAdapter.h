@@ -79,6 +79,9 @@ class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     knowhere::Config
     Match(const TempMetaConf& metaconf) override;
+
+    knowhere::Config
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
