@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "prometheus/PrometheusMetrics.h"
+#include "metrics/prometheus/PrometheusMetrics.h"
 #include "cache/GpuCacheMgr.h"
 #include "metrics/SystemInfo.h"
 #include "server/Config.h"
