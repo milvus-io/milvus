@@ -619,6 +619,18 @@ DBImpl::StartCompactionTask() {
     {
         std::lock_guard<std::mutex> lck(compact_result_mutex_);
         if (compact_thread_results_.empty()) {
+            // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
+            // 1. other tables may still has un-merged files
+            // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
+            if(compact_table_ids_.empty()) {
+                std::vector<meta::TableSchema> table_schema_array;
+                meta_ptr_->AllTables(table_schema_array);
+                for( auto& schema : table_schema_array) {
+                    compact_table_ids_.insert(schema.table_id_);
+                }
+            }
+
+            // start merge file thread
             compact_thread_results_.push_back(
                 compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
             compact_table_ids_.clear();
@@ -717,7 +729,7 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     for (auto& kv : raw_files) {
         auto files = kv.second;
         if (files.size() < options_.merge_trigger_number_) {
-            ENGINE_LOG_DEBUG << "Files number not greater equal than merge trigger number, skip merge action";
+            ENGINE_LOG_TRACE << "Files number not greater equal than merge trigger number, skip merge action";
             continue;
         }
 
@@ -734,7 +746,7 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 
 void
 DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    ENGINE_LOG_TRACE << " Background compaction thread start";
+    ENGINE_LOG_TRACE << "Background compaction thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -757,7 +769,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 
-    ENGINE_LOG_TRACE << " Background compaction thread exit";
+    ENGINE_LOG_TRACE << "Background compaction thread exit";
 }
 
 void
