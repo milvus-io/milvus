@@ -33,7 +33,7 @@ message(STATUS "Build time = ${BUILD_TIME}")
 
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
     execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.* \\(.*\\),.*/\\1/' | sed 's=[a-zA-Z]*\/==g'"
-                    OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+            OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
 ENDMACRO(GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
@@ -117,17 +117,17 @@ include(DefineOptions)
 include(BuildUtils)
 include(ThirdPartyPackages)
 
-if(MILVUS_USE_CCACHE)
-  find_program(CCACHE_FOUND ccache)
-  if(CCACHE_FOUND)
-    message(STATUS "Using ccache: ${CCACHE_FOUND}")
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
-    # let ccache preserve C++ comments, because some of them may be
-    # meaningful to the compiler
-    set(ENV{CCACHE_COMMENTS} "1")
-  endif(CCACHE_FOUND)
-endif()
+if (MILVUS_USE_CCACHE)
+    find_program(CCACHE_FOUND ccache)
+    if (CCACHE_FOUND)
+        message(STATUS "Using ccache: ${CCACHE_FOUND}")
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
+        # let ccache preserve C++ comments, because some of them may be
+        # meaningful to the compiler
+        set(ENV{CCACHE_COMMENTS} "1")
+    endif (CCACHE_FOUND)
+endif ()
 
 set(MILVUS_CPU_VERSION false)
 if (MILVUS_GPU_VERSION)
@@ -140,6 +140,10 @@ else ()
     message(STATUS "Building Milvus CPU version")
     set(MILVUS_CPU_VERSION true)
     add_compile_definitions("MILVUS_CPU_VERSION")
+endif ()
+
+if (MILVUS_WITH_PROMETHEUS)
+    add_compile_definitions("MILVUS_WITH_PROMETHEUS")
 endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -176,9 +180,9 @@ endif ()
 
 if (MILVUS_GPU_VERSION)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_gpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
-else()
+else ()
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_cpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
-endif()
+endif ()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
