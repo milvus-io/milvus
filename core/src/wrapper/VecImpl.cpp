@@ -84,8 +84,8 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         Config search_cfg = cfg;
 
         auto res = index_->Search(dataset, search_cfg);
-        auto ids_array = res->array()[0];
-        auto dis_array = res->array()[1];
+        //        auto ids_array = res->array()[0];
+        //        auto dis_array = res->array()[1];
 
         //{
         //    auto& ids = ids_array;
@@ -104,12 +104,14 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         //    std::cout << "dist\n" << ss_dist.str() << std::endl;
         //}
 
-        auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
-        auto p_dist = dis_array->data()->GetValues<float>(1, 0);
+        //        auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
+        //        auto p_dist = dis_array->data()->GetValues<float>(1, 0);
 
         // TODO(linxj): avoid copy here.
-        memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
-        memcpy(dist, p_dist, sizeof(float) * nq * k);
+        memcpy(ids, res->ids(), sizeof(int64_t) * nq * k);
+        memcpy(dist, res->dist(), sizeof(float) * nq * k);
+        free(res->ids());
+        free(res->dist());
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
