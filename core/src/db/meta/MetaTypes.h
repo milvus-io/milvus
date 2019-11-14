@@ -19,6 +19,7 @@
 
 #include "db/Constants.h"
 #include "db/engine/ExecutionEngine.h"
+#include "src/config.h"
 
 #include <map>
 #include <memory>
@@ -33,6 +34,7 @@ constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_NLIST = 16384;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
+constexpr char CURRENT_VERSION[] = MILVUS_VERSION;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
 constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
@@ -57,6 +59,9 @@ struct TableSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
+    std::string owner_table_;
+    std::string partition_tag_;
+    std::string version_ = CURRENT_VERSION;
 };  // TableSchema
 
 struct TableFileSchema {
