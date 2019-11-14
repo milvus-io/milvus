@@ -146,8 +146,7 @@ XBuildIndexTask::Execute() {
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-            std::cout << "ERROR: failed to build index, index file is too large or gpu memory is not enough"
-                      << std::endl;
+            ENGINE_LOG_ERROR << "Failed to build index, index file is too large or gpu memory is not enough";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
@@ -179,8 +178,8 @@ XBuildIndexTask::Execute() {
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-            std::cout << "ERROR: failed to persist index file: " << table_file.location_
-                      << ", possible out of disk space" << std::endl;
+            ENGINE_LOG_ERROR << "Failed to persist index file: " << table_file.location_
+                      << ", possible out of disk space";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
