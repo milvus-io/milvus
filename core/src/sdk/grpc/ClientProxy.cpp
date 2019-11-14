@@ -32,6 +32,13 @@ UriCheck(const std::string& uri) {
     return (index != std::string::npos);
 }
 
+void
+CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
+    auto vector_data = target->mutable_vector_data();
+    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
+    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
+}
+
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -189,23 +196,22 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            for (size_t i = 0; i < record.data.size(); i++) {
-                grpc_record->add_vector_data(record.data[i]);
-            }
+            CopyRowRecord(grpc_record, record);
         }
 
         // Single thread
         ::milvus::grpc::VectorIds vector_ids;
         if (!id_array.empty()) {
-            for (auto i = 0; i < id_array.size(); i++) {
-                insert_param.add_row_id_array(id_array[i]);
-            }
+            /* set user's ids */
+            auto row_ids = insert_param.mutable_row_id_array();
+            row_ids->Reserve(static_cast<int>(id_array.size()));
+            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
+
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);
-            for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
-                id_array.push_back(vector_ids.vector_id_array(i));
-            }
+            /* return Milvus generated ids back to user */
+            id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
         }
 #endif
     } catch (std::exception& ex) {
@@ -218,7 +224,7 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
 Status
 ClientProxy::Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
                     const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
-                    int64_t topk, int64_t nprobe, std::vector<TopKQueryResult>& topk_query_result_array) {
+                    int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
     try {
         // step 1: convert vectors data
         ::milvus::grpc::SearchParam search_param;
@@ -230,9 +236,7 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         }
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
-            for (auto& rec : record.data) {
-                row_record->add_vector_data(rec);
-            }
+            CopyRowRecord(row_record, record);
         }
 
         // step 2: convert range array
@@ -243,21 +247,17 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         }
 
         // step 3: search vectors
-        ::milvus::grpc::TopKQueryResultList topk_query_result_list;
-        Status status = client_ptr_->Search(topk_query_result_list, search_param);
+        ::milvus::grpc::TopKQueryResult result;
+        Status status = client_ptr_->Search(result, search_param);
 
         // step 4: convert result array
-        for (uint64_t i = 0; i < topk_query_result_list.topk_query_result_size(); ++i) {
-            TopKQueryResult result;
-            for (uint64_t j = 0; j < topk_query_result_list.topk_query_result(i).query_result_arrays_size(); ++j) {
-                QueryResult query_result;
-                query_result.id = topk_query_result_list.topk_query_result(i).query_result_arrays(j).id();
-                query_result.distance = topk_query_result_list.topk_query_result(i).query_result_arrays(j).distance();
-                result.query_result_arrays.emplace_back(query_result);
-            }
+        topk_query_result.row_num = result.row_num();
+        topk_query_result.ids.resize(result.ids().size());
+        memcpy(topk_query_result.ids.data(), result.ids().data(), result.ids().size() * sizeof(int64_t));
+        topk_query_result.distances.resize(result.distances().size());
+        memcpy(topk_query_result.distances.data(), result.distances().data(),
+               result.distances().size() * sizeof(float));
 
-            topk_query_result_array.emplace_back(result);
-        }
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to search vectors: " + std::string(ex.what()));

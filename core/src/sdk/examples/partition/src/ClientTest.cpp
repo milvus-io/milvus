@@ -133,18 +133,18 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // search vectors
         std::cout << "Search in correct partition" << std::endl;
         std::vector<std::string> partiton_tags = {std::to_string(TARGET_PARTITION)};
-        std::vector<milvus::TopKQueryResult> topk_query_result_array;
+        milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
         std::cout << "Search in wrong partition" << std::endl;
         partiton_tags = {"0"};
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
 
         std::cout << "Search by regex matched partition tag" << std::endl;
         partiton_tags = {"\\d"};
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
     }
 
     {  // wait unit build index finish
@@ -182,9 +182,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // search vectors
         std::cout << "Search in whole table" << std::endl;
         std::vector<std::string> partiton_tags;
-        std::vector<milvus::TopKQueryResult> topk_query_result_array;
+        milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
     }
 
     {  // drop index
