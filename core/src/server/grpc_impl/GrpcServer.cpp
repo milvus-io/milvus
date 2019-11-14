@@ -93,7 +93,7 @@ GrpcServer::StartService() {
 
     builder.SetCompressionAlgorithmSupportStatus(GRPC_COMPRESS_STREAM_GZIP, true);
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
-    builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_HIGH);
+    builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
     GrpcRequestHandler service;
 
