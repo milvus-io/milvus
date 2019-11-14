@@ -179,7 +179,7 @@ XBuildIndexTask::Execute() {
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
             ENGINE_LOG_ERROR << "Failed to persist index file: " << table_file.location_
-                      << ", possible out of disk space";
+                             << ", possible out of disk space";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
