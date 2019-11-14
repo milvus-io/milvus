@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
@@ -8,37 +10,36 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-CMAKE_BUILD_DIR="${SCRIPTS_DIR}/../../../core/cmake_build"
+MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
+CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="/opt/milvus"
+FAISS_ROOT=""
 BUILD_COVERAGE="OFF"
-DB_PATH="/opt/milvus"
-PROFILING="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
-CUSTOMIZATION="OFF" # default use ori faiss
+GPU_VERSION="OFF"
+WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-CUSTOMIZED_FAISS_URL="${FAISS_URL:-NONE}"
-wget -q --method HEAD ${CUSTOMIZED_FAISS_URL}
-if [ $? -eq 0 ]; then
-  CUSTOMIZATION="ON"
-else
-  CUSTOMIZATION="OFF"
-fi
-
-while getopts "o:d:t:ulcgjhx" arg
+while getopts "o:t:b:f:gulcjmh" arg
 do
         case $arg in
              o)
                 INSTALL_PREFIX=$OPTARG
                 ;;
-             d)
-                DB_PATH=$OPTARG
-                ;;
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
+                ;;
+             b)
+                CORE_BUILD_DIR=$OPTARG # CORE_BUILD_DIR
+                ;;
+             f)
+                FAISS_ROOT=$OPTARG # FAISS ROOT PATH
+                ;;
+             g)
+                GPU_VERSION="ON";
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -50,31 +51,30 @@ do
              c)
                 BUILD_COVERAGE="ON"
                 ;;
-             g)
-                PROFILING="ON"
-                ;;
              j)
                 USE_JFROG_CACHE="ON"
                 ;;
-             x)
-                CUSTOMIZATION="OFF" # force use ori faiss
+             m)
+                WITH_MKL="ON"
                 ;;
              h) # help
                 echo "
 
 parameter:
 -o: install prefix(default: /opt/milvus)
--d: db data path(default: /opt/milvus)
 -t: build type(default: Debug)
+-b: core code build directory
+-f: faiss root path
+-g: gpu version
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
--g: profiling(default: OFF)
 -j: use jfrog cache build directory(default: OFF)
+-m: build with MKL(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-g] [-j] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-u] [-l] [-c] [-j] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -85,30 +85,28 @@ usage:
         esac
 done
 
-if [[ ! -d ${CMAKE_BUILD_DIR} ]]; then
-    mkdir ${CMAKE_BUILD_DIR}
+if [[ ! -d ${CORE_BUILD_DIR} ]]; then
+    mkdir ${CORE_BUILD_DIR}
 fi
 
-cd ${CMAKE_BUILD_DIR}
-
-# remove make cache since build.sh -l use default variables
-# force update the variables each time
-make rebuild_cache
+cd ${CORE_BUILD_DIR}
 
 CMAKE_CMD="cmake \
--DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+-DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
--DMILVUS_DB_PATH=${DB_PATH} \
--DMILVUS_ENABLE_PROFILING=${PROFILING} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
--DCUSTOMIZATION=${CUSTOMIZATION} \
--DFAISS_URL=${CUSTOMIZED_FAISS_URL} \
-.."
+-DFAISS_ROOT=${FAISS_ROOT} \
+-DFAISS_WITH_MKL=${WITH_MKL} \
+-DArrow_SOURCE=AUTO \
+-DFAISS_SOURCE=AUTO \
+${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
+
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
     # cpplint check
@@ -135,8 +133,8 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #        exit 1
 #    fi
 #    echo "clang-tidy check passed!"
-else
-    # compile and build
-    make -j8 || exit 1
-    make install || exit 1
 fi
+
+# compile and build
+make -j8 || exit 1
+make install || exit 1

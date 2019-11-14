@@ -1,0 +1,88 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: milvus-proxy-servers
+  namespace: milvus
+spec:
+  type: LoadBalancer
+  selector:
+    app: milvus
+    tier: proxy
+  ports:
+  - name: tcp
+    protocol: TCP
+    port: 19530
+    targetPort: 19530
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-proxy
+  namespace: milvus
+spec:
+  selector:
+    matchLabels:
+      app: milvus
+      tier: proxy
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: milvus
+        tier: proxy
+    spec:
+      containers:
+      - name: milvus-proxy
+        image: milvusdb/mishards:0.1.0-rc0
+        imagePullPolicy: Always
+        command: ["python", "mishards/main.py"]
+        resources:
+          limits:
+            memory: "3Gi"
+            cpu: "4"
+          requests:
+            memory: "2Gi"
+        ports:
+          - name: tcp
+            containerPort: 5000
+        env:
+          # - name: SQL_ECHO
+          #   value: "True"
+          - name: DEBUG
+            value: "False"
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: MILVUS_CLIENT
+            value: "False"
+          - name: LOG_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: LOG_PATH
+            value: /var/log/milvus
+          - name: SD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: SD_ROSERVER_POD_PATT
+            value: ".*-ro-servers-.*"
+        volumeMounts:
+        - name: milvus-proxy-configmap
+          mountPath: /source/mishards/.env
+          subPath: milvus_proxy_config.yml
+        - name: milvus-log-disk
+          mountPath: /var/log/milvus
+          subPath: proxylog
+      # imagePullSecrets:
+      #   - name: regcred
+      volumes:
+      - name: milvus-proxy-configmap
+        configMap:
+            name: milvus-proxy-configmap
+      - name: milvus-log-disk
+        persistentVolumeClaim:
+            claimName: milvus-log-disk

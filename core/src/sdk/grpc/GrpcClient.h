@@ -72,7 +72,7 @@ class GrpcClient {
     Cmd(std::string& result, const std::string& cmd);
 
     Status
-    DeleteByRange(grpc::DeleteByRangeParam& delete_by_range_param);
+    DeleteByDate(grpc::DeleteByDateParam& delete_by_range_param);
 
     Status
     PreloadTable(grpc::TableName& table_name);
@@ -82,6 +82,15 @@ class GrpcClient {
 
     Status
     DropIndex(grpc::TableName& table_name);
+
+    Status
+    CreatePartition(const grpc::PartitionParam& partition_param);
+
+    Status
+    ShowPartitions(const grpc::TableName& table_name, grpc::PartitionList& partition_array) const;
+
+    Status
+    DropPartition(const ::milvus::grpc::PartitionParam& partition_param);
 
     Status
     Disconnect();

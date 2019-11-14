@@ -366,7 +366,7 @@ DropTableTask::OnExecute() {
 
         // step 3: Drop table
         std::vector<DB_DATE> dates;
-        status = DBWrapper::DB()->DeleteTable(table_name_, dates);
+        status = DBWrapper::DB()->DropTable(table_name_, dates);
         if (!status.ok()) {
             return status;
         }
@@ -505,7 +505,8 @@ InsertTask::OnExecute() {
             memcpy(target_data, src_data, static_cast<size_t>(sizeof(int64_t) * insert_param_->row_id_array_size()));
         }
 
-        status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), vec_count, vec_f.data(), vec_ids);
+        status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), insert_param_->partition_tag(), vec_count,
+                                                vec_f.data(), vec_ids);
         rc.ElapseFromBegin("add vectors to engine");
         if (!status.ok()) {
             return status;
@@ -637,7 +638,8 @@ SearchTask::OnExecute() {
         rc.RecordSection("prepare vector data");
 
         // step 6: search vectors
-        engine::QueryResults results;
+        engine::ResultIds result_ids;
+        engine::ResultDistances result_distances;
         auto record_count = (uint64_t)search_param_->query_record_array().size();
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -647,11 +649,21 @@ SearchTask::OnExecute() {
 #endif
 
         if (file_id_array_.empty()) {
-            status =
-                DBWrapper::DB()->Query(table_name_, (size_t)top_k, record_count, nprobe, vec_f.data(), dates, results);
+            std::vector<std::string> partition_tags;
+            for (size_t i = 0; i < search_param_->partition_tag_array_size(); i++) {
+                partition_tags.emplace_back(search_param_->partition_tag_array(i));
+            }
+
+            status = ValidationUtil::ValidatePartitionTags(partition_tags);
+            if (!status.ok()) {
+                return status;
+            }
+
+            status = DBWrapper::DB()->Query(table_name_, partition_tags, (size_t)top_k, record_count, nprobe,
+                                            vec_f.data(), dates, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
-                                            vec_f.data(), dates, results);
+            status = DBWrapper::DB()->QueryByFileID(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
+                                                    vec_f.data(), dates, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -663,23 +675,20 @@ SearchTask::OnExecute() {
             return status;
         }
 
-        if (results.empty()) {
+        if (result_ids.empty()) {
             return Status::OK();  // empty table
         }
 
-        if (results.size() != record_count) {
-            std::string msg = "Search " + std::to_string(record_count) + " vectors but only return " +
-                              std::to_string(results.size()) + " results";
-            return Status(SERVER_ILLEGAL_SEARCH_RESULT, msg);
-        }
+        size_t result_k = result_ids.size() / record_count;
 
         // step 7: construct result array
-        for (auto& result : results) {
+        for (size_t i = 0; i < record_count; i++) {
             ::milvus::grpc::TopKQueryResult* topk_query_result = topk_result_list->add_topk_query_result();
-            for (auto& pair : result) {
+            for (size_t j = 0; j < result_k; j++) {
                 ::milvus::grpc::QueryResult* grpc_result = topk_query_result->add_query_result_arrays();
-                grpc_result->set_id(pair.first);
-                grpc_result->set_distance(pair.second);
+                size_t idx = i * result_k + j;
+                grpc_result->set_id(result_ids[idx]);
+                grpc_result->set_distance(result_distances[idx]);
             }
         }
 
@@ -759,22 +768,22 @@ CmdTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-DeleteByRangeTask::DeleteByRangeTask(const ::milvus::grpc::DeleteByRangeParam* delete_by_range_param)
+DeleteByDateTask::DeleteByDateTask(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param)
     : GrpcBaseTask(DDL_DML_TASK_GROUP), delete_by_range_param_(delete_by_range_param) {
 }
 
 BaseTaskPtr
-DeleteByRangeTask::Create(const ::milvus::grpc::DeleteByRangeParam* delete_by_range_param) {
+DeleteByDateTask::Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param) {
     if (delete_by_range_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
 
-    return std::shared_ptr<GrpcBaseTask>(new DeleteByRangeTask(delete_by_range_param));
+    return std::shared_ptr<GrpcBaseTask>(new DeleteByDateTask(delete_by_range_param));
 }
 
 Status
-DeleteByRangeTask::OnExecute() {
+DeleteByDateTask::OnExecute() {
     try {
         TimeRecorder rc("DeleteByRangeTask");
 
@@ -815,7 +824,7 @@ DeleteByRangeTask::OnExecute() {
         std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
-        status = DBWrapper::DB()->DeleteTable(table_name, dates);
+        status = DBWrapper::DB()->DropTable(table_name, dates);
         if (!status.ok()) {
             return status;
         }
@@ -944,6 +953,119 @@ DropIndexTask::OnExecute() {
     }
 
     return Status::OK();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+CreatePartitionTask::CreatePartitionTask(const ::milvus::grpc::PartitionParam* partition_param)
+    : GrpcBaseTask(DDL_DML_TASK_GROUP), partition_param_(partition_param) {
+}
+
+BaseTaskPtr
+CreatePartitionTask::Create(const ::milvus::grpc::PartitionParam* partition_param) {
+    if (partition_param == nullptr) {
+        SERVER_LOG_ERROR << "grpc input is null!";
+        return nullptr;
+    }
+    return std::shared_ptr<GrpcBaseTask>(new CreatePartitionTask(partition_param));
+}
+
+Status
+CreatePartitionTask::OnExecute() {
+    TimeRecorder rc("CreatePartitionTask");
+
+    try {
+        // step 1: check arguments
+        auto status = ValidationUtil::ValidateTableName(partition_param_->table_name());
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = ValidationUtil::ValidateTableName(partition_param_->partition_name());
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = ValidationUtil::ValidatePartitionTags({partition_param_->tag()});
+        if (!status.ok()) {
+            return status;
+        }
+
+        // step 2: create partition
+        status = DBWrapper::DB()->CreatePartition(partition_param_->table_name(), partition_param_->partition_name(),
+                                                  partition_param_->tag());
+        if (!status.ok()) {
+            // partition could exist
+            if (status.code() == DB_ALREADY_EXIST) {
+                return Status(SERVER_INVALID_TABLE_NAME, status.message());
+            }
+            return status;
+        }
+    } catch (std::exception& ex) {
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    rc.ElapseFromBegin("totally cost");
+
+    return Status::OK();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ShowPartitionsTask::ShowPartitionsTask(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list)
+    : GrpcBaseTask(INFO_TASK_GROUP), table_name_(table_name), partition_list_(partition_list) {
+}
+
+BaseTaskPtr
+ShowPartitionsTask::Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list) {
+    return std::shared_ptr<GrpcBaseTask>(new ShowPartitionsTask(table_name, partition_list));
+}
+
+Status
+ShowPartitionsTask::OnExecute() {
+    std::vector<engine::meta::TableSchema> schema_array;
+    auto statuts = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
+    if (!statuts.ok()) {
+        return statuts;
+    }
+
+    for (auto& schema : schema_array) {
+        ::milvus::grpc::PartitionParam* param = partition_list_->add_partition_array();
+        param->set_table_name(schema.owner_table_);
+        param->set_partition_name(schema.table_id_);
+        param->set_tag(schema.partition_tag_);
+    }
+    return Status::OK();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DropPartitionTask::DropPartitionTask(const ::milvus::grpc::PartitionParam* partition_param)
+    : GrpcBaseTask(DDL_DML_TASK_GROUP), partition_param_(partition_param) {
+}
+
+BaseTaskPtr
+DropPartitionTask::Create(const ::milvus::grpc::PartitionParam* partition_param) {
+    return std::shared_ptr<GrpcBaseTask>(new DropPartitionTask(partition_param));
+}
+
+Status
+DropPartitionTask::OnExecute() {
+    if (!partition_param_->partition_name().empty()) {
+        auto status = ValidationUtil::ValidateTableName(partition_param_->partition_name());
+        if (!status.ok()) {
+            return status;
+        }
+        return DBWrapper::DB()->DropPartition(partition_param_->partition_name());
+    } else {
+        auto status = ValidationUtil::ValidateTableName(partition_param_->table_name());
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = ValidationUtil::ValidatePartitionTags({partition_param_->tag()});
+        if (!status.ok()) {
+            return status;
+        }
+        return DBWrapper::DB()->DropPartitionByTag(partition_param_->table_name(), partition_param_->tag());
+    }
 }
 
 }  // namespace grpc

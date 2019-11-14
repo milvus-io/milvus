@@ -171,7 +171,8 @@ TEST_F(DBTest, DB_TEST) {
     BuildVectors(qb, qxb);
 
     std::thread search([&]() {
-        milvus::engine::QueryResults results;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -186,17 +187,19 @@ TEST_F(DBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
+
+            std::vector<std::string> tags;
+            stat = db_->Query(TABLE_NAME, tags, k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
-            for (auto k = 0; k < qb; ++k) {
-                ASSERT_EQ(results[k][0].first, target_ids[k]);
+            for (auto i = 0; i < qb; ++i) {
+                ASSERT_EQ(result_ids[i*k], target_ids[i]);
                 ss.str("");
-                ss << "Result [" << k << "]:";
-                for (auto result : results[k]) {
-                    ss << result.first << " ";
+                ss << "Result [" << i << "]:";
+                for (auto t = 0; t < k; t++) {
+                    ss << result_ids[i * k + t] << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }
@@ -209,10 +212,10 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
-            db_->InsertVectors(TABLE_NAME, qb, qxb.data(), target_ids);
+            db_->InsertVectors(TABLE_NAME, "", qb, qxb.data(), target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+            db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -270,7 +273,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     // insert data
     const int batch_size = 100;
     for (int j = 0; j < nb / batch_size; ++j) {
-        stat = db_->InsertVectors(TABLE_NAME, batch_size, xb.data() + batch_size * j * TABLE_DIM, ids);
+        stat = db_->InsertVectors(TABLE_NAME, "", batch_size, xb.data() + batch_size * j * TABLE_DIM, ids);
         if (j == 200) {
             sleep(1);
         }
@@ -282,16 +285,19 @@ TEST_F(DBTest, SEARCH_TEST) {
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     {
-        milvus::engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
-        milvus::engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -340,7 +346,7 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     int loop = 5;
     for (auto i = 0; i < loop; ++i) {
         milvus::engine::IDNumbers vector_ids;
-        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
         ASSERT_EQ(vector_ids.size(), nb);
     }
 
@@ -370,7 +376,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
 
     milvus::engine::IDNumbers ids;
-    stat = db_->InsertVectors(table_info.table_id_, 0, nullptr, ids);
+    stat = db_->InsertVectors(table_info.table_id_, "", 0, nullptr, ids);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->PreloadTable(table_info.table_id_);
@@ -387,15 +393,17 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DescribeIndex(table_info.table_id_, index);
     ASSERT_FALSE(stat.ok());
 
+    std::vector<std::string> tags;
     milvus::engine::meta::DatesT dates;
-    milvus::engine::QueryResults results;
-    stat = db_->Query(table_info.table_id_, 1, 1, 1, nullptr, dates, results);
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+    stat = db_->Query(table_info.table_id_, tags, 1, 1, 1, nullptr, dates, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
-    stat = db_->Query(table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, results);
+    stat = db_->QueryByFileID(table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->DeleteTable(table_info.table_id_, dates);
+    stat = db_->DropTable(table_info.table_id_, dates);
     ASSERT_FALSE(stat.ok());
 }
 
@@ -408,7 +416,7 @@ TEST_F(DBTest, INDEX_TEST) {
     BuildVectors(nb, xb);
 
     milvus::engine::IDNumbers vector_ids;
-    db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids.size(), nb);
 
     milvus::engine::TableIndex index;
@@ -435,6 +443,106 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_EQ(table_info.metric_type_, index_out.metric_type_);
 
     stat = db_->DropIndex(table_info.table_id_);
+    ASSERT_TRUE(stat.ok());
+}
+
+TEST_F(DBTest, PARTITION_TEST) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    // create partition and insert data
+    const int64_t PARTITION_COUNT = 5;
+    const int64_t INSERT_BATCH = 2000;
+    std::string table_name = TABLE_NAME;
+    for (int64_t i = 0; i < PARTITION_COUNT; i++) {
+        std::string partition_tag = std::to_string(i);
+        std::string partition_name = table_name + "_" + partition_tag;
+        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        ASSERT_TRUE(stat.ok());
+
+
+        std::vector<float> xb;
+        BuildVectors(INSERT_BATCH, xb);
+
+        milvus::engine::IDNumbers vector_ids;
+        vector_ids.resize(INSERT_BATCH);
+        for (int64_t k = 0; k < INSERT_BATCH; k++) {
+            vector_ids[k] = i*INSERT_BATCH + k;
+        }
+
+        db_->InsertVectors(table_name, partition_tag, INSERT_BATCH, xb.data(), vector_ids);
+        ASSERT_EQ(vector_ids.size(), INSERT_BATCH);
+    }
+
+    //duplicated partition is not allowed
+    stat = db_->CreatePartition(table_name, "", "0");
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<milvus::engine::meta::TableSchema> partiton_schema_array;
+    stat = db_->ShowPartitions(table_name, partiton_schema_array);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(partiton_schema_array.size(), PARTITION_COUNT);
+    for (int64_t i = 0; i < PARTITION_COUNT; i++) {
+        ASSERT_EQ(partiton_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
+    }
+
+    { // build index
+        milvus::engine::TableIndex index;
+        index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFFLAT;
+        index.metric_type_ = (int) milvus::engine::MetricType::L2;
+        stat = db_->CreateIndex(table_info.table_id_, index);
+        ASSERT_TRUE(stat.ok());
+
+        uint64_t row_count = 0;
+        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(row_count, INSERT_BATCH*PARTITION_COUNT);
+    }
+
+    { // search
+        const int64_t nq = 5;
+        const int64_t topk = 10;
+        const int64_t nprobe = 10;
+        std::vector<float> xq;
+        BuildVectors(nq, xq);
+
+        // specify partition tags
+        std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(result_ids.size()/topk, nq);
+
+        // search in whole table
+        tags.clear();
+        result_ids.clear();
+        result_distances.clear();
+        stat = db_->Query(TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(result_ids.size()/topk, nq);
+
+        // search in all partitions(tag regex match)
+        tags.push_back("\\d");
+        result_ids.clear();
+        result_distances.clear();
+        stat = db_->Query(TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(result_ids.size()/topk, nq);
+    }
+
+    stat = db_->DropPartition(table_name + "_0");
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->DropPartitionByTag(table_name, "1");
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->DropIndex(table_name);
+    ASSERT_TRUE(stat.ok());
+
+    milvus::engine::meta::DatesT dates;
+    stat = db_->DropTable(table_name, dates);
     ASSERT_TRUE(stat.ok());
 }
 
@@ -470,7 +578,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     int loop = INSERT_LOOP;
     for (auto i = 0; i < loop; ++i) {
         milvus::engine::IDNumbers vector_ids;
-        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
@@ -502,12 +610,12 @@ TEST_F(DBTest2, DELETE_TEST) {
     BuildVectors(nb, xb);
 
     milvus::engine::IDNumbers vector_ids;
-    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
     milvus::engine::TableIndex index;
     stat = db_->CreateIndex(TABLE_NAME, index);
 
     std::vector<milvus::engine::meta::DateT> dates;
-    stat = db_->DeleteTable(TABLE_NAME, dates);
+    stat = db_->DropTable(TABLE_NAME, dates);
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
 
@@ -537,7 +645,7 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     BuildVectors(nb, xb);
 
     milvus::engine::IDNumbers vector_ids;
-    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    stat = db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
     milvus::engine::TableIndex index;
     stat = db_->CreateIndex(TABLE_NAME, index);
 
@@ -549,7 +657,7 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     std::string end_value = CurrentTmDate(1);
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
 
-    stat = db_->DeleteTable(TABLE_NAME, dates);
+    stat = db_->DropTable(TABLE_NAME, dates);
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count = 0;
