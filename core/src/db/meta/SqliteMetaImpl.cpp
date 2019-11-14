@@ -971,6 +971,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
             order_by(&TableFileSchema::file_size_).desc());
 
         Status result;
+        int64_t to_merge_files = 0;
         for (auto& file : selected) {
             TableFileSchema table_file;
             table_file.file_size_ = std::get<4>(file);
@@ -999,11 +1000,13 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
             }
+
             files[table_file.date_].push_back(table_file);
+            to_merge_files++;
         }
 
-        if (selected.size() > 0) {
-            ENGINE_LOG_DEBUG << "Collect " << selected.size() << " to-merge files";
+        if (to_merge_files > 0) {
+            ENGINE_LOG_TRACE << "Collect " << to_merge_files << " to-merge files";
         }
         return result;
     } catch (std::exception& e) {
@@ -1313,16 +1316,18 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     try {
         server::MetricCollector metric;
 
+        int64_t remove_tables = 0;
         for (auto& table_id : table_ids) {
             auto selected = ConnectorPtr->select(columns(&TableFileSchema::file_id_),
                                                  where(c(&TableFileSchema::table_id_) == table_id));
             if (selected.size() == 0) {
                 utils::DeleteTablePath(options_, table_id);
+                remove_tables++;
             }
         }
 
-        if (table_ids.size() > 0) {
-            ENGINE_LOG_DEBUG << "Remove " << table_ids.size() << " tables folder";
+        if (remove_tables) {
+            ENGINE_LOG_DEBUG << "Remove " << remove_tables << " tables folder";
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when delete table folder", e.what());
