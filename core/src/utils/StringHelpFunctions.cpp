@@ -17,6 +17,7 @@
 
 #include "utils/StringHelpFunctions.h"
 
+#include <regex>
 #include <string>
 
 namespace milvus {
@@ -39,39 +40,53 @@ StringHelpFunctions::TrimStringQuote(std::string& string, const std::string& qou
     }
 }
 
-Status
+void
 StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::string& delimeter,
                                             std::vector<std::string>& result) {
     if (str.empty()) {
-        return Status::OK();
+        return;
     }
 
-    size_t last = 0;
-    size_t index = str.find_first_of(delimeter, last);
-    while (index != std::string::npos) {
-        result.emplace_back(str.substr(last, index - last));
-        last = index + 1;
-        index = str.find_first_of(delimeter, last);
+    size_t prev = 0, pos = 0;
+    while (true) {
+        pos = str.find_first_of(delimeter, prev);
+        if (pos == std::string::npos) {
+            result.emplace_back(str.substr(prev));
+            break;
+        } else {
+            result.emplace_back(str.substr(prev, pos - prev));
+            prev = pos + 1;
+        }
     }
-    if (index - last > 0) {
-        std::string temp = str.substr(last);
-        result.emplace_back(temp);
+}
+
+void
+StringHelpFunctions::MergeStringWithDelimeter(const std::vector<std::string>& strs, const std::string& delimeter,
+                                              std::string& result) {
+    if (strs.empty()) {
+        result = "";
+        return;
     }
 
-    return Status::OK();
+    result = strs[0];
+    for (size_t i = 1; i < strs.size(); i++) {
+        result = result + delimeter + strs[i];
+    }
 }
 
 Status
 StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
                                         std::vector<std::string>& result) {
     if (quote.empty()) {
-        return SplitStringByDelimeter(str, delimeter, result);
+        SplitStringByDelimeter(str, delimeter, result);
+        return Status::OK();
     }
 
     size_t last = 0;
     size_t index = str.find_first_of(quote, last);
     if (index == std::string::npos) {
-        return SplitStringByDelimeter(str, delimeter, result);
+        SplitStringByDelimeter(str, delimeter, result);
+        return Status::OK();
     }
 
     std::string process_str = str;
@@ -116,10 +131,27 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
     }
 
     if (!process_str.empty()) {
-        return SplitStringByDelimeter(process_str, delimeter, result);
+        SplitStringByDelimeter(process_str, delimeter, result);
     }
 
     return Status::OK();
+}
+
+bool
+StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::string& pattern_str) {
+    // if target_str equals pattern_str, return true
+    if (target_str == pattern_str) {
+        return true;
+    }
+
+    // regex match
+    std::regex pattern(pattern_str);
+    std::smatch results;
+    if (std::regex_search(target_str, results, pattern)) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
 }  // namespace server

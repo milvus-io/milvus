@@ -145,6 +145,10 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
             break;
         }
+        case IndexType::FAISS_IVFPQ_MIX: {
+            index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFPQ_MIX);
+        }
         case IndexType::FAISS_IVFSQ8_MIX: {
             index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
@@ -167,10 +171,6 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
         case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
-        }
-        case IndexType::FAISS_IVFPQ_MIX: {
-            index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
-            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFPQ_MIX);
         }
         default: { return nullptr; }
     }

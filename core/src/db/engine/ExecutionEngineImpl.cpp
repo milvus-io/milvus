@@ -117,7 +117,11 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_PQ: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+#endif
             break;
         }
         default: {

@@ -19,11 +19,15 @@
 
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
+include_directories(${MILVUS_THIRDPARTY_SRC})
 
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 add_subdirectory(index)
+if (FAISS_WITH_MKL)
+    add_compile_definitions("WITH_MKL")
+endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
@@ -62,11 +66,11 @@ set(scheduler_files
         ${scheduler_task_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/easyloggingpp external_easyloggingpp_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/nlohmann external_nlohmann_files)
-set(external_files
-        ${external_easyloggingpp_files}
-        ${external_nlohmann_files}
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+set(thirdparty_files
+        ${thirdparty_easyloggingpp_files}
+        ${thirdparty_nlohmann_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
@@ -82,7 +86,7 @@ set(engine_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
-        ${external_files}
+        ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
         )

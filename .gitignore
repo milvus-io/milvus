@@ -26,3 +26,6 @@ cmake_build
 *.lo
 *.tar.gz
 *.log
+.coverage
+*.pyc
+cov_html/
