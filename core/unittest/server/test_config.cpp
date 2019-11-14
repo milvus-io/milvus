@@ -415,6 +415,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetResourceConfigSearchResources("gpu10");
     ASSERT_FALSE(s.ok());
 
+    s = config.SetResourceConfigSearchResources("cpu");
+    ASSERT_TRUE(s.ok());
+
     s = config.SetResourceConfigIndexBuildDevice("gup2");
     ASSERT_FALSE(s.ok());
     s = config.SetResourceConfigIndexBuildDevice("gpu16");
@@ -435,3 +438,4 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_TRUE(s.ok());
 }
+
