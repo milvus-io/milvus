@@ -67,7 +67,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
     set(MILVUS_VERSION "0.6.0")
-endif ()
+endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/config.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/config.h @ONLY)
