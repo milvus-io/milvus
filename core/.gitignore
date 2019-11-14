@@ -2,7 +2,7 @@ milvus/
 conf/server_config.yaml
 conf/log_config.conf
 src/config.h
-version.h
+src/version.h
 lcov_out/
 base.info
 output.info
