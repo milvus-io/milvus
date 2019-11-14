@@ -154,6 +154,18 @@ IVFPQConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& typ
     return conf;
 }
 
+int64_t
+IVFPQConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
+    if (size <= TYPICAL_COUNT / 16384 + 1) {
+        // handle less row count, avoid nlist set to 0
+        return 1;
+    } else if (int(size / TYPICAL_COUNT) * nlist <= 0) {
+        // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
+        return int(size / TYPICAL_COUNT * 16384);
+    }
+    return nlist;
+}
+
 knowhere::Config
 NSGConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::NSGCfg>();
