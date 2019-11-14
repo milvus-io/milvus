@@ -211,7 +211,7 @@ TEST_P(IVFTest, clone_test) {
 
     {
         // copy from gpu to cpu
-        std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
+        std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "GPUIVFPQ", "IVFSQHybrid"};
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
@@ -236,7 +236,7 @@ TEST_P(IVFTest, clone_test) {
 
     {
         // copy to gpu
-        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFSQ", "GPUIVFSQ"};
+        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFSQ", "GPUIVFSQ", "IVFPQ", "GPUIVFPQ"};
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
