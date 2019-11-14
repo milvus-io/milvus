@@ -622,10 +622,10 @@ DBImpl::StartCompactionTask() {
             // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
             // 1. other tables may still has un-merged files
             // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
-            if(compact_table_ids_.empty()) {
+            if (compact_table_ids_.empty()) {
                 std::vector<meta::TableSchema> table_schema_array;
                 meta_ptr_->AllTables(table_schema_array);
-                for( auto& schema : table_schema_array) {
+                for (auto& schema : table_schema_array) {
                     compact_table_ids_.insert(schema.table_id_);
                 }
             }
