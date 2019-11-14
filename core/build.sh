@@ -84,7 +84,7 @@ parameter:
 -j: use jfrog cache build directory(default: OFF)
 -g: build GPU version(default: OFF)
 -m: build with MKL(default: OFF)
--e: build without prometheus(default: OFF)
+-e: build without prometheus
 -h: help
 
 usage:
