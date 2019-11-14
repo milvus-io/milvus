@@ -110,12 +110,16 @@ set(unittest_libs
         pthread
         metrics
         gfortran
-        prometheus-cpp-pull
-        prometheus-cpp-push
-        prometheus-cpp-core
         dl
         z
         )
+if (MILVUS_WITH_PROMETHEUS)
+    set(unittest_libs ${unittest_libs}
+            prometheus-cpp-push
+            prometheus-cpp-pull
+            prometheus-cpp-core
+            )
+endif ()
 
 if (MILVUS_GPU_VERSION)
     include_directories("${CUDA_INCLUDE_DIRS}")
