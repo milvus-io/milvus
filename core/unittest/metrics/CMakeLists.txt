@@ -18,10 +18,15 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_metricbase.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_metrics.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_prometheus.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
+        test_metricbase.cpp
+        test_metrics.cpp
+        utils.cpp
+        )
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(test_files ${test_files}
+            test_prometheus.cpp)
+endif ()
 
 add_executable(test_metrics
         ${common_files}
