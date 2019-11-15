@@ -1,4 +1,4 @@
-FROM nvidia/cuda:10.1-devel-ubuntu16.04
+FROM nvidia/cuda:10.1-devel-ubuntu18.04
 
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
@@ -14,6 +14,8 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 COPY ./docker-entrypoint.sh /opt
 COPY ./milvus /opt/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/milvus/lib"
+
+WORKDIR /opt/milvus
 
 ENTRYPOINT [ "/opt/docker-entrypoint.sh" ]
 

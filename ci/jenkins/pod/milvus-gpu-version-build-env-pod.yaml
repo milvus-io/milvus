@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: milvus-build-env
+  name: milvus-gpu-build-env
   labels:
     app: milvus
-    componet: build-env
+    componet: gpu-build-env
 spec:
   containers:
   - name: milvus-build-env
-    image: registry.zilliz.com/milvus/milvus-build-env:v0.5.1-ubuntu18.04
+    image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.6.0-ubuntu18.04
     env:
     - name: POD_IP
       valueFrom:
