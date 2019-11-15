@@ -4,6 +4,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.6.0 (TODO)
 
 ## Bug
+- \#228 - memory usage increased slowly during searching vectors
 - \#246 - Exclude src/external folder from code coverage for jenkin ci
 - \#248 - Reside src/external in thirdparty
 
