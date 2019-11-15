@@ -153,7 +153,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
     // @return TopKQueryResultList
     ::grpc::Status
     Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
-           ::milvus::grpc::TopKQueryResultList* response) override;
+           ::milvus::grpc::TopKQueryResult* response) override;
+
     // *
     // @brief This method is used to query vector in specified files.
     //
@@ -162,7 +163,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
     // @return TopKQueryResultList
     ::grpc::Status
     SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
-                  ::milvus::grpc::TopKQueryResultList* response) override;
+                  ::milvus::grpc::TopKQueryResult* response) override;
+
     // *
     // @brief This method is used to give the server status.
     //

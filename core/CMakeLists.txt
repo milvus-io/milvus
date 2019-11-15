@@ -18,7 +18,7 @@
 #-------------------------------------------------------------------------------
 
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.12)
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -32,10 +32,8 @@ string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
 message(STATUS "Build time = ${BUILD_TIME}")
 
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
-    execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    if (GIT_BRANCH_NAME STREQUAL "")
-        execute_process(COMMAND "git" symbolic-ref --short -q HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    endif ()
+    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.* \\(.*\\),.*/\\1/' | sed 's=[a-zA-Z]*\/==g'"
+                    OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
 ENDMACRO(GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
@@ -69,7 +67,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
     set(MILVUS_VERSION "0.6.0")
-endif ()
+endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/config.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/config.h @ONLY)
@@ -112,11 +110,24 @@ endif ()
 set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
+set(MILVUS_THIRDPARTY_SRC ${PROJECT_SOURCE_DIR}/thirdparty)
 
 include(ExternalProject)
 include(DefineOptions)
 include(BuildUtils)
 include(ThirdPartyPackages)
+
+if(MILVUS_USE_CCACHE)
+  find_program(CCACHE_FOUND ccache)
+  if(CCACHE_FOUND)
+    message(STATUS "Using ccache: ${CCACHE_FOUND}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
+    # let ccache preserve C++ comments, because some of them may be
+    # meaningful to the compiler
+    set(ENV{CCACHE_COMMENTS} "1")
+  endif(CCACHE_FOUND)
+endif()
 
 set(MILVUS_CPU_VERSION false)
 if (MILVUS_GPU_VERSION)
@@ -162,7 +173,13 @@ add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 if ("${MILVUS_DB_PATH}" STREQUAL "")
     set(MILVUS_DB_PATH "/tmp/milvus")
 endif ()
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+
+if (MILVUS_GPU_VERSION)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_gpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+else()
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_cpu_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+endif()
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
 install(DIRECTORY scripts/

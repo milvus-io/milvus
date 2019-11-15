@@ -22,7 +22,7 @@ include_directories(include)
 aux_source_directory(interface interface_files)
 aux_source_directory(grpc grpc_client_files)
 
-add_library(milvus_sdk STATIC
+add_library(milvus_sdk SHARED
         ${interface_files}
         ${grpc_client_files}
         ${grpc_service_files}

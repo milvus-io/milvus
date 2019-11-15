@@ -89,14 +89,16 @@ Utils::MetricTypeName(const milvus::MetricType& metric_type) {
 std::string
 Utils::IndexTypeName(const milvus::IndexType& index_type) {
     switch (index_type) {
-        case milvus::IndexType::cpu_idmap:
-            return "cpu idmap";
-        case milvus::IndexType::gpu_ivfflat:
-            return "gpu ivflat";
-        case milvus::IndexType::gpu_ivfsq8:
-            return "gpu ivfsq8";
-        case milvus::IndexType::mix_nsg:
-            return "mix nsg";
+        case milvus::IndexType::FLAT:
+            return "FLAT";
+        case milvus::IndexType::IVFFLAT:
+            return "IVFFLAT";
+        case milvus::IndexType::IVFSQ8:
+            return "IVFSQ8";
+        case milvus::IndexType::NSG:
+            return "NSG";
+        case milvus::IndexType::IVFSQ8H:
+            return "IVFSQ8H";
         default:
             return "Unknown index type";
     }
@@ -153,32 +155,34 @@ Utils::BuildVectors(int64_t from, int64_t to, std::vector<milvus::RowRecord>& ve
 
 void
 Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-                         const std::vector<milvus::TopKQueryResult>& topk_query_result_array) {
+                         const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
-    std::cout << "Returned result count: " << topk_query_result_array.size() << std::endl;
+    size_t nq = topk_query_result.row_num;
+    size_t topk = topk_query_result.ids.size() / nq;
+    std::cout << "Returned result count: " << nq * topk << std::endl;
 
     int32_t index = 0;
-    for (auto& result : topk_query_result_array) {
+    for (size_t i = 0; i < nq; i++) {
         auto search_id = search_record_array[index].first;
         index++;
-        std::cout << "No." << std::to_string(index) << " vector " << std::to_string(search_id) << " top "
-                  << std::to_string(result.query_result_arrays.size()) << " search result:" << std::endl;
-        for (auto& item : result.query_result_arrays) {
-            std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
-            std::cout << std::endl;
+        std::cout << "No." << index << " vector " << search_id << " top " << topk << " search result:" << std::endl;
+        for (size_t j = 0; j < topk; j++) {
+            size_t idx = i * nq + j;
+            std::cout << "\t" << topk_query_result.ids[idx] << "\t" << topk_query_result.distances[idx] << std::endl;
         }
     }
-
     BLOCK_SPLITER
 }
 
 void
 Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-                         const std::vector<milvus::TopKQueryResult>& topk_query_result_array) {
+                         const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
+    size_t nq = topk_query_result.row_num;
+    size_t result_k = topk_query_result.ids.size() / nq;
     int64_t index = 0;
-    for (auto& result : topk_query_result_array) {
-        auto result_id = result.query_result_arrays[0].id;
+    for (size_t i = 0; i < nq; i++) {
+        auto result_id = topk_query_result.ids[i * result_k];
         auto search_id = search_record_array[index++].first;
         if (result_id != search_id) {
             std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
@@ -193,8 +197,10 @@ void
 Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
                 const std::vector<std::string>& partiton_tags, int64_t top_k, int64_t nprobe,
                 const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
-                std::vector<milvus::TopKQueryResult>& topk_query_result_array) {
-    topk_query_result_array.clear();
+                milvus::TopKQueryResult& topk_query_result) {
+    topk_query_result.distances.clear();
+    topk_query_result.ids.clear();
+    topk_query_result.row_num = 0;
 
     std::vector<milvus::Range> query_range_array;
     milvus::Range rg;
@@ -210,14 +216,14 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
     {
         BLOCK_SPLITER
         milvus_sdk::TimeRecorder rc("search");
-        milvus::Status stat = conn->Search(table_name, partiton_tags, record_array, query_range_array, top_k, nprobe,
-                                           topk_query_result_array);
+        milvus::Status stat =
+            conn->Search(table_name, partiton_tags, record_array, query_range_array, top_k, nprobe, topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }
 
-    PrintSearchResult(search_record_array, topk_query_result_array);
-    CheckSearchResult(search_record_array, topk_query_result_array);
+    PrintSearchResult(search_record_array, topk_query_result);
+    CheckSearchResult(search_record_array, topk_query_result);
 }
 
 }  // namespace milvus_sdk

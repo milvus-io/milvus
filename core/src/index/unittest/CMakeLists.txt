@@ -6,9 +6,9 @@ include_directories(${INDEX_SOURCE_DIR})
 set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss
-        arrow "${ARROW_PREFIX}/lib/libjemalloc_pic.a"
+        arrow "${ARROW_LIB_DIR}/libjemalloc_pic.a"
         )
-if (BUILD_FAISS_WITH_MKL)
+if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
             "-Wl,--start-group \
             ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
@@ -27,7 +27,7 @@ set(basic_libs
         )
 
 set(util_srcs
-        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/adapter/Structure.cpp
