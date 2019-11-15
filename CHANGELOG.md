@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#314 - add Find FAISS in CMake
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 - \#322 - Add option to enable / disable prometheus 
+- \#358 - Add more information in build.sh and install.md
 
 ## Task
 
