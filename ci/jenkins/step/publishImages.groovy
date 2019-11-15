@@ -1,6 +1,6 @@
 container('publish-images') {
     timeout(time: 15, unit: 'MINUTES') {
-        dir ("docker/deploy/${OS_NAME}") {
+        dir ("docker/deploy/${env.BINRARY_VERSION}/${env.OS_NAME}") {
             def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
 
             withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
