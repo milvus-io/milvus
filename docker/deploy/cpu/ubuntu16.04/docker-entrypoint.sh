@@ -7,4 +7,3 @@ if [ "$1" == 'start' ]; then
 fi
 
 exec "$@"
-

@@ -16,9 +16,9 @@
 // under the License.
 
 #include "wrapper/ConfAdapter.h"
+#include "WrapperException.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"
-#include "WrapperException.h"
 
 #include <cmath>
 #include <memory>
@@ -147,12 +147,12 @@ IVFPQConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& typ
     auto conf = std::make_shared<knowhere::IVFPQCfg>();
     conf->k = metaconf.k;
 
-    if (metaconf.nprobe <= 0){
+    if (metaconf.nprobe <= 0) {
         WRAPPER_LOG_ERROR << "The nprobe of PQ is wrong!";
         throw WrapperException("The nprobe of PQ is wrong!");
-    }
-    else
+    } else {
         conf->nprobe = metaconf.nprobe;
+    }
 
     return conf;
 }

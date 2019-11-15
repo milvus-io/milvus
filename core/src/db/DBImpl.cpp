@@ -179,9 +179,10 @@ DBImpl::PreloadTable(const std::string& table_id) {
     }
 
     // get all table files from parent table
+    meta::DatesT dates;
     std::vector<size_t> ids;
     meta::TableFilesSchema files_array;
-    auto status = GetFilesToSearch(table_id, ids, files_array);
+    auto status = GetFilesToSearch(table_id, ids, dates, files_array);
     if (!status.ok()) {
         return status;
     }
@@ -190,7 +191,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
     std::vector<meta::TableSchema> partiton_array;
     status = meta_ptr_->ShowPartitions(table_id, partiton_array);
     for (auto& schema : partiton_array) {
-        status = GetFilesToSearch(schema.table_id_, ids, files_array);
+        status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
     }
 
     int64_t size = 0;
@@ -304,6 +305,10 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     if (!partition_tag.empty()) {
         std::string partition_name;
         status = meta_ptr_->GetPartitionName(table_id, partition_tag, target_table_name);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << status.message();
+            return status;
+        }
     }
 
     // insert vectors into target table
@@ -400,7 +405,7 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& parti
     if (partition_tags.empty()) {
         // no partition tag specified, means search in whole table
         // get all table files from parent table
-        status = GetFilesToSearch(table_id, ids, files_array);
+        status = GetFilesToSearch(table_id, ids, dates, files_array);
         if (!status.ok()) {
             return status;
         }
@@ -408,7 +413,7 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& parti
         std::vector<meta::TableSchema> partiton_array;
         status = meta_ptr_->ShowPartitions(table_id, partiton_array);
         for (auto& schema : partiton_array) {
-            status = GetFilesToSearch(schema.table_id_, ids, files_array);
+            status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
         }
     } else {
         // get files from specified partitions
@@ -416,7 +421,7 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& parti
         GetPartitionsByTags(table_id, partition_tags, partition_name_array);
 
         for (auto& partition_name : partition_name_array) {
-            status = GetFilesToSearch(partition_name, ids, files_array);
+            status = GetFilesToSearch(partition_name, ids, dates, files_array);
         }
     }
 
@@ -446,7 +451,7 @@ DBImpl::QueryByFileID(const std::string& table_id, const std::vector<std::string
     }
 
     meta::TableFilesSchema files_array;
-    auto status = GetFilesToSearch(table_id, ids, files_array);
+    auto status = GetFilesToSearch(table_id, ids, dates, files_array);
     if (!status.ok()) {
         return status;
     }
@@ -829,9 +834,8 @@ DBImpl::BackgroundBuildIndex() {
 }
 
 Status
-DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids,
+DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
                          meta::TableFilesSchema& files) {
-    meta::DatesT dates;
     meta::DatePartionedTableFilesSchema date_files;
     auto status = meta_ptr_->FilesToSearch(table_id, file_ids, dates, date_files);
     if (!status.ok()) {
