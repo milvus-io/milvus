@@ -153,7 +153,8 @@ class DBImpl : public DB {
     MemSerialize();
 
     Status
-    GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, meta::TableFilesSchema& files);
+    GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
+        meta::TableFilesSchema& files);
 
     Status
     GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,
