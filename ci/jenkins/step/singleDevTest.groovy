@@ -9,7 +9,7 @@ timeout(time: 60, unit: 'MINUTES') {
 
     // if (!fileExists('milvus-helm')) {
     //     dir ("milvus-helm") {
-    //         checkout([$class: 'GitSCM', branches: [[name: "0.6.0"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/0.5.0:refs/remotes/origin/0.5.0"]]])
+    //         checkout([$class: 'GitSCM', branches: [[name: "0.6.0"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/0.6.0:refs/remotes/origin/0.6.0"]]])
     //     }
     // }
     // dir ("milvus-helm") {
