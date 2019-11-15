@@ -17,7 +17,7 @@
 
 #include "sdk/grpc/ClientProxy.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "src/config.h"
+#include "src/version.h"
 
 #include <memory>
 #include <string>
