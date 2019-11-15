@@ -8,6 +8,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#246 - Exclude src/external folder from code coverage for jenkin ci
 - \#248 - Reside src/external in thirdparty
 - \#316 - Some files not merged after vectors added
+- \#327 - Search does not use GPU when index type is FLAT
 - \#340 - Test cases run failed on 0.6.0
 
 ## Feature
