@@ -16,8 +16,10 @@
 // under the License.
 
 #include "metrics/Metrics.h"
-#include "PrometheusMetrics.h"
 #include "server/Config.h"
+#ifdef MILVUS_WITH_PROMETHEUS
+#include "metrics/prometheus/PrometheusMetrics.h"
+#endif
 
 #include <string>
 
@@ -37,11 +39,15 @@ Metrics::CreateMetricsCollector() {
 
     config.GetMetricConfigCollector(collector_type_str);
 
+#ifdef MILVUS_WITH_PROMETHEUS
     if (collector_type_str == "prometheus") {
         return PrometheusMetrics::GetInstance();
     } else {
         return MetricsBase::GetInstance();
     }
+#else
+    return MetricsBase::GetInstance();
+#endif
 }
 
 }  // namespace server

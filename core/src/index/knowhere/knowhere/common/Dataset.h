@@ -54,6 +54,9 @@ class Dataset {
         : tensor_(std::move(tensor)), tensor_schema_(std::move(tensor_schema)) {
     }
 
+    Dataset(void* ids, void* dists) : ids_(ids), dists_(dists) {
+    }
+
     Dataset(const Dataset&) = delete;
     Dataset&
     operator=(const Dataset&) = delete;
@@ -128,6 +131,16 @@ class Dataset {
         tensor_schema_ = std::move(tensor_schema);
     }
 
+    void*
+    ids() {
+        return ids_;
+    }
+
+    void*
+    dist() {
+        return dists_;
+    }
+
     // const Config &
     // meta() const { return meta_; }
 
@@ -141,6 +154,9 @@ class Dataset {
     SchemaPtr array_schema_;
     std::vector<TensorPtr> tensor_;
     SchemaPtr tensor_schema_;
+    // TODO(yukun): using smart pointer
+    void* ids_;
+    void* dists_;
     // Config meta_;
 };
 
