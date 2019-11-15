@@ -88,23 +88,24 @@ NSG::Search(const DatasetPtr& dataset, const Config& config) {
     s_params.search_length = build_cfg->search_length;
     index_->Search((float*)p_data, rows, dim, build_cfg->k, res_dis, res_ids, s_params);
 
-    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
-    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
+    //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
+    //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
 
-    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
-    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
-
-    auto int64_type = std::make_shared<arrow::Int64Type>();
-    auto float_type = std::make_shared<arrow::FloatType>();
-
-    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
-    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
-
-    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
-    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
-    std::vector<ArrayPtr> array{ids, dists};
-
-    return std::make_shared<Dataset>(array, nullptr);
+    //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
+    //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
+    //
+    //    auto int64_type = std::make_shared<arrow::Int64Type>();
+    //    auto float_type = std::make_shared<arrow::FloatType>();
+    //
+    //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
+    //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
+    //
+    //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
+    //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
+    //    std::vector<ArrayPtr> array{ids, dists};
+    //
+    //    return std::make_shared<Dataset>(array, nullptr);
+    return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
 }
 
 IndexModelPtr

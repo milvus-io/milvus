@@ -151,9 +151,10 @@ generate_query_dataset(int64_t nb, int64_t dim, float* xb) {
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->array()[0];
+    auto ids = result->ids();
     for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
+        EXPECT_EQ(i, *((int64_t*)(ids) + i * k));
+        //        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
     }
 }
 
