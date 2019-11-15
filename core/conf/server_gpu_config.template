@@ -29,7 +29,7 @@ metric_config:
 cache_config:
   cpu_cache_capacity: 16            # GB, CPU memory used for cache, must be a positive integer
   cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
-  gpu_cache_capacity: 3             # GB, GPU memory used for cache, must be a positive integer
+  gpu_cache_capacity: 4             # GB, GPU memory used for cache, must be a positive integer
   gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
   cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
 

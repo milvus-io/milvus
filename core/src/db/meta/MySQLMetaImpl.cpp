@@ -1392,6 +1392,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
         }  // Scoped Connection
 
         Status ret;
+        int64_t to_merge_files = 0;
         for (auto& resRow : res) {
             TableFileSchema table_file;
             table_file.file_size_ = resRow["file_size"];
@@ -1420,13 +1421,14 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
+                to_merge_files++;
             }
 
             files[table_file.date_].push_back(table_file);
         }
 
-        if (res.size() > 0) {
-            ENGINE_LOG_DEBUG << "Collect " << res.size() << " to-merge files";
+        if (to_merge_files > 0) {
+            ENGINE_LOG_TRACE << "Collect " << to_merge_files << " to-merge files";
         }
         return ret;
     } catch (std::exception& e) {
@@ -1809,6 +1811,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
             mysqlpp::StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
 
+            int64_t remove_tables = 0;
             if (!res.empty()) {
                 std::stringstream idsToDeleteSS;
                 for (auto& resRow : res) {
@@ -1817,7 +1820,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                     resRow["table_id"].to_string(table_id);
 
                     utils::DeleteTablePath(options_, table_id, false);  // only delete empty folder
-
+                    remove_tables++;
                     idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
                 }
                 std::string idsToDeleteStr = idsToDeleteSS.str();
@@ -1832,8 +1835,8 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 }
             }
 
-            if (res.size() > 0) {
-                ENGINE_LOG_DEBUG << "Remove " << res.size() << " tables from meta";
+            if (remove_tables > 0) {
+                ENGINE_LOG_DEBUG << "Remove " << remove_tables << " tables from meta";
             }
         }  // Scoped Connection
     } catch (std::exception& e) {
