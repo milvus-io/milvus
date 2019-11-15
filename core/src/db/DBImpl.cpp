@@ -305,6 +305,10 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     if (!partition_tag.empty()) {
         std::string partition_name;
         status = meta_ptr_->GetPartitionName(table_id, partition_tag, target_table_name);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << status.message();
+            return status;
+        }
     }
 
     // insert vectors into target table
