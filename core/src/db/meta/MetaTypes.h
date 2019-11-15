@@ -19,7 +19,7 @@
 
 #include "db/Constants.h"
 #include "db/engine/ExecutionEngine.h"
-#include "src/config.h"
+#include "src/version.h"
 
 #include <map>
 #include <memory>

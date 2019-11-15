@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#248 - Reside src/external in thirdparty
 - \#316 - Some files not merged after vectors added
 - \#340 - Test cases run failed on 0.6.0
+- \#353 - Rename config.h.in to version.h.in
 
 ## Feature
 - \#12 - Pure CPU version for Milvus

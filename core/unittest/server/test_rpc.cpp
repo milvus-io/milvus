@@ -23,7 +23,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/grpc_impl/GrpcRequestScheduler.h"
 #include "server/grpc_impl/GrpcRequestTask.h"
-#include "src/config.h"
+#include "src/version.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
