@@ -75,7 +75,8 @@ parameter:
 -d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
 -f: FAISS root path(default: empty). The path should be an absolute path
-    containing the pre-installed lib/ and include/ directory of FAISS
+    containing the pre-installed lib/ and include/ directory of FAISS. If they can't be found,
+    we will build the original FAISS from source instead.
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -r: remove previous build directory(default: OFF)
