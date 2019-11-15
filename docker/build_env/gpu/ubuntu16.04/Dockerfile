@@ -20,6 +20,8 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 RUN sh -c 'echo export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2019.5.281/linux/mkl/lib/intel64:\$LD_LIBRARY_PATH > /etc/profile.d/mkl.sh'
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
+WORKDIR /opt/milvus
+
 ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
 CMD [ "start" ]
-

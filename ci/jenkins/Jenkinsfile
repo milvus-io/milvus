@@ -93,7 +93,7 @@ pipeline {
                         stage("Publish docker images") {
                             agent {
                                 kubernetes {
-                                    label 'publish'
+                                    label "${BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                 }
@@ -115,7 +115,7 @@ pipeline {
                         stage("Deploy to Development") {
                             agent {
                                 kubernetes {
-                                    label 'dev-test'
+                                    label "${BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                 }
@@ -223,7 +223,7 @@ pipeline {
                         stage("Publish docker images") {
                             agent {
                                 kubernetes {
-                                    label 'publish'
+                                    label "${BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                 }
@@ -245,7 +245,7 @@ pipeline {
                         stage("Deploy to Development") {
                             agent {
                                 kubernetes {
-                                    label 'dev-test'
+                                    label "${BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                 }
