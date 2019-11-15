@@ -14,10 +14,11 @@ CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 WITH_MKL="OFF"
-FAISS_ROOT=""
+FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
+WITH_PROMETHEUS="ON"
 
-while getopts "p:d:t:f:ulrcgjhxzm" arg
+while getopts "p:d:t:f:ulrcgjhxzme" arg
 do
         case $arg in
              p)
@@ -63,7 +64,10 @@ do
                 ;;
              m)
                 WITH_MKL="ON"
-                ;;   
+                ;;
+             e)
+               WITH_PROMETHEUS="OFF"
+                ;;
              h) # help
                 echo "
 
@@ -80,10 +84,11 @@ parameter:
 -j: use jfrog cache build directory(default: OFF)
 -g: build GPU version(default: OFF)
 -m: build with MKL(default: OFF)
+-e: build without prometheus
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-j] [-g] [-m] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-j] [-g] [-m] [-e] [-h]
                 "
                 exit 0
                 ;;
@@ -118,6 +123,7 @@ CMAKE_CMD="cmake \
 -DCUSTOMIZATION=${CUSTOMIZATION} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
+-DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
