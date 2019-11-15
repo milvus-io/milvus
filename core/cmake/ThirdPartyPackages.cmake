@@ -164,8 +164,10 @@ endif ()
 
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        #disable find_package for now
-        build_dependency(${DEPENDENCY_NAME})
+        find_package(${DEPENDENCY_NAME} MODULE)
+        if(NOT ${${DEPENDENCY_NAME}_FOUND})
+          build_dependency(${DEPENDENCY_NAME})
+        endif()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")

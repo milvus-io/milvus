@@ -1,10 +1,11 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
-
 # Milvus 0.6.0 (TODO)
 
 ## Bug
+- \#246 - Exclude src/external folder from code coverage for jenkin ci
+- \#248 - Reside src/external in thirdparty
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -12,11 +13,31 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#226 - Experimental shards middleware for Milvus
 
 ## Improvement
+- \#275 - Rename C++ SDK IndexType
+- \#284 - Change C++ SDK to shared library
+- \#260 - C++ SDK README
+- \#314 - add Find FAISS in CMake
+- \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 
 ## Task
 
+# Milvus 0.5.3 (2019-11-13)
 
-# Milvus 0.5.2 (TODO)
+## Bug
+- \#258 - Bytes type in proto cause big-endian/little-endian problem
+
+## Feature
+
+## Improvement
+- \#204 - improve grpc performance in search
+- \#207 - Add more unittest for config set/get
+- \#208 - optimize unittest to support run single test more easily
+- \#284 - Change C++ SDK to shared library
+- \#260 - C++ SDK README
+
+## Task
+
+# Milvus 0.5.2 (2019-11-07)
 
 ## Bug
 - \#194 - Search faild: message="Table file doesn't exist"
@@ -24,7 +45,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Feature
 
 ## Improvement
-- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.52
+- \#190 - Update default config:use_blas_threshold to 1100 and server version printout to 0.5.2
 
 ## Task
 

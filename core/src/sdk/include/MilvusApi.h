@@ -31,12 +31,12 @@ namespace milvus {
  * @brief Index Type
  */
 enum class IndexType {
-    invalid = 0,
-    cpu_idmap,
-    gpu_ivfflat,
-    gpu_ivfsq8,
-    mix_nsg,
-    ivfsq8h,
+    INVALID = 0,
+    FLAT = 1,
+    IVFFLAT = 2,
+    IVFSQ8 = 3,
+    NSG = 4,
+    IVFSQ8H = 5,
 };
 
 enum class MetricType {
@@ -79,18 +79,12 @@ struct RowRecord {
 };
 
 /**
- * @brief Query result
- */
-struct QueryResult {
-    int64_t id;       ///< Output result
-    double distance;  ///< Vector similarity distance
-};
-
-/**
  * @brief TopK query result
  */
 struct TopKQueryResult {
-    std::vector<QueryResult> query_result_arrays;  ///< TopK query result
+    int64_t row_num;
+    std::vector<int64_t> ids;
+    std::vector<float> distances;
 };
 
 /**
@@ -274,7 +268,7 @@ class Connection {
     virtual Status
     Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
            const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
-           int64_t nprobe, std::vector<TopKQueryResult>& topk_query_result_array) = 0;
+           int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show table description

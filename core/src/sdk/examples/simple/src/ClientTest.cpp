@@ -41,7 +41,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 5;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::gpu_ivfsq8;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t N_LIST = 15000;
 
 milvus::TableSchema
@@ -144,9 +144,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     milvus_sdk::Utils::Sleep(3);
     {  // search vectors
         std::vector<std::string> partiton_tags;
-        std::vector<milvus::TopKQueryResult> topk_query_result_array;
+        milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
     }
 
     {  // wait unit build index finish
@@ -169,9 +169,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {  // search vectors
         std::vector<std::string> partiton_tags;
-        std::vector<milvus::TopKQueryResult> topk_query_result_array;
+        milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
     }
 
     {  // drop index

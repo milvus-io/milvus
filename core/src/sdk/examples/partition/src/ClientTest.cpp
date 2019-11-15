@@ -41,7 +41,7 @@ constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::gpu_ivfsq8;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t N_LIST = 15000;
 constexpr int32_t PARTITION_COUNT = 5;
 constexpr int32_t TARGET_PARTITION = 3;
@@ -133,18 +133,18 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // search vectors
         std::cout << "Search in correct partition" << std::endl;
         std::vector<std::string> partiton_tags = {std::to_string(TARGET_PARTITION)};
-        std::vector<milvus::TopKQueryResult> topk_query_result_array;
+        milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
         std::cout << "Search in wrong partition" << std::endl;
         partiton_tags = {"0"};
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
 
         std::cout << "Search by regex matched partition tag" << std::endl;
         partiton_tags = {"\\d"};
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
     }
 
     {  // wait unit build index finish
@@ -182,9 +182,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // search vectors
         std::cout << "Search in whole table" << std::endl;
         std::vector<std::string> partiton_tags;
-        std::vector<milvus::TopKQueryResult> topk_query_result_array;
+        milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result_array);
+                                    topk_query_result);
     }
 
     {  // drop index
