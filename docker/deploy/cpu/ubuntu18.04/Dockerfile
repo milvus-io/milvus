@@ -11,6 +11,8 @@ COPY ./docker-entrypoint.sh /opt
 COPY ./milvus /opt/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/milvus/lib"
 
+WORKDIR /opt/milvus
+
 ENTRYPOINT [ "/opt/docker-entrypoint.sh" ]
 
 CMD [ "start" ]
