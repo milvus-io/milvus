@@ -40,13 +40,13 @@ pipeline {
             }
 
             parallel {
-                stage ("CPU Version") {
+                stage ("GPU Version") {
                     environment {
-                        BINRARY_VERSION = "cpu"
+                        BINRARY_VERSION = "gpu"
                         PACKAGE_VERSION = VersionNumber([
-                            versionNumberString : '${SEMVER}-cpu-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
+                            versionNumberString : '${SEMVER}-gpu-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
                         ]);
-                        DOCKER_VERSION = "${SEMVER}-cpu-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                        DOCKER_VERSION = "${SEMVER}-gpu-${OS_NAME}-${LOWER_BUILD_TYPE}"
                     }
 
                     stages {
@@ -55,7 +55,7 @@ pipeline {
                                 kubernetes {
                                     label 'build'
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
+                                    yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
                                 }
                             }
 
@@ -170,13 +170,13 @@ pipeline {
                     }
                 }
 
-                stage ("GPU Version") {
+                stage ("CPU Version") {
                     environment {
-                        BINRARY_VERSION = "gpu"
+                        BINRARY_VERSION = "cpu"
                         PACKAGE_VERSION = VersionNumber([
-                            versionNumberString : '${SEMVER}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-gpu-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
+                            versionNumberString : '${SEMVER}-cpu-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
                         ]);
-                        DOCKER_VERSION = "${SEMVER}-${OS_NAME}-${LOWER_BUILD_TYPE}-gpu"
+                        DOCKER_VERSION = "${SEMVER}-cpu-${OS_NAME}-${LOWER_BUILD_TYPE}"
                     }
 
                     stages {
@@ -185,7 +185,7 @@ pipeline {
                                 kubernetes {
                                     label 'build'
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
+                                    yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
                                 }
                             }
 
