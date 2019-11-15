@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 
 #include "IndexGPUIVF.h"
 
@@ -26,6 +27,10 @@ namespace knowhere {
 class GPUIVFPQ : public GPUIVF {
  public:
     explicit GPUIVFPQ(const int& device_id) : GPUIVF(device_id) {
+    }
+
+    GPUIVFPQ(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
+        : GPUIVF(std::move(index), device_id, resource) {
     }
 
     IndexModelPtr

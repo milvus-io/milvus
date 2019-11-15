@@ -79,6 +79,13 @@ class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     knowhere::Config
     Match(const TempMetaConf& metaconf) override;
+
+    knowhere::Config
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
+
+ protected:
+    static int64_t
+    MatchNlist(const int64_t& size, const int64_t& nlist);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
