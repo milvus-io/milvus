@@ -53,7 +53,7 @@ pipeline {
                         stage("Run Build") {
                             agent {
                                 kubernetes {
-                                    label 'build'
+                                    label "${BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
                                 }
@@ -183,7 +183,7 @@ pipeline {
                         stage("Run Build") {
                             agent {
                                 kubernetes {
-                                    label 'build'
+                                    label "${BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
                                 }
