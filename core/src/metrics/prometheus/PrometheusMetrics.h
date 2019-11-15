@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-#include "MetricBase.h"
+#include "metrics/MetricBase.h"
 #include "utils/Error.h"
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()

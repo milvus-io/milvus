@@ -60,7 +60,7 @@ class ClientProxy : public Connection {
     Status
     Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
            const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
-           int64_t nprobe, std::vector<TopKQueryResult>& topk_query_result_array) override;
+           int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;

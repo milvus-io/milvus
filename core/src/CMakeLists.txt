@@ -37,6 +37,7 @@ endforeach ()
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
@@ -91,6 +92,11 @@ set(engine_files
         ${wrapper_files}
         )
 
+if (MILVUS_WITH_PROMETHEUS)
+    set(engine_files ${engine_files}
+            ${metrics_prometheus_files})
+endif ()
+
 set(client_grpc_lib
         grpcpp_channelz
         grpc++
@@ -115,7 +121,6 @@ set(third_party_libs
         sqlite
         ${client_grpc_lib}
         yaml-cpp
-        ${prometheus_lib}
         mysqlpp
         zlib
         ${boost_lib}
@@ -138,10 +143,16 @@ if (MILVUS_GPU_VERSION)
             )
 endif ()
 
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+if (MILVUS_ENABLE_PROFILING)
     set(third_party_libs ${third_party_libs}
             gperftools
             libunwind
+            )
+endif ()
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(third_party_libs ${third_party_libs}
+            ${prometheus_lib}
             )
 endif ()
 
@@ -166,12 +177,21 @@ target_link_libraries(milvus_engine
         ${engine_libs}
         )
 
-add_library(metrics STATIC ${metrics_files})
+if (MILVUS_WITH_PROMETHEUS)
+    add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
+else ()
+    add_library(metrics STATIC ${metrics_files})
+endif ()
 
 set(metrics_lib
         yaml-cpp
-        ${prometheus_lib}
         )
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(metrics_lib ${metrics_lib}
+            ${prometheus_lib}
+            )
+endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
