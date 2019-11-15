@@ -51,6 +51,7 @@ class KnowhereWrapperTest
         tempconf.size = nb;
         tempconf.dim = dim;
         tempconf.k = k;
+        tempconf.nprobe = 16;
 
         index_ = GetVecIndexFactory(index_type);
         conf = ParamGenerator::GetInstance().GenBuild(index_type, tempconf);
