@@ -1,8 +1,4 @@
-FROM nvidia/cuda:10.1-devel-ubuntu18.04
-
-ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
-
-RUN rm -rf /etc/apt/sources.list.d/nvidia-ml.list && rm -rf /etc/apt/sources.list.d/cuda.list
+FROM ubuntu:18.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 && \
@@ -14,6 +10,8 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 COPY ./docker-entrypoint.sh /opt
 COPY ./milvus /opt/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/milvus/lib"
+
+WORKDIR /opt/milvus
 
 ENTRYPOINT [ "/opt/docker-entrypoint.sh" ]
 
