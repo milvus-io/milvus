@@ -43,16 +43,28 @@ Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
 
-    channel_ = ::grpc::CreateChannel(uri, ::grpc::InsecureChannelCredentials());
-    if (channel_ != nullptr) {
-        connected_ = true;
-        client_ptr_ = std::make_shared<GrpcClient>(channel_);
-        return Status::OK();
-    }
+//    channel_ = ::grpc::CreateChannel(uri, ::grpc::InsecureChannelCredentials());
 
-    std::string reason = "connect failed!";
-    connected_ = false;
-    return Status(StatusCode::NotConnected, reason);
+//    channel_ = std::make_shared<grpc_channel>(grpc_insecure_channel_create(uri.c_str(), nullptr, nullptr));
+//    channel_ = std::shared_ptr<grpc_channel>(grpc_insecure_channel_create(uri.c_str(), nullptr, nullptr));
+    auto uri_str = uri.c_str();
+    grpc_channel * channel = grpc_insecure_channel_create(uri_str, nullptr, nullptr);
+//    grpc_insecure_channel_create(uri.c_str(), nullptr, nullptr);
+    auto state = grpc_channel_check_connectivity_state(channel, true);
+    if (state == GRPC_CHANNEL_READY) {
+        std::cout << "Connect " << uri << " successfully";
+    } else {
+        std::cout << "Connect " << uri << " failed.";
+    }
+//    if (channel_ != nullptr) {
+//        connected_ = true;
+//        client_ptr_ = std::make_shared<GrpcClient>(channel_);
+//        return Status::OK();
+//    }
+
+//    std::string reason = "connect failed!";
+//    connected_ = false;
+//    return Status(StatusCode::NotConnected, reason);
 }
 
 Status
