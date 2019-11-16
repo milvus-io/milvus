@@ -29,8 +29,13 @@ $ ./build.sh -t Release
 ```
 
 By default, it will build CPU version. To build GPU version, add `-g` option
-```
+```shell
 $ ./build.sh -g
+```
+
+If you want to know the complete build options, run
+```shell
+$./build.sh -h
 ```
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
@@ -43,13 +48,13 @@ $ cd [Milvus root path]/core/milvus
 
 Add `lib/` directory to `LD_LIBRARY_PATH`
 
-```
+```shell
 $ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:[Milvus root path]/core/milvus/lib
 ```
 
 Then start Milvus server:
 
-```
+```shell
 $ cd scripts
 $ ./start_server.sh
 ```
@@ -65,7 +70,7 @@ $ ./stop_server.sh
 `protocol https not supported or disabled in libcurl`.
 First, make sure you have `libcurl4-openssl-dev` installed in your system.
 Then try reinstall CMake from source with `--system-curl` option:
-```
+```shell
 $ ./bootstrap --system-curl 
 $ make 
 $ sudo make install

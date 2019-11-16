@@ -14,64 +14,69 @@ CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 WITH_MKL="OFF"
-FAISS_ROOT=""
+FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
+WITH_PROMETHEUS="ON"
 
-while getopts "p:d:t:f:ulrcgjhxzm" arg
-do
-        case $arg in
-             p)
-                INSTALL_PREFIX=$OPTARG
-                ;;
-             d)
-                DB_PATH=$OPTARG
-                ;;
-             t)
-                BUILD_TYPE=$OPTARG # BUILD_TYPE
-                ;;
-             f)
-                FAISS_ROOT=$OPTARG
-                FAISS_SOURCE="AUTO"
-                ;;
-             u)
-                echo "Build and run unittest cases" ;
-                BUILD_UNITTEST="ON";
-                ;;
-             l)
-                RUN_CPPLINT="ON"
-                ;;
-             r)
-                if [[ -d ${BUILD_OUTPUT_DIR} ]]; then
-                    rm ./${BUILD_OUTPUT_DIR} -r
-                    MAKE_CLEAN="ON"
-                fi
-                ;;
-             c)
-                BUILD_COVERAGE="ON"
-                ;;
-             z)
-                PROFILING="ON"
-                ;;
-             j)
-                USE_JFROG_CACHE="ON"
-                ;;
-             x)
-                CUSTOMIZATION="OFF" # force use ori faiss
-                ;;
-             g)
-                GPU_VERSION="ON"
-                ;;
-             m)
-                WITH_MKL="ON"
-                ;;   
-             h) # help
-                echo "
+while getopts "p:d:t:f:ulrcgjhxzme" arg; do
+  case $arg in
+  p)
+    INSTALL_PREFIX=$OPTARG
+    ;;
+  d)
+    DB_PATH=$OPTARG
+    ;;
+  t)
+    BUILD_TYPE=$OPTARG # BUILD_TYPE
+    ;;
+  f)
+    FAISS_ROOT=$OPTARG
+    FAISS_SOURCE="AUTO"
+    ;;
+  u)
+    echo "Build and run unittest cases"
+    BUILD_UNITTEST="ON"
+    ;;
+  l)
+    RUN_CPPLINT="ON"
+    ;;
+  r)
+    if [[ -d ${BUILD_OUTPUT_DIR} ]]; then
+      rm ./${BUILD_OUTPUT_DIR} -r
+      MAKE_CLEAN="ON"
+    fi
+    ;;
+  c)
+    BUILD_COVERAGE="ON"
+    ;;
+  z)
+    PROFILING="ON"
+    ;;
+  j)
+    USE_JFROG_CACHE="ON"
+    ;;
+  x)
+    CUSTOMIZATION="OFF" # force use ori faiss
+    ;;
+  g)
+    GPU_VERSION="ON"
+    ;;
+  m)
+    WITH_MKL="ON"
+    ;;
+  e)
+    WITH_PROMETHEUS="OFF"
+    ;;
+  h) # help
+    echo "
 
 parameter:
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
--f: faiss root path(default: empty)
+-f: FAISS root path(default: empty). The path should be an absolute path
+    containing the pre-installed lib/ and include/ directory of FAISS. If they can't be found,
+    we will build the original FAISS from source instead.
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -r: remove previous build directory(default: OFF)
@@ -80,29 +85,30 @@ parameter:
 -j: use jfrog cache build directory(default: OFF)
 -g: build GPU version(default: OFF)
 -m: build with MKL(default: OFF)
+-e: build without prometheus(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-j] [-g] [-m] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-j] [-g] [-m] [-e] [-h]
                 "
-                exit 0
-                ;;
-             ?)
-                echo "ERROR! unknown argument"
-        exit 1
-        ;;
-        esac
+    exit 0
+    ;;
+  ?)
+    echo "ERROR! unknown argument"
+    exit 1
+    ;;
+  esac
 done
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
-    mkdir ${BUILD_OUTPUT_DIR}
+  mkdir ${BUILD_OUTPUT_DIR}
 fi
 
 cd ${BUILD_OUTPUT_DIR}
 
 # remove make cache since build.sh -l use default variables
 # force update the variables each time
-make rebuild_cache > /dev/null 2>&1
+make rebuild_cache >/dev/null 2>&1
 
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
@@ -118,30 +124,31 @@ CMAKE_CMD="cmake \
 -DCUSTOMIZATION=${CUSTOMIZATION} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
+-DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
 
 if [[ ${MAKE_CLEAN} == "ON" ]]; then
-    make clean
+  make clean
 fi
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
-    # cpplint check
-    make lint
-    if [ $? -ne 0 ]; then
-        echo "ERROR! cpplint check failed"
-        exit 1
-    fi
-    echo "cpplint check passed!"
+  # cpplint check
+  make lint
+  if [ $? -ne 0 ]; then
+    echo "ERROR! cpplint check failed"
+    exit 1
+  fi
+  echo "cpplint check passed!"
 
-    # clang-format check
-    make check-clang-format
-    if [ $? -ne 0 ]; then
-        echo "ERROR! clang-format check failed"
-        exit 1
-    fi
-    echo "clang-format check passed!"
+  # clang-format check
+  make check-clang-format
+  if [ $? -ne 0 ]; then
+    echo "ERROR! clang-format check failed"
+    exit 1
+  fi
+  echo "clang-format check passed!"
 
 #    # clang-tidy check
 #    make check-clang-tidy
@@ -152,11 +159,11 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #    echo "clang-tidy check passed!"
 else
 
-    # strip binary symbol
-    if [[ ${BUILD_TYPE} != "Debug" ]]; then
-        strip src/milvus_server
-    fi
+  # strip binary symbol
+  if [[ ${BUILD_TYPE} != "Debug" ]]; then
+    strip src/milvus_server
+  fi
 
-    # compile and build
-    make -j 8 install || exit 1
+  # compile and build
+  make -j 8 install || exit 1
 fi
