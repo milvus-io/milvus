@@ -68,7 +68,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         stat = conn->Connect(param);
         std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
-
+#ifdef yhz
     {  // server version
         std::string version = conn->ServerVersion();
         std::cout << "Server version: " << version << std::endl;
@@ -206,4 +206,5 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::string status = conn->ServerStatus();
         std::cout << "Server status after disconnect: " << status << std::endl;
     }
+#endif
 }
