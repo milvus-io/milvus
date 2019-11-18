@@ -155,12 +155,10 @@ DBTest::SetUp() {
     res_mgr->Clear();
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, true));
-    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
 
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
     auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
-    res_mgr->Connect("cpu", "gtx1660", PCIE);
     res_mgr->Start();
     milvus::scheduler::SchedInst::GetInstance()->Start();
 
