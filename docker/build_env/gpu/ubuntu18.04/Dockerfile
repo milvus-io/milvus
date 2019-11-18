@@ -11,15 +11,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget && \
     git flex bison gfortran lsb-core \
     curl libtool automake libboost-all-dev libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
     clang-format-6.0 clang-tidy-6.0 \
-    lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.4-243 intel-mkl-core-2019.4-243 && \
+    lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
 RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/libmysqlclient_r.so
 
-RUN sh -c 'echo export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2019.4.243/linux/mkl/lib/intel64:\$LD_LIBRARY_PATH > /etc/profile.d/mkl.sh'
+RUN sh -c 'echo export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2019.5.281/linux/mkl/lib/intel64:\$LD_LIBRARY_PATH > /etc/profile.d/mkl.sh'
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
+WORKDIR /opt/milvus
+
 ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
 CMD [ "start" ]
-

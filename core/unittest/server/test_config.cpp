@@ -295,7 +295,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::vector<int64_t> device_ids;
     s = config.GetResourceConfigIndexBuildDevice(device_ids);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == resource_index_build_device);
+    ASSERT_TRUE(device_ids[0] == resource_index_build_device);
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {

@@ -762,6 +762,12 @@ Config::CheckResourceConfigIndexBuildDevice(const std::vector<std::string>& valu
         }
     }
 
+    if (value.size() > 1 && value[0] == "cpu") {
+        std::string msg =
+            "Invalid index build resource. "
+            "Possible reason: resource_config.index_build_device does not support hybrid of cpu and gpux.";
+    }
+
     return Status::OK();
 }
 
