@@ -32,13 +32,6 @@ UriCheck(const std::string& uri) {
     return (index != std::string::npos);
 }
 
-void
-CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
-    auto vector_data = target->mutable_vector_data();
-    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
-    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
-}
-
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -196,17 +189,14 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            CopyRowRecord(grpc_record, record);
+            grpc_record->add_vector_data(record.data.begin(), record.data.end());
         }
 
         // Single thread
         ::milvus::grpc::VectorIds vector_ids;
         if (!id_array.empty()) {
             /* set user's ids */
-            auto row_ids = insert_param.mutable_row_id_array();
-            row_ids->Reserve(static_cast<int>(id_array.size()));
-            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-
+            insert_param.add_row_id_array(id_array.begin(), id_array.end());
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);
@@ -236,7 +226,7 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         }
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
-            CopyRowRecord(row_record, record);
+            row_record->add_vector_data(record.data.begin(), record.data.end());
         }
 
         // step 2: convert range array
