@@ -53,6 +53,9 @@ struct IVFCfg : public Cfg {
 
     IVFCfg() = default;
 
+    std::stringstream
+    DumpImpl() override;
+
     bool
     CheckValid() override {
         return true;
@@ -68,6 +71,9 @@ struct IVFSQCfg : public IVFCfg {
              const int64_t& nbits, METRICTYPE type)
         : IVFCfg(dim, k, gpu_id, nlist, nprobe, type), nbits(nbits) {
     }
+
+    std::stringstream
+    DumpImpl() override;
 
     IVFSQCfg() = default;
 
@@ -118,6 +124,9 @@ struct NSGCfg : public IVFCfg {
     }
 
     NSGCfg() = default;
+
+    std::stringstream
+    DumpImpl() override;
 
     bool
     CheckValid() override {
