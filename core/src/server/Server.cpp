@@ -25,7 +25,7 @@
 #include "server/DBWrapper.h"
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcServer.h"
-#include "src/config.h"
+#include "src/version.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
