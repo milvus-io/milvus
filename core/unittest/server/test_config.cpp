@@ -292,7 +292,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     s = config.SetResourceConfigIndexBuildDevice("gpu" + std::to_string(resource_index_build_device));
 #endif
     ASSERT_TRUE(s.ok());
-    s = config.GetResourceConfigIndexBuildDevice(int32_val);
+    std::vector<int64_t> device_ids;
+    s = config.GetResourceConfigIndexBuildDevice(device_ids);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(int32_val == resource_index_build_device);
 }

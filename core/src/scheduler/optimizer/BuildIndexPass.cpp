@@ -15,37 +15,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/OnlyGPUPass.h"
+#include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
-#include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
 
-OnlyGPUPass::OnlyGPUPass(bool has_cpu) : has_cpu_(has_cpu) {
+BuildIndexPass::BuildIndexPass(std::vector<int64_t>& build_gpu_ids) : build_gpu_ids_(build_gpu_ids) {
 }
 
 bool
-OnlyGPUPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::SearchTask || has_cpu_)
+BuildIndexPass::Run(const TaskPtr& task) {
+    if (task->Type() != TaskType::BuildIndexTask)
         return false;
 
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8 &&
-        search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+    if (build_gpu_ids_.empty())
         return false;
-    }
 
-    auto gpu_id = get_gpu_pool();
-    if (gpu_id.empty())
-        return false;
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpu_id[specified_gpu_id_]);
+    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
     auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
     task->label() = label;
 
-    specified_gpu_id_ = (specified_gpu_id_ + 1) % gpu_id.size();
+    specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
     return true;
 }
 

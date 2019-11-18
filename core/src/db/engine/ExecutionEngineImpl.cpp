@@ -570,12 +570,19 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetResourceConfigIndexBuildDevice(gpu_num_);
+    std::vector<int64_t> gpu_ids;
+    Status s = config.GetResourceConfigIndexBuildDevice(gpu_ids);
     if (!s.ok()) {
         return s;
     }
+    for (auto id : gpu_ids) {
+        if (gpu_num_ == id) {
+            return Status::OK();
+        }
+    }
 
-    return Status::OK();
+    std::string msg = "Invalid gpu_num";
+    return Status(SERVER_INVALID_ARGUMENT, msg);
 }
 
 }  // namespace engine
