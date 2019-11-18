@@ -167,7 +167,7 @@ SearchRequest::OnExecute() {
 
         // step 7: construct result array
         topk_result_->set_row_num(record_count);
-        topk_result_->mutable_ids()->Resize(static_cast<int>(result_ids.size()), 0);
+        topk_result_->mutable_ids()->Resize(static_cast<int>(result_ids.size()), -1);
         memcpy(topk_result_->mutable_ids()->mutable_data(), result_ids.data(), result_ids.size() * sizeof(int64_t));
         topk_result_->mutable_distances()->Resize(static_cast<int>(result_distances.size()), 0.0);
         memcpy(topk_result_->mutable_distances()->mutable_data(), result_distances.data(),
