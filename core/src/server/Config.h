@@ -101,10 +101,11 @@ static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu,gpu0";
 #endif
 
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE = "index_build_device";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_DELIMITER = ",";
 #ifdef MILVUS_CPU_VERSION
 static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu";
 #else
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "gpu0";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu,gpu0";
 #endif
 const int32_t CPU_DEVICE_ID = -1;
 
@@ -190,7 +191,7 @@ class Config {
     Status
     CheckResourceConfigSearchResources(const std::vector<std::string>& value);
     Status
-    CheckResourceConfigIndexBuildDevice(const std::string& value);
+    CheckResourceConfigIndexBuildDevice(const std::vector<std::string>& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -259,7 +260,7 @@ class Config {
     Status
     GetResourceConfigSearchResources(std::vector<std::string>& value);
     Status
-    GetResourceConfigIndexBuildDevice(int32_t& value);
+    GetResourceConfigIndexBuildDevice(std::vector<int64_t>& value);
 
  public:
     /* server config */

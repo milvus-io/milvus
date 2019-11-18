@@ -48,12 +48,14 @@ KnowhereResource::Initialize() {
     // get build index gpu resource
     server::Config& config = server::Config::GetInstance();
 
-    int32_t build_index_gpu;
-    s = config.GetResourceConfigIndexBuildDevice(build_index_gpu);
+    std::vector<int64_t> build_index_gpus;
+    s = config.GetResourceConfigIndexBuildDevice(build_index_gpus);
     if (!s.ok())
         return s;
 
-    gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
+    for (auto gpu_id : build_index_gpus) {
+        gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
+    }
 
     // get search gpu resource
     std::vector<std::string> pool;

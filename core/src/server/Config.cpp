@@ -215,8 +215,8 @@ Config::ValidateConfig() {
         return s;
     }
 
-    int32_t resource_index_build_device;
-    s = GetResourceConfigIndexBuildDevice(resource_index_build_device);
+    std::vector<int64_t> index_build_devices;
+    s = GetResourceConfigIndexBuildDevice(index_build_devices);
     if (!s.ok()) {
         return s;
     }
@@ -599,22 +599,24 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
-        int device_id;
-        Status s = GetResourceConfigIndexBuildDevice(device_id);
+        std::vector<int64_t> device_ids;
+        Status s = GetResourceConfigIndexBuildDevice(device_ids);
         if (!s.ok()) {
             return s;
         }
 
         size_t gpu_memory;
-        if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
-            std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(device_id);
-            return Status(SERVER_UNEXPECTED_ERROR, msg);
-        } else if (gpu_cache_capacity >= gpu_memory) {
-            std::string msg = "Invalid gpu cache capacity: " + value +
-                              ". Possible reason: cache_config.gpu_cache_capacity exceeds GPU memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        } else if (gpu_cache_capacity > (double)gpu_memory * 0.9) {
-            std::cerr << "Warning: gpu cache capacity value is too big" << std::endl;
+        for (auto& device_id : device_ids) {
+            if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
+                std::string msg = "Fail to get GPU memory for GPU device: " + std::to_string(device_id);
+                return Status(SERVER_UNEXPECTED_ERROR, msg);
+            } else if (gpu_cache_capacity >= gpu_memory) {
+                std::string msg = "Invalid gpu cache capacity: " + value +
+                                  ". Possible reason: cache_config.gpu_cache_capacity exceeds GPU memory.";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            } else if (gpu_cache_capacity > (double)gpu_memory * 0.9) {
+                std::cerr << "Warning: gpu cache capacity value is too big" << std::endl;
+            }
         }
     }
     return Status::OK();
@@ -745,11 +747,21 @@ Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value
 }
 
 Status
-Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
-    auto status = CheckResource(value);
-    if (!status.ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, status.message());
+Config::CheckResourceConfigIndexBuildDevice(const std::vector<std::string>& value) {
+    if (value.empty()) {
+        std::string msg =
+            "Invalid index build resource. "
+            "Possible reason: resource_config.index_build_device is empty.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+
+    for (auto& resource : value) {
+        auto status = CheckResource(resource);
+        if (!status.ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, status.message());
+        }
+    }
+
     return Status::OK();
 }
 
@@ -1036,18 +1048,25 @@ Config::GetResourceConfigSearchResources(std::vector<std::string>& value) {
 }
 
 Status
-Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
+Config::GetResourceConfigIndexBuildDevice(std::vector<int64_t>& value) {
     std::string str =
-        GetConfigStr(CONFIG_RESOURCE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT);
-    Status s = CheckResourceConfigIndexBuildDevice(str);
+        GetConfigSequenceStr(CONFIG_RESOURCE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, CONFIG_RESOURCE_INDEX_BUILD_DELIMITER,
+                             CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT);
+    std::vector<std::string> resources;
+    server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_RESOURCE_INDEX_BUILD_DELIMITER, resources);
+
+    Status s = CheckResourceConfigIndexBuildDevice(resources);
     if (!s.ok()) {
         return s;
     }
 
-    if (str == "cpu") {
-        value = CPU_DEVICE_ID;
-    } else {
-        value = std::stoi(str.substr(3));
+    for (auto res : resources) {
+        if (res == "cpu") {
+            value.emplace_back(CPU_DEVICE_ID);
+            break;
+        }
+        int64_t device_id = std::stoi(str.substr(3));
+        value.emplace_back(device_id);
     }
 
     return Status::OK();
@@ -1318,7 +1337,10 @@ Config::SetResourceConfigSearchResources(const std::string& value) {
 
 Status
 Config::SetResourceConfigIndexBuildDevice(const std::string& value) {
-    Status s = CheckResourceConfigIndexBuildDevice(value);
+    std::vector<std::string> res_vec;
+    server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_RESOURCE_INDEX_BUILD_DELIMITER, res_vec);
+
+    Status s = CheckResourceConfigIndexBuildDevice(res_vec);
     if (!s.ok()) {
         return s;
     }

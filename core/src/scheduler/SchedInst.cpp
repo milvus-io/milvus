@@ -54,8 +54,8 @@ load_simple_config() {
     // get resources
     auto gpu_ids = get_gpu_pool();
 
-    int32_t build_gpu_id;
-    config.GetResourceConfigIndexBuildDevice(build_gpu_id);
+    std::vector<int64_t> build_gpu_ids;
+    config.GetResourceConfigIndexBuildDevice(build_gpu_ids);
 
     // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
@@ -65,19 +65,30 @@ load_simple_config() {
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
     auto pcie = Connection("pcie", 12000);
-    bool find_build_gpu_id = false;
-    for (auto& gpu_id : gpu_ids) {
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
-        if (build_gpu_id == gpu_id) {
-            find_build_gpu_id = true;
+
+    std::vector<int64_t> not_find_build_ids;
+    for (auto& build_id : build_gpu_ids) {
+        bool find_gpu_id = false;
+        for (auto& gpu_id : gpu_ids) {
+            if (gpu_id == build_id) {
+                find_gpu_id = true;
+                break;
+            }
+        }
+        if (not find_gpu_id) {
+            not_find_build_ids.emplace_back(build_id);
         }
     }
 
-    if (not find_build_gpu_id) {
+    for (auto& gpu_id : gpu_ids) {
+        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
+        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
+    }
+
+    for (auto& not_find_id : not_find_build_ids) {
         ResMgrInst::GetInstance()->Add(
-            ResourceFactory::Create(std::to_string(build_gpu_id), "GPU", build_gpu_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(build_gpu_id), pcie);
+            ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id, true, true));
+        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
     }
 }
 

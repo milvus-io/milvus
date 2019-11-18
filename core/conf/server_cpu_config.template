@@ -40,4 +40,5 @@ engine_config:
 resource_config:
   search_resources:                 # define the device used for search computation
     - cpu
-  index_build_device: cpu           # CPU used for building index
+  index_build_device:               # CPU used for building index
+    - cpu
