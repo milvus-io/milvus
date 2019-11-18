@@ -116,6 +116,14 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
             break;
         }
+        case EngineType::FAISS_PQ: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+#endif
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;

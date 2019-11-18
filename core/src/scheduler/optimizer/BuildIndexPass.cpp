@@ -34,9 +34,16 @@ BuildIndexPass::Run(const TaskPtr& task) {
     if (build_gpu_ids_.empty())
         return false;
 
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
-    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-    task->label() = label;
+    ResourcePtr res_ptr;
+    if (build_gpu_ids_[0] == server::CPU_DEVICE_ID && build_gpu_ids_.size() == 1) {
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+        task->label() = label;
+    } else {
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
+        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+        task->label() = label;
+    }
 
     specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
     return true;
