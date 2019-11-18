@@ -682,11 +682,8 @@ SearchTask::OnExecute() {
 
         // step 7: construct result array
         topk_result_->set_row_num(record_count);
-        topk_result_->mutable_ids()->Resize(static_cast<int>(result_ids.size()), 0);
-        memcpy(topk_result_->mutable_ids()->mutable_data(), result_ids.data(), result_ids.size() * sizeof(int64_t));
-        topk_result_->mutable_distances()->Resize(static_cast<int>(result_distances.size()), 0.0);
-        memcpy(topk_result_->mutable_distances()->mutable_data(), result_distances.data(),
-               result_distances.size() * sizeof(float));
+        topk_result_->add_ids(result_ids.begin(), result_ids.end());
+        topk_result_->add_distances(result_distances.begin(), result_distances.end());
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

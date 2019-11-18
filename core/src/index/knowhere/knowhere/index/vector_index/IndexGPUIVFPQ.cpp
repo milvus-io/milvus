@@ -39,17 +39,19 @@ GPUIVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
 
     GETTENSOR(dataset)
 
-    // TODO(linxj): set device here.
-    // TODO(linxj): set gpu resource here.
-    faiss::gpu::StandardGpuResources res;
-    faiss::gpu::GpuIndexIVFPQ device_index(&res, dim, build_cfg->nlist, build_cfg->m, build_cfg->nbits,
-                                           GetMetricType(build_cfg->metric_type));  // IP not support
-    device_index.train(rows, (float*)p_data);
-
-    std::shared_ptr<faiss::Index> host_index = nullptr;
-    host_index.reset(faiss::gpu::index_gpu_to_cpu(&device_index));
-
-    return std::make_shared<IVFIndexModel>(host_index);
+    auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
+    if (temp_resource != nullptr) {
+        ResScope rs(temp_resource, gpu_id_, true);
+        auto device_index = new faiss::gpu::GpuIndexIVFPQ(temp_resource->faiss_res.get(), dim, build_cfg->nlist,
+                                                          build_cfg->m, build_cfg->nbits,
+                                                          GetMetricType(build_cfg->metric_type));  // IP not support
+        device_index->train(rows, (float*)p_data);
+        std::shared_ptr<faiss::Index> host_index = nullptr;
+        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
+        return std::make_shared<IVFIndexModel>(host_index);
+    } else {
+        KNOWHERE_THROW_MSG("Build IVFSQ can't get gpu resource");
+    }
 }
 
 std::shared_ptr<faiss::IVFSearchParameters>
@@ -66,7 +68,14 @@ GPUIVFPQ::GenParams(const Config& config) {
 
 VectorIndexPtr
 GPUIVFPQ::CopyGpuToCpu(const Config& config) {
-    KNOWHERE_THROW_MSG("not support yet");
+    std::lock_guard<std::mutex> lk(mutex_);
+
+    faiss::Index* device_index = index_.get();
+    faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+
+    std::shared_ptr<faiss::Index> new_index;
+    new_index.reset(host_index);
+    return std::make_shared<IVFPQ>(new_index);
 }
 
 }  // namespace knowhere
