@@ -17,65 +17,32 @@
 
 #pragma once
 
-#include "grpc/gen-status/status.grpc.pb.h"
-#include "grpc/gen-status/status.pb.h"
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
-#include "utils/BlockingQueue.h"
-#include "utils/Status.h"
 
-#include <map>
-#include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace milvus {
 namespace server {
 namespace grpc {
 
-using RequestQueue = BlockingQueue<BaseRequestPtr>;
-using RequestQueuePtr = std::shared_ptr<RequestQueue>;
-using ThreadPtr = std::shared_ptr<std::thread>;
-
-class GrpcRequestScheduler {
+class SearchRequest : public GrpcBaseRequest {
  public:
-    static GrpcRequestScheduler&
-    GetInstance() {
-        static GrpcRequestScheduler scheduler;
-        return scheduler;
-    }
-
-    void
-    Start();
-
-    void
-    Stop();
-
-    Status
-    ExecuteRequest(const BaseRequestPtr& request_ptr);
-
-    static void
-    ExecRequest(BaseRequestPtr& request_ptr, ::milvus::grpc::Status* grpc_status);
+    static BaseRequestPtr
+    Create(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
+           ::milvus::grpc::TopKQueryResult* response);
 
  protected:
-    GrpcRequestScheduler();
-
-    virtual ~GrpcRequestScheduler();
-
-    void
-    TakeToExecute(RequestQueuePtr request_queue);
+    SearchRequest(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
+                  ::milvus::grpc::TopKQueryResult* response);
 
     Status
-    PutToQueue(const BaseRequestPtr& request_ptr);
+    OnExecute() override;
 
  private:
-    mutable std::mutex queue_mtx_;
-
-    std::map<std::string, RequestQueuePtr> request_groups_;
-
-    std::vector<ThreadPtr> execute_threads_;
-
-    bool stopped_;
+    const ::milvus::grpc::SearchParam* search_param_;
+    std::vector<std::string> file_id_array_;
+    ::milvus::grpc::TopKQueryResult* topk_result_;
 };
 
 }  // namespace grpc
