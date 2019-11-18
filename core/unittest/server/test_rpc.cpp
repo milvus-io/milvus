@@ -22,7 +22,7 @@
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/grpc_impl/GrpcRequestScheduler.h"
-#include "server/grpc_impl/GrpcRequestTask.h"
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 #include "src/version.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
@@ -453,20 +453,20 @@ TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
 
 //////////////////////////////////////////////////////////////////////
 namespace {
-class DummyTask : public milvus::server::grpc::GrpcBaseTask {
+class DummyRequest : public milvus::server::grpc::GrpcBaseRequest {
  public:
     milvus::Status
     OnExecute() override {
         return milvus::Status::OK();
     }
 
-    static milvus::server::grpc::BaseTaskPtr
+    static milvus::server::grpc::BaseRequestPtr
     Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::grpc::GrpcBaseTask>(new DummyTask(dummy));
+        return std::shared_ptr<milvus::server::grpc::GrpcBaseRequest>(new DummyRequest(dummy));
     }
 
  public:
-    explicit DummyTask(std::string& dummy) : GrpcBaseTask(dummy) {
+    explicit DummyRequest(std::string& dummy) : GrpcBaseRequest(dummy) {
     }
 };
 
@@ -475,27 +475,27 @@ class RpcSchedulerTest : public testing::Test {
     void
     SetUp() override {
         std::string dummy = "dql";
-        task_ptr = std::make_shared<DummyTask>(dummy);
+        request_ptr = std::make_shared<DummyRequest>(dummy);
     }
 
-    std::shared_ptr<DummyTask> task_ptr;
+    std::shared_ptr<DummyRequest> request_ptr;
 };
 
 }  // namespace
 
 TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
-    auto status = task_ptr->Execute();
+    auto status = request_ptr->Execute();
     ASSERT_TRUE(status.ok());
 
     milvus::server::grpc::GrpcRequestScheduler::GetInstance().Start();
     ::milvus::grpc::Status grpc_status;
     std::string dummy = "dql";
-    milvus::server::grpc::BaseTaskPtr base_task_ptr = DummyTask::Create(dummy);
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecTask(base_task_ptr, &grpc_status);
+    milvus::server::grpc::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
+    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecRequest(base_task_ptr, &grpc_status);
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
-    task_ptr = nullptr;
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
+    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    request_ptr = nullptr;
+    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteRequest(request_ptr);
 
     milvus::server::grpc::GrpcRequestScheduler::GetInstance().Stop();
 }
