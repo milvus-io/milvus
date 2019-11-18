@@ -8,12 +8,15 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#246 - Exclude src/external folder from code coverage for jenkin ci
 - \#248 - Reside src/external in thirdparty
 - \#316 - Some files not merged after vectors added
+- \#327 - Search does not use GPU when index type is FLAT
 - \#340 - Test cases run failed on 0.6.0
+- \#374 - sdk_simple return empty result
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
 - \#77 - Support table partition
 - \#226 - Experimental shards middleware for Milvus
+- \#127 - Support new Index type IVFPQ
 
 ## Improvement
 - \#275 - Rename C++ SDK IndexType
@@ -21,7 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#260 - C++ SDK README
 - \#314 - add Find FAISS in CMake
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
-- \#322 - Add option to enable / disable prometheus 
+- \#322 - Add option to enable / disable prometheus
 - \#358 - Add more information in build.sh and install.md
 
 ## Task

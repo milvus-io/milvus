@@ -49,7 +49,7 @@ CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config
     if (auto cpu_index = std::dynamic_pointer_cast<IVFSQ>(index)) {
         return cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFPQ>(index)) {
-        KNOWHERE_THROW_MSG("IVFPQ not support transfer to gpu");
+        return cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVF>(index)) {
         return cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IDMAP>(index)) {
