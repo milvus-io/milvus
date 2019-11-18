@@ -17,7 +17,7 @@
 
 #include "sdk/grpc/ClientProxy.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "src/config.h"
+#include "src/version.h"
 
 #include <memory>
 #include <string>
@@ -30,6 +30,13 @@ bool
 UriCheck(const std::string& uri) {
     size_t index = uri.find_first_of(':', 0);
     return (index != std::string::npos);
+}
+
+void
+CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
+    auto vector_data = target->mutable_vector_data();
+    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
+    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
 }
 
 Status
@@ -189,14 +196,16 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            grpc_record->add_vector_data(record.data.begin(), record.data.end());
+            CopyRowRecord(grpc_record, record);
         }
 
         // Single thread
         ::milvus::grpc::VectorIds vector_ids;
         if (!id_array.empty()) {
             /* set user's ids */
-            insert_param.add_row_id_array(id_array.begin(), id_array.end());
+            auto row_ids = insert_param.mutable_row_id_array();
+            row_ids->Resize(static_cast<int>(id_array.size()), -1);
+            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);
@@ -226,7 +235,7 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         }
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
-            row_record->add_vector_data(record.data.begin(), record.data.end());
+            CopyRowRecord(row_record, record);
         }
 
         // step 2: convert range array
