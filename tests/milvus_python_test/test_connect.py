@@ -249,8 +249,8 @@ class TestConnect:
         '''
         milvus = Milvus()
         uri_value = "tcp://%s:19540" % args["ip"]
-        milvus.connect(host=args["ip"], port="", uri=uri_value)
-        assert milvus.connected()
+        with pytest.raises(Exception) as e:
+            milvus.connect(host=args["ip"], port="", uri=uri_value)
 
     def test_connect_param_priority_uri(self, args):
         '''
