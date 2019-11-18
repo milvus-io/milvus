@@ -47,7 +47,8 @@ ConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::Cfg>();
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = conf->gpu_id;
+    conf->gpu_id = metaconf.gpu_id;
+    conf->k = metaconf.k;
     MatchBase(conf);
     return conf;
 }
@@ -65,7 +66,7 @@ IVFConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = conf->gpu_id;
+    conf->gpu_id = metaconf.gpu_id;
     MatchBase(conf);
     return conf;
 }
@@ -114,7 +115,7 @@ IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = conf->gpu_id;
+    conf->gpu_id = metaconf.gpu_id;
     conf->nbits = 8;
     MatchBase(conf);
     return conf;
@@ -126,7 +127,7 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = conf->gpu_id;
+    conf->gpu_id = metaconf.gpu_id;
     conf->nbits = 8;
 
     if (!(conf->d % 4))
@@ -175,21 +176,17 @@ NSGConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = conf->gpu_id;
+    conf->gpu_id = metaconf.gpu_id;
+    conf->k = metaconf.k;
 
-    double factor = metaconf.size / TYPICAL_COUNT;
     auto scale_factor = round(metaconf.dim / 128.0);
     scale_factor = scale_factor >= 4 ? 4 : scale_factor;
-    conf->nprobe = conf->nlist > 10000 ? conf->nlist * 0.02 : conf->nlist * 0.1;
-    conf->knng = (100 + 100 * scale_factor) * factor;
-    conf->search_length = (40 + 5 * scale_factor) * factor;
-    conf->out_degree = (50 + 5 * scale_factor) * factor;
-    conf->candidate_pool_size = (200 + 100 * scale_factor) * factor;
+    conf->nprobe = int64_t(conf->nlist * 0.01);
+    conf->knng = 40 + 10 * scale_factor;  // the size of knng
+    conf->search_length = 40 + 5 * scale_factor;
+    conf->out_degree = 50 + 5 * scale_factor;
+    conf->candidate_pool_size = 200 + 100 * scale_factor;
     MatchBase(conf);
-
-    //    WRAPPER_LOG_DEBUG << "nlist: " << conf->nlist
-    //    << ", gpu_id: " << conf->gpu_id << ", d: " << conf->d
-    //    << ", nprobe: " << conf->nprobe << ", knng: " << conf->knng;
     return conf;
 }
 

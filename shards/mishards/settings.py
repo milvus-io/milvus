@@ -50,10 +50,16 @@ class TracingConfig:
         }
     }
 
+    max_overflow=0
 
 class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
     SQL_ECHO = env.bool('SQL_ECHO', False)
+    SQL_POOL_SIZE = env.int('pool_size', 100)
+    SQL_POOL_RECYCLE = env.int('pool_recycle', 5)
+    SQL_POOL_TIMEOUT = env.int('pool_timeout', 30)
+    SQL_POOL_PRE_PING = env.bool('pool_pre_ping', True)
+    SQL_MAX_OVERFLOW = env.int('max_overflow', 0)
     TRACER_PLUGIN_PATH = env.str('TRACER_PLUGIN_PATH', '')
     TRACER_CLASS_NAME = env.str('TRACER_CLASS_NAME', '')
     ROUTER_PLUGIN_PATH = env.str('ROUTER_PLUGIN_PATH', '')
@@ -65,5 +71,10 @@ class DefaultConfig:
 class TestingConfig(DefaultConfig):
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI', '')
     SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
+    SQL_POOL_SIZE = env.int('pool_size', 100)
+    SQL_POOL_RECYCLE = env.int('pool_recycle', 5)
+    SQL_POOL_TIMEOUT = env.int('pool_timeout', 30)
+    SQL_POOL_PRE_PING = env.bool('pool_pre_ping', True)
+    SQL_MAX_OVERFLOW = env.int('max_overflow', 0)
     TRACER_CLASS_NAME = env.str('TRACER_CLASS_TEST_NAME', '')
     ROUTER_CLASS_NAME = env.str('ROUTER_CLASS_TEST_NAME', 'FileBasedHashRingRouter')

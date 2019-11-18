@@ -46,9 +46,6 @@ class ConfAdapter {
     virtual knowhere::Config
     MatchSearch(const TempMetaConf& metaconf, const IndexType& type);
 
-    //    virtual void
-    //    Dump(){}
-
  protected:
     static void
     MatchBase(knowhere::Config conf);
