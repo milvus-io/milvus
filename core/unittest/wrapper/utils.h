@@ -89,13 +89,13 @@ class ParamGenerator {
         return instance;
     }
 
-    knowhere::Config 
+    knowhere::Config
     GenSearchConf(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
         auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
         return adapter->MatchSearch(conf, type);
     }
 
-    knowhere::Config 
+    knowhere::Config
     GenBuild(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
         auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
         return adapter->Match(conf);
