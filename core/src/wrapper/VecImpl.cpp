@@ -26,7 +26,7 @@
 
 /*
  * no parameter check in this layer.
- * only responible for index combination
+ * only responsible for index combination
  */
 
 namespace milvus {
@@ -271,7 +271,7 @@ IVFHybridIndex::LoadQuantizer(const Config& conf) {
     if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
         return new_idx->LoadQuantizer(conf);
     } else {
-        WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+        WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
     }
 }
 
@@ -282,8 +282,8 @@ IVFHybridIndex::SetQuantizer(const knowhere::QuantizerPtr& q) {
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             new_idx->SetQuantizer(q);
         } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
-            return Status(KNOWHERE_ERROR, "not support");
+            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
+            return Status(KNOWHERE_ERROR, "not supported");
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -302,8 +302,8 @@ IVFHybridIndex::UnsetQuantizer() {
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             new_idx->UnsetQuantizer();
         } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
-            return Status(KNOWHERE_ERROR, "not support");
+            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
+            return Status(KNOWHERE_ERROR, "not supported");
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -322,7 +322,7 @@ IVFHybridIndex::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             return std::make_shared<IVFHybridIndex>(new_idx->LoadData(q, conf), type);
         } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -341,7 +341,7 @@ IVFHybridIndex::CopyToGpuWithQuantizer(const int64_t& device_id, const Config& c
             auto new_idx = std::make_shared<IVFHybridIndex>(pair.first, type);
             return std::make_pair(new_idx, pair.second);
         } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
