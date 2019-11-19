@@ -59,8 +59,9 @@ class JobMgr : public interface::dumpable {
     static std::vector<TaskPtr>
     build_task(const JobPtr& job);
 
-    void
-    calculate_path(const TaskPtr& task);
+ public:
+    static void
+    calculate_path(const ResourceMgrPtr& res_mgr, const TaskPtr& task);
 
  private:
     bool running_ = false;
