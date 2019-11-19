@@ -23,6 +23,7 @@
 #include "Scheduler.h"
 #include "Utils.h"
 #include "optimizer/BuildIndexPass.h"
+#include "optimizer/FallbackPass.h"
 #include "optimizer/HybridPass.h"
 #include "optimizer/LargeSQ8HPass.h"
 #include "optimizer/OnlyCPUPass.h"
@@ -103,12 +104,14 @@ class OptimizerInst {
                 pass_list.push_back(std::make_shared<HybridPass>());
 #ifdef MILVUS_CPU_VERSION
                 pass_list.push_back(std::make_shared<OnlyCPUPass>());
+<<<<<<< HEAD
 #else
                 server::Config& config = server::Config::GetInstance();
                 std::vector<int32_t> build_resources;
                 config.GetGpuResourceConfigBuildIndexResources(build_resources);
                 pass_list.push_back(std::make_shared<BuildIndexPass>(build_resources));
 #endif
+//                pass_list.push_back(std::make_shared<FallbackPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
             }
         }
