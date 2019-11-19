@@ -91,21 +91,18 @@ static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 static const char* CONFIG_RESOURCE = "resource_config";
 static const char* CONFIG_RESOURCE_MODE = "mode";
 static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
+static const char* CONFIG_RESOURCE_RESOURCES_DELIMITER = ",";
 static const char* CONFIG_RESOURCE_SEARCH_RESOURCES = "search_resources";
-static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER = ",";
-
 #ifdef MILVUS_CPU_VERSION
 static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu";
 #else
 static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu,gpu0";
 #endif
-
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE = "index_build_device";
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DELIMITER = ",";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_RESOURCES = "index_build_resources";
 #ifdef MILVUS_CPU_VERSION
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_RESOURCES_DEFAULT = "cpu";
 #else
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu,gpu0";
+static const char* CONFIG_RESOURCE_INDEX_BUILD_RESOURCES_DEFAULT = "gpu0";
 #endif
 const int32_t CPU_DEVICE_ID = -1;
 
@@ -191,7 +188,7 @@ class Config {
     Status
     CheckResourceConfigSearchResources(const std::vector<std::string>& value);
     Status
-    CheckResourceConfigIndexBuildDevice(const std::vector<std::string>& value);
+    CheckResourceConfigIndexBuildResources(const std::vector<std::string>& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -260,7 +257,7 @@ class Config {
     Status
     GetResourceConfigSearchResources(std::vector<std::string>& value);
     Status
-    GetResourceConfigIndexBuildDevice(std::vector<int64_t>& value);
+    GetResourceConfigIndexBuildResources(std::vector<std::string>& value);
 
  public:
     /* server config */
@@ -321,7 +318,7 @@ class Config {
     Status
     SetResourceConfigSearchResources(const std::string& value);
     Status
-    SetResourceConfigIndexBuildDevice(const std::string& value);
+    SetResourceConfigIndexBuildResources(const std::string& value);
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;

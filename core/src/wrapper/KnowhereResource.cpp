@@ -19,6 +19,8 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+
+#include "scheduler/Utils.h"
 #include "server/Config.h"
 
 #include <map>
@@ -48,8 +50,7 @@ KnowhereResource::Initialize() {
     // get build index gpu resource
     server::Config& config = server::Config::GetInstance();
 
-    std::vector<int64_t> build_index_gpus;
-    s = config.GetResourceConfigIndexBuildDevice(build_index_gpus);
+    auto build_index_gpus = scheduler::get_build_resources();
     if (!s.ok())
         return s;
 

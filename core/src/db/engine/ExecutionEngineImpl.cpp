@@ -355,6 +355,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+    gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
@@ -577,12 +578,7 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpu_ids;
-    Status s = config.GetResourceConfigIndexBuildDevice(gpu_ids);
-    if (!s.ok()) {
-        return s;
-    }
+    auto gpu_ids = scheduler::get_build_resources();
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
             return Status::OK();

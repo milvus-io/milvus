@@ -27,7 +27,6 @@ metric_config:
     port: 8080                      # port prometheus uses to fetch metrics, must in range [1025, 65534]
 
 cache_config:
-
   cpu_cache_capacity: 16            # GB, CPU memory used for cache, must be a positive integer
   cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
   cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
@@ -38,7 +37,7 @@ engine_config:
   gpu_search_threshold: 1000        # threshold beyond which the search computation is executed on GPUs only
 
 resource_config:
-  search_resources:                 # define the device used for search computation
+  search_resources:                 # define the devices used for search computation, must be in format: cpu or gpux
     - cpu
-  index_build_device:               # CPU used for building index
+  index_build_resources:            # define the devices used for index building, must be in format: cpu or gpux
     - cpu
