@@ -23,15 +23,12 @@ class DB:
         uri and self.init_db(uri, echo)
         self.session_factory = scoped_session(sessionmaker(class_=LocalSession, db=self))
 
-    def init_db(self, uri, echo=False):
+    def init_db(self, uri, echo=False, pool_size=100, pool_recycle=5, pool_timeout=30, pool_pre_ping=True, max_overflow=0):
         url = make_url(uri)
         if url.get_backend_name() == 'sqlite':
             self.engine = create_engine(url)
         else:
-            self.engine = create_engine(uri, pool_size=100, pool_recycle=5, pool_timeout=30,
-                                        pool_pre_ping=True,
-                                        echo=echo,
-                                        max_overflow=0)
+            self.engine = create_engine(uri, pool_size, pool_recycle, pool_timeout, pool_pre_ping, echo, max_overflow)
         self.uri = uri
         self.url = url
 
