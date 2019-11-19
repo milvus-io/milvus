@@ -28,13 +28,13 @@ Memory: 503GB
 
 Docker version: 18.09
 
-Nvidia Driver version: 430.34
+NVIDIA Driver version: 430.34
 
 Milvus version: 0.5.3
 
 SDK interface: Python 3.6.8
 
-Pymilvus version: 0.2.5
+pymilvus version: 0.2.5
 
 
 
@@ -66,7 +66,7 @@ For details on this dataset, you can check : http://corpus-texmex.irisa.fr/ .
 
   > Note: In the query test of recall, we will test the following parameters with different values:
   >
-  > nq - grouped by: [1, 5, 10,  200, 400, 600, 800, 1000], 
+  > nq - grouped by: [10,  200, 400, 600, 800, 1000], 
   >
   > topk - grouped by: [1, 10, 100]
 
@@ -93,7 +93,7 @@ Milvus configuration
 - gpu_cache_capacity: 6
 - use_blas_threshold: 1100
 
-You can check the definition of Milvus configuration on https://milvus.io/docs/en/reference/milvus_config/.
+The definitions of Milvus configuration are on https://milvus.io/docs/en/reference/milvus_config/.
 
 Test method
 
