@@ -45,17 +45,6 @@ std::mutex BuildMgrInst::mutex_;
 
 void
 load_simple_config() {
-    server::Config& config = server::Config::GetInstance();
-    std::string mode;
-    config.GetResourceConfigMode(mode);
-    std::vector<std::string> pool;
-    config.GetResourceConfigSearchResources(pool);
-
-    // get resources
-    auto gpu_ids = get_gpu_pool();
-
-    auto build_gpu_ids = get_build_resources();
-
     // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
 
@@ -63,6 +52,13 @@ load_simple_config() {
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, true));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
+    // get resources
+#ifdef MILVUS_GPU_VERSION
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int32_t> gpu_ids;
+    config.GetGpuResourceConfigSearchResources(gpu_ids);
+    std::vector<int32_t> build_gpu_ids;
+    config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids);
     auto pcie = Connection("pcie", 12000);
 
     std::vector<int64_t> not_find_build_ids;
@@ -89,6 +85,7 @@ load_simple_config() {
             ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id, true, true));
         ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
     }
+#endif
 }
 
 void

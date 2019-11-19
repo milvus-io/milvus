@@ -85,7 +85,6 @@ class RpcHandlerTest : public testing::Test {
         //        DBWrapper::GetInstance().GetInstance().StartService();
         //        DBWrapper::GetInstance().GetInstance().StopService();
 
-        milvus::server::Config::GetInstance().SetResourceConfigMode("single");
         milvus::server::DBWrapper::GetInstance().StartService();
 
         // initialize handler, create table

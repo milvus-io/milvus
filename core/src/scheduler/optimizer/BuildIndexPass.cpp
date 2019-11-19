@@ -23,7 +23,7 @@
 namespace milvus {
 namespace scheduler {
 
-BuildIndexPass::BuildIndexPass(std::vector<int64_t>& build_gpu_ids) : build_gpu_ids_(build_gpu_ids) {
+BuildIndexPass::BuildIndexPass(std::vector<int32_t>& build_gpu_ids) : build_gpu_ids_(build_gpu_ids) {
 }
 
 bool
@@ -35,15 +35,9 @@ BuildIndexPass::Run(const TaskPtr& task) {
         return false;
 
     ResourcePtr res_ptr;
-    if (build_gpu_ids_[0] == server::CPU_DEVICE_ID) {
-        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
-    } else {
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
-    }
+    res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
+    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    task->label() = label;
 
     specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
     return true;

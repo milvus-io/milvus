@@ -21,14 +21,13 @@
 #include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
+#include "Utils.h"
 #include "optimizer/BuildIndexPass.h"
 #include "optimizer/HybridPass.h"
 #include "optimizer/LargeSQ8HPass.h"
 #include "optimizer/OnlyCPUPass.h"
-#include "optimizer/OnlyGPUPass.h"
 #include "optimizer/Optimizer.h"
 #include "server/Config.h"
-#include "Utils.h"
 
 #include <memory>
 #include <mutex>
@@ -99,25 +98,17 @@ class OptimizerInst {
         if (instance == nullptr) {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
-                server::Config& config = server::Config::GetInstance();
-                std::vector<std::string> search_resources;
-                bool has_cpu = false;
-                config.GetResourceConfigSearchResources(search_resources);
-                for (auto& resource : search_resources) {
-                    if (resource == "cpu") {
-                        has_cpu = true;
-                    }
-                }
-
-                auto build_resources = get_build_resources();
-
-
                 std::vector<PassPtr> pass_list;
                 pass_list.push_back(std::make_shared<LargeSQ8HPass>());
                 pass_list.push_back(std::make_shared<HybridPass>());
+#ifdef MILVUS_CPU_VERSION
                 pass_list.push_back(std::make_shared<OnlyCPUPass>());
-                pass_list.push_back(std::make_shared<OnlyGPUPass>(has_cpu));
+#else
+                server::Config& config = server::Config::GetInstance();
+                std::vector<int32_t> build_resources;
+                config.GetGpuResourceConfigBuildIndexResources(build_resources);
                 pass_list.push_back(std::make_shared<BuildIndexPass>(build_resources));
+#endif
                 instance = std::make_shared<Optimizer>(pass_list);
             }
         }
