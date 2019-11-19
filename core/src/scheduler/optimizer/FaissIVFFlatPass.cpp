@@ -15,31 +15,52 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/OnlyCPUPass.h"
+#include "scheduler/optimizer/FaissIVFFlatPass.h"
+#include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
+#include "server/Config.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
 void
-OnlyCPUPass::Init() {
+FaissIVFFlatPass::Init() {
+    server::Config& config = server::Config::GetInstance();
+    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
+    if (!s.ok()) {
+        threshold_ = std::numeric_limits<int32_t>::max();
+    }
+    s = config.GetGpuResourceConfigSearchResources(gpus);
+    if (!s.ok()) {
+        throw;
+    }
 }
 
 bool
-OnlyCPUPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::SearchTask)
-        return false;
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8 &&
-        search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+FaissIVFFlatPass::Run(const TaskPtr& task) {
+    if (task->Type() != TaskType::SearchTask) {
         return false;
     }
 
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    auto search_task = std::static_pointer_cast<XSearchTask>(task);
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+        return false;
+    }
+
+    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
+    ResourcePtr res_ptr;
+    if (search_job->nq() < threshold_) {
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else {
+        auto best_device_id = count_ % gpus.size();
+        count_++;
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
+    }
+    auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
     return true;
 }

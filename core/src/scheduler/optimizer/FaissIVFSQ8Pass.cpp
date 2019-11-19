@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/LargeSQ8HPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8Pass.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
@@ -28,57 +28,40 @@ namespace milvus {
 namespace scheduler {
 
 void
-LargeSQ8HPass::Init() {
+FaissIVFSQ8Pass::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
     s = config.GetGpuResourceConfigSearchResources(gpus);
+    if (!s.ok()) {
+        throw;
+    }
 }
 
 bool
-LargeSQ8HPass::Run(const TaskPtr& task) {
+FaissIVFSQ8Pass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask) {
         return false;
     }
 
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8H) {
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8) {
         return false;
     }
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
-
-    // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
-
+    ResourcePtr res_ptr;
     if (search_job->nq() < threshold_) {
-        return false;
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else {
+        auto best_device_id = count_ % gpus.size();
+        count_++;
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
     }
-
-    //    std::vector<int64_t> all_free_mem;
-    //    for (auto& gpu : gpus) {
-    //        auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-    //        auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-    //        all_free_mem.push_back(free_mem);
-    //    }
-    //
-    //    auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-    //    auto best_index = std::distance(all_free_mem.begin(), max_e);
-    //    auto best_device_id = gpus[best_index];
-    auto best_device_id = count_ % gpus.size();
-    count_++;
-
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
-    if (not res_ptr) {
-        SERVER_LOG_ERROR << "GpuResource " << best_device_id << " invalid.";
-        // TODO: throw critical error and exit
-        return false;
-    }
-
-    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
-
     return true;
 }
 

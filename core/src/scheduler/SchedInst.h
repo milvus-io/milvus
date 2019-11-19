@@ -24,9 +24,10 @@
 #include "Utils.h"
 #include "optimizer/BuildIndexPass.h"
 #include "optimizer/FallbackPass.h"
-#include "optimizer/HybridPass.h"
-#include "optimizer/LargeSQ8HPass.h"
-#include "optimizer/OnlyCPUPass.h"
+#include "optimizer/FaissFlatPass.h"
+#include "optimizer/FaissIVFFlatPass.h"
+#include "optimizer/FaissIVFSQ8Pass.h"
+#include "optimizer/FaissIVFSQ8HPass.h"
 #include "optimizer/Optimizer.h"
 #include "server/Config.h"
 
@@ -100,15 +101,12 @@ class OptimizerInst {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
                 std::vector<PassPtr> pass_list;
-                pass_list.push_back(std::make_shared<LargeSQ8HPass>());
-                pass_list.push_back(std::make_shared<HybridPass>());
-#ifdef MILVUS_CPU_VERSION
-                pass_list.push_back(std::make_shared<OnlyCPUPass>());
-#else
-                server::Config& config = server::Config::GetInstance();
-                std::vector<int32_t> build_resources;
-                config.GetGpuResourceConfigBuildIndexResources(build_resources);
-                pass_list.push_back(std::make_shared<BuildIndexPass>(build_resources));
+#ifdef MILVUS_GPU_VERSION
+                pass_list.push_back(std::make_shared<BuildIndexPass>());
+                pass_list.push_back(std::make_shared<FaissFlatPass>());
+                pass_list.push_back(std::make_shared<FaissIVFFlatPass>());
+                pass_list.push_back(std::make_shared<FaissIVFSQ8Pass>());
+                pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
