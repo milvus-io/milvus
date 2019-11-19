@@ -18,6 +18,8 @@
 #pragma once
 
 #include <memory>
+#include <sstream>
+#include "Log.h"
 
 namespace knowhere {
 
@@ -49,6 +51,18 @@ struct Cfg {
     virtual bool
     CheckValid() {
         return true;
+    }
+
+    void
+    Dump() {
+        KNOWHERE_LOG_DEBUG << DumpImpl().str();
+    }
+
+    virtual std::stringstream
+    DumpImpl() {
+        std::stringstream ss;
+        ss << "dim: " << d << ", metric: " << int(metric_type) << ", gpuid: " << gpu_id << ", k: " << k;
+        return ss;
     }
 };
 using Config = std::shared_ptr<Cfg>;
