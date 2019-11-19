@@ -10,7 +10,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#316 - Some files not merged after vectors added
 - \#327 - Search does not use GPU when index type is FLAT
 - \#340 - Test cases run failed on 0.6.0
+- \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
+- \#397 - sdk_simple return incorrect result
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -22,10 +24,12 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#260 - C++ SDK README
+- \#266 - Rpc request source code refactor
 - \#314 - add Find FAISS in CMake
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 - \#322 - Add option to enable / disable prometheus
 - \#358 - Add more information in build.sh and install.md
+- \#255 - Add ivfsq8 test report detailed version
 
 ## Task
 

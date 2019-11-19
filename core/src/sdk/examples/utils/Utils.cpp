@@ -167,7 +167,7 @@ Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
         index++;
         std::cout << "No." << index << " vector " << search_id << " top " << topk << " search result:" << std::endl;
         for (size_t j = 0; j < topk; j++) {
-            size_t idx = i * nq + j;
+            size_t idx = i * topk + j;
             std::cout << "\t" << topk_query_result.ids[idx] << "\t" << topk_query_result.distances[idx] << std::endl;
         }
     }
