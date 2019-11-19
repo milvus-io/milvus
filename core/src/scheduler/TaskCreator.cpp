@@ -18,7 +18,6 @@
 #include "scheduler/TaskCreator.h"
 #include "SchedInst.h"
 #include "tasklabel/BroadcastLabel.h"
-#include "tasklabel/DefaultLabel.h"
 #include "tasklabel/SpecResLabel.h"
 
 namespace milvus {
@@ -47,8 +46,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const SearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& index_file : job->index_files()) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<XSearchTask>(index_file.second, label);
+        auto task = std::make_shared<XSearchTask>(index_file.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }
@@ -70,11 +68,8 @@ TaskCreator::Create(const DeleteJobPtr& job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-
     for (auto& to_index_file : job->to_index_files()) {
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, label);
+        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }

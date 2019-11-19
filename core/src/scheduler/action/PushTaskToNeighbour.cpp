@@ -102,38 +102,6 @@ Action::PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest) 
 }
 
 void
-Action::DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
-                                  std::shared_ptr<LoadCompletedEvent> event) {
-    if (not resource->HasExecutor() && event->task_table_item_->Move()) {
-        auto task_item = event->task_table_item_;
-        auto task = event->task_table_item_->task;
-        auto search_task = std::static_pointer_cast<XSearchTask>(task);
-        bool moved = false;
-
-        // to support test task, REFACTOR
-        if (resource->type() == ResourceType::CPU) {
-            if (auto index_engine = search_task->index_engine_) {
-                auto location = index_engine->GetLocation();
-
-                for (auto i = 0; i < res_mgr->GetNumGpuResource(); ++i) {
-                    auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
-                    if (index != nullptr) {
-                        moved = true;
-                        auto dest_resource = res_mgr->GetResource(ResourceType::GPU, i);
-                        PushTaskToResource(event->task_table_item_, dest_resource);
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (not moved) {
-            PushTaskToNeighbourRandomly(task_item, resource);
-        }
-    }
-}
-
-void
 Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                             std::shared_ptr<LoadCompletedEvent> event) {
     auto task_item = event->task_table_item_;
