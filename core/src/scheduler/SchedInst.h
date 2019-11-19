@@ -21,6 +21,7 @@
 #include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
+#include "optimizer/FallbackPass.h"
 #include "optimizer/HybridPass.h"
 #include "optimizer/LargeSQ8HPass.h"
 #include "optimizer/OnlyCPUPass.h"
@@ -112,6 +113,7 @@ class OptimizerInst {
                 pass_list.push_back(std::make_shared<HybridPass>());
                 pass_list.push_back(std::make_shared<OnlyCPUPass>());
                 pass_list.push_back(std::make_shared<OnlyGPUPass>(has_cpu));
+                pass_list.push_back(std::make_shared<FallbackPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
             }
         }
