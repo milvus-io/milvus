@@ -1,0 +1,26 @@
+{
+  "host": "127.0.0.1",
+  "port": "5666",
+  "tracer_library": "/home/zhiru/work/jaeger-client-cpp-0.5.0/build/libjaegertracing.so",
+  "tracer_configuration": {
+    "service_name": "server-side",
+    "sampler": {
+      "type": "const",
+      "param": "1"
+    },
+    "disabled": false,
+    "reporter": {
+      "localAgentHostPort": "127.0.0.1:6831"
+    },
+    "headers": {
+      "jaegerDebugHeader": "demo-debug-id",
+      "jaegerBaggageHeader": "demo-baggage",
+      "TraceContextHeaderName": "demo-span-context",
+      "traceBaggageHeaderPrefix": "demo-ctx-"
+    },
+    "baggage_restrictions": {
+      "denyBaggageOnInitializationFailure": false,
+      "hostPort": ""
+    }
+  }
+}
