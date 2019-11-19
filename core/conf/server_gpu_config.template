@@ -27,10 +27,7 @@ metric_config:
     port: 8080                      # port prometheus uses to fetch metrics, must in range [1025, 65534]
 
 cache_config:
-  cpu_cache_capacity: 16            # GB, CPU memory used for cache, must be a positive integer
-  cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
-  gpu_cache_capacity: 4             # GB, GPU memory used for cache, must be a positive integer
-  gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered, must be in range (0.0, 1.0]
+  cpu_cache_capacity: 16            # GB, size of CPU memory used for cache, must be a positive integer
   cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
 
 engine_config:
@@ -38,8 +35,10 @@ engine_config:
                                     # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
   gpu_search_threshold: 1000        # threshold beyond which the search computation is executed on GPUs only
 
-resource_config:
-  search_resources:                 # define the devices used for search computation, must be in format: cpu or gpux
-    - cpu
+gpu_resource_config:
+  enable_gpu: true                  # whether to enable GPU resources
+  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer
+  search_resources:                 # define the GPU devices used for search computation, must be in format gpux
     - gpu0
-  index_build_device: gpu0          # CPU / GPU used for building index, must be in format: cpu or gpux
+  build_index_resources:            # define the GPU devices used for index building, must be in format gpux
+    - gpu0

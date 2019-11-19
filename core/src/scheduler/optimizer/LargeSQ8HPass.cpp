@@ -34,6 +34,7 @@ LargeSQ8HPass::Init() {
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
+    s = config.GetGpuResourceConfigSearchResources(gpus);
 }
 
 bool
@@ -55,7 +56,6 @@ LargeSQ8HPass::Run(const TaskPtr& task) {
         return false;
     }
 
-    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
     //    std::vector<int64_t> all_free_mem;
     //    for (auto& gpu : gpus) {
     //        auto cache = cache::GpuCacheMgr::GetInstance(gpu);
