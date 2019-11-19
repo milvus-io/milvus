@@ -144,7 +144,14 @@ ExecutionEngineImpl::HybridLoad() const {
     }
 
     const std::string key = location_ + ".quantizer";
-    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int32_t> gpus;
+    Status s = config.GetGpuResourceConfigSearchResources(gpus);
+    if (!s.ok()) {
+        ENGINE_LOG_ERROR << s.message();
+        return;
+    }
 
     // cache hit
     {
@@ -578,7 +585,9 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {
-    auto gpu_ids = scheduler::get_build_resources();
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int32_t> gpu_ids;
+    Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
             return Status::OK();

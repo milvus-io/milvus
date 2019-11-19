@@ -27,11 +27,5 @@ get_current_timestamp();
 uint64_t
 get_num_gpu();
 
-std::vector<uint64_t>
-get_gpu_pool();
-
-std::vector<int64_t>
-get_build_resources();
-
 }  // namespace scheduler
 }  // namespace milvus

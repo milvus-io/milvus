@@ -34,7 +34,7 @@ namespace scheduler {
 
 class BuildIndexPass : public Pass {
  public:
-    explicit BuildIndexPass(std::vector<int64_t>& build_gpu_id);
+    explicit BuildIndexPass(std::vector<int32_t>& build_gpu_id);
 
  public:
     bool
@@ -42,7 +42,7 @@ class BuildIndexPass : public Pass {
 
  private:
     uint64_t specified_gpu_id_ = 0;
-    std::vector<int64_t> build_gpu_ids_;
+    std::vector<int32_t> build_gpu_ids_;
 };
 
 using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;

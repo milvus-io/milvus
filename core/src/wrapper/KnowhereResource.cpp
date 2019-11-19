@@ -37,7 +37,6 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 Status
 KnowhereResource::Initialize() {
 #ifdef MILVUS_GPU_VERSION
-
     struct GpuResourceSetting {
         int64_t pinned_memory = 300 * M_BYTE;
         int64_t temp_memory = 300 * M_BYTE;
@@ -49,8 +48,8 @@ KnowhereResource::Initialize() {
 
     // get build index gpu resource
     server::Config& config = server::Config::GetInstance();
-
-    auto build_index_gpus = scheduler::get_build_resources();
+    std::vector<int32_t> build_index_gpus;
+    s = config.GetGpuResourceConfigBuildIndexResources(build_index_gpus);
     if (!s.ok())
         return s;
 
@@ -59,18 +58,12 @@ KnowhereResource::Initialize() {
     }
 
     // get search gpu resource
-    std::vector<std::string> pool;
-    s = config.GetResourceConfigSearchResources(pool);
+    std::vector<int32_t> search_gpus;
+    s = config.GetGpuResourceConfigSearchResources(search_gpus);
     if (!s.ok())
         return s;
 
-    std::set<uint64_t> gpu_ids;
-    for (auto& resource : pool) {
-        if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
-            // invalid
-            continue;
-        }
-        auto gpu_id = std::stoi(resource.substr(3));
+    for (auto& gpu_id : search_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
     }
 

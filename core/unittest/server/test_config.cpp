@@ -216,21 +216,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     s = config.GetCacheConfigCpuCacheThreshold(float_val);
     ASSERT_TRUE(float_val == cache_cpu_cache_threshold);
 
-#ifdef MILVUS_GPU_VERSION
-    int64_t cache_gpu_cache_capacity = 1;
-    s = config.SetCacheConfigGpuCacheCapacity(std::to_string(cache_gpu_cache_capacity));
-    ASSERT_TRUE(s.ok());
-    s = config.GetCacheConfigGpuCacheCapacity(int64_val);
-    ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int64_val == cache_gpu_cache_capacity);
-
-    float cache_gpu_cache_threshold = 0.2;
-    s = config.SetCacheConfigGpuCacheThreshold(std::to_string(cache_gpu_cache_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetCacheConfigGpuCacheThreshold(float_val);
-    ASSERT_TRUE(float_val == cache_gpu_cache_threshold);
-#endif
-
     bool cache_insert_data = true;
     s = config.SetCacheConfigCacheInsertData(std::to_string(cache_insert_data));
     ASSERT_TRUE(s.ok());
@@ -259,47 +244,54 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(int32_val == engine_gpu_search_threshold);
 
-    /* resource config */
-    std::string resource_mode = "simple";
-    s = config.SetResourceConfigMode(resource_mode);
+    /* gpu resource config */
+    bool resource_enable_gpu = true;
+    s = config.SetGpuResourceConfigEnableGpu(std::to_string(resource_enable_gpu));
     ASSERT_TRUE(s.ok());
-    s = config.GetResourceConfigMode(str_val);
+    s = config.GetGpuResourceConfigEnableGpu(bool_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(str_val == resource_mode);
+    ASSERT_TRUE(bool_val == resource_enable_gpu);
 
-#ifdef MILVUS_CPU_VERSION
-    std::vector<std::string> search_resources = {"cpu"};
-#else
-    std::vector<std::string> search_resources = {"cpu", "gpu0"};
-#endif
-    std::vector<std::string> search_res_vec;
+#ifdef MILVUS_GPU_VERSION
+    int64_t gpu_cache_capacity = 1;
+    s = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_cache_capacity));
+    ASSERT_TRUE(s.ok());
+    s = config.GetGpuResourceConfigCacheCapacity(int64_val);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(int64_val == gpu_cache_capacity);
+
+    float gpu_cache_threshold = 0.2;
+    s = config.SetGpuResourceConfigCacheThreshold(std::to_string(gpu_cache_threshold));
+    ASSERT_TRUE(s.ok());
+    s = config.GetGpuResourceConfigCacheThreshold(float_val);
+    ASSERT_TRUE(float_val == gpu_cache_threshold);
+
+    std::vector<std::string> search_resources = {"gpu0"};
+    std::vector<int32_t> search_res_vec;
     std::string search_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
-        search_resources, milvus::server::CONFIG_RESOURCE_RESOURCES_DELIMITER, search_res_str);
-    s = config.SetResourceConfigSearchResources(search_res_str);
+        search_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, search_res_str);
+    s = config.SetGpuResourceConfigSearchResources(search_res_str);
     ASSERT_TRUE(s.ok());
-    s = config.GetResourceConfigSearchResources(search_res_vec);
+    s = config.GetGpuResourceConfigSearchResources(search_res_vec);
     ASSERT_TRUE(s.ok());
     for (size_t i = 0; i < search_resources.size(); i++) {
-        ASSERT_TRUE(search_resources[i] == search_res_vec[i]);
+        ASSERT_TRUE(std::stoi(search_resources[i].substr(3)) == search_res_vec[i]);
     }
 
-#ifdef MILVUS_CPU_VERSION
-    std::vector<std::string> index_build_resources = {"cpu"};
-#else
-    std::vector<std::string> index_build_resources = {"gpu0", "gpu1"};
-#endif
-    std::vector<std::string> index_build_res_vec;
-    std::string index_build_res_str;
+    std::vector<std::string> build_index_resources = {"gpu0"};
+    std::vector<int32_t> build_index_res_vec;
+    std::string build_index_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
-        index_build_resources, milvus::server::CONFIG_RESOURCE_RESOURCES_DELIMITER, index_build_res_str);
-    s = config.SetResourceConfigIndexBuildResources(index_build_res_str);
+        build_index_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, build_index_res_str);
+    s = config.SetGpuResourceConfigBuildIndexResources(build_index_res_str);
     ASSERT_TRUE(s.ok());
-    s = config.GetResourceConfigIndexBuildResources(index_build_res_vec);
+    s = config.GetGpuResourceConfigBuildIndexResources(build_index_res_vec);
     ASSERT_TRUE(s.ok());
-    for (size_t i = 0; i < index_build_resources.size(); i++) {
-        ASSERT_TRUE(index_build_resources[i] == index_build_res_vec[i]);
+    for (size_t i = 0; i < build_index_resources.size(); i++) {
+        ASSERT_TRUE(std::stoi(build_index_resources[i].substr(3)) == build_index_res_vec[i]);
     }
+#endif
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
@@ -386,18 +378,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetCacheConfigCpuCacheThreshold("1.0");
     ASSERT_FALSE(s.ok());
 
-#ifdef MILVUS_GPU_VERSION
-    s = config.SetCacheConfigGpuCacheCapacity("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigGpuCacheCapacity("128");
-    ASSERT_FALSE(s.ok());
-
-    s = config.SetCacheConfigGpuCacheThreshold("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigGpuCacheThreshold("1.0");
-    ASSERT_FALSE(s.ok());
-#endif
-
     s = config.SetCacheConfigCacheInsertData("N");
     ASSERT_FALSE(s.ok());
 
@@ -413,20 +393,29 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetEngineConfigGpuSearchThreshold("-1");
     ASSERT_FALSE(s.ok());
 
-    /* resource config */
-    s = config.SetResourceConfigMode("default");
+    /* gpu resource config */
+    s = config.SetGpuResourceConfigEnableGpu("ok");
     ASSERT_FALSE(s.ok());
 
-    s = config.SetResourceConfigSearchResources("gpu10");
+#ifdef MILVUS_GPU_VERSION
+    s = config.SetGpuResourceConfigCacheCapacity("a");
+    ASSERT_FALSE(s.ok());
+    s = config.SetGpuResourceConfigCacheCapacity("128");
     ASSERT_FALSE(s.ok());
 
-    s = config.SetResourceConfigSearchResources("cpu");
-    ASSERT_TRUE(s.ok());
+    s = config.SetGpuResourceConfigCacheThreshold("a");
+    ASSERT_FALSE(s.ok());
+    s = config.SetGpuResourceConfigCacheThreshold("1.0");
+    ASSERT_FALSE(s.ok());
 
-    s = config.SetResourceConfigIndexBuildResources("gup2");
+    s = config.SetGpuResourceConfigSearchResources("gpu10");
     ASSERT_FALSE(s.ok());
-    s = config.SetResourceConfigIndexBuildResources("gpu16");
+
+    s = config.SetGpuResourceConfigBuildIndexResources("gup2");
     ASSERT_FALSE(s.ok());
+    s = config.SetGpuResourceConfigBuildIndexResources("gpu16");
+    ASSERT_FALSE(s.ok());
+#endif
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
@@ -443,4 +432,3 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_TRUE(s.ok());
 }
-
