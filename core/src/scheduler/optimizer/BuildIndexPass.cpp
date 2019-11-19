@@ -35,7 +35,7 @@ BuildIndexPass::Run(const TaskPtr& task) {
         return false;
 
     ResourcePtr res_ptr;
-    if (build_gpu_ids_[0] == server::CPU_DEVICE_ID && build_gpu_ids_.size() == 1) {
+    if (build_gpu_ids_[0] == server::CPU_DEVICE_ID) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
         auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
         task->label() = label;

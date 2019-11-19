@@ -28,6 +28,7 @@
 #include "optimizer/OnlyGPUPass.h"
 #include "optimizer/Optimizer.h"
 #include "server/Config.h"
+#include "Utils.h"
 
 #include <memory>
 #include <mutex>
@@ -108,8 +109,8 @@ class OptimizerInst {
                     }
                 }
 
-                std::vector<int64_t> build_resources;
-                config.GetResourceConfigIndexBuildDevice(build_resources);
+                auto build_resources = get_build_resources();
+
 
                 std::vector<PassPtr> pass_list;
                 pass_list.push_back(std::make_shared<LargeSQ8HPass>());

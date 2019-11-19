@@ -272,30 +272,34 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 #else
     std::vector<std::string> search_resources = {"cpu", "gpu0"};
 #endif
-    std::vector<std::string> res_vec;
-    std::string res_str;
+    std::vector<std::string> search_res_vec;
+    std::string search_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
-        search_resources, milvus::server::CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER, res_str);
-    s = config.SetResourceConfigSearchResources(res_str);
+        search_resources, milvus::server::CONFIG_RESOURCE_RESOURCES_DELIMITER, search_res_str);
+    s = config.SetResourceConfigSearchResources(search_res_str);
     ASSERT_TRUE(s.ok());
-    s = config.GetResourceConfigSearchResources(res_vec);
+    s = config.GetResourceConfigSearchResources(search_res_vec);
     ASSERT_TRUE(s.ok());
     for (size_t i = 0; i < search_resources.size(); i++) {
-        ASSERT_TRUE(search_resources[i] == res_vec[i]);
+        ASSERT_TRUE(search_resources[i] == search_res_vec[i]);
     }
 
 #ifdef MILVUS_CPU_VERSION
-    int32_t resource_index_build_device = milvus::server::CPU_DEVICE_ID;
-    s = config.SetResourceConfigIndexBuildDevice("cpu");
+    std::vector<std::string> index_build_resources = {"cpu"};
 #else
-    int32_t resource_index_build_device = 0;
-    s = config.SetResourceConfigIndexBuildDevice("gpu" + std::to_string(resource_index_build_device));
+    std::vector<std::string> index_build_resources = {"gpu0", "gpu1"};
 #endif
+    std::vector<std::string> index_build_res_vec;
+    std::string index_build_res_str;
+    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
+        index_build_resources, milvus::server::CONFIG_RESOURCE_RESOURCES_DELIMITER, index_build_res_str);
+    s = config.SetResourceConfigIndexBuildResources(index_build_res_str);
     ASSERT_TRUE(s.ok());
-    std::vector<int64_t> device_ids;
-    s = config.GetResourceConfigIndexBuildDevice(device_ids);
+    s = config.GetResourceConfigIndexBuildResources(index_build_res_vec);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(device_ids[0] == resource_index_build_device);
+    for (size_t i = 0; i < index_build_resources.size(); i++) {
+        ASSERT_TRUE(index_build_resources[i] == index_build_res_vec[i]);
+    }
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
@@ -419,9 +423,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetResourceConfigSearchResources("cpu");
     ASSERT_TRUE(s.ok());
 
-    s = config.SetResourceConfigIndexBuildDevice("gup2");
+    s = config.SetResourceConfigIndexBuildResources("gup2");
     ASSERT_FALSE(s.ok());
-    s = config.SetResourceConfigIndexBuildDevice("gpu16");
+    s = config.SetResourceConfigIndexBuildResources("gpu16");
     ASSERT_FALSE(s.ok());
 }
 

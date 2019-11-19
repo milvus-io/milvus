@@ -54,8 +54,7 @@ load_simple_config() {
     // get resources
     auto gpu_ids = get_gpu_pool();
 
-    std::vector<int64_t> build_gpu_ids;
-    config.GetResourceConfigIndexBuildDevice(build_gpu_ids);
+    auto build_gpu_ids = get_build_resources();
 
     // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
