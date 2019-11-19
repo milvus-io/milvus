@@ -59,12 +59,8 @@ static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_CACHE = "cache_config";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "16";
-static const char* CONFIG_CACHE_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
-static const char* CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT = "4";
-static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_mem_threshold";
+static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
-static const char* CONFIG_CACHE_GPU_CACHE_THRESHOLD = "gpu_mem_threshold";
-static const char* CONFIG_CACHE_GPU_CACHE_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 
@@ -87,26 +83,23 @@ static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
-/* resource config */
-static const char* CONFIG_RESOURCE = "resource_config";
-static const char* CONFIG_RESOURCE_MODE = "mode";
-static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
-static const char* CONFIG_RESOURCE_SEARCH_RESOURCES = "search_resources";
-static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DELIMITER = ",";
-
-#ifdef MILVUS_CPU_VERSION
-static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu";
+/* gpu resource config */
+static const char* CONFIG_GPU_RESOURCE = "gpu_resource_config";
+static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU = "enable_gpu";
+#ifdef MILVUS_GPU_VERSION
+static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "true";
 #else
-static const char* CONFIG_RESOURCE_SEARCH_RESOURCES_DEFAULT = "cpu,gpu0";
+static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "false";
 #endif
-
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE = "index_build_device";
-#ifdef MILVUS_CPU_VERSION
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "cpu";
-#else
-static const char* CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT = "gpu0";
-#endif
-const int32_t CPU_DEVICE_ID = -1;
+static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
+static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "4";
+static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
+static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_GPU_RESOURCE_DELIMITER = ",";
+static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES = "search_resources";
+static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
+static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
+static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 
 class Config {
  public:
@@ -170,10 +163,6 @@ class Config {
     Status
     CheckCacheConfigCpuCacheThreshold(const std::string& value);
     Status
-    CheckCacheConfigGpuCacheCapacity(const std::string& value);
-    Status
-    CheckCacheConfigGpuCacheThreshold(const std::string& value);
-    Status
     CheckCacheConfigCacheInsertData(const std::string& value);
 
     /* engine config */
@@ -184,13 +173,17 @@ class Config {
     Status
     CheckEngineConfigGpuSearchThreshold(const std::string& value);
 
-    /* resource config */
+    /* gpu resource config */
     Status
-    CheckResourceConfigMode(const std::string& value);
+    CheckGpuResourceConfigEnableGpu(const std::string& value);
     Status
-    CheckResourceConfigSearchResources(const std::vector<std::string>& value);
+    CheckGpuResourceConfigCacheCapacity(const std::string& value);
     Status
-    CheckResourceConfigIndexBuildDevice(const std::string& value);
+    CheckGpuResourceConfigCacheThreshold(const std::string& value);
+    Status
+    CheckGpuResourceConfigSearchResources(const std::vector<std::string>& value);
+    Status
+    CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -239,10 +232,6 @@ class Config {
     Status
     GetCacheConfigCpuCacheThreshold(float& value);
     Status
-    GetCacheConfigGpuCacheCapacity(int64_t& value);
-    Status
-    GetCacheConfigGpuCacheThreshold(float& value);
-    Status
     GetCacheConfigCacheInsertData(bool& value);
 
     /* engine config */
@@ -253,13 +242,17 @@ class Config {
     Status
     GetEngineConfigGpuSearchThreshold(int32_t& value);
 
-    /* resource config */
+    /* gpu resource config */
     Status
-    GetResourceConfigMode(std::string& value);
+    GetGpuResourceConfigEnableGpu(bool& value);
     Status
-    GetResourceConfigSearchResources(std::vector<std::string>& value);
+    GetGpuResourceConfigCacheCapacity(int64_t& value);
     Status
-    GetResourceConfigIndexBuildDevice(int32_t& value);
+    GetGpuResourceConfigCacheThreshold(float& value);
+    Status
+    GetGpuResourceConfigSearchResources(std::vector<int32_t>& value);
+    Status
+    GetGpuResourceConfigBuildIndexResources(std::vector<int32_t>& value);
 
  public:
     /* server config */
@@ -300,10 +293,6 @@ class Config {
     Status
     SetCacheConfigCpuCacheThreshold(const std::string& value);
     Status
-    SetCacheConfigGpuCacheCapacity(const std::string& value);
-    Status
-    SetCacheConfigGpuCacheThreshold(const std::string& value);
-    Status
     SetCacheConfigCacheInsertData(const std::string& value);
 
     /* engine config */
@@ -314,13 +303,17 @@ class Config {
     Status
     SetEngineConfigGpuSearchThreshold(const std::string& value);
 
-    /* resource config */
+    /* gpu resource config */
     Status
-    SetResourceConfigMode(const std::string& value);
+    SetGpuResourceConfigEnableGpu(const std::string& value);
     Status
-    SetResourceConfigSearchResources(const std::string& value);
+    SetGpuResourceConfigCacheCapacity(const std::string& value);
     Status
-    SetResourceConfigIndexBuildDevice(const std::string& value);
+    SetGpuResourceConfigCacheThreshold(const std::string& value);
+    Status
+    SetGpuResourceConfigSearchResources(const std::string& value);
+    Status
+    SetGpuResourceConfigBuildIndexResources(const std::string& value);
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
