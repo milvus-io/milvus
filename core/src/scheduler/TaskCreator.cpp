@@ -70,8 +70,7 @@ TaskCreator::Create(const DeleteJobPtr& job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    // TODO(yukun): remove "disk" hardcode here
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("disk");
+    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
 
     for (auto& to_index_file : job->to_index_files()) {
         auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
