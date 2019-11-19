@@ -29,6 +29,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#322 - Add option to enable / disable prometheus
 - \#358 - Add more information in build.sh and install.md
 - \#255 - Add ivfsq8 test report detailed version
+- \#404 - Add virtual method Init() in Pass abstract class
 
 ## Task
 
