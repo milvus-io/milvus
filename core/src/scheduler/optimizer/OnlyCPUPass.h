@@ -37,6 +37,9 @@ class OnlyCPUPass : public Pass {
     OnlyCPUPass() = default;
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
 };

@@ -27,6 +27,10 @@ namespace scheduler {
 OnlyGPUPass::OnlyGPUPass(bool has_cpu) : has_cpu_(has_cpu) {
 }
 
+void
+OnlyGPUPass::Init() {
+}
+
 bool
 OnlyGPUPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask || has_cpu_)

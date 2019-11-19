@@ -16,26 +16,17 @@
 // under the License.
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
+#include <bits/stdc++.h>
 #include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
 #include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class LargeSQ8HPass : public Pass {
+class FallbackPass : public Pass {
  public:
-    LargeSQ8HPass() = default;
+    FallbackPass() = default;
 
  public:
     void
@@ -43,13 +34,7 @@ class LargeSQ8HPass : public Pass {
 
     bool
     Run(const TaskPtr& task) override;
-
- private:
-    int32_t threshold_ = std::numeric_limits<int32_t>::max();
-    int64_t count_ = 0;
 };
-
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
