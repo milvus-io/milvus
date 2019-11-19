@@ -18,6 +18,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -32,9 +33,9 @@
 namespace milvus {
 namespace scheduler {
 
-class OnlyCPUPass : public Pass {
+class FaissFlatPass : public Pass {
  public:
-    OnlyCPUPass() = default;
+    FaissFlatPass() = default;
 
  public:
     void
@@ -42,9 +43,14 @@ class OnlyCPUPass : public Pass {
 
     bool
     Run(const TaskPtr& task) override;
+
+ private:
+    int32_t threshold_ = std::numeric_limits<int32_t>::max();
+    int64_t count_ = 0;
+    std::vector<int32_t> gpus;
 };
 
-using OnlyCPUPassPtr = std::shared_ptr<OnlyCPUPass>;
+using FaissFlatPassPtr = std::shared_ptr<FaissFlatPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

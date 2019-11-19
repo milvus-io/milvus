@@ -33,9 +33,9 @@
 namespace milvus {
 namespace scheduler {
 
-class LargeSQ8HPass : public Pass {
+class FaissIVFSQ8HPass : public Pass {
  public:
-    LargeSQ8HPass() = default;
+    FaissIVFSQ8HPass() = default;
 
  public:
     void
@@ -50,7 +50,7 @@ class LargeSQ8HPass : public Pass {
     std::vector<int32_t> gpus;
 };
 
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
+using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
