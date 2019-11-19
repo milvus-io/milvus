@@ -18,6 +18,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -32,9 +33,9 @@
 namespace milvus {
 namespace scheduler {
 
-class HybridPass : public Pass {
+class FaissIVFSQ8HPass : public Pass {
  public:
-    HybridPass() = default;
+    FaissIVFSQ8HPass() = default;
 
  public:
     void
@@ -42,9 +43,14 @@ class HybridPass : public Pass {
 
     bool
     Run(const TaskPtr& task) override;
+
+ private:
+    int32_t threshold_ = std::numeric_limits<int32_t>::max();
+    int64_t count_ = 0;
+    std::vector<int32_t> gpus;
 };
 
-using HybridPassPtr = std::shared_ptr<HybridPass>;
+using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

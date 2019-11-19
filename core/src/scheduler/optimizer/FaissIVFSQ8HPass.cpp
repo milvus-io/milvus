@@ -15,38 +15,50 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/BuildIndexPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8HPass.h"
+#include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
+#include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
+#include "server/Config.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
 void
-BuildIndexPass::Init() {
+FaissIVFSQ8HPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    std::vector<int32_t> build_resources;
-    Status s = config.GetGpuResourceConfigBuildIndexResources(build_resources);
+    Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
-        throw;
+        threshold_ = std::numeric_limits<int32_t>::max();
     }
+    s = config.GetGpuResourceConfigSearchResources(gpus);
 }
 
 bool
-BuildIndexPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::BuildIndexTask)
+FaissIVFSQ8HPass::Run(const TaskPtr& task) {
+    if (task->Type() != TaskType::SearchTask) {
         return false;
+    }
 
-    if (build_gpu_ids_.empty())
+    auto search_task = std::static_pointer_cast<XSearchTask>(task);
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8H) {
         return false;
+    }
 
+    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
-    res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
-    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    if (search_job->nq() < threshold_) {
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else {
+        auto best_device_id = count_ % gpus.size();
+        count_++;
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
+    }
+    auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
-
-    specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
     return true;
 }
 

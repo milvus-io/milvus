@@ -34,7 +34,7 @@ namespace scheduler {
 
 class BuildIndexPass : public Pass {
  public:
-    explicit BuildIndexPass(std::vector<int32_t>& build_gpu_id);
+    BuildIndexPass() = default;
 
  public:
     void
