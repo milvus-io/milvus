@@ -23,6 +23,10 @@
 namespace milvus {
 namespace scheduler {
 
+void
+HybridPass::Init() {
+}
+
 bool
 HybridPass::Run(const TaskPtr& task) {
     // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
