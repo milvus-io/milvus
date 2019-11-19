@@ -91,6 +91,7 @@ load_simple_config() {
 void
 StartSchedulerService() {
     load_simple_config();
+    OptimizerInst::GetInstance()->Init();
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
     JobMgrInst::GetInstance()->Start();

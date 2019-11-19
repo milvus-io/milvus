@@ -37,6 +37,9 @@ class BuildIndexPass : public Pass {
     explicit BuildIndexPass(std::vector<int32_t>& build_gpu_id);
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
 

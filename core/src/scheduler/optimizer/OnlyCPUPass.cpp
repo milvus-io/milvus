@@ -24,6 +24,10 @@
 namespace milvus {
 namespace scheduler {
 
+void
+OnlyCPUPass::Init() {
+}
+
 bool
 OnlyCPUPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask)

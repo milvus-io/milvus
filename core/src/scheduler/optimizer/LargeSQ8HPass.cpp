@@ -27,7 +27,8 @@
 namespace milvus {
 namespace scheduler {
 
-LargeSQ8HPass::LargeSQ8HPass() {
+void
+LargeSQ8HPass::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {

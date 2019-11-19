@@ -26,6 +26,10 @@ namespace scheduler {
 BuildIndexPass::BuildIndexPass(std::vector<int32_t>& build_gpu_ids) : build_gpu_ids_(build_gpu_ids) {
 }
 
+void
+BuildIndexPass::Init() {
+}
+
 bool
 BuildIndexPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::BuildIndexTask)

@@ -16,25 +16,17 @@
 // under the License.
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
+#include <bits/stdc++.h>
 #include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
 #include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class OnlyCPUPass : public Pass {
+class FallbackPass : public Pass {
  public:
-    OnlyCPUPass() = default;
+    FallbackPass() = default;
 
  public:
     void
@@ -43,8 +35,6 @@ class OnlyCPUPass : public Pass {
     bool
     Run(const TaskPtr& task) override;
 };
-
-using OnlyCPUPassPtr = std::shared_ptr<OnlyCPUPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
