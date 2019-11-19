@@ -16,7 +16,6 @@
 // under the License.
 
 #include "scheduler/Utils.h"
-#include "server/Config.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda_runtime.h>

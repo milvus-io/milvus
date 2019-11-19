@@ -37,10 +37,6 @@ class Action {
     PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest);
 
     static void
-    DefaultLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
-                              std::shared_ptr<LoadCompletedEvent> event);
-
-    static void
     SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                         std::shared_ptr<LoadCompletedEvent> event);
 };
