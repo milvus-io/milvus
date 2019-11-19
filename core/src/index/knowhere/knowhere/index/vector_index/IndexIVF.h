@@ -47,7 +47,6 @@ class IVF : public VectorIndex, public FaissBaseIndex {
     void
     set_index_model(IndexModelPtr model) override;
 
-
     void
     Add(const DatasetPtr& dataset, const Config& config) override;
 
