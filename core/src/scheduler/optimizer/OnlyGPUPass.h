@@ -37,6 +37,9 @@ class OnlyGPUPass : public Pass {
     explicit OnlyGPUPass(bool has_cpu);
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
 

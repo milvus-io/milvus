@@ -35,9 +35,12 @@ namespace scheduler {
 
 class LargeSQ8HPass : public Pass {
  public:
-    LargeSQ8HPass();
+    LargeSQ8HPass() = default;
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
 
