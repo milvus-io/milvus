@@ -25,7 +25,6 @@
 #include <cstdio>
 #include <fstream>
 
-
 #include "wrapper/VecIndex.h"
 #include "wrapper/utils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -90,17 +89,20 @@ class ParamGenerator {
         return instance;
     }
 
-    knowhere::Config GenSearchConf(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
+    knowhere::Config
+    GenSearchConf(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
         auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
         return adapter->MatchSearch(conf, type);
     }
 
-    knowhere::Config GenBuild(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
+    knowhere::Config
+    GenBuild(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
         auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
         return adapter->Match(conf);
     }
 
-    knowhere::Config Gen(const milvus::engine::IndexType& type) {
+    knowhere::Config
+    Gen(const milvus::engine::IndexType& type) {
         switch (type) {
             case milvus::engine::IndexType::FAISS_IDMAP: {
                 auto tempconf = std::make_shared<knowhere::Cfg>();
