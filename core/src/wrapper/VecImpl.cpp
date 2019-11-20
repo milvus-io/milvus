@@ -21,11 +21,13 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/Log.h"
 #include "wrapper/WrapperException.h"
+#include "wrapper/gpu/GPUVecImpl.h"
 
 #ifdef MILVUS_GPU_VERSION
 
-#include <src/index/knowhere/knowhere/index/vector_index/IndexGPUIVF.h>
-#include <src/index/knowhere/knowhere/index/vector_index/helpers/Cloner.h>
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 
 #endif
 
