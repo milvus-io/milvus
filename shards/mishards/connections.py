@@ -2,11 +2,18 @@ import logging
 import threading
 from functools import wraps
 from milvus import Milvus
+from milvus.client.hooks import BaseaSearchHook
 
 from mishards import (settings, exceptions)
 from utils import singleton
 
 logger = logging.getLogger(__name__)
+
+
+class Searchook(BaseaSearchHook):
+
+    def on_response(self, *args, **kwargs):
+        return True
 
 
 class Connection:
@@ -18,6 +25,9 @@ class Connection:
         self.conn = Milvus()
         self.error_handlers = [] if not error_handlers else error_handlers
         self.on_retry_func = kwargs.get('on_retry_func', None)
+
+        # define search hook
+        self.conn._set_hook(search_in_file=Searchook())
         # self._connect()
 
     def __str__(self):
