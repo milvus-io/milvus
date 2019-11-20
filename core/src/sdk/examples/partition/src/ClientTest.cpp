@@ -31,45 +31,45 @@
 
 namespace {
 
-    const char *TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
+const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
 
-    constexpr int64_t TABLE_DIMENSION = 512;
-    constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
-    constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::L2;
-    constexpr int64_t BATCH_ROW_COUNT = 10000;
-    constexpr int64_t NQ = 5;
-    constexpr int64_t TOP_K = 10;
-    constexpr int64_t NPROBE = 32;
-    constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
-    constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-    constexpr int32_t N_LIST = 15000;
-    constexpr int32_t PARTITION_COUNT = 5;
-    constexpr int32_t TARGET_PARTITION = 3;
+constexpr int64_t TABLE_DIMENSION = 512;
+constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
+constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::L2;
+constexpr int64_t BATCH_ROW_COUNT = 10000;
+constexpr int64_t NQ = 5;
+constexpr int64_t TOP_K = 10;
+constexpr int64_t NPROBE = 32;
+constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
+constexpr int32_t N_LIST = 15000;
+constexpr int32_t PARTITION_COUNT = 5;
+constexpr int32_t TARGET_PARTITION = 3;
 
-    milvus::TableSchema
-    BuildTableSchema() {
-        milvus::TableSchema tb_schema = {TABLE_NAME, TABLE_DIMENSION, TABLE_INDEX_FILE_SIZE, TABLE_METRIC_TYPE};
-        return tb_schema;
-    }
+milvus::TableSchema
+BuildTableSchema() {
+    milvus::TableSchema tb_schema = {TABLE_NAME, TABLE_DIMENSION, TABLE_INDEX_FILE_SIZE, TABLE_METRIC_TYPE};
+    return tb_schema;
+}
 
-    milvus::PartitionParam
-    BuildPartitionParam(int32_t index) {
-        std::string tag = std::to_string(index);
-        std::string partition_name = std::string(TABLE_NAME) + "_" + tag;
-        milvus::PartitionParam partition_param = {TABLE_NAME, partition_name, tag};
-        return partition_param;
-    }
+milvus::PartitionParam
+BuildPartitionParam(int32_t index) {
+    std::string tag = std::to_string(index);
+    std::string partition_name = std::string(TABLE_NAME) + "_" + tag;
+    milvus::PartitionParam partition_param = {TABLE_NAME, partition_name, tag};
+    return partition_param;
+}
 
-    milvus::IndexParam
-    BuildIndexParam() {
-        milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, N_LIST};
-        return index_param;
-    }
+milvus::IndexParam
+BuildIndexParam() {
+    milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, N_LIST};
+    return index_param;
+}
 
 }  // namespace
 
 void
-ClientTest::Test(const std::string &address, const std::string &port) {
+ClientTest::Test(const std::string& address, const std::string& port) {
     std::shared_ptr<milvus::Connection> conn = milvus::Connection::Create();
 
     milvus::Status stat;
