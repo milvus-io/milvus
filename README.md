@@ -66,7 +66,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 - [Milvus bootcamp](https://github.com/milvus-io/bootcamp)
 
-- [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs/test_report)
+- [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
