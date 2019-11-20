@@ -210,11 +210,11 @@ class Config {
     Status
     GetDBConfigBackendUrl(std::string& value);
     Status
-    GetDBConfigArchiveDiskThreshold(int32_t& value);
+    GetDBConfigArchiveDiskThreshold(int64_t& value);
     Status
-    GetDBConfigArchiveDaysThreshold(int32_t& value);
+    GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigInsertBufferSize(int32_t& value);
+    GetDBConfigInsertBufferSize(int64_t& value);
     Status
     GetDBConfigPreloadTable(std::string& value);
 
@@ -236,11 +236,11 @@ class Config {
 
     /* engine config */
     Status
-    GetEngineConfigUseBlasThreshold(int32_t& value);
+    GetEngineConfigUseBlasThreshold(int64_t& value);
     Status
-    GetEngineConfigOmpThreadNum(int32_t& value);
+    GetEngineConfigOmpThreadNum(int64_t& value);
     Status
-    GetEngineConfigGpuSearchThreshold(int32_t& value);
+    GetEngineConfigGpuSearchThreshold(int64_t& value);
 
     /* gpu resource config */
     Status
@@ -250,9 +250,9 @@ class Config {
     Status
     GetGpuResourceConfigCacheThreshold(float& value);
     Status
-    GetGpuResourceConfigSearchResources(std::vector<int32_t>& value);
+    GetGpuResourceConfigSearchResources(std::vector<int64_t>& value);
     Status
-    GetGpuResourceConfigBuildIndexResources(std::vector<int32_t>& value);
+    GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value);
 
  public:
     /* server config */
