@@ -36,7 +36,7 @@ engine_config:
   gpu_search_threshold: 1000        # threshold beyond which the search computation is executed on GPUs only
 
 gpu_resource_config:
-  enable_gpu: false                 # whether to enable GPU resources
+  enable: false                     # whether to enable GPU resources
   cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer
   search_resources:                 # define the GPU devices used for search computation, must be in format gpux
     - gpu0
