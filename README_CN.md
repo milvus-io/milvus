@@ -65,7 +65,7 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 
 - [Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
 
-- [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs/test_report)
+- [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
