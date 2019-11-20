@@ -18,33 +18,37 @@
 #pragma once
 
 #include <SPTAG/AnnService/inc/Core/VectorIndex.h>
+
 #include <cstdint>
 #include <memory>
+#include <string>
+
 #include "VectorIndex.h"
 #include "knowhere/index/IndexModel.h"
 
 namespace knowhere {
 
-class CPUKDTRNG : public VectorIndex {
+class CPUSPTAGRNG : public VectorIndex {
  public:
-    CPUKDTRNG() {
-        index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::KDT, SPTAG::VectorValueType::Float);
-        index_ptr_->SetParameter("DistCalcMethod", "L2");
-    }
+    explicit CPUSPTAGRNG(const std::string& IndexType);
 
  public:
     BinarySet
     Serialize() override;
+
     VectorIndexPtr
     Clone() override;
+
     void
     Load(const BinarySet& index_array) override;
 
  public:
     // PreprocessorPtr
     // BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
+
     int64_t
     Count() override;
+
     int64_t
     Dimension() override;
 
@@ -56,6 +60,7 @@ class CPUKDTRNG : public VectorIndex {
 
     DatasetPtr
     Search(const DatasetPtr& dataset, const Config& config) override;
+
     void
     Seal() override;
 
@@ -66,11 +71,12 @@ class CPUKDTRNG : public VectorIndex {
  private:
     PreprocessorPtr preprocessor_;
     std::shared_ptr<SPTAG::VectorIndex> index_ptr_;
+    SPTAG::IndexAlgoType index_type_;
 };
 
-using CPUKDTRNGPtr = std::shared_ptr<CPUKDTRNG>;
+using CPUSPTAGRNGPtr = std::shared_ptr<CPUSPTAGRNG>;
 
-class CPUKDTRNGIndexModel : public IndexModel {
+class CPUSPTAGRNGIndexModel : public IndexModel {
  public:
     BinarySet
     Serialize() override;
@@ -82,6 +88,6 @@ class CPUKDTRNGIndexModel : public IndexModel {
     std::shared_ptr<SPTAG::VectorIndex> index_;
 };
 
-using CPUKDTRNGIndexModelPtr = std::shared_ptr<CPUKDTRNGIndexModel>;
+using CPUSPTAGRNGIndexModelPtr = std::shared_ptr<CPUSPTAGRNGIndexModel>;
 
 }  // namespace knowhere
