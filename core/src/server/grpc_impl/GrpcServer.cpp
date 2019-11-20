@@ -36,6 +36,13 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
+#include <grpc++/grpc++.h>
+#include <grpc++/server.h>
+#include <grpc++/server_builder.h>
+#include <grpc++/server_context.h>
+
+#include "tracing/interceptor.h"
+
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -99,6 +106,16 @@ GrpcServer::StartService() {
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+
+    //Add gRPC interceptor
+    using InterceptorI = ::grpc::experimental::ServerInterceptorFactoryInterface;
+    using InterceptorIPtr = std::unique_ptr<InterceptorI>;
+    std::vector<InterceptorIPtr> creators;
+
+    creators.push_back(std::unique_ptr<::grpc::experimental::ServerInterceptorFactoryInterface>(
+        new SpanInterceptorFactory(opentracing::Tracer::Global())));
+
+    builder.experimental().SetInterceptorCreators(std::move(creators));
 
     server_ptr_ = builder.BuildAndStart();
     server_ptr_->Wait();

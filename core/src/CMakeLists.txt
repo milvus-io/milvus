@@ -86,6 +86,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -203,7 +204,7 @@ endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
-add_library(tracing STATIC ${tracing_files})
+add_library(tracing STATIC ${tracing_files} ${context_files})
 set(tracing_lib
         opentracing
         opentracing_mocktracer

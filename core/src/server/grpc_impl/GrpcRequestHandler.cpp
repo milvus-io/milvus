@@ -68,6 +68,7 @@ GrpcRequestHandler::DropTable(::grpc::ServerContext* context, const ::milvus::gr
                               ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DropTableRequest::Create(request->table_name());
     GrpcRequestScheduler::ExecRequest(request_ptr, response);
+    SET_TRACING_TAG(*response);
     return ::grpc::Status::OK;
 }
 
@@ -97,8 +98,9 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     BaseRequestPtr request_ptr = SearchRequest::Create(request, file_id_array, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_error_code(grpc_status.error_code());
-    response->mutable_status()->set_reason(grpc_status.reason());
+//    response->mutable_status()->set_error_code(grpc_status.error_code());
+//    response->mutable_status()->set_reason(grpc_status.reason());
+    SET_RESPONSE(response, grpc_status);
     return ::grpc::Status::OK;
 }
 

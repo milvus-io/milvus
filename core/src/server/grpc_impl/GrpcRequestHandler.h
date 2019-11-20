@@ -26,6 +26,18 @@
 namespace milvus {
 namespace server {
 namespace grpc {
+
+// TODO
+// set tag (error, error_code)
+#define SET_TRACING_TAG(GRPC_STATUS)                                        \
+    if ((GRPC_STATUS).error_code() != ::milvus::grpc::ErrorCode::SUCCESS) { \
+    }
+
+#define SET_RESPONSE(RESPONSE, GRPC_STATUS)                               \
+    (RESPONSE)->mutable_status()->set_error_code((GRPC_STATUS).error_code()); \
+    (RESPONSE)->mutable_status()->set_reason((GRPC_STATUS).reason());         \
+    SET_TRACING_TAG((GRPC_STATUS))
+
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
  public:
     // *
