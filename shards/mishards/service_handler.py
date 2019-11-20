@@ -63,7 +63,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             row_num = files_collection.row_num
             ids = files_collection.ids
             diss = files_collection.distances  # distance collections
-            # TODO: batch_len is equal to topk
+            # TODO: batch_len is equal to topk, may need to compare with topk
             batch_len = len(ids) // row_num
 
             for row_index in range(row_num):
@@ -82,7 +82,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                      merge_dis_results[row_index], dis_batch,
                                      batch_len,
                                      reverse)
-
 
         calc_time = time.time() - calc_time
         logger.info('Merge takes {}'.format(calc_time))
