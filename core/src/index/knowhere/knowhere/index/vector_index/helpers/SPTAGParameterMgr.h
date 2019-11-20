@@ -22,31 +22,40 @@
 #include <utility>
 #include <vector>
 
+#include <SPTAG/AnnService/inc/Core/Common.h>
+#include "IndexParameter.h"
+
 namespace knowhere {
 
-using KDTParameter = std::pair<std::string, std::string>;
+    using KDTConfig = std::shared_ptr<KDTCfg>;
+    using BKTConfig = std::shared_ptr<BKTCfg>;
 
-class KDTParameterMgr {
- public:
-    const std::vector<KDTParameter>&
-    GetKDTParameters();
+    class SPTAGParameterMgr {
+    public:
+        const KDTConfig&
+        GetKDTParameters();
 
- public:
-    static KDTParameterMgr&
-    GetInstance() {
-        static KDTParameterMgr instance;
-        return instance;
-    }
+        const BKTConfig&
+        GetBKTParameters();
 
-    KDTParameterMgr(const KDTParameterMgr&) = delete;
-    KDTParameterMgr&
-    operator=(const KDTParameterMgr&) = delete;
+    public:
+        static SPTAGParameterMgr&
+        GetInstance() {
+            static SPTAGParameterMgr instance;
+            return instance;
+        }
 
- private:
-    KDTParameterMgr();
+        SPTAGParameterMgr(const SPTAGParameterMgr&) = delete;
 
- private:
-    std::vector<KDTParameter> kdt_parameters_;
-};
+        SPTAGParameterMgr&
+        operator=(const SPTAGParameterMgr&) = delete;
+
+    private:
+        SPTAGParameterMgr();
+
+    private:
+        KDTConfig kdt_config_;
+        BKTConfig bkt_config_;
+    };
 
 }  // namespace knowhere

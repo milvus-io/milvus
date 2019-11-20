@@ -124,6 +124,14 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 #endif
             break;
         }
+        case EngineType::SPTAG_KDT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
+            break;
+        }
+        case EngineType::SPTAG_BKT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;
