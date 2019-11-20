@@ -17,7 +17,7 @@ Milvusは世界中一番早い特徴ベクトルにむかう類似性検索エ�
 
 Milvusは安定的な[Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java)又は [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) APIsを提供します。
 
-Milvus [リリースノート](https://milvus.io/docs/en/release/v0.5.3/)を読んで最新バージョンや更新情報を手に入れます。(https://github.com/milvus-io/milvus/tree/master/core/src/sdk)
+Milvus [リリースノート](https://milvus.io/docs/en/release/v0.5.3/)を読んで最新バージョンや更新情報を手に入れます。
 
 
 ## はじめに
