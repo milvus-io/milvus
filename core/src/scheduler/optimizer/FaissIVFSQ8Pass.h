@@ -14,39 +14,43 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 #pragma once
 
+#include <condition_variable>
+#include <deque>
+#include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
-#include <utility>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
-namespace knowhere {
+#include "Pass.h"
 
-using KDTParameter = std::pair<std::string, std::string>;
+namespace milvus {
+namespace scheduler {
 
-class KDTParameterMgr {
+class FaissIVFSQ8Pass : public Pass {
  public:
-    const std::vector<KDTParameter>&
-    GetKDTParameters();
+    FaissIVFSQ8Pass() = default;
 
  public:
-    static KDTParameterMgr&
-    GetInstance() {
-        static KDTParameterMgr instance;
-        return instance;
-    }
+    void
+    Init() override;
 
-    KDTParameterMgr(const KDTParameterMgr&) = delete;
-    KDTParameterMgr&
-    operator=(const KDTParameterMgr&) = delete;
+    bool
+    Run(const TaskPtr& task) override;
 
  private:
-    KDTParameterMgr();
-
- private:
-    std::vector<KDTParameter> kdt_parameters_;
+    int64_t threshold_ = std::numeric_limits<int64_t>::max();
+    int64_t count_ = 0;
+    std::vector<int64_t> gpus;
 };
 
-}  // namespace knowhere
+using FaissIVFSQ8PassPtr = std::shared_ptr<FaissIVFSQ8Pass>;
+
+}  // namespace scheduler
+}  // namespace milvus

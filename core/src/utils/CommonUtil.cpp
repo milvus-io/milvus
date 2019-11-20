@@ -54,7 +54,7 @@ CommonUtil::GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem) {
 }
 
 bool
-CommonUtil::GetSystemAvailableThreads(uint32_t& thread_count) {
+CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
     thread_count *= THREAD_MULTIPLY_CPU;

@@ -2,7 +2,7 @@
 
 ## 概述
 
-本文描述了ivfsq8索引在milvus单机部署方式下的测试报告。
+本文描述了ivfsq8索引在milvus单机部署方式下的测试结果。
 
 
 
@@ -28,13 +28,13 @@ GPU1: GeForce GTX 1080
 
 Docker版本: 18.09
 
-Nvidia Driver版本: 430.34
+NVIDIA Driver版本: 430.34
 
 Milvus版本: 0.5.3
 
 SDK接口: Python 3.6.8
 
-Pymilvus版本: 0.2.5
+pymilvus版本: 0.2.5
 
 
 
@@ -66,7 +66,7 @@ Pymilvus版本: 0.2.5
 
   > 备注：在向量准确性测试中，我们会测试下面参数不同的取值来观察结果：
   >
-  > 被查询向量的数量nq将按照 [1, 5, 10,  200, 400, 600, 800, 1000]的数量分组，
+  > 被查询向量的数量nq将按照 [10,  200, 400, 600, 800, 1000]的数量分组，
   >
   > 单条查询中最相似的K个结果topk将按照[1, 10, 100]的数量分组。
 
@@ -93,7 +93,7 @@ Milvus设置：
 - gpu_cache_capacity: 6
 - use_blas_threshold: 1100
 
-你可以在 https://milvus.io/docs/en/reference/milvus_config/上查询Milvus设置的详细定义。
+Milvus设置的详细定义可以参考 https://milvus.io/docs/en/reference/milvus_config/ 。
 
 测试方法
 
@@ -177,8 +177,6 @@ search_resources: gpu0, gpu1
 
 | nq/topk | topk=1 | topk=10 | topk=100 |
 | :-----: | :----: | :-----: | :------: |
-|  nq=1   | 1.000  |  0.800  |  0.790   |
-|  nq=5   | 0.800  |  0.820  |  0.908   |
 |  nq=10  | 0.900  |  0.910  |  0.939   |
 | nq=200  | 0.955  |  0.941  |  0.929   |
 | nq=400  | 0.958  |  0.944  |  0.932   |
@@ -194,8 +192,6 @@ search_resources: cpu, gpu0
 
 | nq/topk | topk=1 | topk=10 | topk=100 |
 | :-----: | :----: | :-----: | :------: |
-|  nq=1   | 1.000  |  0.800  |  0.790   |
-|  nq=5   | 0.800  |  0.820  |  0.908   |
 |  nq=10  | 0.900  |  0.910  |  0.939   |
 | nq=200  | 0.955  |  0.941  |  0.929   |
 | nq=400  | 0.958  |  0.944  |  0.932   |
@@ -207,5 +203,5 @@ search_resources: cpu, gpu0
 
 **总结**
 
-​		随着nq的增大，召回率逐渐稳定至93%以上。
+随着nq的增大，召回率逐渐稳定至93%以上。
 

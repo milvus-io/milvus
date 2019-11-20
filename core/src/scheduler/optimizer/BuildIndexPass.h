@@ -32,16 +32,23 @@
 namespace milvus {
 namespace scheduler {
 
-class OnlyCPUPass : public Pass {
+class BuildIndexPass : public Pass {
  public:
-    OnlyCPUPass() = default;
+    BuildIndexPass() = default;
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
+
+ private:
+    uint64_t specified_gpu_id_ = 0;
+    std::vector<int32_t> build_gpu_ids_;
 };
 
-using OnlyCPUPassPtr = std::shared_ptr<OnlyCPUPass>;
+using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

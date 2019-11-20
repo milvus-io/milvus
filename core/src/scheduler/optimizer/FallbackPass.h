@@ -14,23 +14,27 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 #pragma once
 
-#include "TaskLabel.h"
-
+#include <bits/stdc++.h>
 #include <memory>
+
+#include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class DefaultLabel : public TaskLabel {
+class FallbackPass : public Pass {
  public:
-    DefaultLabel() : TaskLabel(TaskLabelType::DEFAULT) {
-    }
-};
+    FallbackPass() = default;
 
-using DefaultLabelPtr = std::shared_ptr<DefaultLabel>;
+ public:
+    void
+    Init() override;
+
+    bool
+    Run(const TaskPtr& task) override;
+};
 
 }  // namespace scheduler
 }  // namespace milvus
