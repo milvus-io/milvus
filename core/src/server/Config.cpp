@@ -190,8 +190,8 @@ Config::ValidateConfig() {
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
-    bool resource_enable_gpu;
-    s = GetGpuResourceConfigEnableGpu(resource_enable_gpu);
+    bool gpu_resource_enable;
+    s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
@@ -330,7 +330,7 @@ Config::ResetDefaultConfig() {
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
-    s = SetGpuResourceConfigEnableGpu(CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT);
+    s = SetGpuResourceConfigEnable(CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -641,10 +641,10 @@ Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
 }
 
 Status
-Config::CheckGpuResourceConfigEnableGpu(const std::string& value) {
+Config::CheckGpuResourceConfigEnable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg = "Invalid gpu resource config: " + value +
-                          ". Possible reason: gpu_resource_config.enable_gpu is not a boolean.";
+        std::string msg =
+            "Invalid gpu resource config: " + value + ". Possible reason: gpu_resource_config.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -992,10 +992,9 @@ Config::GetEngineConfigGpuSearchThreshold(int32_t& value) {
 }
 
 Status
-Config::GetGpuResourceConfigEnableGpu(bool& value) {
-    std::string str =
-        GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE_GPU, CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT);
-    Status s = CheckGpuResourceConfigEnableGpu(str);
+Config::GetGpuResourceConfigEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
+    Status s = CheckGpuResourceConfigEnable(str);
     if (!s.ok()) {
         return s;
     }
@@ -1006,13 +1005,13 @@ Config::GetGpuResourceConfigEnableGpu(bool& value) {
 
 Status
 Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
-    bool enable_gpu = false;
-    Status s = GetGpuResourceConfigEnableGpu(enable_gpu);
+    bool gpu_resource_enable = false;
+    Status s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
-    if (!enable_gpu) {
-        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable_gpu is set to false.";
+    if (!gpu_resource_enable) {
+        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY,
@@ -1027,13 +1026,13 @@ Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
 
 Status
 Config::GetGpuResourceConfigCacheThreshold(float& value) {
-    bool enable_gpu = false;
-    Status s = GetGpuResourceConfigEnableGpu(enable_gpu);
+    bool gpu_resource_enable = false;
+    Status s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
-    if (!enable_gpu) {
-        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable_gpu is set to false.";
+    if (!gpu_resource_enable) {
+        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_THRESHOLD,
@@ -1048,13 +1047,13 @@ Config::GetGpuResourceConfigCacheThreshold(float& value) {
 
 Status
 Config::GetGpuResourceConfigSearchResources(std::vector<int32_t>& value) {
-    bool enable_gpu = false;
-    Status s = GetGpuResourceConfigEnableGpu(enable_gpu);
+    bool gpu_resource_enable = false;
+    Status s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
-    if (!enable_gpu) {
-        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable_gpu is set to false.";
+    if (!gpu_resource_enable) {
+        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
     std::string str = GetConfigSequenceStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES,
@@ -1073,13 +1072,13 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int32_t>& value) {
 
 Status
 Config::GetGpuResourceConfigBuildIndexResources(std::vector<int32_t>& value) {
-    bool enable_gpu = false;
-    Status s = GetGpuResourceConfigEnableGpu(enable_gpu);
+    bool gpu_resource_enable = false;
+    Status s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
-    if (!enable_gpu) {
-        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable_gpu is set to false.";
+    if (!gpu_resource_enable) {
+        std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
     std::string str =
@@ -1295,12 +1294,12 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
 
 /* gpu resource config */
 Status
-Config::SetGpuResourceConfigEnableGpu(const std::string& value) {
-    Status s = CheckGpuResourceConfigEnableGpu(value);
+Config::SetGpuResourceConfigEnable(const std::string& value) {
+    Status s = CheckGpuResourceConfigEnable(value);
     if (!s.ok()) {
         return s;
     }
-    SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE_GPU, value);
+    SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
     return Status::OK();
 }
 
