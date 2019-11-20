@@ -758,7 +758,7 @@ SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& 
 
     // not allow create partition under partition
     if(!table_schema.owner_table_.empty()) {
-        return Status(DB_ERROR, "Nested partition is not allow");
+        return Status(DB_ERROR, "Nested partition is not allowed");
     }
 
     // trim side-blank of tag, only compare valid characters
@@ -770,7 +770,7 @@ SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& 
     std::string exist_partition;
     GetPartitionName(table_id, valid_tag, exist_partition);
     if(!exist_partition.empty()) {
-        return Status(DB_ERROR, "Duplicated partition is not allow");
+        return Status(DB_ERROR, "Duplicate partition is not allowed");
     }
 
     if (partition_name == "") {
