@@ -23,6 +23,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#77 - Support table partition
 - \#127 - Support new Index type IVFPQ
 - \#226 - Experimental shards middleware for Milvus
+- \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
 - \#420 - Update shards merge part to match v0.5.3
 

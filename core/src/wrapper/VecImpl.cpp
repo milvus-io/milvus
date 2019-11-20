@@ -26,8 +26,8 @@
 #ifdef MILVUS_GPU_VERSION
 
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #endif
 

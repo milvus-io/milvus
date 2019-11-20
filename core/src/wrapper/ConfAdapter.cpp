@@ -201,5 +201,35 @@ NSGConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type)
     return conf;
 }
 
+knowhere::Config
+SPTAGKDTConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::KDTCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    return conf;
+}
+
+knowhere::Config
+SPTAGKDTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::KDTCfg>();
+    conf->k = metaconf.k;
+    return conf;
+}
+
+knowhere::Config
+SPTAGBKTConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::BKTCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    return conf;
+}
+
+knowhere::Config
+SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::BKTCfg>();
+    conf->k = metaconf.k;
+    return conf;
+}
+
 }  // namespace engine
 }  // namespace milvus
