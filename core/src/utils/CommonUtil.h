@@ -30,7 +30,7 @@ class CommonUtil {
     static bool
     GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem);
     static bool
-    GetSystemAvailableThreads(uint32_t& thread_count);
+    GetSystemAvailableThreads(int64_t& thread_count);
 
     static bool
     IsFileExist(const std::string& path);
