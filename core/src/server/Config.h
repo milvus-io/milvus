@@ -85,11 +85,11 @@ static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
 /* gpu resource config */
 static const char* CONFIG_GPU_RESOURCE = "gpu_resource_config";
-static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU = "enable_gpu";
+static const char* CONFIG_GPU_RESOURCE_ENABLE = "enable";
 #ifdef MILVUS_GPU_VERSION
-static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "true";
+static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 #else
-static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "false";
+static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "4";
@@ -175,7 +175,7 @@ class Config {
 
     /* gpu resource config */
     Status
-    CheckGpuResourceConfigEnableGpu(const std::string& value);
+    CheckGpuResourceConfigEnable(const std::string& value);
     Status
     CheckGpuResourceConfigCacheCapacity(const std::string& value);
     Status
@@ -210,11 +210,11 @@ class Config {
     Status
     GetDBConfigBackendUrl(std::string& value);
     Status
-    GetDBConfigArchiveDiskThreshold(int32_t& value);
+    GetDBConfigArchiveDiskThreshold(int64_t& value);
     Status
-    GetDBConfigArchiveDaysThreshold(int32_t& value);
+    GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigInsertBufferSize(int32_t& value);
+    GetDBConfigInsertBufferSize(int64_t& value);
     Status
     GetDBConfigPreloadTable(std::string& value);
 
@@ -236,23 +236,23 @@ class Config {
 
     /* engine config */
     Status
-    GetEngineConfigUseBlasThreshold(int32_t& value);
+    GetEngineConfigUseBlasThreshold(int64_t& value);
     Status
-    GetEngineConfigOmpThreadNum(int32_t& value);
+    GetEngineConfigOmpThreadNum(int64_t& value);
     Status
-    GetEngineConfigGpuSearchThreshold(int32_t& value);
+    GetEngineConfigGpuSearchThreshold(int64_t& value);
 
     /* gpu resource config */
     Status
-    GetGpuResourceConfigEnableGpu(bool& value);
+    GetGpuResourceConfigEnable(bool& value);
     Status
     GetGpuResourceConfigCacheCapacity(int64_t& value);
     Status
     GetGpuResourceConfigCacheThreshold(float& value);
     Status
-    GetGpuResourceConfigSearchResources(std::vector<int32_t>& value);
+    GetGpuResourceConfigSearchResources(std::vector<int64_t>& value);
     Status
-    GetGpuResourceConfigBuildIndexResources(std::vector<int32_t>& value);
+    GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value);
 
  public:
     /* server config */
@@ -305,7 +305,7 @@ class Config {
 
     /* gpu resource config */
     Status
-    SetGpuResourceConfigEnableGpu(const std::string& value);
+    SetGpuResourceConfigEnable(const std::string& value);
     Status
     SetGpuResourceConfigCacheCapacity(const std::string& value);
     Status
