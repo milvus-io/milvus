@@ -17,7 +17,7 @@
 
 #include "sdk/grpc/ClientProxy.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "src/config.h"
+#include "src/version.h"
 
 #include <memory>
 #include <string>
@@ -204,9 +204,8 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
         if (!id_array.empty()) {
             /* set user's ids */
             auto row_ids = insert_param.mutable_row_id_array();
-            row_ids->Reserve(static_cast<int>(id_array.size()));
+            row_ids->Resize(static_cast<int>(id_array.size()), -1);
             memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);

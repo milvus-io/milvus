@@ -76,8 +76,8 @@ TEST_P(SPTAGTest, sptag_basic) {
     AssertAnns(result, nq, k);
 
     {
-        //auto ids = result->array()[0];
-        //auto dists = result->array()[1];
+        // auto ids = result->array()[0];
+        // auto dists = result->array()[1];
         auto ids = result->ids();
         auto dists = result->dist();
 
@@ -85,8 +85,8 @@ TEST_P(SPTAGTest, sptag_basic) {
         std::stringstream ss_dist;
         for (auto i = 0; i < nq; i++) {
             for (auto j = 0; j < k; ++j) {
-                //ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
-                //ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
+                // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
+                // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
                 ss_id << *((int64_t*)(ids) + i * k + j) << " ";
                 ss_dist << *((float*)(dists) + i * k + j) << " ";
             }

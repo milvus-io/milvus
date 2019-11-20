@@ -84,12 +84,12 @@ DBImpl::Start() {
         return Status::OK();
     }
 
-    ENGINE_LOG_TRACE << "DB service start";
+    // ENGINE_LOG_TRACE << "DB service start";
     shutting_down_.store(false, std::memory_order_release);
 
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        ENGINE_LOG_TRACE << "StartTimerTasks";
+        // ENGINE_LOG_TRACE << "StartTimerTasks";
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
 
@@ -114,7 +114,7 @@ DBImpl::Stop() {
         meta_ptr_->CleanUp();
     }
 
-    ENGINE_LOG_TRACE << "DB service stop";
+    // ENGINE_LOG_TRACE << "DB service stop";
     return Status::OK();
 }
 
@@ -279,6 +279,11 @@ DBImpl::DropPartitionByTag(const std::string& table_id, const std::string& parti
 
     std::string partition_name;
     auto status = meta_ptr_->GetPartitionName(table_id, partition_tag, partition_name);
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
+        return status;
+    }
+
     return DropPartition(partition_name);
 }
 
@@ -553,7 +558,7 @@ DBImpl::StartMetricTask() {
         return;
     }
 
-    ENGINE_LOG_TRACE << "Start metric task";
+    // ENGINE_LOG_TRACE << "Start metric task";
 
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
@@ -579,7 +584,7 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUTemperature();
     server::Metrics::GetInstance().CPUTemperature();
 
-    ENGINE_LOG_TRACE << "Metric task finished";
+    // ENGINE_LOG_TRACE << "Metric task finished";
 }
 
 Status
@@ -751,7 +756,7 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 
 void
 DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    ENGINE_LOG_TRACE << "Background compaction thread start";
+    // ENGINE_LOG_TRACE << " Background compaction thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -774,7 +779,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 
-    ENGINE_LOG_TRACE << "Background compaction thread exit";
+    // ENGINE_LOG_TRACE << " Background compaction thread exit";
 }
 
 void
@@ -807,7 +812,7 @@ DBImpl::StartBuildIndexTask(bool force) {
 
 void
 DBImpl::BackgroundBuildIndex() {
-    ENGINE_LOG_TRACE << "Background build index thread start";
+    // ENGINE_LOG_TRACE << "Background build index thread start";
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
@@ -830,7 +835,7 @@ DBImpl::BackgroundBuildIndex() {
         }
     }
 
-    ENGINE_LOG_TRACE << "Background build index thread exit";
+    // ENGINE_LOG_TRACE << "Background build index thread exit";
 }
 
 Status
@@ -853,8 +858,12 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
     auto status = meta_ptr_->ShowPartitions(table_id, partiton_array);
 
     for (auto& tag : partition_tags) {
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
         for (auto& schema : partiton_array) {
-            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, tag)) {
+            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.table_id_);
             }
         }

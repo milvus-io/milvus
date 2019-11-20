@@ -14,38 +14,33 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 
-#include "Pass.h"
+#include <string>
 
 namespace milvus {
-namespace scheduler {
+namespace server {
+namespace grpc {
 
-class OnlyGPUPass : public Pass {
+class DescribeTableRequest : public GrpcBaseRequest {
  public:
-    explicit OnlyGPUPass(bool has_cpu);
+    static BaseRequestPtr
+    Create(const std::string& table_name, ::milvus::grpc::TableSchema* schema);
 
- public:
-    bool
-    Run(const TaskPtr& task) override;
+ protected:
+    DescribeTableRequest(const std::string& table_name, ::milvus::grpc::TableSchema* schema);
+
+    Status
+    OnExecute() override;
 
  private:
-    uint64_t specified_gpu_id_ = 0;
-    bool has_cpu_ = false;
+    std::string table_name_;
+    ::milvus::grpc::TableSchema* schema_;
 };
 
-using OnlyGPUPassPtr = std::shared_ptr<OnlyGPUPass>;
-
-}  // namespace scheduler
+}  // namespace grpc
+}  // namespace server
 }  // namespace milvus

@@ -56,13 +56,16 @@ class ValidationUtil {
     ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
 
     static Status
+    ValidatePartitionName(const std::string& partition_name);
+
+    static Status
     ValidatePartitionTags(const std::vector<std::string>& partition_tags);
 
     static Status
-    ValidateGpuIndex(uint32_t gpu_index);
+    ValidateGpuIndex(int32_t gpu_index);
 
     static Status
-    GetGpuMemory(uint32_t gpu_index, size_t& memory);
+    GetGpuMemory(int32_t gpu_index, size_t& memory);
 
     static Status
     ValidateIpAddress(const std::string& ip_address);
