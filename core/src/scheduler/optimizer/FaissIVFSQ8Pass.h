@@ -14,23 +14,43 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 #pragma once
 
-#include "TaskLabel.h"
-
+#include <condition_variable>
+#include <deque>
+#include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class DefaultLabel : public TaskLabel {
+class FaissIVFSQ8Pass : public Pass {
  public:
-    DefaultLabel() : TaskLabel(TaskLabelType::DEFAULT) {
-    }
+    FaissIVFSQ8Pass() = default;
+
+ public:
+    void
+    Init() override;
+
+    bool
+    Run(const TaskPtr& task) override;
+
+ private:
+    int32_t threshold_ = std::numeric_limits<int32_t>::max();
+    int64_t count_ = 0;
+    std::vector<int32_t> gpus;
 };
 
-using DefaultLabelPtr = std::shared_ptr<DefaultLabel>;
+using FaissIVFSQ8PassPtr = std::shared_ptr<FaissIVFSQ8Pass>;
 
 }  // namespace scheduler
 }  // namespace milvus

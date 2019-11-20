@@ -33,20 +33,24 @@
 namespace milvus {
 namespace scheduler {
 
-class LargeSQ8HPass : public Pass {
+class FaissIVFFlatPass : public Pass {
  public:
-    LargeSQ8HPass();
+    FaissIVFFlatPass() = default;
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
 
  private:
     int32_t threshold_ = std::numeric_limits<int32_t>::max();
     int64_t count_ = 0;
+    std::vector<int32_t> gpus;
 };
 
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
+using FaissIVFFlatPassPtr = std::shared_ptr<FaissIVFFlatPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
