@@ -409,7 +409,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     partition_parm.set_partition_name(partition_name);
     handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
