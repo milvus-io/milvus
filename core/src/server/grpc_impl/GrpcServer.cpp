@@ -41,7 +41,7 @@
 #include <grpc++/server_builder.h>
 #include <grpc++/server_context.h>
 
-#include "tracing/interceptor.h"
+#include "server/grpc_impl/interceptor/SpanInterceptor.h"
 
 namespace milvus {
 namespace server {
@@ -102,7 +102,7 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
-    GrpcRequestHandler service;
+    GrpcRequestHandler service(opentracing::Tracer::Global());
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
@@ -113,7 +113,7 @@ GrpcServer::StartService() {
     std::vector<InterceptorIPtr> creators;
 
     creators.push_back(std::unique_ptr<::grpc::experimental::ServerInterceptorFactoryInterface>(
-        new SpanInterceptorFactory(opentracing::Tracer::Global())));
+        new SpanInterceptorFactory(&service)));
 
     builder.experimental().SetInterceptorCreators(std::move(creators));
 

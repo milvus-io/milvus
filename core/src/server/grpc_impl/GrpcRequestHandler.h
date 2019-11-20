@@ -23,6 +23,10 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 
+#include <context/Context.h>
+#include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
+#include "opentracing/tracer.h"
+
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -33,13 +37,23 @@ namespace grpc {
     if ((GRPC_STATUS).error_code() != ::milvus::grpc::ErrorCode::SUCCESS) { \
     }
 
-#define SET_RESPONSE(RESPONSE, GRPC_STATUS)                               \
+#define SET_RESPONSE(RESPONSE, GRPC_STATUS)                                   \
     (RESPONSE)->mutable_status()->set_error_code((GRPC_STATUS).error_code()); \
     (RESPONSE)->mutable_status()->set_reason((GRPC_STATUS).reason());         \
     SET_TRACING_TAG((GRPC_STATUS))
 
-class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
+class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:
+    explicit GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer);
+
+    void
+    OnPostRecvInitialMetaData(::grpc::experimental::ServerRpcInfo* server_rpc_info,
+                              ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+
+    void
+    OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
+                     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+
     // *
     // @brief This method is used to create table
     //
@@ -204,6 +218,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
     ::grpc::Status
     PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                  ::milvus::grpc::Status* response) override;
+
+ private:
+    std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
+    std::shared_ptr<opentracing::Tracer> tracer_;
+//    std::shared_ptr<opentracing::Span> span_;
 };
 
 }  // namespace grpc

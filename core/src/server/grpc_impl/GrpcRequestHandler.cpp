@@ -38,9 +38,47 @@
 
 #include <vector>
 
+#include "tracing/TextMapCarrier.h"
+#include "tracing/TracerUtil.h"
+
 namespace milvus {
 namespace server {
 namespace grpc {
+
+GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer) : tracer_(tracer) {
+}
+
+void
+GrpcRequestHandler::OnPostRecvInitialMetaData(
+    ::grpc::experimental::ServerRpcInfo* server_rpc_info,
+    ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
+    //    cout << "experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA ..." << endl;
+    std::unordered_map<std::string, std::string> text_map;
+    auto* map = interceptor_batch_methods->GetRecvInitialMetadata();
+    /* for (auto kv : *map) { */
+    /*     cout << string(kv.first.data(), kv.first.length()) << " : " */
+    /*         << string(kv.second.data(), kv.second.length()) << endl; */
+    /* } */
+
+    auto context_kv = map->find(TracerUtil::GetTraceContextHeaderName());
+    if (context_kv != map->end()) {
+        text_map[std::string(context_kv->first.data(), context_kv->first.length())] =
+            std::string(context_kv->second.data(), context_kv->second.length());
+    }
+
+    TextMapCarrier carrier{text_map};
+    auto span_maybe = tracer_->Extract(carrier);
+    span_ = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_maybe->get())});
+    // TODO
+}
+
+void
+GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
+                                     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
+    //        cout << "experimental::InterceptionHookPoints::PRE_SEND_MESSAGE ..." << endl;
+    // TODO
+    span_->Finish();
+}
 
 ::grpc::Status
 GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
@@ -98,8 +136,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     BaseRequestPtr request_ptr = SearchRequest::Create(request, file_id_array, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
-//    response->mutable_status()->set_error_code(grpc_status.error_code());
-//    response->mutable_status()->set_reason(grpc_status.reason());
+    //    response->mutable_status()->set_error_code(grpc_status.error_code());
+    //    response->mutable_status()->set_reason(grpc_status.reason());
     SET_RESPONSE(response, grpc_status);
     return ::grpc::Status::OK;
 }

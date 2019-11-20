@@ -204,7 +204,7 @@ endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
-add_library(tracing STATIC ${tracing_files} ${context_files})
+add_library(tracing STATIC ${tracing_files})
 set(tracing_lib
         opentracing
         opentracing_mocktracer
@@ -229,6 +229,7 @@ add_executable(milvus_server
         ${grpc_service_files}
         ${utils_files}
         ${tracing_files}
+        ${context_files}
         )
 
 target_link_libraries(milvus_server
