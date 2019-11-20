@@ -59,7 +59,7 @@ C++サンプルコードを実行するために、次のコマンドをつか�
 
 - [Milvus](https://github.com/milvus-io/bootcamp)
 
-- [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs/test_report)
+- [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
