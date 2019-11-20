@@ -23,6 +23,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#77 - Support table partition
 - \#127 - Support new Index type IVFPQ
 - \#226 - Experimental shards middleware for Milvus
+- \#346 - Support build index with multiple gpu
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version

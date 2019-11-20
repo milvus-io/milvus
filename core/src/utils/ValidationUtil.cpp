@@ -198,7 +198,7 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
 }
 
 Status
-ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
+ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
@@ -219,7 +219,7 @@ ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
 }
 
 Status
-ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
+ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
 #ifdef MILVUS_GPU_VERSION
 
     cudaDeviceProp deviceProp;

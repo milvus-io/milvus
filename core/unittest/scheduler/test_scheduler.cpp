@@ -23,7 +23,6 @@
 #include "scheduler/Scheduler.h"
 #include "scheduler/resource/Resource.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
@@ -148,46 +147,6 @@ insert_dummy_index_into_gpu_cache(uint64_t device_id) {
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index);
 
     cache::GpuCacheMgr::GetInstance(device_id)->InsertItem("location", obj);
-}
-
-TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
-    const uint64_t NUM = 10;
-    std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
-    dummy->location_ = "location";
-
-    insert_dummy_index_into_gpu_cache(1);
-
-    for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy, label);
-        task->label() = std::make_shared<DefaultLabel>();
-        tasks.push_back(task);
-        cpu_resource_.lock()->task_table().Put(task);
-    }
-
-    sleep(3);
-    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().size(), NUM);
-}
-
-TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
-    const uint64_t NUM = 10;
-    std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy1 = std::make_shared<TableFileSchema>();
-    dummy1->location_ = "location";
-
-    tasks.clear();
-
-    for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy1, label);
-        task->label() = std::make_shared<DefaultLabel>();
-        tasks.push_back(task);
-        cpu_resource_.lock()->task_table().Put(task);
-    }
-
-    sleep(3);
-    //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 }
 
 class SchedulerTest2 : public testing::Test {

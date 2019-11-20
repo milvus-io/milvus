@@ -159,6 +159,10 @@ DBTest::SetUp() {
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
     auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
+#ifdef MILVUS_GPU_VERSION
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0, true, true));
+    res_mgr->Connect("cpu", "0", PCIE);
+#endif
     res_mgr->Start();
     milvus::scheduler::SchedInst::GetInstance()->Start();
 

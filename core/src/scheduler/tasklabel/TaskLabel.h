@@ -23,7 +23,6 @@ namespace milvus {
 namespace scheduler {
 
 enum class TaskLabelType {
-    DEFAULT,             // means can be executed in any resource
     SPECIFIED_RESOURCE,  // means must executing in special resource
     BROADCAST,           // means all enable-executor resource must execute task
 };
