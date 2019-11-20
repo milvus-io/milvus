@@ -32,7 +32,7 @@ FaissIVFSQ8HPass::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
-        threshold_ = std::numeric_limits<int32_t>::max();
+        threshold_ = std::numeric_limits<int64_t>::max();
     }
     s = config.GetGpuResourceConfigSearchResources(gpus);
 }

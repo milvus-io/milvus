@@ -124,6 +124,14 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 #endif
             break;
         }
+        case EngineType::SPTAG_KDT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
+            break;
+        }
+        case EngineType::SPTAG_BKT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;
@@ -146,7 +154,7 @@ ExecutionEngineImpl::HybridLoad() const {
     const std::string key = location_ + ".quantizer";
 
     server::Config& config = server::Config::GetInstance();
-    std::vector<int32_t> gpus;
+    std::vector<int64_t> gpus;
     Status s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
         ENGINE_LOG_ERROR << s.message();
@@ -586,7 +594,7 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
-    std::vector<int32_t> gpu_ids;
+    std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {

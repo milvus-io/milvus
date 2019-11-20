@@ -60,7 +60,7 @@ TEST(UtilTest, COMMON_TEST) {
     ASSERT_GT(total_mem, 0);
     ASSERT_GT(free_mem, 0);
 
-    uint32_t thread_cnt = 0;
+    int64_t thread_cnt = 0;
     milvus::server::CommonUtil::GetSystemAvailableThreads(thread_cnt);
     ASSERT_GT(thread_cnt, 0);
 
