@@ -26,7 +26,7 @@ namespace scheduler {
 void
 BuildIndexPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    std::vector<int32_t> build_resources;
+    std::vector<int64_t> build_resources;
     Status s = config.GetGpuResourceConfigBuildIndexResources(build_resources);
     if (!s.ok()) {
         throw;
