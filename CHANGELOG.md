@@ -13,6 +13,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
 - \#397 - sdk_simple return incorrect result
+- \#440 - Query API in customization still uses old version
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
