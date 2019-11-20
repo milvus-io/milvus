@@ -14,35 +14,43 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 #pragma once
 
+#include <condition_variable>
+#include <deque>
+#include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-enum class TaskLabelType {
-    SPECIFIED_RESOURCE,  // means must executing in special resource
-    BROADCAST,           // means all enable-executor resource must execute task
-};
-
-class TaskLabel {
+class FaissIVFSQ8HPass : public Pass {
  public:
-    inline TaskLabelType
-    Type() const {
-        return type_;
-    }
+    FaissIVFSQ8HPass() = default;
 
- protected:
-    explicit TaskLabel(TaskLabelType type) : type_(type) {
-    }
+ public:
+    void
+    Init() override;
+
+    bool
+    Run(const TaskPtr& task) override;
 
  private:
-    TaskLabelType type_;
+    int32_t threshold_ = std::numeric_limits<int32_t>::max();
+    int64_t count_ = 0;
+    std::vector<int32_t> gpus;
 };
 
-using TaskLabelPtr = std::shared_ptr<TaskLabel>;
+using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

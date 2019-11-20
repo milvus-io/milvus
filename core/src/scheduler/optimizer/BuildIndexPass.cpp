@@ -15,28 +15,39 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/HybridPass.h"
+#include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/task/SearchTask.h"
+#include "scheduler/Utils.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
 
-bool
-HybridPass::Run(const TaskPtr& task) {
-    // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
-    if (task->Type() != TaskType::SearchTask)
-        return false;
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ == (int)engine::EngineType::FAISS_IVFSQ8H) {
-        // TODO: remove "cpu" hardcode
-        ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
-        return true;
+void
+BuildIndexPass::Init() {
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int32_t> build_resources;
+    Status s = config.GetGpuResourceConfigBuildIndexResources(build_resources);
+    if (!s.ok()) {
+        throw;
     }
-    return false;
+}
+
+bool
+BuildIndexPass::Run(const TaskPtr& task) {
+    if (task->Type() != TaskType::BuildIndexTask)
+        return false;
+
+    if (build_gpu_ids_.empty())
+        return false;
+
+    ResourcePtr res_ptr;
+    res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
+    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    task->label() = label;
+
+    specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
+    return true;
 }
 
 }  // namespace scheduler

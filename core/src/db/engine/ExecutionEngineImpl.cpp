@@ -144,7 +144,14 @@ ExecutionEngineImpl::HybridLoad() const {
     }
 
     const std::string key = location_ + ".quantizer";
-    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int32_t> gpus;
+    Status s = config.GetGpuResourceConfigSearchResources(gpus);
+    if (!s.ok()) {
+        ENGINE_LOG_ERROR << s.message();
+        return;
+    }
 
     // cache hit
     {
@@ -355,6 +362,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+    gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
@@ -578,12 +586,16 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetResourceConfigIndexBuildDevice(gpu_num_);
-    if (!s.ok()) {
-        return s;
+    std::vector<int32_t> gpu_ids;
+    Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
+    for (auto id : gpu_ids) {
+        if (gpu_num_ == id) {
+            return Status::OK();
+        }
     }
 
-    return Status::OK();
+    std::string msg = "Invalid gpu_num";
+    return Status(SERVER_INVALID_ARGUMENT, msg);
 }
 
 }  // namespace engine

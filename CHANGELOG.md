@@ -17,8 +17,9 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Feature
 - \#12 - Pure CPU version for Milvus
 - \#77 - Support table partition
-- \#226 - Experimental shards middleware for Milvus
 - \#127 - Support new Index type IVFPQ
+- \#226 - Experimental shards middleware for Milvus
+- \#346 - Support build index with multiple gpu
 
 ## Improvement
 - \#275 - Rename C++ SDK IndexType
@@ -30,6 +31,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#322 - Add option to enable / disable prometheus
 - \#358 - Add more information in build.sh and install.md
 - \#255 - Add ivfsq8 test report detailed version
+- \#404 - Add virtual method Init() in Pass abstract class
+- \#409 - Add a Fallback pass in optimizer
 
 ## Task
 
