@@ -15,33 +15,39 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/optimizer/BuildIndexPass.h"
+#include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
-
-#ifdef MILVUS_GPU_VERSION
-#include <cuda_runtime.h>
-#endif
-#include <chrono>
-#include <set>
-#include <string>
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
 
-uint64_t
-get_current_timestamp() {
-    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
-    auto duration = now.time_since_epoch();
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-    return millis;
+void
+BuildIndexPass::Init() {
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int32_t> build_resources;
+    Status s = config.GetGpuResourceConfigBuildIndexResources(build_resources);
+    if (!s.ok()) {
+        throw;
+    }
 }
 
-uint64_t
-get_num_gpu() {
-    int n_devices = 0;
-#ifdef MILVUS_GPU_VERSION
-    cudaGetDeviceCount(&n_devices);
-#endif
-    return n_devices;
+bool
+BuildIndexPass::Run(const TaskPtr& task) {
+    if (task->Type() != TaskType::BuildIndexTask)
+        return false;
+
+    if (build_gpu_ids_.empty())
+        return false;
+
+    ResourcePtr res_ptr;
+    res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
+    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    task->label() = label;
+
+    specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
+    return true;
 }
 
 }  // namespace scheduler

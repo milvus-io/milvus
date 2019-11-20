@@ -22,7 +22,6 @@
 #include "scheduler/resource/GpuResource.h"
 #include "scheduler/resource/TestResource.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -187,8 +186,7 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     auto callback = [&](EventPtr event) { flag = true; };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
-    auto label = std::make_shared<DefaultLabel>();
-    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, label));
+    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, nullptr));
     sleep(1);
     ASSERT_TRUE(flag);
 }

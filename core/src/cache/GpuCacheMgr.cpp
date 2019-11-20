@@ -37,7 +37,7 @@ GpuCacheMgr::GpuCacheMgr() {
     Status s;
 
     int64_t gpu_cache_cap;
-    s = config.GetCacheConfigGpuCacheCapacity(gpu_cache_cap);
+    s = config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
@@ -45,7 +45,7 @@ GpuCacheMgr::GpuCacheMgr() {
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float gpu_mem_threshold;
-    s = config.GetCacheConfigGpuCacheThreshold(gpu_mem_threshold);
+    s = config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
