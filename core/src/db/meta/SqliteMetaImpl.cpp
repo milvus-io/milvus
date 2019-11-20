@@ -22,6 +22,7 @@
 #include "metrics/Metrics.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <sqlite_orm.h>
 #include <unistd.h>
@@ -757,17 +758,23 @@ SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& 
 
     // not allow create partition under partition
     if(!table_schema.owner_table_.empty()) {
-        return Status(DB_ERROR, "Nested partition is not allow");
+        return Status(DB_ERROR, "Nested partition is not allowed");
+    }
+
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    std::string valid_tag = tag;
+    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+    // not allow duplicated partition
+    std::string exist_partition;
+    GetPartitionName(table_id, valid_tag, exist_partition);
+    if(!exist_partition.empty()) {
+        return Status(DB_ERROR, "Duplicate partition is not allowed");
     }
 
     if (partition_name == "") {
-        // not allow duplicated partition
-        std::string exist_partition;
-        GetPartitionName(table_id, tag, exist_partition);
-        if(!exist_partition.empty()) {
-            return Status(DB_ERROR, "Duplicated partition is not allow");
-        }
-
+        // generate unique partition name
         NextTableId(table_schema.table_id_);
     } else {
         table_schema.table_id_ = partition_name;
@@ -777,9 +784,14 @@ SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& 
     table_schema.flag_ = 0;
     table_schema.created_on_ = utils::GetMicroSecTimeStamp();
     table_schema.owner_table_ = table_id;
-    table_schema.partition_tag_ = tag;
+    table_schema.partition_tag_ = valid_tag;
 
-    return CreateTable(table_schema);
+    status = CreateTable(table_schema);
+    if (status.code() == DB_ALREADY_EXIST) {
+        return Status(DB_ALREADY_EXIST, "Partition already exists");
+    }
+
+    return status;
 }
 
 Status
@@ -814,13 +826,18 @@ SqliteMetaImpl::GetPartitionName(const std::string& table_id, const std::string&
     try {
         server::MetricCollector metric;
 
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
         auto name = ConnectorPtr->select(columns(&TableSchema::table_id_),
                                                where(c(&TableSchema::owner_table_) == table_id
-                                                     and c(&TableSchema::partition_tag_) == tag));
+                                                     and c(&TableSchema::partition_tag_) == valid_tag));
         if (name.size() > 0) {
             partition_name = std::get<0>(name[0]);
         } else {
-            return Status(DB_NOT_FOUND, "Table " + table_id + "'s partition " + tag + " not found");
+            return Status(DB_NOT_FOUND, "Table " + table_id + "'s partition " + valid_tag + " not found");
         }
     } catch (std::exception &e) {
         return HandleException("Encounter exception when get partition name", e.what());

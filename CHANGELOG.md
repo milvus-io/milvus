@@ -12,7 +12,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#340 - Test cases run failed on 0.6.0
 - \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
+- \#377 - Create partition success if tag name only contains spaces
 - \#397 - sdk_simple return incorrect result
+- \#399 - Create partition should be failed if partition tag existed
+- \#412 - Message returned is confused when partition created with null partition name
+- \#416 - Drop the same partition success repeatally
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
