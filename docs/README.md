@@ -9,3 +9,8 @@ The tests are run on [SIFT1B dataset](http://corpus-texmex.irisa.fr/), and provi
 - Recall: The fraction of the total amount of relevant instances that were actually retrieved.
 
 Test variables are `nq` and `topk`.
+
+The following is a list of existing test reports:
+
+- [IVF_SQ8](test_report/milvus_ivfsq8_test_report_detailed_version.md)
+- [IVF_SQ8H](test_report/milvus_ivfsq8h_test_report_detailed_version.md)
