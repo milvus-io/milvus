@@ -36,7 +36,7 @@ main(int argc, char* argv[]) {
                                            {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
-    std::string address = "192.168.1.89", port = "19530";
+    std::string address = "127.0.0.1", port = "19530";
     app_name = argv[0];
 
     int value;

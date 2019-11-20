@@ -105,7 +105,7 @@ class ClientProxy : public Connection {
     DropPartition(const PartitionParam& partition_param) override;
 
  private:
-    std::shared_ptr<grpc_channel> channel_;
+    std::shared_ptr<::grpc::Channel> channel_;
 
  private:
     std::shared_ptr<GrpcClient> client_ptr_;

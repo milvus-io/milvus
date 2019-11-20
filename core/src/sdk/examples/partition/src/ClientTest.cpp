@@ -78,7 +78,7 @@ ClientTest::Test(const std::string &address, const std::string &port) {
         stat = conn->Connect(param);
         std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
-#ifdef yhz
+
     {  // create table
         milvus::TableSchema tb_schema = BuildTableSchema();
         stat = conn->CreateTable(tb_schema);
@@ -202,5 +202,4 @@ ClientTest::Test(const std::string &address, const std::string &port) {
     }
 
     milvus::Connection::Destroy(conn);
-#endif
 }
