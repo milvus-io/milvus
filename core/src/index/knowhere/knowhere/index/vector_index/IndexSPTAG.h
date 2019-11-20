@@ -28,66 +28,66 @@
 
 namespace knowhere {
 
-    class CPUSPTAGRNG : public VectorIndex {
-    public:
-        explicit CPUSPTAGRNG(const std::string& IndexType);
+class CPUSPTAGRNG : public VectorIndex {
+ public:
+    explicit CPUSPTAGRNG(const std::string& IndexType);
 
-    public:
-        BinarySet
-        Serialize() override;
+ public:
+    BinarySet
+    Serialize() override;
 
-        VectorIndexPtr
-        Clone() override;
+    VectorIndexPtr
+    Clone() override;
 
-        void
-        Load(const BinarySet& index_array) override;
+    void
+    Load(const BinarySet& index_array) override;
 
-    public:
-        // PreprocessorPtr
-        // BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
+ public:
+    // PreprocessorPtr
+    // BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
 
-        int64_t
-        Count() override;
+    int64_t
+    Count() override;
 
-        int64_t
-        Dimension() override;
+    int64_t
+    Dimension() override;
 
-        IndexModelPtr
-        Train(const DatasetPtr& dataset, const Config& config) override;
+    IndexModelPtr
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
-        void
-        Add(const DatasetPtr& dataset, const Config& config) override;
+    void
+    Add(const DatasetPtr& dataset, const Config& config) override;
 
-        DatasetPtr
-        Search(const DatasetPtr& dataset, const Config& config) override;
+    DatasetPtr
+    Search(const DatasetPtr& dataset, const Config& config) override;
 
-        void
-        Seal() override;
+    void
+    Seal() override;
 
-    private:
-        void
-        SetParameters(const Config& config);
+ private:
+    void
+    SetParameters(const Config& config);
 
-    private:
-        PreprocessorPtr preprocessor_;
-        std::shared_ptr<SPTAG::VectorIndex> index_ptr_;
-        SPTAG::IndexAlgoType index_type_;
-    };
+ private:
+    PreprocessorPtr preprocessor_;
+    std::shared_ptr<SPTAG::VectorIndex> index_ptr_;
+    SPTAG::IndexAlgoType index_type_;
+};
 
-    using CPUSPTAGRNGPtr = std::shared_ptr<CPUSPTAGRNG>;
+using CPUSPTAGRNGPtr = std::shared_ptr<CPUSPTAGRNG>;
 
-    class CPUSPTAGRNGIndexModel : public IndexModel {
-    public:
-        BinarySet
-        Serialize() override;
+class CPUSPTAGRNGIndexModel : public IndexModel {
+ public:
+    BinarySet
+    Serialize() override;
 
-        void
-        Load(const BinarySet& binary) override;
+    void
+    Load(const BinarySet& binary) override;
 
-    private:
-        std::shared_ptr<SPTAG::VectorIndex> index_;
-    };
+ private:
+    std::shared_ptr<SPTAG::VectorIndex> index_;
+};
 
-    using CPUSPTAGRNGIndexModelPtr = std::shared_ptr<CPUSPTAGRNGIndexModel>;
+using CPUSPTAGRNGIndexModelPtr = std::shared_ptr<CPUSPTAGRNGIndexModel>;
 
 }  // namespace knowhere

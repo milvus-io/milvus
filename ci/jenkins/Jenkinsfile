@@ -2,7 +2,7 @@
 
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
-cron_string =  BRANCH_NAME == "0.5.1" ? "H 1 * * * " : cron_string
+cron_string =  BRANCH_NAME == "0.6.0" ? "H 1 * * * " : cron_string
 
 pipeline {
     agent none
@@ -50,7 +50,7 @@ pipeline {
                     }
 
                     stages {
-                        stage("Run Build") {
+                        stage("Run GPU Version Build") {
                             agent {
                                 kubernetes {
                                     label "${BINRARY_VERSION}-build"
@@ -60,7 +60,7 @@ pipeline {
                             }
 
                             stages {
-                                stage('Build') {
+                                stage('GPU Version Build') {
                                     steps {
                                         container('milvus-build-env') {
                                             script {
@@ -69,7 +69,7 @@ pipeline {
                                         }
                                     }
                                 }
-                                stage('Code Coverage') {
+                                stage('GPU Version Code Coverage') {
                                     steps {
                                         container('milvus-build-env') {
                                             script {
@@ -78,7 +78,7 @@ pipeline {
                                         }
                                     }
                                 }
-                                stage('Upload Package') {
+                                stage('Upload GPU Version Package') {
                                     steps {
                                         container('milvus-build-env') {
                                             script {
@@ -90,7 +90,7 @@ pipeline {
                             }
                         }
 
-                        stage("Publish docker images") {
+                        stage("Publish GPU Version docker images") {
                             agent {
                                 kubernetes {
                                     label "${BINRARY_VERSION}-publish"
@@ -100,7 +100,7 @@ pipeline {
                             }
 
                             stages {
-                                stage('Publish') {
+                                stage('Publish GPU Version') {
                                     steps {
                                         container('publish-images'){
                                             script {
@@ -112,7 +112,7 @@ pipeline {
                             }
                         }
 
-                        stage("Deploy to Development") {
+                        stage("Deploy GPU Version to Development") {
                             agent {
                                 kubernetes {
                                     label "${BINRARY_VERSION}-dev-test"
@@ -122,7 +122,7 @@ pipeline {
                             }
 
                             stages {
-                                stage("Deploy to Dev") {
+                                stage("Deploy GPU Version to Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -132,7 +132,7 @@ pipeline {
                                     }
                                 }
 
-                                stage("Dev Test") {
+                                stage("GPU Version Dev Test") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -147,7 +147,7 @@ pipeline {
                                     }
                                 }
 
-                                stage ("Cleanup Dev") {
+                                stage ("Cleanup GPU Version Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -180,7 +180,7 @@ pipeline {
                     }
 
                     stages {
-                        stage("Run Build") {
+                        stage("Run CPU Version Build") {
                             agent {
                                 kubernetes {
                                     label "${BINRARY_VERSION}-build"
@@ -190,7 +190,7 @@ pipeline {
                             }
 
                             stages {
-                                stage('Build') {
+                                stage('Build CPU Version') {
                                     steps {
                                         container('milvus-build-env') {
                                             script {
@@ -199,7 +199,7 @@ pipeline {
                                         }
                                     }
                                 }
-                                stage('Code Coverage') {
+                                stage('CPU Version Code Coverage') {
                                     steps {
                                         container('milvus-build-env') {
                                             script {
@@ -208,7 +208,7 @@ pipeline {
                                         }
                                     }
                                 }
-                                stage('Upload Package') {
+                                stage('Upload CPU Version Package') {
                                     steps {
                                         container('milvus-build-env') {
                                             script {
@@ -220,7 +220,7 @@ pipeline {
                             }
                         }
 
-                        stage("Publish docker images") {
+                        stage("Publish CPU Version docker images") {
                             agent {
                                 kubernetes {
                                     label "${BINRARY_VERSION}-publish"
@@ -230,7 +230,7 @@ pipeline {
                             }
 
                             stages {
-                                stage('Publish') {
+                                stage('Publish CPU Version') {
                                     steps {
                                         container('publish-images'){
                                             script {
@@ -242,7 +242,7 @@ pipeline {
                             }
                         }
 
-                        stage("Deploy to Development") {
+                        stage("Deploy CPU Version to Development") {
                             agent {
                                 kubernetes {
                                     label "${BINRARY_VERSION}-dev-test"
@@ -252,7 +252,7 @@ pipeline {
                             }
 
                             stages {
-                                stage("Deploy to Dev") {
+                                stage("Deploy CPU Version to Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -262,7 +262,7 @@ pipeline {
                                     }
                                 }
 
-                                stage("Dev Test") {
+                                stage("CPU Version Dev Test") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -277,7 +277,7 @@ pipeline {
                                     }
                                 }
 
-                                stage ("Cleanup Dev") {
+                                stage ("Cleanup CPU Version Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {

@@ -27,35 +27,35 @@
 
 namespace knowhere {
 
-    using KDTConfig = std::shared_ptr<KDTCfg>;
-    using BKTConfig = std::shared_ptr<BKTCfg>;
+using KDTConfig = std::shared_ptr<KDTCfg>;
+using BKTConfig = std::shared_ptr<BKTCfg>;
 
-    class SPTAGParameterMgr {
-    public:
-        const KDTConfig&
-        GetKDTParameters();
+class SPTAGParameterMgr {
+ public:
+    const KDTConfig&
+    GetKDTParameters();
 
-        const BKTConfig&
-        GetBKTParameters();
+    const BKTConfig&
+    GetBKTParameters();
 
-    public:
-        static SPTAGParameterMgr&
-        GetInstance() {
-            static SPTAGParameterMgr instance;
-            return instance;
-        }
+ public:
+    static SPTAGParameterMgr&
+    GetInstance() {
+        static SPTAGParameterMgr instance;
+        return instance;
+    }
 
-        SPTAGParameterMgr(const SPTAGParameterMgr&) = delete;
+    SPTAGParameterMgr(const SPTAGParameterMgr&) = delete;
 
-        SPTAGParameterMgr&
-        operator=(const SPTAGParameterMgr&) = delete;
+    SPTAGParameterMgr&
+    operator=(const SPTAGParameterMgr&) = delete;
 
-    private:
-        SPTAGParameterMgr();
+ private:
+    SPTAGParameterMgr();
 
-    private:
-        KDTConfig kdt_config_;
-        BKTConfig bkt_config_;
-    };
+ private:
+    KDTConfig kdt_config_;
+    BKTConfig bkt_config_;
+};
 
 }  // namespace knowhere

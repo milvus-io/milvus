@@ -14,39 +14,32 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 
-#include "Pass.h"
+#include <string>
 
 namespace milvus {
-namespace scheduler {
+namespace server {
+namespace grpc {
 
-class LargeSQ8HPass : public Pass {
+class PreloadTableRequest : public GrpcBaseRequest {
  public:
-    LargeSQ8HPass();
+    static BaseRequestPtr
+    Create(const std::string& table_name);
 
- public:
-    bool
-    Run(const TaskPtr& task) override;
+ protected:
+    explicit PreloadTableRequest(const std::string& table_name);
+
+    Status
+    OnExecute() override;
 
  private:
-    int32_t threshold_ = std::numeric_limits<int32_t>::max();
-    int64_t count_ = 0;
+    std::string table_name_;
 };
 
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
-
-}  // namespace scheduler
+}  // namespace grpc
+}  // namespace server
 }  // namespace milvus

@@ -22,8 +22,8 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "utils/Log.h"
 
 #ifdef MILVUS_GPU_VERSION

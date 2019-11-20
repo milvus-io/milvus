@@ -15,22 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include "TaskLabel.h"
-
-#include <memory>
+#include "scheduler/optimizer/FallbackPass.h"
+#include "scheduler/SchedInst.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
 
-class DefaultLabel : public TaskLabel {
- public:
-    DefaultLabel() : TaskLabel(TaskLabelType::DEFAULT) {
-    }
-};
+void
+FallbackPass::Init() {
+}
 
-using DefaultLabelPtr = std::shared_ptr<DefaultLabel>;
+bool
+FallbackPass::Run(const TaskPtr& task) {
+    auto task_type = task->Type();
+    if (task_type != TaskType::SearchTask && task_type != TaskType::BuildIndexTask) {
+        return false;
+    }
+    // NEVER be empty
+    auto cpu = ResMgrInst::GetInstance()->GetCpuResources()[0];
+    auto label = std::make_shared<SpecResLabel>(cpu);
+    task->label() = label;
+    return true;
+}
 
 }  // namespace scheduler
 }  // namespace milvus

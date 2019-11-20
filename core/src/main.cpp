@@ -25,7 +25,7 @@
 #include "easyloggingpp/easylogging++.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
-#include "src/config.h"
+#include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 

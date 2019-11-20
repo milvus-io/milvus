@@ -34,4 +34,26 @@ GetMetricType(METRICTYPE& type) {
     KNOWHERE_THROW_MSG("Metric type is invalid");
 }
 
+std::stringstream
+IVFCfg::DumpImpl() {
+    auto ss = Cfg::DumpImpl();
+    ss << ", nlist: " << nlist << ", nprobe: " << nprobe;
+    return ss;
+}
+
+std::stringstream
+IVFSQCfg::DumpImpl() {
+    auto ss = IVFCfg::DumpImpl();
+    ss << ", nbits: " << nbits;
+    return ss;
+}
+
+std::stringstream
+NSGCfg::DumpImpl() {
+    auto ss = IVFCfg::DumpImpl();
+    ss << ", knng: " << knng << ", search_length: " << search_length << ", out_degree: " << out_degree
+       << ", candidate: " << candidate_pool_size;
+    return ss;
+}
+
 }  // namespace knowhere

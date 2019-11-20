@@ -15,29 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/HybridPass.h"
-#include "scheduler/SchedInst.h"
-#include "scheduler/task/SearchTask.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
+#pragma once
+
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {
-namespace scheduler {
+namespace server {
+namespace grpc {
 
-bool
-HybridPass::Run(const TaskPtr& task) {
-    // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
-    if (task->Type() != TaskType::SearchTask)
-        return false;
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ == (int)engine::EngineType::FAISS_IVFSQ8H) {
-        // TODO: remove "cpu" hardcode
-        ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
-        return true;
-    }
-    return false;
-}
+class CreateTableRequest : public GrpcBaseRequest {
+ public:
+    static BaseRequestPtr
+    Create(const ::milvus::grpc::TableSchema* schema);
 
-}  // namespace scheduler
+ protected:
+    explicit CreateTableRequest(const ::milvus::grpc::TableSchema* schema);
+
+    Status
+    OnExecute() override;
+
+ private:
+    const ::milvus::grpc::TableSchema* schema_;
+};
+
+}  // namespace grpc
+}  // namespace server
 }  // namespace milvus

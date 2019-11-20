@@ -14,34 +14,31 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
-#include "Pass.h"
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {
-namespace scheduler {
+namespace server {
+namespace grpc {
 
-class OnlyCPUPass : public Pass {
+class InsertRequest : public GrpcBaseRequest {
  public:
-    OnlyCPUPass() = default;
+    static BaseRequestPtr
+    Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
 
- public:
-    bool
-    Run(const TaskPtr& task) override;
+ protected:
+    InsertRequest(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
+
+    Status
+    OnExecute() override;
+
+ private:
+    const ::milvus::grpc::InsertParam* insert_param_;
+    ::milvus::grpc::VectorIds* record_ids_;
 };
 
-using OnlyCPUPassPtr = std::shared_ptr<OnlyCPUPass>;
-
-}  // namespace scheduler
+}  // namespace grpc
+}  // namespace server
 }  // namespace milvus

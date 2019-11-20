@@ -22,6 +22,7 @@
 #include "metrics/Metrics.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <mysql++/mysql++.h>
 #include <string.h>
@@ -1162,17 +1163,23 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
 
     // not allow create partition under partition
     if (!table_schema.owner_table_.empty()) {
-        return Status(DB_ERROR, "Nested partition is not allow");
+        return Status(DB_ERROR, "Nested partition is not allowed");
+    }
+
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    std::string valid_tag = tag;
+    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+    // not allow duplicated partition
+    std::string exist_partition;
+    GetPartitionName(table_id, valid_tag, exist_partition);
+    if (!exist_partition.empty()) {
+        return Status(DB_ERROR, "Duplicate partition is not allowed");
     }
 
     if (partition_name == "") {
-        // not allow duplicated partition
-        std::string exist_partition;
-        GetPartitionName(table_id, tag, exist_partition);
-        if (!exist_partition.empty()) {
-            return Status(DB_ERROR, "Duplicated partition is not allow");
-        }
-
+        // generate unique partition name
         NextTableId(table_schema.table_id_);
     } else {
         table_schema.table_id_ = partition_name;
@@ -1182,9 +1189,14 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
     table_schema.flag_ = 0;
     table_schema.created_on_ = utils::GetMicroSecTimeStamp();
     table_schema.owner_table_ = table_id;
-    table_schema.partition_tag_ = tag;
+    table_schema.partition_tag_ = valid_tag;
 
-    return CreateTable(table_schema);
+    status = CreateTable(table_schema);
+    if (status.code() == DB_ALREADY_EXIST) {
+        return Status(DB_ALREADY_EXIST, "Partition already exists");
+    }
+
+    return status;
 }
 
 Status
@@ -1231,6 +1243,12 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
+
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
@@ -1240,7 +1258,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
             allPartitionsQuery << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
-                               << table_id << " AND partition_tag = " << mysqlpp::quote << tag << " AND state <> "
+                               << table_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
                                << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
@@ -1252,7 +1270,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
             const mysqlpp::Row& resRow = res[0];
             resRow["table_id"].to_string(partition_name);
         } else {
-            return Status(DB_NOT_FOUND, "Partition " + tag + " of table " + table_id + " not found");
+            return Status(DB_NOT_FOUND, "Partition " + valid_tag + " of table " + table_id + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN GET PARTITION NAME", e.what());
