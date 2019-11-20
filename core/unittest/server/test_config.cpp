@@ -246,9 +246,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 
     /* gpu resource config */
     bool resource_enable_gpu = true;
-    s = config.SetGpuResourceConfigEnableGpu(std::to_string(resource_enable_gpu));
+    s = config.SetGpuResourceConfigEnable(std::to_string(resource_enable_gpu));
     ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigEnableGpu(bool_val);
+    s = config.GetGpuResourceConfigEnable(bool_val);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(bool_val == resource_enable_gpu);
 
@@ -394,7 +394,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(s.ok());
 
     /* gpu resource config */
-    s = config.SetGpuResourceConfigEnableGpu("ok");
+    s = config.SetGpuResourceConfigEnable("ok");
     ASSERT_FALSE(s.ok());
 
 #ifdef MILVUS_GPU_VERSION
