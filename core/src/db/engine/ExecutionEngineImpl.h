@@ -122,8 +122,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     int64_t dim_;
     std::string location_;
 
-    int32_t nlist_ = 0;
-    int32_t gpu_num_ = 0;
+    int64_t nlist_ = 0;
+    int64_t gpu_num_ = 0;
 };
 
 }  // namespace engine

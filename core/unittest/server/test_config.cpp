@@ -104,7 +104,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s;
     std::string str_val;
-    int32_t int32_val;
     int64_t int64_val;
     float float_val;
     bool bool_val;
@@ -160,26 +159,26 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(str_val == db_backend_url);
 
-    int32_t db_archive_disk_threshold = 100;
+    int64_t db_archive_disk_threshold = 100;
     s = config.SetDBConfigArchiveDiskThreshold(std::to_string(db_archive_disk_threshold));
     ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigArchiveDiskThreshold(int32_val);
+    s = config.GetDBConfigArchiveDiskThreshold(int64_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == db_archive_disk_threshold);
+    ASSERT_TRUE(int64_val == db_archive_disk_threshold);
 
-    int32_t db_archive_days_threshold = 365;
+    int64_t db_archive_days_threshold = 365;
     s = config.SetDBConfigArchiveDaysThreshold(std::to_string(db_archive_days_threshold));
     ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigArchiveDaysThreshold(int32_val);
+    s = config.GetDBConfigArchiveDaysThreshold(int64_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == db_archive_days_threshold);
+    ASSERT_TRUE(int64_val == db_archive_days_threshold);
 
-    int32_t db_insert_buffer_size = 2;
+    int64_t db_insert_buffer_size = 2;
     s = config.SetDBConfigInsertBufferSize(std::to_string(db_insert_buffer_size));
     ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigInsertBufferSize(int32_val);
+    s = config.GetDBConfigInsertBufferSize(int64_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == db_insert_buffer_size);
+    ASSERT_TRUE(int64_val == db_insert_buffer_size);
 
     /* metric config */
     bool metric_enable_monitor = false;
@@ -223,32 +222,32 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(bool_val == cache_insert_data);
 
     /* engine config */
-    int32_t engine_use_blas_threshold = 50;
+    int64_t engine_use_blas_threshold = 50;
     s = config.SetEngineConfigUseBlasThreshold(std::to_string(engine_use_blas_threshold));
     ASSERT_TRUE(s.ok());
-    s = config.GetEngineConfigUseBlasThreshold(int32_val);
+    s = config.GetEngineConfigUseBlasThreshold(int64_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == engine_use_blas_threshold);
+    ASSERT_TRUE(int64_val == engine_use_blas_threshold);
 
-    int32_t engine_omp_thread_num = 8;
+    int64_t engine_omp_thread_num = 8;
     s = config.SetEngineConfigOmpThreadNum(std::to_string(engine_omp_thread_num));
     ASSERT_TRUE(s.ok());
-    s = config.GetEngineConfigOmpThreadNum(int32_val);
+    s = config.GetEngineConfigOmpThreadNum(int64_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == engine_omp_thread_num);
+    ASSERT_TRUE(int64_val == engine_omp_thread_num);
 
-    int32_t engine_gpu_search_threshold = 800;
+    int64_t engine_gpu_search_threshold = 800;
     s = config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));
     ASSERT_TRUE(s.ok());
-    s = config.GetEngineConfigGpuSearchThreshold(int32_val);
+    s = config.GetEngineConfigGpuSearchThreshold(int64_val);
     ASSERT_TRUE(s.ok());
-    ASSERT_TRUE(int32_val == engine_gpu_search_threshold);
+    ASSERT_TRUE(int64_val == engine_gpu_search_threshold);
 
     /* gpu resource config */
     bool resource_enable_gpu = true;
-    s = config.SetGpuResourceConfigEnableGpu(std::to_string(resource_enable_gpu));
+    s = config.SetGpuResourceConfigEnable(std::to_string(resource_enable_gpu));
     ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigEnableGpu(bool_val);
+    s = config.GetGpuResourceConfigEnable(bool_val);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(bool_val == resource_enable_gpu);
 
@@ -267,7 +266,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(float_val == gpu_cache_threshold);
 
     std::vector<std::string> search_resources = {"gpu0"};
-    std::vector<int32_t> search_res_vec;
+    std::vector<int64_t> search_res_vec;
     std::string search_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
         search_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, search_res_str);
@@ -276,11 +275,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     s = config.GetGpuResourceConfigSearchResources(search_res_vec);
     ASSERT_TRUE(s.ok());
     for (size_t i = 0; i < search_resources.size(); i++) {
-        ASSERT_TRUE(std::stoi(search_resources[i].substr(3)) == search_res_vec[i]);
+        ASSERT_TRUE(std::stoll(search_resources[i].substr(3)) == search_res_vec[i]);
     }
 
     std::vector<std::string> build_index_resources = {"gpu0"};
-    std::vector<int32_t> build_index_res_vec;
+    std::vector<int64_t> build_index_res_vec;
     std::string build_index_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
         build_index_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, build_index_res_str);
@@ -289,7 +288,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     s = config.GetGpuResourceConfigBuildIndexResources(build_index_res_vec);
     ASSERT_TRUE(s.ok());
     for (size_t i = 0; i < build_index_resources.size(); i++) {
-        ASSERT_TRUE(std::stoi(build_index_resources[i].substr(3)) == build_index_res_vec[i]);
+        ASSERT_TRUE(std::stoll(build_index_resources[i].substr(3)) == build_index_res_vec[i]);
     }
 #endif
 }
@@ -394,7 +393,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(s.ok());
 
     /* gpu resource config */
-    s = config.SetGpuResourceConfigEnableGpu("ok");
+    s = config.SetGpuResourceConfigEnable("ok");
     ASSERT_FALSE(s.ok());
 
 #ifdef MILVUS_GPU_VERSION

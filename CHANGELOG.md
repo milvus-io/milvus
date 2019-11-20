@@ -27,10 +27,11 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
-- \#275 - Rename C++ SDK IndexType
 - \#260 - C++ SDK README
 - \#266 - Rpc request source code refactor
+- \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
+- \#306 - Use int64 for all config integer
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 - \#314 - add Find FAISS in CMake
 - \#322 - Add option to enable / disable prometheus
