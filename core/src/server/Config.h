@@ -89,7 +89,7 @@ static const char* CONFIG_GPU_RESOURCE_ENABLE = "enable";
 #ifdef MILVUS_GPU_VERSION
 static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 #else
-static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "false";
+static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "4";
