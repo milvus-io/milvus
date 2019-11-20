@@ -45,9 +45,9 @@ class FaissIVFSQ8HPass : public Pass {
     Run(const TaskPtr& task) override;
 
  private:
-    int32_t threshold_ = std::numeric_limits<int32_t>::max();
+    int64_t threshold_ = std::numeric_limits<int64_t>::max();
     int64_t count_ = 0;
-    std::vector<int32_t> gpus;
+    std::vector<int64_t> gpus;
 };
 
 using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;

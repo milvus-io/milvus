@@ -55,9 +55,9 @@ load_simple_config() {
     // get resources
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
-    std::vector<int32_t> gpu_ids;
+    std::vector<int64_t> gpu_ids;
     config.GetGpuResourceConfigSearchResources(gpu_ids);
-    std::vector<int32_t> build_gpu_ids;
+    std::vector<int64_t> build_gpu_ids;
     config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids);
     auto pcie = Connection("pcie", 12000);
 
