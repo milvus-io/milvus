@@ -85,9 +85,9 @@ static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
 /* gpu resource config */
 static const char* CONFIG_GPU_RESOURCE = "gpu_resource_config";
-static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU = "enable_gpu";
+static const char* CONFIG_GPU_RESOURCE_ENABLE = "enable";
 #ifdef MILVUS_GPU_VERSION
-static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "true";
+static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 #else
 static const char* CONFIG_GPU_RESOURCE_ENABLE_GPU_DEFAULT = "false";
 #endif
@@ -175,7 +175,7 @@ class Config {
 
     /* gpu resource config */
     Status
-    CheckGpuResourceConfigEnableGpu(const std::string& value);
+    CheckGpuResourceConfigEnable(const std::string& value);
     Status
     CheckGpuResourceConfigCacheCapacity(const std::string& value);
     Status
@@ -244,7 +244,7 @@ class Config {
 
     /* gpu resource config */
     Status
-    GetGpuResourceConfigEnableGpu(bool& value);
+    GetGpuResourceConfigEnable(bool& value);
     Status
     GetGpuResourceConfigCacheCapacity(int64_t& value);
     Status
@@ -305,7 +305,7 @@ class Config {
 
     /* gpu resource config */
     Status
-    SetGpuResourceConfigEnableGpu(const std::string& value);
+    SetGpuResourceConfigEnable(const std::string& value);
     Status
     SetGpuResourceConfigCacheCapacity(const std::string& value);
     Status
