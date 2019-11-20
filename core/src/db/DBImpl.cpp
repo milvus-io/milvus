@@ -279,6 +279,11 @@ DBImpl::DropPartitionByTag(const std::string& table_id, const std::string& parti
 
     std::string partition_name;
     auto status = meta_ptr_->GetPartitionName(table_id, partition_tag, partition_name);
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
+        return status;
+    }
+
     return DropPartition(partition_name);
 }
 
@@ -853,8 +858,12 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
     auto status = meta_ptr_->ShowPartitions(table_id, partiton_array);
 
     for (auto& tag : partition_tags) {
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
         for (auto& schema : partiton_array) {
-            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, tag)) {
+            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.table_id_);
             }
         }

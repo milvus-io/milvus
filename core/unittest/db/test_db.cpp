@@ -461,6 +461,13 @@ TEST_F(DBTest, PARTITION_TEST) {
         stat = db_->CreatePartition(table_name, partition_name, partition_tag);
         ASSERT_TRUE(stat.ok());
 
+        // not allow nested partition
+        stat = db_->CreatePartition(partition_name, "dumy", "dummy");
+        ASSERT_FALSE(stat.ok());
+
+        // not allow duplicated partition
+        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        ASSERT_FALSE(stat.ok());
 
         std::vector<float> xb;
         BuildVectors(INSERT_BATCH, xb);
