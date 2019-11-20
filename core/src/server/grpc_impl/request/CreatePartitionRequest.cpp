@@ -51,7 +51,7 @@ CreatePartitionRequest::OnExecute() {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableName(partition_param_->partition_name());
+        status = ValidationUtil::ValidatePartitionName(partition_param_->partition_name());
         if (!status.ok()) {
             return status;
         }

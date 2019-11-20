@@ -12,24 +12,28 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#340 - Test cases run failed on 0.6.0
 - \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
+- \#377 - Create partition success if tag name only contains spaces
 - \#397 - sdk_simple return incorrect result
+- \#399 - Create partition should be failed if partition tag existed
+- \#412 - Message returned is confused when partition created with null partition name
+- \#416 - Drop the same partition success repeatally
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
 - \#77 - Support table partition
-- \#226 - Experimental shards middleware for Milvus
 - \#127 - Support new Index type IVFPQ
+- \#226 - Experimental shards middleware for Milvus
 
 ## Improvement
+- \#255 - Add ivfsq8 test report detailed version
 - \#275 - Rename C++ SDK IndexType
-- \#284 - Change C++ SDK to shared library
 - \#260 - C++ SDK README
 - \#266 - Rpc request source code refactor
-- \#314 - add Find FAISS in CMake
+- \#284 - Change C++ SDK to shared library
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
+- \#314 - add Find FAISS in CMake
 - \#322 - Add option to enable / disable prometheus
 - \#358 - Add more information in build.sh and install.md
-- \#255 - Add ivfsq8 test report detailed version
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
 
