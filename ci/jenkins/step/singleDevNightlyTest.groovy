@@ -1,7 +1,7 @@
 timeout(time: 90, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         sh 'python3 -m pip install -r requirements.txt'
-        sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}-milvus-engine.milvus.svc.cluster.local"
+        sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}-engine.milvus.svc.cluster.local"
     }
     // mysql database backend test
     load "ci/jenkins/jenkinsfile/cleanupSingleDev.groovy"
@@ -17,6 +17,6 @@ timeout(time: 90, unit: 'MINUTES') {
         }
     }
     dir ("tests/milvus_python_test") {
-        sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}-milvus-engine.milvus.svc.cluster.local"
+        sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --ip ${env.PIPELINE_NAME}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}-engine.milvus.svc.cluster.local"
     }
 }
