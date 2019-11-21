@@ -16,6 +16,7 @@ std::shared_ptr<Context>
 Context::Child(const std::string& operation_name) const {
     auto new_context = std::make_shared<Context>(request_id_);
     new_context->SetTraceContext(trace_context_->Child(operation_name));
+    return new_context;
 }
 
 std::shared_ptr<Context>

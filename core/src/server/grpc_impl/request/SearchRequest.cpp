@@ -49,6 +49,9 @@ SearchRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::g
 Status
 SearchRequest::OnExecute() {
     try {
+
+        auto pre_query_ctx = context_->Child("Pre query");
+
         int64_t top_k = search_param_->topk();
         int64_t nprobe = search_param_->nprobe();
 
@@ -135,6 +138,8 @@ SearchRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
 
+        pre_query_ctx->GetTraceContext()->getSpan()->Finish();
+
         if (file_id_array_.empty()) {
             std::vector<std::string> partition_tags;
             for (size_t i = 0; i < search_param_->partition_tag_array_size(); i++) {
@@ -146,7 +151,7 @@ SearchRequest::OnExecute() {
                 return status;
             }
 
-            status = DBWrapper::DB()->Query(table_name_, partition_tags, (size_t)top_k, record_count, nprobe,
+            status = DBWrapper::DB()->Query(context_, table_name_, partition_tags, (size_t)top_k, record_count, nprobe,
                                             vec_f.data(), dates, result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->QueryByFileID(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,

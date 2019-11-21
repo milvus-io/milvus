@@ -382,21 +382,24 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
+DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
               uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result = Query(table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
+    Status result = Query(context, table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
     return result;
 }
 
 Status
-DBImpl::Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
+DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
               uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
               ResultDistances& result_distances) {
+
+    auto post_query_ctx = context->Child("Post query");
+
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -433,6 +436,9 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& parti
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
     status = QueryAsync(table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    post_query_ctx->GetTraceContext()->getSpan()->Finish();
+
     return status;
 }
 
