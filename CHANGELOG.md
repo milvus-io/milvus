@@ -17,12 +17,14 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#399 - Create partition should be failed if partition tag existed
 - \#412 - Message returned is confused when partition created with null partition name
 - \#416 - Drop the same partition success repeatally
+- \#440 - Query API in customization still uses old version
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
 - \#77 - Support table partition
 - \#127 - Support new Index type IVFPQ
 - \#226 - Experimental shards middleware for Milvus
+- \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
 
 ## Improvement
@@ -38,6 +40,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#358 - Add more information in build.sh and install.md
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
+- \#433 - C++ SDK query result is not easy to use
 
 ## Task
 
