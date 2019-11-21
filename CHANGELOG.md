@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#412 - Message returned is confused when partition created with null partition name
 - \#416 - Drop the same partition success repeatally
 - \#440 - Query API in customization still uses old version
+- \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
