@@ -68,8 +68,12 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     }
 
     TextMapCarrier carrier{text_map};
-    auto span_maybe = tracer_->Extract(carrier);
-    auto span = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_maybe->get())});
+    auto span_context_maybe = tracer_->Extract(carrier);
+    if (!span_context_maybe) {
+        std::cerr << span_context_maybe.error().message() << std::endl;
+        throw std::runtime_error(span_context_maybe.error().message());
+    }
+    auto span = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_context_maybe->get())});
     // TODO
     auto server_context = server_rpc_info->server_context();
     auto client_metadata = server_context->client_metadata();
@@ -83,12 +87,13 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     auto was_successful = tracer_->Inject(span->context(), dummy_carrier);
     if (!was_successful) {
         std::cerr << was_successful.error().message() << std::endl;
-        throw std::runtime_error("was_successful.error().message()");
+        throw std::runtime_error(was_successful.error().message());
     }
     auto dummy_span_context_maybe = tracer_->Extract(dummy_carrier);
-    //auto dummy_span_context = std::move(*dummy_span_context_maybe);
-//    auto hahah = TraceContext(dummy_span_context);
-
+    if (!dummy_span_context_maybe) {
+        std::cerr << dummy_span_context_maybe.error().message() << std::endl;
+        throw std::runtime_error(dummy_span_context_maybe.error().message());
+    }
     auto trace_context = std::make_shared<TraceContext>(*dummy_span_context_maybe);
     auto context = std::make_shared<Context>(request_id);
     context->SetTraceContext(trace_context);
