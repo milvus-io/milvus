@@ -1,10 +1,13 @@
 milvus/
 conf/server_config.yaml
 conf/log_config.conf
-version.h
+src/config.h
+src/version.h
 lcov_out/
 base.info
 output.info
 output_new.info
 server.info
 *.pyc
+src/grpc/python_gen.h
+src/grpc/python/

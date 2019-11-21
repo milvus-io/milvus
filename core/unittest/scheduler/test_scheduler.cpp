@@ -17,14 +17,13 @@
 
 #include <gtest/gtest.h>
 
-#include "scheduler/Scheduler.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
-#include "scheduler/task/TestTask.h"
-#include "scheduler/ResourceFactory.h"
-#include "scheduler/resource/Resource.h"
 #include "cache/DataObj.h"
 #include "cache/GpuCacheMgr.h"
+#include "scheduler/ResourceFactory.h"
+#include "scheduler/Scheduler.h"
+#include "scheduler/resource/Resource.h"
+#include "scheduler/task/TestTask.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
 
@@ -33,59 +32,61 @@ namespace scheduler {
 
 class MockVecIndex : public engine::VecIndex {
  public:
-    virtual Status BuildAll(const int64_t& nb,
-                            const float* xb,
-                            const int64_t* ids,
-                            const engine::Config& cfg,
-                            const int64_t& nt = 0,
-                            const float* xt = nullptr) {
+    virtual Status
+    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const engine::Config& cfg, const int64_t& nt = 0,
+             const float* xt = nullptr) {
     }
 
-    engine::VecIndexPtr Clone() override {
+    engine::VecIndexPtr
+    Clone() override {
         return milvus::engine::VecIndexPtr();
     }
 
-    int64_t GetDeviceId() override {
+    int64_t
+    GetDeviceId() override {
         return 0;
     }
 
-    engine::IndexType GetType() override {
+    engine::IndexType
+    GetType() override {
         return engine::IndexType::INVALID;
     }
 
-    virtual Status Add(const int64_t& nb,
-                       const float* xb,
-                       const int64_t* ids,
-                       const engine::Config& cfg = engine::Config()) {
+    virtual Status
+    Add(const int64_t& nb, const float* xb, const int64_t* ids, const engine::Config& cfg = engine::Config()) {
     }
 
-    virtual Status Search(const int64_t& nq,
-                          const float* xq,
-                          float* dist,
-                          int64_t* ids,
-                          const engine::Config& cfg = engine::Config()) {
+    virtual Status
+    Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids,
+           const engine::Config& cfg = engine::Config()) {
     }
 
-    engine::VecIndexPtr CopyToGpu(const int64_t& device_id, const engine::Config& cfg) override {
+    engine::VecIndexPtr
+    CopyToGpu(const int64_t& device_id, const engine::Config& cfg) override {
     }
 
-    engine::VecIndexPtr CopyToCpu(const engine::Config& cfg) override {
+    engine::VecIndexPtr
+    CopyToCpu(const engine::Config& cfg) override {
     }
 
-    virtual int64_t Dimension() {
+    virtual int64_t
+    Dimension() {
         return dimension_;
     }
 
-    virtual int64_t Count() {
+    virtual int64_t
+    Count() {
         return ntotal_;
     }
 
-    virtual knowhere::BinarySet Serialize() {
+    virtual knowhere::BinarySet
+    Serialize() {
         knowhere::BinarySet binset;
         return binset;
     }
 
-    virtual Status Load(const knowhere::BinarySet& index_binary) {
+    virtual Status
+    Load(const knowhere::BinarySet& index_binary) {
     }
 
  public:
@@ -148,46 +149,6 @@ insert_dummy_index_into_gpu_cache(uint64_t device_id) {
     cache::GpuCacheMgr::GetInstance(device_id)->InsertItem("location", obj);
 }
 
-TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
-    const uint64_t NUM = 10;
-    std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
-    dummy->location_ = "location";
-
-    insert_dummy_index_into_gpu_cache(1);
-
-    for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy, label);
-        task->label() = std::make_shared<DefaultLabel>();
-        tasks.push_back(task);
-        cpu_resource_.lock()->task_table().Put(task);
-    }
-
-    sleep(3);
-    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().size(), NUM);
-}
-
-TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
-    const uint64_t NUM = 10;
-    std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy1 = std::make_shared<TableFileSchema>();
-    dummy1->location_ = "location";
-
-    tasks.clear();
-
-    for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
-        auto task = std::make_shared<TestTask>(dummy1, label);
-        task->label() = std::make_shared<DefaultLabel>();
-        tasks.push_back(task);
-        cpu_resource_.lock()->task_table().Put(task);
-    }
-
-    sleep(3);
-//    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
-}
-
 class SchedulerTest2 : public testing::Test {
  protected:
     void
@@ -240,7 +201,7 @@ class SchedulerTest2 : public testing::Test {
     std::shared_ptr<Scheduler> scheduler_;
 };
 
-//TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
+// TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
 //    const uint64_t NUM = 2;
 //    std::vector<std::shared_ptr<TestTask>> tasks;
 //    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
@@ -257,6 +218,5 @@ class SchedulerTest2 : public testing::Test {
 //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 //}
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

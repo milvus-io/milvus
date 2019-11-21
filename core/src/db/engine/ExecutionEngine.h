@@ -26,6 +26,7 @@
 namespace milvus {
 namespace engine {
 
+// TODO(linxj): replace with VecIndex::IndexType
 enum class EngineType {
     INVALID = 0,
     FAISS_IDMAP = 1,
@@ -33,7 +34,10 @@ enum class EngineType {
     FAISS_IVFSQ8,
     NSG_MIX,
     FAISS_IVFSQ8H,
-    MAX_VALUE = FAISS_IVFSQ8H,
+    FAISS_PQ,
+    SPTAG_KDT,
+    SPTAG_BKT,
+    MAX_VALUE = SPTAG_BKT,
 };
 
 enum class MetricType {

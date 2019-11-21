@@ -19,7 +19,6 @@
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <nvml.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -28,6 +27,10 @@
 #include <iostream>
 #include <string>
 #include <utility>
+
+#ifdef MILVUS_GPU_VERSION
+#include <nvml.h>
+#endif
 
 namespace milvus {
 namespace server {
@@ -60,6 +63,7 @@ SystemInfo::Init() {
     total_ram_ = GetPhysicalMemory();
     fclose(file);
 
+#ifdef MILVUS_GPU_VERSION
     // initialize GPU information
     nvmlReturn_t nvmlresult;
     nvmlresult = nvmlInit();
@@ -72,6 +76,7 @@ SystemInfo::Init() {
         SERVER_LOG_ERROR << "Unable to get devidce number";
         return;
     }
+#endif
 
     // initialize network traffic information
     std::pair<uint64_t, uint64_t> in_and_out_octets = Octets();
@@ -213,6 +218,9 @@ SystemInfo::GPUMemoryTotal() {
     if (!initialized_)
         Init();
     std::vector<uint64_t> result;
+
+#ifdef MILVUS_GPU_VERSION
+
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
@@ -220,6 +228,8 @@ SystemInfo::GPUMemoryTotal() {
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
         result.push_back(nvmlMemory.total);
     }
+#endif
+
     return result;
 }
 
@@ -228,6 +238,9 @@ SystemInfo::GPUTemperature() {
     if (!initialized_)
         Init();
     std::vector<uint64_t> result;
+
+#ifdef MILVUS_GPU_VERSION
+
     for (int i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
@@ -235,6 +248,9 @@ SystemInfo::GPUTemperature() {
         nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &temp);
         result.push_back(temp);
     }
+
+#endif
+
     return result;
 }
 
@@ -283,6 +299,9 @@ SystemInfo::GPUMemoryUsed() {
         Init();
 
     std::vector<uint64_t> result;
+
+#ifdef MILVUS_GPU_VERSION
+
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
@@ -290,6 +309,9 @@ SystemInfo::GPUMemoryUsed() {
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
         result.push_back(nvmlMemory.used);
     }
+
+#endif
+
     return result;
 }
 

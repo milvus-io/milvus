@@ -17,5 +17,7 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
+aux_source_directory(${MILVUS_SOURCE_DIR}/src/sdk/examples/utils util_files)
 
-add_subdirectory(grpcsimple)
+add_subdirectory(simple)
+add_subdirectory(partition)

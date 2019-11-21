@@ -15,16 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
+#include <gtest/gtest.h>
+#include "scheduler/ResourceMgr.h"
 #include "scheduler/resource/CpuResource.h"
-#include "scheduler/resource/GpuResource.h"
 #include "scheduler/resource/DiskResource.h"
+#include "scheduler/resource/GpuResource.h"
 #include "scheduler/resource/TestResource.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
-#include "scheduler/ResourceMgr.h"
-#include <gtest/gtest.h>
-
 
 namespace milvus {
 namespace scheduler {
@@ -101,10 +98,13 @@ TEST_F(ResourceMgrBaseTest, GET_ALL_RESOURCES) {
     bool disk = false, cpu = false, gpu = false;
     auto resources = mgr1_->GetAllResources();
     ASSERT_EQ(resources.size(), 3);
-    for (auto &res : resources) {
-        if (res->type() == ResourceType::DISK) disk = true;
-        if (res->type() == ResourceType::CPU) cpu = true;
-        if (res->type() == ResourceType::GPU) gpu = true;
+    for (auto& res : resources) {
+        if (res->type() == ResourceType::DISK)
+            disk = true;
+        if (res->type() == ResourceType::CPU)
+            cpu = true;
+        if (res->type() == ResourceType::GPU)
+            gpu = true;
     }
 
     ASSERT_TRUE(disk);
@@ -183,17 +183,13 @@ class ResourceMgrAdvanceTest : public testing::Test {
 
 TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     bool flag = false;
-    auto callback = [&](EventPtr event) {
-        flag = true;
-    };
+    auto callback = [&](EventPtr event) { flag = true; };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
-    auto label = std::make_shared<DefaultLabel>();
-    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, label));
+    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, nullptr));
     sleep(1);
     ASSERT_TRUE(flag);
 }
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

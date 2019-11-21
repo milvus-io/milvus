@@ -15,18 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "scheduler/resource/Resource.h"
-#include "scheduler/resource/DiskResource.h"
+#include <gtest/gtest.h>
+#include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/CpuResource.h"
+#include "scheduler/resource/DiskResource.h"
 #include "scheduler/resource/GpuResource.h"
+#include "scheduler/resource/Resource.h"
 #include "scheduler/resource/TestResource.h"
 #include "scheduler/task/Task.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
-#include "scheduler/ResourceFactory.h"
-#include <gtest/gtest.h>
-
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -158,17 +156,13 @@ class ResourceAdvanceTest : public testing::Test {
     void
     WaitLoader(uint64_t count) {
         std::unique_lock<std::mutex> lock(load_mutex_);
-        cv_.wait(lock, [&] {
-            return load_count_ == count;
-        });
+        cv_.wait(lock, [&] { return load_count_ == count; });
     }
 
     void
     WaitExecutor(uint64_t count) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        cv_.wait(lock, [&] {
-            return exec_count_ == count;
-        });
+        cv_.wait(lock, [&] { return exec_count_ == count; });
     }
 
     ResourcePtr disk_resource_;
@@ -188,8 +182,10 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
+        auto label = std::make_shared<SpecResLabel>(disk_resource_);
         auto task = std::make_shared<TestTask>(dummy, label);
+        std::vector<std::string> path{disk_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         disk_resource_->task_table().Put(task);
     }
@@ -214,8 +210,10 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
+        auto label = std::make_shared<SpecResLabel>(cpu_resource_);
         auto task = std::make_shared<TestTask>(dummy, label);
+        std::vector<std::string> path{cpu_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         cpu_resource_->task_table().Put(task);
     }
@@ -240,8 +238,10 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
+        auto label = std::make_shared<SpecResLabel>(gpu_resource_);
         auto task = std::make_shared<TestTask>(dummy, label);
+        std::vector<std::string> path{gpu_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         gpu_resource_->task_table().Put(task);
     }
@@ -266,8 +266,10 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto label = std::make_shared<DefaultLabel>();
+        auto label = std::make_shared<SpecResLabel>(test_resource_);
         auto task = std::make_shared<TestTask>(dummy, label);
+        std::vector<std::string> path{test_resource_->name()};
+        task->path() = Path(path, 0);
         tasks.push_back(task);
         test_resource_->task_table().Put(task);
     }
@@ -287,6 +289,5 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     }
 }
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

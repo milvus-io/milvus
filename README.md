@@ -79,5 +79,3 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 ## License
 
 [Apache License 2.0](LICENSE)
-
-

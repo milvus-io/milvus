@@ -13,16 +13,16 @@ macro(define_option name description default)
 endmacro()
 
 function(list_join lst glue out)
-    if("${${lst}}" STREQUAL "")
+    if ("${${lst}}" STREQUAL "")
         set(${out} "" PARENT_SCOPE)
         return()
-    endif()
+    endif ()
 
     list(GET ${lst} 0 joined)
     list(REMOVE_AT ${lst} 0)
-    foreach(item ${${lst}})
+    foreach (item ${${lst}})
         set(joined "${joined}${glue}${item}")
-    endforeach()
+    endforeach ()
     set(${out} ${joined} PARENT_SCOPE)
 endfunction()
 
@@ -35,22 +35,31 @@ macro(define_option_string name description default)
 
     set("${name}_OPTION_ENUM" ${ARGN})
     list_join("${name}_OPTION_ENUM" "|" "${name}_OPTION_ENUM")
-    if(NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
+    if (NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
         set_property(CACHE ${name} PROPERTY STRINGS ${ARGN})
-    endif()
+    endif ()
 endmacro()
+
+#----------------------------------------------------------------------
+set_option_category("GPU version")
+
+if (MILVUS_GPU_VERSION)
+    define_option(KNOWHERE_GPU_VERSION "Build GPU version" ON)
+else ()
+    define_option(KNOWHERE_GPU_VERSION "Build GPU version" OFF)
+endif ()
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "AUTO")
+set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 
 define_option_string(KNOWHERE_DEPENDENCY_SOURCE
-                    "Method to use for acquiring KNOWHERE's build dependencies"
-                    "${KNOWHERE_DEPENDENCY_SOURCE_DEFAULT}"
-                    "AUTO"
-                    "BUNDLED"
-                    "SYSTEM")
+        "Method to use for acquiring KNOWHERE's build dependencies"
+        "${KNOWHERE_DEPENDENCY_SOURCE_DEFAULT}"
+        "AUTO"
+        "BUNDLED"
+        "SYSTEM")
 
 define_option(KNOWHERE_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
@@ -70,27 +79,16 @@ define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
-define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
-
-#----------------------------------------------------------------------
-if(MSVC)
-    set_option_category("MSVC")
-
-    define_option(MSVC_LINK_VERBOSE
-            "Pass verbose linking options when linking libraries and executables"
-            OFF)
-
-    define_option(KNOWHERE_USE_STATIC_CRT "Build KNOWHERE with statically linked CRT" OFF)
-endif()
+define_option(FAISS_WITH_MKL "Build FAISS with MKL" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 
 if (BUILD_UNIT_TEST)
     define_option(KNOWHERE_BUILD_TESTS "Build the KNOWHERE googletest unit tests" ON)
-else()
+else ()
     define_option(KNOWHERE_BUILD_TESTS "Build the KNOWHERE googletest unit tests" OFF)
-endif(BUILD_UNIT_TEST)
+endif (BUILD_UNIT_TEST)
 
 #----------------------------------------------------------------------
 macro(config_summary)
@@ -102,12 +100,12 @@ macro(config_summary)
     message(STATUS "  Generator: ${CMAKE_GENERATOR}")
     message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
     message(STATUS "  Source directory: ${CMAKE_CURRENT_SOURCE_DIR}")
-    if(${CMAKE_EXPORT_COMPILE_COMMANDS})
+    if (${CMAKE_EXPORT_COMPILE_COMMANDS})
         message(
                 STATUS "  Compile commands: ${INDEX_BINARY_DIR}/compile_commands.json")
-    endif()
+    endif ()
 
-    foreach(category ${KNOWHERE_OPTION_CATEGORIES})
+    foreach (category ${KNOWHERE_OPTION_CATEGORIES})
 
         message(STATUS)
         message(STATUS "${category} options:")
@@ -115,50 +113,50 @@ macro(config_summary)
         set(option_names ${KNOWHERE_${category}_OPTION_NAMES})
 
         set(max_value_length 0)
-        foreach(name ${option_names})
+        foreach (name ${option_names})
             string(LENGTH "\"${${name}}\"" value_length)
-            if(${max_value_length} LESS ${value_length})
+            if (${max_value_length} LESS ${value_length})
                 set(max_value_length ${value_length})
-            endif()
-        endforeach()
+            endif ()
+        endforeach ()
 
-        foreach(name ${option_names})
-            if("${${name}_OPTION_TYPE}" STREQUAL "string")
+        foreach (name ${option_names})
+            if ("${${name}_OPTION_TYPE}" STREQUAL "string")
                 set(value "\"${${name}}\"")
-            else()
+            else ()
                 set(value "${${name}}")
-            endif()
+            endif ()
 
             set(default ${${name}_OPTION_DEFAULT})
             set(description ${${name}_OPTION_DESCRIPTION})
             string(LENGTH ${description} description_length)
-            if(${description_length} LESS 70)
+            if (${description_length} LESS 70)
                 string(
                         SUBSTRING
                         "                                                                     "
                         ${description_length} -1 description_padding)
-            else()
+            else ()
                 set(description_padding "
                 ")
-            endif()
+            endif ()
 
             set(comment "[${name}]")
 
-            if("${value}" STREQUAL "${default}")
+            if ("${value}" STREQUAL "${default}")
                 set(comment "[default] ${comment}")
-            endif()
+            endif ()
 
-            if(NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
+            if (NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
                 set(comment "${comment} [${${name}_OPTION_ENUM}]")
-            endif()
+            endif ()
 
             string(
                     SUBSTRING "${value}                                                             "
                     0 ${max_value_length} value)
 
             message(STATUS "  ${description} ${description_padding} ${value} ${comment}")
-        endforeach()
+        endforeach ()
 
-    endforeach()
+    endforeach ()
 
 endmacro()

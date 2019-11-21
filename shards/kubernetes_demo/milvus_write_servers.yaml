@@ -1,0 +1,70 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: milvus-wo-servers
+  namespace: milvus
+spec:
+  type: ClusterIP
+  selector:
+    app: milvus
+    tier: wo-servers
+  ports:
+  - protocol: TCP
+    port: 19530
+    targetPort: 19530
+
+---
+
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: milvus-wo-servers
+  namespace: milvus
+spec:
+  selector:
+    matchLabels:
+      app: milvus
+      tier: wo-servers
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: milvus
+        tier: wo-servers
+    spec:
+      containers:
+      - name: milvus-wo-server
+        image: milvusdb/milvus:0.5.0-d102119-ede20b
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 19530
+        resources:
+          limits:
+            memory: "5Gi"
+            cpu: "1.0"
+          requests:
+            memory: "4Gi"
+        volumeMounts:
+        - name: milvus-db-disk
+          mountPath: /var/milvus
+          subPath: dbdata
+        - name: milvus-woserver-configmap
+          mountPath: /opt/milvus/conf/server_config.yaml
+          subPath: config.yml
+        - name: milvus-woserver-configmap
+          mountPath: /opt/milvus/conf/log_config.conf
+          subPath: log.conf
+      # imagePullSecrets:
+        # - name: regcred
+      # tolerations:
+      #   - key: "worker"
+      #     operator: "Equal"
+      #     value: "performance"
+      #     effect: "NoSchedule"
+      volumes:
+      - name: milvus-woserver-configmap
+        configMap:
+            name: milvus-woserver-configmap
+      - name: milvus-db-disk
+        persistentVolumeClaim:
+            claimName: milvus-db-disk

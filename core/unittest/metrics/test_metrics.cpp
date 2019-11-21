@@ -75,6 +75,7 @@ TEST_F(MetricTest, METRIC_TEST) {
     }
 
     std::thread search([&]() {
+//        std::vector<std::string> tags;
 //        milvus::engine::ResultIds result_ids;
 //        milvus::engine::ResultDistances result_distances;
         int k = 10;
@@ -91,7 +92,7 @@ TEST_F(MetricTest, METRIC_TEST) {
             prev_count = count;
 
             START_TIMER;
-//            stat = db_->Query(group_name, k, qb, qxb, result_ids, result_distances);
+//            stat = db_->Query(group_name, tags, k, qb, qxb, result_ids, result_distances);
             ss << "Search " << j << " With Size " << (float) (count * group_dim * sizeof(float)) / (1024 * 1024)
                << " M";
 
@@ -112,10 +113,10 @@ TEST_F(MetricTest, METRIC_TEST) {
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
-            db_->InsertVectors(group_name, qb, qxb, target_ids);
+            db_->InsertVectors(group_name, "", qb, qxb, target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->InsertVectors(group_name, nb, xb, vector_ids);
+            db_->InsertVectors(group_name, "", nb, xb, vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(2000));
     }

@@ -33,6 +33,7 @@ namespace engine {
 
 using Config = knowhere::Config;
 
+// TODO(linxj): replace with string, Do refactor serialization
 enum class IndexType {
     INVALID = 0,
     FAISS_IDMAP = 1,
@@ -47,6 +48,8 @@ enum class IndexType {
     FAISS_IVFSQ8_GPU,
     FAISS_IVFSQ8_HYBRID,  // only support build on gpu.
     NSG_MIX,
+    FAISS_IVFPQ_MIX,
+    SPTAG_BKT_RNT_CPU,
 };
 
 class VecIndex;
@@ -136,6 +139,9 @@ write_index(VecIndexPtr index, const std::string& location);
 
 extern VecIndexPtr
 read_index(const std::string& location);
+
+VecIndexPtr
+read_index(const std::string& location, knowhere::BinarySet& index_binary);
 
 extern VecIndexPtr
 GetVecIndexFactory(const IndexType& type, const Config& cfg = Config());
