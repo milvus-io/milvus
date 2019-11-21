@@ -39,6 +39,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#358 - Add more information in build.sh and install.md
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
+- \#433 - C++ SDK query result is not easy to use
 
 ## Task
 
