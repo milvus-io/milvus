@@ -116,7 +116,7 @@ for test in `ls ${DIR_UNITTEST}`; do
     if [ $? -ne 0 ]; then
         echo ${args}
         echo ${DIR_UNITTEST}/${test} "run failed"
-        exit -1
+        exit 1
     fi
 done
 
@@ -143,7 +143,7 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
 
 if [ $? -ne 0 ]; then
     echo "gen ${FILE_INFO_OUTPUT_NEW} failed"
-    exit -2
+    exit 2
 fi
 
 # gen html report
