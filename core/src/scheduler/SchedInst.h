@@ -102,11 +102,16 @@ class OptimizerInst {
             if (instance == nullptr) {
                 std::vector<PassPtr> pass_list;
 #ifdef MILVUS_GPU_VERSION
-                pass_list.push_back(std::make_shared<BuildIndexPass>());
-                pass_list.push_back(std::make_shared<FaissFlatPass>());
-                pass_list.push_back(std::make_shared<FaissIVFFlatPass>());
-                pass_list.push_back(std::make_shared<FaissIVFSQ8Pass>());
-                pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
+                bool enable_gpu = false;
+                server::Config& config = server::Config::GetInstance();
+                config.GetGpuResourceConfigEnable(enable_gpu);
+                if (enable_gpu) {
+                    pass_list.push_back(std::make_shared<BuildIndexPass>());
+                    pass_list.push_back(std::make_shared<FaissFlatPass>());
+                    pass_list.push_back(std::make_shared<FaissIVFFlatPass>());
+                    pass_list.push_back(std::make_shared<FaissIVFSQ8Pass>());
+                    pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
+                }
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
