@@ -1,4 +1,4 @@
-#include "GrpcInterceptorHookHandler.h"
+#include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 
 void
 GrpcInterceptorHookHandler::OnPostRecvInitialMetaData(

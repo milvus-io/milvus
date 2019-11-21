@@ -77,9 +77,11 @@ set(thirdparty_files
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
 set(grpc_server_files
         ${grpc_request_files}
         ${grpc_impl_files}
+        ${grpc_interceptor_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)

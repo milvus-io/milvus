@@ -24,8 +24,8 @@
 #include "grpc/gen-status/status.pb.h"
 
 #include <context/Context.h>
-#include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 #include "opentracing/tracer.h"
+#include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 
 namespace milvus {
 namespace server {
@@ -222,7 +222,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
  private:
     std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
-//    std::shared_ptr<opentracing::Span> span_;
+    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
 };
 
 }  // namespace grpc

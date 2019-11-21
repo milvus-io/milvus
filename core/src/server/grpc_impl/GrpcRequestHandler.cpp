@@ -36,6 +36,7 @@
 #include "server/grpc_impl/request/ShowTablesRequest.h"
 #include "utils/TimeRecorder.h"
 
+#include <src/server/Config.h>
 #include <vector>
 
 #include "tracing/TextMapCarrier.h"
@@ -68,8 +69,31 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
 
     TextMapCarrier carrier{text_map};
     auto span_maybe = tracer_->Extract(carrier);
-    span_ = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_maybe->get())});
+    auto span = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_maybe->get())});
     // TODO
+    auto server_context = server_rpc_info->server_context();
+    auto client_metadata = server_context->client_metadata();
+    std::string request_id = "random";
+    auto request_id_kv = client_metadata.find("request_id");
+    if (request_id_kv != client_metadata.end()) {
+        request_id = request_id_kv->second.data();
+    }
+    text_map.clear();
+    TextMapCarrier dummy_carrier(text_map);
+    auto was_successful = tracer_->Inject(span->context(), dummy_carrier);
+    if (!was_successful) {
+        std::cerr << was_successful.error().message() << std::endl;
+        throw std::runtime_error("was_successful.error().message()");
+    }
+    auto dummy_span_context_maybe = tracer_->Extract(dummy_carrier);
+    //auto dummy_span_context = std::move(*dummy_span_context_maybe);
+//    auto hahah = TraceContext(dummy_span_context);
+
+    auto trace_context = std::make_shared<TraceContext>(*dummy_span_context_maybe);
+    auto context = std::make_shared<Context>(request_id);
+    context->SetTraceContext(trace_context);
+    context_map_[server_rpc_info->server_context()] = context;
+    span_map_[server_rpc_info->server_context()] = std::move(span);
 }
 
 void
@@ -77,7 +101,8 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
                                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
     //        cout << "experimental::InterceptionHookPoints::PRE_SEND_MESSAGE ..." << endl;
     // TODO
-    span_->Finish();
+    auto span = std::move(span_map_[server_rpc_info->server_context()]);
+    span->Finish();
 }
 
 ::grpc::Status
