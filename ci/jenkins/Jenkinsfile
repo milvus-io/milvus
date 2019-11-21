@@ -113,6 +113,10 @@ pipeline {
                         }
 
                         stage("Deploy to Development") {
+                            environment {
+                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
+                            }
+
                             agent {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-dev-test"
@@ -243,6 +247,10 @@ pipeline {
                         }
 
                         stage("Deploy to Development") {
+                            environment {
+                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
+                            }
+
                             agent {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-dev-test"
