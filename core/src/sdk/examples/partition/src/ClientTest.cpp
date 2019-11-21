@@ -148,6 +148,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // wait unit build index finish
+        milvus_sdk::TimeRecorder rc("Create index");
         std::cout << "Wait until create all index done" << std::endl;
         milvus::IndexParam index1 = BuildIndexParam();
         milvus_sdk::Utils::PrintIndexParam(index1);
