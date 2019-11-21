@@ -106,41 +106,6 @@ Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, Resou
                                             std::shared_ptr<LoadCompletedEvent> event) {
     auto task_item = event->task_table_item_;
     auto task = event->task_table_item_->task;
-    //    if (resource->type() == ResourceType::DISK) {
-    //        // step 1: calculate shortest path per resource, from disk to compute resource
-    //        auto compute_resources = res_mgr->GetComputeResources();
-    //        std::vector<std::vector<std::string>> paths;
-    //        std::vector<uint64_t> transport_costs;
-    //        for (auto& res : compute_resources) {
-    //            std::vector<std::string> path;
-    //            uint64_t transport_cost = ShortestPath(resource, res, res_mgr, path);
-    //            transport_costs.push_back(transport_cost);
-    //            paths.emplace_back(path);
-    //        }
-    //        if (task->job_.lock()->type() == JobType::BUILD) {
-    //            // step2: Read device id in config
-    //            // get build index gpu resource
-    //            server::Config& config = server::Config::GetInstance();
-    //            int32_t build_index_gpu;
-    //            Status stat = config.GetResourceConfigIndexBuildDevice(build_index_gpu);
-    //
-    //            bool find_gpu_res = false;
-    //            if (res_mgr->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
-    //                for (uint64_t i = 0; i < compute_resources.size(); ++i) {
-    //                    if (compute_resources[i]->name() ==
-    //                        res_mgr->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
-    //                        find_gpu_res = true;
-    //                        Path task_path(paths[i], paths[i].size() - 1);
-    //                        task->path() = task_path;
-    //                        break;
-    //                    }
-    //                }
-    //            }
-    //            if (not find_gpu_res) {
-    //                task->path() = Path(paths[0], paths[0].size() - 1);
-    //            }
-    //        }
-    //    }
 
     if (resource->name() == task->path().Last()) {
         resource->WakeupExecutor();
