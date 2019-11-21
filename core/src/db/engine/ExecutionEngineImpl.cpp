@@ -25,6 +25,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
@@ -92,11 +93,19 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+#endif
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
+#else
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+#endif
             break;
         }
         case EngineType::NSG_MIX: {
@@ -105,6 +114,22 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::FAISS_IVFSQ8H: {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            break;
+        }
+        case EngineType::FAISS_PQ: {
+#ifdef MILVUS_CPU_VERSION
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+#endif
+            break;
+        }
+        case EngineType::SPTAG_KDT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
+            break;
+        }
+        case EngineType::SPTAG_BKT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
             break;
         }
         default: {
@@ -127,7 +152,14 @@ ExecutionEngineImpl::HybridLoad() const {
     }
 
     const std::string key = location_ + ".quantizer";
-    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int64_t> gpus;
+    Status s = config.GetGpuResourceConfigSearchResources(gpus);
+    if (!s.ok()) {
+        ENGINE_LOG_ERROR << s.message();
+        return;
+    }
 
     // cache hit
     {
@@ -309,18 +341,36 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         return Status::OK();
     }
 #endif
-    try {
-        index_ = index_->CopyToGpu(device_id);
-        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-    } catch (std::exception& e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status(DB_ERROR, e.what());
+
+    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
+        if (index_ == nullptr) {
+            ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
+            return Status(DB_ERROR, "index is null");
+        }
+
+        try {
+            index_ = index_->CopyToGpu(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+        } catch (std::exception& e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status(DB_ERROR, e.what());
+        }
     }
+
+    if (!already_in_cache) {
+        GpuCache(device_id);
+    }
+
     return Status::OK();
 }
 
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+    gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
@@ -544,12 +594,16 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetResourceConfigIndexBuildDevice(gpu_num_);
-    if (!s.ok()) {
-        return s;
+    std::vector<int64_t> gpu_ids;
+    Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
+    for (auto id : gpu_ids) {
+        if (gpu_num_ == id) {
+            return Status::OK();
+        }
     }
 
-    return Status::OK();
+    std::string msg = "Invalid gpu_num";
+    return Status(SERVER_INVALID_ARGUMENT, msg);
 }
 
 }  // namespace engine

@@ -15,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
-#include "external/easyloggingpp/easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 
 INITIALIZE_EASYLOGGINGPP
 
 int
-main(int argc, char **argv) {
+main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

@@ -21,7 +21,6 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_algorithm.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_event.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_node.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_normal.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_resource.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_resource_factory.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_resource_mgr.cpp
@@ -29,7 +28,7 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_task.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_tasktable.cpp)
 
-cuda_add_executable(test_scheduler
+add_executable(test_scheduler
         ${common_files}
         ${entry_file}
         ${test_files}

@@ -28,6 +28,8 @@
 #include "wrapper/VecIndex.h"
 #include "wrapper/utils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "wrapper/ConfAdapterMgr.h"
+#include "wrapper/ConfAdapter.h"
 
 class DataGenBase;
 
@@ -87,7 +89,20 @@ class ParamGenerator {
         return instance;
     }
 
-    knowhere::Config Gen(const milvus::engine::IndexType& type) {
+    knowhere::Config
+    GenSearchConf(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
+        auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
+        return adapter->MatchSearch(conf, type);
+    }
+
+    knowhere::Config
+    GenBuild(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
+        auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
+        return adapter->Match(conf);
+    }
+
+    knowhere::Config
+    Gen(const milvus::engine::IndexType& type) {
         switch (type) {
             case milvus::engine::IndexType::FAISS_IDMAP: {
                 auto tempconf = std::make_shared<knowhere::Cfg>();
@@ -114,28 +129,29 @@ class ParamGenerator {
                 tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
-//            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
-//            case milvus::engine::IndexType::FAISS_IVFPQ_GPU: {
-//                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
-//                tempconf->nlist = 100;
-//                tempconf->nprobe = 16;
-//                tempconf->nbits = 8;
-//                tempconf->m = 8;
-//                tempconf->metric_type = knowhere::METRICTYPE::L2;
-//                return tempconf;
-//            }
-//            case milvus::engine::IndexType::NSG_MIX: {
-//                auto tempconf = std::make_shared<knowhere::NSGCfg>();
-//                tempconf->nlist = 100;
-//                tempconf->nprobe = 16;
-//                tempconf->search_length = 8;
-//                tempconf->knng = 200;
-//                tempconf->search_length = 40; // TODO(linxj): be 20 when search
-//                tempconf->out_degree = 60;
-//                tempconf->candidate_pool_size = 200;
-//                tempconf->metric_type = knowhere::METRICTYPE::L2;
-//                return tempconf;
-//            }
+            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
+            case milvus::engine::IndexType::FAISS_IVFPQ_GPU:
+            case milvus::engine::IndexType::FAISS_IVFPQ_MIX: {
+                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
+                tempconf->nlist = 100;
+                tempconf->nprobe = 16;
+                tempconf->nbits = 8;
+                tempconf->m = 8;
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
+                return tempconf;
+            }
+            case milvus::engine::IndexType::NSG_MIX: {
+                auto tempconf = std::make_shared<knowhere::NSGCfg>();
+                tempconf->nlist = 100;
+                tempconf->nprobe = 16;
+                tempconf->search_length = 8;
+                tempconf->knng = 200;
+                tempconf->search_length = 40; // TODO(linxj): be 20 when search
+                tempconf->out_degree = 60;
+                tempconf->candidate_pool_size = 200;
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
+                return tempconf;
+            }
         }
     }
 };

@@ -78,4 +78,3 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 ## 许可协议
 
 [Apache 许可协议2.0版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
-

@@ -26,7 +26,6 @@ index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 class TestMixBase:
 
     # TODO: enable
-    @pytest.mark.level(2)
     def test_search_during_createIndex(self, args):
         loops = 100000
         table = gen_unique_str()

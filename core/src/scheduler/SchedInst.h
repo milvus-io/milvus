@@ -21,10 +21,13 @@
 #include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
-#include "optimizer/HybridPass.h"
-#include "optimizer/LargeSQ8HPass.h"
-#include "optimizer/OnlyCPUPass.h"
-#include "optimizer/OnlyGPUPass.h"
+#include "Utils.h"
+#include "optimizer/BuildIndexPass.h"
+#include "optimizer/FaissFlatPass.h"
+#include "optimizer/FaissIVFFlatPass.h"
+#include "optimizer/FaissIVFSQ8HPass.h"
+#include "optimizer/FaissIVFSQ8Pass.h"
+#include "optimizer/FallbackPass.h"
 #include "optimizer/Optimizer.h"
 #include "server/Config.h"
 
@@ -97,20 +100,15 @@ class OptimizerInst {
         if (instance == nullptr) {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
-                server::Config& config = server::Config::GetInstance();
-                std::vector<std::string> search_resources;
-                bool has_cpu = false;
-                config.GetResourceConfigSearchResources(search_resources);
-                for (auto& resource : search_resources) {
-                    if (resource == "cpu") {
-                        has_cpu = true;
-                    }
-                }
                 std::vector<PassPtr> pass_list;
-                pass_list.push_back(std::make_shared<LargeSQ8HPass>());
-                pass_list.push_back(std::make_shared<HybridPass>());
-                pass_list.push_back(std::make_shared<OnlyCPUPass>());
-                pass_list.push_back(std::make_shared<OnlyGPUPass>(has_cpu));
+#ifdef MILVUS_GPU_VERSION
+                pass_list.push_back(std::make_shared<BuildIndexPass>());
+                pass_list.push_back(std::make_shared<FaissFlatPass>());
+                pass_list.push_back(std::make_shared<FaissIVFFlatPass>());
+                pass_list.push_back(std::make_shared<FaissIVFSQ8Pass>());
+                pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
+#endif
+                pass_list.push_back(std::make_shared<FallbackPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
             }
         }

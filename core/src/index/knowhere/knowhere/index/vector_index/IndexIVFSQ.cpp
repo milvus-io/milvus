@@ -15,15 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#ifdef MILVUS_GPU_VERSION
+#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuCloner.h>
+#endif
 #include <faiss/index_factory.h>
+
 #include <memory>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
 
 namespace knowhere {
 
@@ -54,6 +61,8 @@ IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
 
 VectorIndexPtr
 IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+#ifdef MILVUS_GPU_VERSION
+
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
 
@@ -65,6 +74,10 @@ IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
+
+#else
+    KNOWHERE_THROW_MSG("Calling IVFSQ::CopyCpuToGpu when we are using CPU version");
+#endif
 }
 
 }  // namespace knowhere

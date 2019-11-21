@@ -18,11 +18,18 @@
 #include "wrapper/VecImpl.h"
 #include "DataTransfer.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "utils/Log.h"
+#include "wrapper/WrapperException.h"
+#include "wrapper/gpu/GPUVecImpl.h"
+
+#ifdef MILVUS_GPU_VERSION
+
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-#include "utils/Log.h"
+
+#endif
 
 /*
  * no parameter check in this layer.
@@ -79,8 +86,8 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         Config search_cfg = cfg;
 
         auto res = index_->Search(dataset, search_cfg);
-        auto ids_array = res->array()[0];
-        auto dis_array = res->array()[1];
+        //        auto ids_array = res->array()[0];
+        //        auto dis_array = res->array()[1];
 
         //{
         //    auto& ids = ids_array;
@@ -99,12 +106,14 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         //    std::cout << "dist\n" << ss_dist.str() << std::endl;
         //}
 
-        auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
-        auto p_dist = dis_array->data()->GetValues<float>(1, 0);
+        //        auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
+        //        auto p_dist = dis_array->data()->GetValues<float>(1, 0);
 
         // TODO(linxj): avoid copy here.
-        memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
-        memcpy(dist, p_dist, sizeof(float) * nq * k);
+        memcpy(ids, res->ids(), sizeof(int64_t) * nq * k);
+        memcpy(dist, res->dist(), sizeof(float) * nq * k);
+        free(res->ids());
+        free(res->dist());
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
@@ -146,19 +155,29 @@ VecIndexImpl::GetType() {
 VecIndexPtr
 VecIndexImpl::CopyToGpu(const int64_t& device_id, const Config& cfg) {
     // TODO(linxj): exception handle
+#ifdef MILVUS_GPU_VERSION
     auto gpu_index = knowhere::cloner::CopyCpuToGpu(index_, device_id, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(gpu_index, ConvertToGpuIndexType(type));
     new_index->dim = dim;
     return new_index;
+#else
+    WRAPPER_LOG_ERROR << "Calling VecIndexImpl::CopyToGpu when we are using CPU version";
+    throw WrapperException("Calling VecIndexImpl::CopyToGpu when we are using CPU version");
+#endif
 }
 
 VecIndexPtr
 VecIndexImpl::CopyToCpu(const Config& cfg) {
     // TODO(linxj): exception handle
+#ifdef MILVUS_GPU_VERSION
     auto cpu_index = knowhere::cloner::CopyGpuToCpu(index_, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(cpu_index, ConvertToCpuIndexType(type));
     new_index->dim = dim;
     return new_index;
+#else
+    WRAPPER_LOG_ERROR << "Calling VecIndexImpl::CopyToCpu when we are using CPU version";
+    throw WrapperException("Calling VecIndexImpl::CopyToCpu when we are using CPU version");
+#endif
 }
 
 VecIndexPtr
@@ -171,11 +190,14 @@ VecIndexImpl::Clone() {
 
 int64_t
 VecIndexImpl::GetDeviceId() {
+#ifdef MILVUS_GPU_VERSION
     if (auto device_idx = std::dynamic_pointer_cast<knowhere::GPUIndex>(index_)) {
         return device_idx->GetGpuDevice();
     }
+#else
     // else
     return -1;  // -1 == cpu
+#endif
 }
 
 float*
@@ -224,131 +246,6 @@ BFIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const 
         return Status(KNOWHERE_ERROR, e.what());
     }
     return Status::OK();
-}
-
-// TODO(linxj): add lock here.
-Status
-IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
-                      const float* xt) {
-    try {
-        dim = cfg->d;
-        auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
-
-        auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
-        index_->set_preprocessor(preprocessor);
-        auto model = index_->Train(dataset, cfg);
-        index_->set_index_model(model);
-        index_->Add(dataset, cfg);
-
-        if (auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(index_)) {
-            auto host_index = device_index->CopyGpuToCpu(Config());
-            index_ = host_index;
-            type = ConvertToCpuIndexType(type);
-        } else {
-            WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
-            return Status(KNOWHERE_ERROR, "Build IVFMIXIndex Failed");
-        }
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_ERROR, e.what());
-    }
-    return Status::OK();
-}
-
-Status
-IVFMixIndex::Load(const knowhere::BinarySet& index_binary) {
-    index_->Load(index_binary);
-    dim = Dimension();
-    return Status::OK();
-}
-
-knowhere::QuantizerPtr
-IVFHybridIndex::LoadQuantizer(const Config& conf) {
-    // TODO(linxj): Hardcode here
-    if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
-        return new_idx->LoadQuantizer(conf);
-    } else {
-        WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
-    }
-}
-
-Status
-IVFHybridIndex::SetQuantizer(const knowhere::QuantizerPtr& q) {
-    try {
-        // TODO(linxj): Hardcode here
-        if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
-            new_idx->SetQuantizer(q);
-        } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
-            return Status(KNOWHERE_ERROR, "not supported");
-        }
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_ERROR, e.what());
-    }
-    return Status::OK();
-}
-
-Status
-IVFHybridIndex::UnsetQuantizer() {
-    try {
-        // TODO(linxj): Hardcode here
-        if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
-            new_idx->UnsetQuantizer();
-        } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
-            return Status(KNOWHERE_ERROR, "not supported");
-        }
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_ERROR, e.what());
-    }
-    return Status::OK();
-}
-
-VecIndexPtr
-IVFHybridIndex::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
-    try {
-        // TODO(linxj): Hardcode here
-        if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
-            return std::make_shared<IVFHybridIndex>(new_idx->LoadData(q, conf), type);
-        } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
-        }
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-    }
-    return nullptr;
-}
-
-std::pair<VecIndexPtr, knowhere::QuantizerPtr>
-IVFHybridIndex::CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) {
-    try {
-        // TODO(linxj): Hardcode here
-        if (auto hybrid_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
-            auto pair = hybrid_idx->CopyCpuToGpuWithQuantizer(device_id, cfg);
-            auto new_idx = std::make_shared<IVFHybridIndex>(pair.first, type);
-            return std::make_pair(new_idx, pair.second);
-        } else {
-            WRAPPER_LOG_ERROR << "Hybrid mode not supported for index type: " << int(type);
-        }
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-    }
-    return std::make_pair(nullptr, nullptr);
 }
 
 }  // namespace engine

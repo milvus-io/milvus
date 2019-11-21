@@ -5,9 +5,6 @@ container('milvus-build-env') {
                 gitlabCommitStatus(name: 'Packaged Engine') {
                     if (fileExists('milvus')) {
                         try {
-                            if (fileExists('milvus/unittest')) {
-                                sh "rm -rf ./milvus/unittest"
-                            }
                             sh "tar -zcvf ./${PROJECT_NAME}-engine-${PACKAGE_VERSION}.tar.gz ./milvus"
                             def fileTransfer = load "${env.WORKSPACE}/ci/function/file_transfer.groovy"
                             fileTransfer.FileTransfer("${PROJECT_NAME}-engine-${PACKAGE_VERSION}.tar.gz", "${PROJECT_NAME}/engine/${JOB_NAME}-${BUILD_ID}", 'nas storage')

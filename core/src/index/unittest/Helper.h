@@ -18,13 +18,16 @@
 #include <memory>
 #include <string>
 
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#endif
 
 int DEVICEID = 0;
 constexpr int64_t DIM = 128;
@@ -41,16 +44,18 @@ IndexFactory(const std::string& type) {
         return std::make_shared<knowhere::IVF>();
     } else if (type == "IVFPQ") {
         return std::make_shared<knowhere::IVFPQ>();
+    } else if (type == "IVFSQ") {
+        return std::make_shared<knowhere::IVFSQ>();
+#ifdef MILVUS_GPU_VERSION
     } else if (type == "GPUIVF") {
         return std::make_shared<knowhere::GPUIVF>(DEVICEID);
     } else if (type == "GPUIVFPQ") {
         return std::make_shared<knowhere::GPUIVFPQ>(DEVICEID);
-    } else if (type == "IVFSQ") {
-        return std::make_shared<knowhere::IVFSQ>();
     } else if (type == "GPUIVFSQ") {
         return std::make_shared<knowhere::GPUIVFSQ>(DEVICEID);
     } else if (type == "IVFSQHybrid") {
         return std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+#endif
     }
 }
 
@@ -110,11 +115,15 @@ class TestGpuIndexBase : public ::testing::Test {
  protected:
     void
     SetUp() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
+#endif
     }
 
     void
     TearDown() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 };

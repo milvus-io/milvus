@@ -26,55 +26,36 @@
 TEST_F(EngineTest, FACTORY_TEST) {
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512,
-                "/tmp/milvus_index_1",
-                milvus::engine::EngineType::INVALID,
-                milvus::engine::MetricType::IP,
-                1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::INVALID, milvus::engine::MetricType::IP, 1024);
 
         ASSERT_TRUE(engine_ptr == nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512,
-                "/tmp/milvus_index_1",
-                milvus::engine::EngineType::FAISS_IDMAP,
-                milvus::engine::MetricType::IP,
-                1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IDMAP, milvus::engine::MetricType::IP, 1024);
+
+        ASSERT_TRUE(engine_ptr != nullptr);
+    }
+
+    {
+        auto engine_ptr =
+            milvus::engine::EngineFactory::Build(512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IVFFLAT,
+                                                 milvus::engine::MetricType::IP, 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512,
-                "/tmp/milvus_index_1",
-                milvus::engine::EngineType::FAISS_IVFFLAT,
-                milvus::engine::MetricType::IP,
-                1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IVFSQ8, milvus::engine::MetricType::IP, 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512,
-                "/tmp/milvus_index_1",
-                milvus::engine::EngineType::FAISS_IVFSQ8,
-                milvus::engine::MetricType::IP,
-                1024);
-
-        ASSERT_TRUE(engine_ptr != nullptr);
-    }
-
-    {
-        auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512,
-                "/tmp/milvus_index_1",
-                milvus::engine::EngineType::NSG_MIX,
-                milvus::engine::MetricType::IP,
-                1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::NSG_MIX, milvus::engine::MetricType::IP, 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -84,21 +65,17 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-            dimension,
-            file_path,
-            milvus::engine::EngineType::FAISS_IVFFLAT,
-            milvus::engine::MetricType::IP,
-            1024);
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
 
     std::vector<float> data;
     std::vector<int64_t> ids;
     const int row_count = 10000;
-    data.reserve(row_count*dimension);
+    data.reserve(row_count * dimension);
     ids.reserve(row_count);
     for (int64_t i = 0; i < row_count; i++) {
         ids.push_back(i);
         for (uint16_t k = 0; k < dimension; k++) {
-            data.push_back(i*dimension + k);
+            data.push_back(i * dimension + k);
         }
     }
 
@@ -109,14 +86,14 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->Count(), ids.size());
 
     status = engine_ptr->CopyToGpu(0, false);
-    //ASSERT_TRUE(status.ok());
+    // ASSERT_TRUE(status.ok());
 
     auto new_engine = engine_ptr->Clone();
     ASSERT_EQ(new_engine->Dimension(), dimension);
     ASSERT_EQ(new_engine->Count(), ids.size());
     status = new_engine->CopyToCpu();
-    //ASSERT_TRUE(status.ok());
+    // ASSERT_TRUE(status.ok());
 
     auto engine_build = new_engine->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
-    //ASSERT_TRUE(status.ok());
+    // ASSERT_TRUE(status.ok());
 }

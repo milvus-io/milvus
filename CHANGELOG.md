@@ -1,6 +1,50 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
+# Milvus 0.6.0 (TODO)
+
+## Bug
+- \#228 - memory usage increased slowly during searching vectors
+- \#246 - Exclude src/external folder from code coverage for jenkin ci
+- \#248 - Reside src/external in thirdparty
+- \#316 - Some files not merged after vectors added
+- \#327 - Search does not use GPU when index type is FLAT
+- \#340 - Test cases run failed on 0.6.0
+- \#353 - Rename config.h.in to version.h.in
+- \#374 - sdk_simple return empty result
+- \#377 - Create partition success if tag name only contains spaces
+- \#397 - sdk_simple return incorrect result
+- \#399 - Create partition should be failed if partition tag existed
+- \#412 - Message returned is confused when partition created with null partition name
+- \#416 - Drop the same partition success repeatally
+- \#440 - Query API in customization still uses old version
+
+## Feature
+- \#12 - Pure CPU version for Milvus
+- \#77 - Support table partition
+- \#127 - Support new Index type IVFPQ
+- \#226 - Experimental shards middleware for Milvus
+- \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
+- \#346 - Support build index with multiple gpu
+
+## Improvement
+- \#255 - Add ivfsq8 test report detailed version
+- \#260 - C++ SDK README
+- \#266 - Rpc request source code refactor
+- \#275 - Rename C++ SDK IndexType
+- \#284 - Change C++ SDK to shared library
+- \#306 - Use int64 for all config integer
+- \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
+- \#314 - add Find FAISS in CMake
+- \#322 - Add option to enable / disable prometheus
+- \#358 - Add more information in build.sh and install.md
+- \#404 - Add virtual method Init() in Pass abstract class
+- \#409 - Add a Fallback pass in optimizer
+- \#433 - C++ SDK query result is not easy to use
+- \#449 - Add ShowPartitions example for C++ SDK
+
+## Task
+
 # Milvus 0.5.3 (2019-11-13)
 
 ## Bug
@@ -87,7 +131,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-658 - Fix SQ8 Hybrid can't search
 - MS-665 - IVF_SQ8H search crash when no GPU resource in search_resources
 - \#9 - Change default gpu_cache_capacity to 4
-- \#20 - C++ sdk example get grpc error 
+- \#20 - C++ sdk example get grpc error
 - \#23 - Add unittest to improve code coverage
 - \#31 - make clang-format failed after run build.sh -l
 - \#39 - Create SQ8H index hang if using github server version
@@ -139,7 +183,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-635 - Add compile option to support customized faiss
 - MS-660 - add ubuntu_build_deps.sh
 - \#18 - Add all test cases
-	
+
 # Milvus 0.4.0 (2019-09-12)
 
 ## Bug
@@ -348,11 +392,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-82 - Update server startup welcome message
 - MS-83 - Update vecwise to Milvus
 - MS-77 - Performance issue of post-search action
-- MS-22 - Enhancement for MemVector size control 
+- MS-22 - Enhancement for MemVector size control
 - MS-92 - Unify behavior of debug and release build
 - MS-98 - Install all unit test to installation directory
 - MS-115 - Change is_startup of metric_config switch from true to on
-- MS-122 - Archive criteria config 
+- MS-122 - Archive criteria config
 - MS-124 - HasTable interface
 - MS-126 - Add more error code
 - MS-128 - Change default db path
