@@ -53,7 +53,7 @@ pipeline {
                         stage("Run Build") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-build"
+                                    label "${env.BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
                                 }
@@ -62,7 +62,7 @@ pipeline {
                             stages {
                                 stage('Build') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                             }
@@ -71,7 +71,7 @@ pipeline {
                                 }
                                 stage('Code Coverage') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                             }
@@ -80,7 +80,7 @@ pipeline {
                                 }
                                 stage('Upload Package') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                             }
@@ -93,7 +93,7 @@ pipeline {
                         stage("Publish docker images") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-publish"
+                                    label "${env.BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                 }
@@ -115,7 +115,7 @@ pipeline {
                         stage("Deploy to Development") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-dev-test"
+                                    label "${env.BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                 }
@@ -183,7 +183,7 @@ pipeline {
                         stage("Run Build") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-build"
+                                    label "${env.BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
                                 }
@@ -192,7 +192,7 @@ pipeline {
                             stages {
                                 stage('Build') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                             }
@@ -201,7 +201,7 @@ pipeline {
                                 }
                                 stage('Code Coverage') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                             }
@@ -210,7 +210,7 @@ pipeline {
                                 }
                                 stage('Upload Package') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                             }
@@ -223,7 +223,7 @@ pipeline {
                         stage("Publish docker images") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-publish"
+                                    label "${env.BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                 }
@@ -245,7 +245,7 @@ pipeline {
                         stage("Deploy to Development") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-dev-test"
+                                    label "${env.BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                 }
