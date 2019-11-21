@@ -5,11 +5,18 @@
 
 class TraceContext {
  public:
-    explicit TraceContext(std::unique_ptr<opentracing::SpanContext>& span_context);
+    explicit TraceContext(std::unique_ptr<opentracing::Span>& span);
 
-    const std::unique_ptr<opentracing::SpanContext>&
-    getSpanContext() const;
+    std::unique_ptr<TraceContext>
+    Child(const std::string& operation_name) const;
+
+    std::unique_ptr<TraceContext>
+    Follower(const std::string& operation_name) const;
+
+    const std::unique_ptr<opentracing::Span>&
+    getSpan() const;
 
  private:
-    std::unique_ptr<opentracing::SpanContext> span_context_;
+    //    std::unique_ptr<opentracing::SpanContext> span_context_;
+    std::unique_ptr<opentracing::Span> span_;
 };

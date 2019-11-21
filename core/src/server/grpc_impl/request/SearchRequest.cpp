@@ -27,22 +27,23 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-SearchRequest::SearchRequest(const ::milvus::grpc::SearchParam* search_vector_infos,
+SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_vector_infos,
                              const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response)
     : GrpcBaseRequest(DQL_REQUEST_GROUP),
+      context_(context),
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
       topk_result_(response) {
 }
 
 BaseRequestPtr
-SearchRequest::Create(const ::milvus::grpc::SearchParam* search_vector_infos,
+SearchRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_vector_infos,
                       const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response) {
     if (search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
-    return std::shared_ptr<GrpcBaseRequest>(new SearchRequest(search_vector_infos, file_id_array, response));
+    return std::shared_ptr<GrpcBaseRequest>(new SearchRequest(context, search_vector_infos, file_id_array, response));
 }
 
 Status

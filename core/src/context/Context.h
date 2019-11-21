@@ -11,6 +11,12 @@ class Context {
  public:
     explicit Context(const std::string& request_id);
 
+    std::shared_ptr<Context>
+    Child(const std::string& operation_name) const;
+
+    std::shared_ptr<Context>
+    Follower(const std::string& operation_name) const;
+
     void
     SetTraceContext(const std::shared_ptr<TraceContext>& trace_context);
 

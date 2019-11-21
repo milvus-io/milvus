@@ -19,6 +19,8 @@
 
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 
+#include "context/Context.h"
+
 #include <string>
 #include <vector>
 
@@ -29,17 +31,18 @@ namespace grpc {
 class SearchRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
-           ::milvus::grpc::TopKQueryResult* response);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_param,
+           const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response);
 
  protected:
-    SearchRequest(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
-                  ::milvus::grpc::TopKQueryResult* response);
+    SearchRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_param,
+                  const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response);
 
     Status
     OnExecute() override;
 
  private:
+    const std::shared_ptr<Context>& context_;
     const ::milvus::grpc::SearchParam* search_param_;
     std::vector<std::string> file_id_array_;
     ::milvus::grpc::TopKQueryResult* topk_result_;
