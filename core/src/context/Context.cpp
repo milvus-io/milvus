@@ -23,4 +23,5 @@ std::shared_ptr<Context>
 Context::Follower(const std::string& operation_name) const {
     auto new_context = std::make_shared<Context>(request_id_);
     new_context->SetTraceContext(trace_context_->Follower(operation_name));
+    return new_context;
 }
