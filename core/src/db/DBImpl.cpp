@@ -839,6 +839,25 @@ DBImpl::BackgroundBuildIndex() {
 }
 
 Status
+DBImpl::GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,
+                             meta::TableFilesSchema& files) {
+    files.clear();
+    auto status = meta_ptr_->FilesByType(table_id, file_types, files);
+
+    // only build index for files that row count greater than certain threshold
+    for (auto it = files.begin(); it != files.end();) {
+        if ((*it).file_type_ == static_cast<int>(meta::TableFileSchema::RAW) &&
+            (*it).row_count_ < meta::BUILD_INDEX_THRESHOLD) {
+            it = files.erase(it);
+        } else {
+            it++;
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
                          meta::TableFilesSchema& files) {
     meta::DatePartionedTableFilesSchema date_files;
@@ -946,18 +965,18 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     }
 
     // get files to build index
-    std::vector<std::string> file_ids;
-    auto status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
+    meta::TableFilesSchema table_files;
+    auto status = GetFilesToBuildIndex(table_id, file_types, table_files);
     int times = 1;
 
-    while (!file_ids.empty()) {
+    while (!table_files.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
         if (index.engine_type_ != (int)EngineType::FAISS_IDMAP) {
             status = meta_ptr_->UpdateTableFilesToIndex(table_id);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10 * 1000, times * 100)));
-        status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
+        GetFilesToBuildIndex(table_id, file_types, table_files);
         times++;
     }
 
