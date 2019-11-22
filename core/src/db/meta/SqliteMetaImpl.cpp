@@ -836,7 +836,8 @@ SqliteMetaImpl::GetPartitionName(const std::string& table_id, const std::string&
 
         auto name = ConnectorPtr->select(columns(&TableSchema::table_id_),
                                          where(c(&TableSchema::owner_table_) == table_id
-                                               and c(&TableSchema::partition_tag_) == valid_tag));
+                                               and c(&TableSchema::partition_tag_) == valid_tag
+                                               and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         if (name.size() > 0) {
             partition_name = std::get<0>(name[0]);
         } else {
