@@ -97,7 +97,6 @@ IVF::Serialize() {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    Seal();
     return SerializeImpl();
 }
 
