@@ -149,7 +149,8 @@ class TestConnect:
             milvus.connect(uri=uri_value, timeout=1)
         assert not milvus.connected()
 
-    def test_connect_with_multiprocess(self, args):
+    # disable
+    def _test_connect_with_multiprocess(self, args):
         '''
         target: test uri connect with multiprocess
         method: set correct uri, test with multiprocessing connecting
