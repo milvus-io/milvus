@@ -32,6 +32,8 @@ const size_t H_SEC = 60 * M_SEC;
 const size_t D_SEC = 24 * H_SEC;
 const size_t W_SEC = 7 * D_SEC;
 
+const size_t BUILD_INDEX_THRESHOLD = 1000;
+
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus

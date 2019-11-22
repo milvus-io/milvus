@@ -42,6 +42,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#409 - Add a Fallback pass in optimizer
 - \#433 - C++ SDK query result is not easy to use
 - \#449 - Add ShowPartitions example for C++ SDK
+- \#470 - Small raw files should not be build index
 
 ## Task
 
