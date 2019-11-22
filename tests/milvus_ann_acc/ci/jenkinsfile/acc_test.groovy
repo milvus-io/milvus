@@ -1,4 +1,4 @@
-timeout(time: 1800, unit: 'MINUTES') {
+timeout(time: 7200, unit: 'MINUTES') {
     try {
         dir ("milvu_ann_acc") {
             print "Git clone url: ${TEST_URL}:${TEST_BRANCH}"
