@@ -959,6 +959,7 @@ MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
         updateTableFilesToIndexQuery << "UPDATE " << META_TABLEFILES
                                      << " SET file_type = " << std::to_string(TableFileSchema::TO_INDEX)
                                      << " WHERE table_id = " << mysqlpp::quote << table_id
+                                     << " AND row_count >= " << std::to_string(meta::BUILD_INDEX_THRESHOLD)
                                      << " AND file_type = " << std::to_string(TableFileSchema::RAW) << ";";
 
         ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesToIndex: " << updateTableFilesToIndexQuery.str();
@@ -1527,13 +1528,13 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
 
 Status
 MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                           std::vector<std::string>& file_ids) {
+                           TableFilesSchema& table_files) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
 
     try {
-        file_ids.clear();
+        table_files.clear();
 
         mysqlpp::StoreQueryResult res;
         {
@@ -1553,9 +1554,10 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
 
             mysqlpp::Query hasNonIndexFilesQuery = connectionPtr->query();
             // since table_id is a unique column we just need to check whether it exists or not
-            hasNonIndexFilesQuery << "SELECT file_id, file_type"
-                                  << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
-                                  << " AND file_type in (" << types << ");";
+            hasNonIndexFilesQuery
+                << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
+                << " AND file_type in (" << types << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesByType: " << hasNonIndexFilesQuery.str();
 
@@ -1566,9 +1568,18 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
             int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0;
             int to_index_count = 0, index_count = 0, backup_count = 0;
             for (auto& resRow : res) {
-                std::string file_id;
-                resRow["file_id"].to_string(file_id);
-                file_ids.push_back(file_id);
+                TableFileSchema file_schema;
+                file_schema.id_ = resRow["id"];
+                file_schema.table_id_ = table_id;
+                file_schema.engine_type_ = resRow["engine_type"];
+                resRow["file_id"].to_string(file_schema.file_id_);
+                file_schema.file_type_ = resRow["file_type"];
+                file_schema.file_size_ = resRow["file_size"];
+                file_schema.row_count_ = resRow["row_count"];
+                file_schema.date_ = resRow["date"];
+                file_schema.created_on_ = resRow["created_on"];
+
+                table_files.emplace_back(file_schema);
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
