@@ -19,6 +19,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#416 - Drop the same partition success repeatally
 - \#440 - Query API in customization still uses old version
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
+- \#458 - Index data is not compatible between 0.5 and 0.6
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -42,6 +43,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
 - \#433 - C++ SDK query result is not easy to use
+- \#449 - Add ShowPartitions example for C++ SDK
 
 ## Task
 

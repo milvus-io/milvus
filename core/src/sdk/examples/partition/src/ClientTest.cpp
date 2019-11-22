@@ -93,6 +93,15 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             std::cout << "CreatePartition function call status: " << stat.message() << std::endl;
             milvus_sdk::Utils::PrintPartitionParam(partition_param);
         }
+
+        // show partitions
+        milvus::PartitionList partition_array;
+        stat = conn->ShowPartitions(TABLE_NAME, partition_array);
+
+        std::cout << partition_array.size() << " partitions created:" << std::endl;
+        for (auto& partition : partition_array) {
+            std::cout << "\t" << partition.partition_name << "\t tag = " << partition.partition_tag << std::endl;
+        }
     }
 
     {  // insert vectors

@@ -16,8 +16,9 @@ add_interval_time = 2
 vectors = gen_vectors(100, dim)
 # vectors /= numpy.linalg.norm(vectors)
 # vectors = vectors.tolist()
-nrpobe = 1
+nprobe = 1
 epsilon = 0.001
+tag = "1970-01-01"
 
 
 class TestSearchBase:
@@ -49,6 +50,15 @@ class TestSearchBase:
                 pytest.skip("sq8h not support in open source")
         return request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, args):
+        if "internal" not in args:
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        return request.param
     """
     generate top-k params
     """
@@ -70,7 +80,7 @@ class TestSearchBase:
         query_vec = [vectors[0]]
         top_k = get_top_k
         nprobe = 1
-        status, result = connect.search_vectors(table, top_k, nrpobe, query_vec)
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec)
         if top_k <= 2048:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
@@ -85,7 +95,6 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
-        
         index_params = get_index_params
         logging.getLogger().info(index_params)
         vectors, ids = self.init_data(connect, table)
@@ -93,7 +102,7 @@ class TestSearchBase:
         query_vec = [vectors[0]]
         top_k = 10
         nprobe = 1
-        status, result = connect.search_vectors(table, top_k, nrpobe, query_vec)
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec)
         logging.getLogger().info(result)
         if top_k <= 1024:
             assert status.OK()
@@ -102,6 +111,160 @@ class TestSearchBase:
             assert result[0][0].distance <= epsilon
         else:
             assert not status.OK()
+
+    def test_search_l2_index_params_partition(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: add vectors into table, search with the given vectors, check the result
+        expected: search status ok, and the length of the result is top_k, search table with partition tag return empty
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        vectors, ids = self.init_data(connect, table)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=[tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == 0
+
+    def test_search_l2_index_params_partition_A(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search partition with the given vectors, check the result
+        expected: search status ok, and the length of the result is 0
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        vectors, ids = self.init_data(connect, table)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(partition_name, top_k, nprobe, query_vec, partition_tags=[tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == 0
+
+    def test_search_l2_index_params_partition_B(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search with the given vectors, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        vectors, ids = self.init_data(connect, partition_name)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=[tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
+        status, result = connect.search_vectors(partition_name, top_k, nprobe, query_vec, partition_tags=[tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == 0
+
+    def test_search_l2_index_params_partition_C(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search with the given vectors and tags (one of the tags not existed in table), check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        vectors, ids = self.init_data(connect, partition_name)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=[tag, "new_tag"])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
+
+    def test_search_l2_index_params_partition_D(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search with the given vectors and tag (tag name not existed in table), check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        vectors, ids = self.init_data(connect, partition_name)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=["new_tag"])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == 0
+
+    def test_search_l2_index_params_partition_E(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search table with the given vectors and tags, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        new_tag = "new_tag"
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        new_partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, new_partition_name, new_tag)
+        vectors, ids = self.init_data(connect, partition_name)
+        new_vectors, new_ids = self.init_data(connect, new_partition_name, nb=1000)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0], new_vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=[tag, new_tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert check_result(result[1], new_ids[0])
+        assert result[0][0].distance <= epsilon
+        assert result[1][0].distance <= epsilon
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=[new_tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[1], new_ids[0])
+        assert result[1][0].distance <= epsilon
 
     def test_search_ip_index_params(self, connect, ip_table, get_index_params):
         '''
@@ -117,7 +280,7 @@ class TestSearchBase:
         query_vec = [vectors[0]]
         top_k = 10
         nprobe = 1
-        status, result = connect.search_vectors(ip_table, top_k, nrpobe, query_vec)
+        status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vec)
         logging.getLogger().info(result)
 
         if top_k <= 1024:
@@ -127,6 +290,59 @@ class TestSearchBase:
             assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
         else:
             assert not status.OK()
+
+    def test_search_ip_index_params_partition(self, connect, ip_table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search with the given vectors, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(ip_table, partition_name, tag)
+        vectors, ids = self.init_data(connect, ip_table)
+        status = connect.create_index(ip_table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vec)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+        status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vec, partition_tags=[tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == 0
+
+    def test_search_ip_index_params_partition_A(self, connect, ip_table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search with the given vectors and tag, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        status = connect.create_partition(ip_table, partition_name, tag)
+        vectors, ids = self.init_data(connect, partition_name)
+        status = connect.create_index(ip_table, index_params)
+        query_vec = [vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vec, partition_tags=[tag])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+        status, result = connect.search_vectors(partition_name, top_k, nprobe, query_vec)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
 
     @pytest.mark.level(2)
     def test_search_vectors_without_connect(self, dis_connect, table):
@@ -518,6 +734,14 @@ class TestSearchParamsInvalid(object):
         status, result = connect.search_vectors(table_name, top_k, nprobe, query_vecs)
         assert not status.OK()
 
+    @pytest.mark.level(1)
+    def test_search_with_invalid_tag_format(self, connect, table):
+        top_k = 1
+        nprobe = 1 
+        query_vecs = gen_vectors(1, dim)
+        with pytest.raises(Exception) as e:
+            status, result = connect.search_vectors(table_name, top_k, nprobe, query_vecs, partition_tags="tag")
+
     """
     Test search table with invalid top-k
     """
@@ -574,7 +798,7 @@ class TestSearchParamsInvalid(object):
         yield request.param
 
     @pytest.mark.level(1)
-    def test_search_with_invalid_nrpobe(self, connect, table, get_nprobes):
+    def test_search_with_invalid_nprobe(self, connect, table, get_nprobes):
         '''
         target: test search fuction, with the wrong top_k
         method: search with top_k
@@ -592,7 +816,7 @@ class TestSearchParamsInvalid(object):
                 status, result = connect.search_vectors(table, top_k, nprobe, query_vecs)
 
     @pytest.mark.level(2)
-    def test_search_with_invalid_nrpobe_ip(self, connect, ip_table, get_nprobes):
+    def test_search_with_invalid_nprobe_ip(self, connect, ip_table, get_nprobes):
         '''
         target: test search fuction, with the wrong top_k
         method: search with top_k
