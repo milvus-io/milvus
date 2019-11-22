@@ -15,31 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/optimizer/OnlyCPUPass.h"
+#include "scheduler/optimizer/FallbackPass.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/Utils.h"
-#include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
 
+void
+FallbackPass::Init() {
+}
+
 bool
-OnlyCPUPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::SearchTask)
-        return false;
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8 &&
-        search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+FallbackPass::Run(const TaskPtr& task) {
+    auto task_type = task->Type();
+    if (task_type != TaskType::SearchTask && task_type != TaskType::BuildIndexTask) {
         return false;
     }
-
-    auto gpu_id = get_gpu_pool();
-    if (not gpu_id.empty())
-        return false;
-
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    // NEVER be empty
+    auto cpu = ResMgrInst::GetInstance()->GetCpuResources()[0];
+    auto label = std::make_shared<SpecResLabel>(cpu);
     task->label() = label;
     return true;
 }

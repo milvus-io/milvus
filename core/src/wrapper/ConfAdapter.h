@@ -46,9 +46,6 @@ class ConfAdapter {
     virtual knowhere::Config
     MatchSearch(const TempMetaConf& metaconf, const IndexType& type);
 
-    //    virtual void
-    //    Dump(){}
-
  protected:
     static void
     MatchBase(knowhere::Config conf);
@@ -95,6 +92,24 @@ class NSGConfAdapter : public IVFConfAdapter {
 
     knowhere::Config
     MatchSearch(const TempMetaConf& metaconf, const IndexType& type) final;
+};
+
+class SPTAGKDTConfAdapter : public ConfAdapter {
+ public:
+    knowhere::Config
+    Match(const TempMetaConf& metaconf) override;
+
+    knowhere::Config
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
+};
+
+class SPTAGBKTConfAdapter : public ConfAdapter {
+ public:
+    knowhere::Config
+    Match(const TempMetaConf& metaconf) override;
+
+    knowhere::Config
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
 };
 
 }  // namespace engine

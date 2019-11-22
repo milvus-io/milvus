@@ -18,6 +18,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -32,20 +33,24 @@
 namespace milvus {
 namespace scheduler {
 
-class OnlyGPUPass : public Pass {
+class FaissIVFFlatPass : public Pass {
  public:
-    explicit OnlyGPUPass(bool has_cpu);
+    FaissIVFFlatPass() = default;
 
  public:
+    void
+    Init() override;
+
     bool
     Run(const TaskPtr& task) override;
 
  private:
-    uint64_t specified_gpu_id_ = 0;
-    bool has_cpu_ = false;
+    int64_t threshold_ = std::numeric_limits<int64_t>::max();
+    int64_t count_ = 0;
+    std::vector<int64_t> gpus;
 };
 
-using OnlyGPUPassPtr = std::shared_ptr<OnlyGPUPass>;
+using FaissIVFFlatPassPtr = std::shared_ptr<FaissIVFFlatPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

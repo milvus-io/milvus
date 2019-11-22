@@ -117,6 +117,11 @@ void
 DataGenBase::GenData(const int& dim, const int& nb, const int& nq, std::vector<float>& xb, std::vector<float>& xq,
                      std::vector<int64_t>& ids, const int& k, std::vector<int64_t>& gt_ids,
                      std::vector<float>& gt_dis) {
+    xb.clear();
+    xq.clear();
+    ids.clear();
+    gt_ids.clear();
+    gt_dis.clear();
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);

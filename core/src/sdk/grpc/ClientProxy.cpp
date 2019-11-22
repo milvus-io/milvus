@@ -32,6 +32,13 @@ UriCheck(const std::string& uri) {
     return (index != std::string::npos);
 }
 
+void
+CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
+    auto vector_data = target->mutable_vector_data();
+    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
+    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
+}
+
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -189,14 +196,16 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            grpc_record->add_vector_data(record.data.begin(), record.data.end());
+            CopyRowRecord(grpc_record, record);
         }
 
         // Single thread
         ::milvus::grpc::VectorIds vector_ids;
         if (!id_array.empty()) {
             /* set user's ids */
-            insert_param.add_row_id_array(id_array.begin(), id_array.end());
+            auto row_ids = insert_param.mutable_row_id_array();
+            row_ids->Resize(static_cast<int>(id_array.size()), -1);
+            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);
@@ -226,7 +235,7 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         }
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
-            row_record->add_vector_data(record.data.begin(), record.data.end());
+            CopyRowRecord(row_record, record);
         }
 
         // step 2: convert range array
@@ -241,12 +250,17 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         Status status = client_ptr_->Search(result, search_param);
 
         // step 4: convert result array
-        topk_query_result.row_num = result.row_num();
-        topk_query_result.ids.resize(result.ids().size());
-        memcpy(topk_query_result.ids.data(), result.ids().data(), result.ids().size() * sizeof(int64_t));
-        topk_query_result.distances.resize(result.distances().size());
-        memcpy(topk_query_result.distances.data(), result.distances().data(),
-               result.distances().size() * sizeof(float));
+        topk_query_result.reserve(result.row_num());
+        int64_t nq = result.row_num();
+        int64_t topk = result.ids().size() / nq;
+        for (int64_t i = 0; i < result.row_num(); i++) {
+            milvus::QueryResult one_result;
+            one_result.ids.resize(topk);
+            one_result.distances.resize(topk);
+            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
+            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
+            topk_query_result.emplace_back(one_result);
+        }
 
         return status;
     } catch (std::exception& ex) {

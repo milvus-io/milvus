@@ -30,10 +30,10 @@ set(external_srcs
 
 set(index_srcs
         knowhere/index/preprocessor/Normalize.cpp
-        knowhere/index/vector_index/IndexKDT.cpp
+        knowhere/index/vector_index/IndexSPTAG.cpp
         knowhere/index/vector_index/IndexIDMAP.cpp
         knowhere/index/vector_index/IndexIVF.cpp
-        knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
+        knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
         knowhere/index/vector_index/IndexNSG.cpp
         knowhere/index/vector_index/nsg/NSG.cpp
         knowhere/index/vector_index/nsg/NSGIO.cpp
