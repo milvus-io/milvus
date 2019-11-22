@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#412 - Message returned is confused when partition created with null partition name
 - \#416 - Drop the same partition success repeatally
 - \#440 - Query API in customization still uses old version
+- \#458 - Index data is not compatible between 0.5 and 0.6
 
 ## Feature
 - \#12 - Pure CPU version for Milvus

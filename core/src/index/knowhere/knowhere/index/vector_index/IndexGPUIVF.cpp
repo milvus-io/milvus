@@ -86,9 +86,6 @@ GPUIVF::SerializeImpl() {
             faiss::Index* index = index_.get();
             faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(index);
 
-            // TODO(linxj): support seal
-            // SealImpl();
-
             faiss::write_index(host_index, &writer);
             delete host_index;
         }

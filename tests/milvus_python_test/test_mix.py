@@ -25,9 +25,8 @@ index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 class TestMixBase:
 
-    # TODO: enable
     def test_search_during_createIndex(self, args):
-        loops = 100000
+        loops = 10000
         table = gen_unique_str()
         query_vecs = [vectors[0], vectors[1]]
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
