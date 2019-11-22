@@ -85,7 +85,7 @@ JobMgr::worker_function() {
         }
 
         for (auto& task : tasks) {
-            calculate_path(task);
+            calculate_path(res_mgr_, task);
         }
 
         // disk resources NEVER be empty.
@@ -103,8 +103,8 @@ JobMgr::build_task(const JobPtr& job) {
 }
 
 void
-JobMgr::calculate_path(const TaskPtr& task) {
-    if (task->type_ != TaskType::SearchTask) {
+JobMgr::calculate_path(const ResourceMgrPtr& res_mgr, const TaskPtr& task) {
+    if (task->type_ != TaskType::SearchTask && task->type_ != TaskType::BuildIndexTask) {
         return;
     }
 
@@ -114,9 +114,9 @@ JobMgr::calculate_path(const TaskPtr& task) {
 
     std::vector<std::string> path;
     auto spec_label = std::static_pointer_cast<SpecResLabel>(task->label());
-    auto src = res_mgr_->GetDiskResources()[0];
+    auto src = res_mgr->GetDiskResources()[0];
     auto dest = spec_label->resource();
-    ShortestPath(src.lock(), dest.lock(), res_mgr_, path);
+    ShortestPath(src.lock(), dest.lock(), res_mgr, path);
     task->path() = Path(path, path.size() - 1);
 }
 

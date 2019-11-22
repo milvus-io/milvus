@@ -21,17 +21,19 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/Log.h"
 #include "wrapper/WrapperException.h"
+#include "wrapper/gpu/GPUVecImpl.h"
 
 #ifdef MILVUS_GPU_VERSION
 
-#include <src/index/knowhere/knowhere/index/vector_index/IndexGPUIVF.h>
-#include <src/index/knowhere/knowhere/index/vector_index/helpers/Cloner.h>
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #endif
 
 /*
  * no parameter check in this layer.
- * only responible for index combination
+ * only responsible for index combination
  */
 
 namespace milvus {

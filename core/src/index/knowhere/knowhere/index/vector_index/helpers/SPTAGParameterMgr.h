@@ -14,39 +14,48 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
-#include <thread>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "Pass.h"
+#include <SPTAG/AnnService/inc/Core/Common.h>
+#include "IndexParameter.h"
 
-namespace milvus {
-namespace scheduler {
+namespace knowhere {
 
-class LargeSQ8HPass : public Pass {
+using KDTConfig = std::shared_ptr<KDTCfg>;
+using BKTConfig = std::shared_ptr<BKTCfg>;
+
+class SPTAGParameterMgr {
  public:
-    LargeSQ8HPass();
+    const KDTConfig&
+    GetKDTParameters();
+
+    const BKTConfig&
+    GetBKTParameters();
 
  public:
-    bool
-    Run(const TaskPtr& task) override;
+    static SPTAGParameterMgr&
+    GetInstance() {
+        static SPTAGParameterMgr instance;
+        return instance;
+    }
+
+    SPTAGParameterMgr(const SPTAGParameterMgr&) = delete;
+
+    SPTAGParameterMgr&
+    operator=(const SPTAGParameterMgr&) = delete;
 
  private:
-    int32_t threshold_ = std::numeric_limits<int32_t>::max();
-    int64_t count_ = 0;
+    SPTAGParameterMgr();
+
+ private:
+    KDTConfig kdt_config_;
+    BKTConfig bkt_config_;
 };
 
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
-
-}  // namespace scheduler
-}  // namespace milvus
+}  // namespace knowhere
