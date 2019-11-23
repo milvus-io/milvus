@@ -30,6 +30,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
 - \#488 - Add log in scheduler/optimizer
+- \#502 - C++ SDK support IVFPQ and SPTAG
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
