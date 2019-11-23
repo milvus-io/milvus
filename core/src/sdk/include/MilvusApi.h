@@ -37,6 +37,9 @@ enum class IndexType {
     IVFSQ8 = 3,
     NSG = 4,
     IVFSQ8H = 5,
+    IVFPQ = 6,
+    SPTAGKDT = 7,
+    SPTAGBKT = 8,
 };
 
 enum class MetricType {
