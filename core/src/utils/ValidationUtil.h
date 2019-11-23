@@ -64,8 +64,10 @@ class ValidationUtil {
     static Status
     ValidateGpuIndex(int32_t gpu_index);
 
+#ifdef MILVUS_GPU_VERSION
     static Status
     GetGpuMemory(int32_t gpu_index, size_t& memory);
+#endif
 
     static Status
     ValidateIpAddress(const std::string& ip_address);
