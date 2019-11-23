@@ -29,12 +29,14 @@ namespace scheduler {
 
 void
 FaissIVFSQ8HPass::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int64_t>::max();
     }
     s = config.GetGpuResourceConfigSearchResources(gpus);
+#endif
 }
 
 bool

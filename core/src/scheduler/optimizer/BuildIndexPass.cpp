@@ -25,12 +25,14 @@ namespace scheduler {
 
 void
 BuildIndexPass::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> build_resources;
     Status s = config.GetGpuResourceConfigBuildIndexResources(build_resources);
     if (!s.ok()) {
         throw;
     }
+#endif
 }
 
 bool
