@@ -7,7 +7,7 @@ metadata:
     componet: cpu-build-env
 spec:
   containers:
-  - name: milvus-build-env
+  - name: milvus-cpu-build-env
     image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.6.0-ubuntu18.04
     env:
     - name: POD_IP

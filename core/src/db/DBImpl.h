@@ -153,6 +153,10 @@ class DBImpl : public DB {
     MemSerialize();
 
     Status
+    GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,
+                         meta::TableFilesSchema& files);
+
+    Status
     GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
                      meta::TableFilesSchema& files);
 

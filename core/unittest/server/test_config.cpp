@@ -25,6 +25,8 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
+#include <limits>
+
 namespace {
 
 static constexpr uint64_t KB = 1024;
@@ -63,9 +65,21 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     int64_t port = server_config.GetInt64Value("port");
     ASSERT_NE(port, 0);
 
-    server_config.SetValue("test", "2.5");
-    double test = server_config.GetDoubleValue("test");
-    ASSERT_EQ(test, 2.5);
+    server_config.SetValue("float_test", "2.5");
+    double dbl = server_config.GetDoubleValue("float_test");
+    ASSERT_LE(abs(dbl - 2.5), std::numeric_limits<double>::epsilon());
+    float flt = server_config.GetFloatValue("float_test");
+    ASSERT_LE(abs(flt - 2.5), std::numeric_limits<float>::epsilon());
+
+    server_config.SetValue("bool_test", "true");
+    bool blt = server_config.GetBoolValue("bool_test");
+    ASSERT_TRUE(blt);
+
+    server_config.SetValue("int_test", "34");
+    int32_t it32 = server_config.GetInt32Value("int_test");
+    ASSERT_EQ(it32, 34);
+    int64_t it64 = server_config.GetInt64Value("int_test");
+    ASSERT_EQ(it64, 34);
 
     milvus::server::ConfigNode fake;
     server_config.AddChild("fake", fake);
@@ -236,6 +250,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(int64_val == engine_omp_thread_num);
 
+#ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
     s = config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));
     ASSERT_TRUE(s.ok());
@@ -251,7 +266,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(bool_val == resource_enable_gpu);
 
-#ifdef MILVUS_GPU_VERSION
     int64_t gpu_cache_capacity = 1;
     s = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_cache_capacity));
     ASSERT_TRUE(s.ok());
@@ -389,6 +403,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetEngineConfigOmpThreadNum("10000");
     ASSERT_FALSE(s.ok());
 
+#ifdef MILVUS_GPU_VERSION
     s = config.SetEngineConfigGpuSearchThreshold("-1");
     ASSERT_FALSE(s.ok());
 
@@ -396,7 +411,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetGpuResourceConfigEnable("ok");
     ASSERT_FALSE(s.ok());
 
-#ifdef MILVUS_GPU_VERSION
     s = config.SetGpuResourceConfigCacheCapacity("a");
     ASSERT_FALSE(s.ok());
     s = config.SetGpuResourceConfigCacheCapacity("128");

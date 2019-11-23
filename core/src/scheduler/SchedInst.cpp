@@ -54,36 +54,40 @@ load_simple_config() {
 
     // get resources
 #ifdef MILVUS_GPU_VERSION
+    bool enable_gpu = false;
     server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpu_ids;
-    config.GetGpuResourceConfigSearchResources(gpu_ids);
-    std::vector<int64_t> build_gpu_ids;
-    config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids);
-    auto pcie = Connection("pcie", 12000);
+    config.GetGpuResourceConfigEnable(enable_gpu);
+    if (enable_gpu) {
+        std::vector<int64_t> gpu_ids;
+        config.GetGpuResourceConfigSearchResources(gpu_ids);
+        std::vector<int64_t> build_gpu_ids;
+        config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids);
+        auto pcie = Connection("pcie", 12000);
 
-    std::vector<int64_t> not_find_build_ids;
-    for (auto& build_id : build_gpu_ids) {
-        bool find_gpu_id = false;
-        for (auto& gpu_id : gpu_ids) {
-            if (gpu_id == build_id) {
-                find_gpu_id = true;
-                break;
+        std::vector<int64_t> not_find_build_ids;
+        for (auto& build_id : build_gpu_ids) {
+            bool find_gpu_id = false;
+            for (auto& gpu_id : gpu_ids) {
+                if (gpu_id == build_id) {
+                    find_gpu_id = true;
+                    break;
+                }
+            }
+            if (not find_gpu_id) {
+                not_find_build_ids.emplace_back(build_id);
             }
         }
-        if (not find_gpu_id) {
-            not_find_build_ids.emplace_back(build_id);
+
+        for (auto& gpu_id : gpu_ids) {
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
+            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
         }
-    }
 
-    for (auto& gpu_id : gpu_ids) {
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
-    }
-
-    for (auto& not_find_id : not_find_build_ids) {
-        ResMgrInst::GetInstance()->Add(
-            ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
+        for (auto& not_find_id : not_find_build_ids) {
+            ResMgrInst::GetInstance()->Add(
+                ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id, true, true));
+            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
+        }
     }
 #endif
 }

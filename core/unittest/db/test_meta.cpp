@@ -306,9 +306,9 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(dated_files[table_file.date_].size(), 0);
 
     std::vector<int> file_types;
-    std::vector<std::string> file_ids;
-    status = impl_->FilesByType(table.table_id_, file_types, file_ids);
-    ASSERT_TRUE(file_ids.empty());
+    milvus::engine::meta::TableFilesSchema table_files;
+    status = impl_->FilesByType(table.table_id_, file_types, table_files);
+    ASSERT_TRUE(table_files.empty());
     ASSERT_FALSE(status.ok());
 
     file_types = {
@@ -317,11 +317,11 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
         milvus::engine::meta::TableFileSchema::INDEX,     milvus::engine::meta::TableFileSchema::RAW,
         milvus::engine::meta::TableFileSchema::BACKUP,
     };
-    status = impl_->FilesByType(table.table_id_, file_types, file_ids);
+    status = impl_->FilesByType(table.table_id_, file_types, table_files);
     ASSERT_TRUE(status.ok());
     uint64_t total_cnt = new_index_files_cnt + new_merge_files_cnt + backup_files_cnt + new_files_cnt + raw_files_cnt +
                          to_index_files_cnt + index_files_cnt;
-    ASSERT_EQ(file_ids.size(), total_cnt);
+    ASSERT_EQ(table_files.size(), total_cnt);
 
     status = impl_->DeleteTableFiles(table_id);
     ASSERT_TRUE(status.ok());
