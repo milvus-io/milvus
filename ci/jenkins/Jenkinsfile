@@ -114,7 +114,7 @@ pipeline {
 
                         stage("Deploy to Development") {
                             environment {
-                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
+                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase().replaceAll(".", "-")
                             }
 
                             agent {
