@@ -99,6 +99,12 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "NSG";
         case milvus::IndexType::IVFSQ8H:
             return "IVFSQ8H";
+        case milvus::IndexType::IVFPQ:
+            return "IVFPQ";
+        case milvus::IndexType::SPTAGKDT:
+            return "SPTAGKDT";
+        case milvus::IndexType::SPTAGBKT:
+            return "SPTAGBKT";
         default:
             return "Unknown index type";
     }
