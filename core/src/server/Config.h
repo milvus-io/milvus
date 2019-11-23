@@ -172,9 +172,10 @@ class Config {
     CheckEngineConfigOmpThreadNum(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
-    /* gpu resource config */
     Status
     CheckEngineConfigGpuSearchThreshold(const std::string& value);
+
+    /* gpu resource config */
     Status
     CheckGpuResourceConfigEnable(const std::string& value);
     Status
@@ -307,9 +308,10 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
-    /* gpu resource config */
     Status
     SetEngineConfigGpuSearchThreshold(const std::string& value);
+
+    /* gpu resource config */
     Status
     SetGpuResourceConfigEnable(const std::string& value);
     Status
