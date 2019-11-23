@@ -25,7 +25,8 @@ index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 class TestMixBase:
 
-    def test_search_during_createIndex(self, args):
+    # disable
+    def _test_search_during_createIndex(self, args):
         loops = 10000
         table = gen_unique_str()
         query_vecs = [vectors[0], vectors[1]]

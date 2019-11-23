@@ -189,35 +189,37 @@ Config::ValidateConfig() {
     }
 
     /* gpu resource config */
-#ifdef MILVUS_GPU_VERSION
     bool gpu_resource_enable;
     s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
 
-    int64_t resource_cache_capacity;
-    s = GetGpuResourceConfigCacheCapacity(resource_cache_capacity);
-    if (!s.ok()) {
-        return s;
-    }
+#ifdef MILVUS_GPU_VERSION
+    if (gpu_resource_enable) {
+        int64_t resource_cache_capacity;
+        s = GetGpuResourceConfigCacheCapacity(resource_cache_capacity);
+        if (!s.ok()) {
+            return s;
+        }
 
-    float resource_cache_threshold;
-    s = GetGpuResourceConfigCacheThreshold(resource_cache_threshold);
-    if (!s.ok()) {
-        return s;
-    }
+        float resource_cache_threshold;
+        s = GetGpuResourceConfigCacheThreshold(resource_cache_threshold);
+        if (!s.ok()) {
+            return s;
+        }
 
-    std::vector<int64_t> search_resources;
-    s = GetGpuResourceConfigSearchResources(search_resources);
-    if (!s.ok()) {
-        return s;
-    }
+        std::vector<int64_t> search_resources;
+        s = GetGpuResourceConfigSearchResources(search_resources);
+        if (!s.ok()) {
+            return s;
+        }
 
-    std::vector<int64_t> index_build_resources;
-    s = GetGpuResourceConfigBuildIndexResources(index_build_resources);
-    if (!s.ok()) {
-        return s;
+        std::vector<int64_t> index_build_resources;
+        s = GetGpuResourceConfigBuildIndexResources(index_build_resources);
+        if (!s.ok()) {
+            return s;
+        }
     }
 #endif
 
