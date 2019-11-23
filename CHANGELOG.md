@@ -20,6 +20,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Query API in customization still uses old version
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
+- \#486 - gpu no usage during index building
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -28,6 +29,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#226 - Experimental shards middleware for Milvus
 - \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
+- \#488 - Add log in scheduler/optimizer
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version

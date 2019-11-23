@@ -26,8 +26,7 @@ namespace scheduler {
 void
 BuildIndexPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> build_resources;
-    Status s = config.GetGpuResourceConfigBuildIndexResources(build_resources);
+    Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids_);
     if (!s.ok()) {
         throw;
     }
@@ -38,13 +37,16 @@ BuildIndexPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::BuildIndexTask)
         return false;
 
-    if (build_gpu_ids_.empty())
+    if (build_gpu_ids_.empty()) {
+        SERVER_LOG_WARNING << "BuildIndexPass cannot get build index gpu!";
         return false;
+    }
 
     ResourcePtr res_ptr;
     res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
     auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
     task->label() = label;
+    SERVER_LOG_DEBUG << "Specify gpu" << specified_gpu_id_ << " to build index!";
 
     specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
     return true;
