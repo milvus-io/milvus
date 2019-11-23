@@ -250,6 +250,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(int64_val == engine_omp_thread_num);
 
+#ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
     s = config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));
     ASSERT_TRUE(s.ok());
@@ -265,7 +266,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(bool_val == resource_enable_gpu);
 
-#ifdef MILVUS_GPU_VERSION
     int64_t gpu_cache_capacity = 1;
     s = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_cache_capacity));
     ASSERT_TRUE(s.ok());
@@ -403,14 +403,14 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     s = config.SetEngineConfigOmpThreadNum("10000");
     ASSERT_FALSE(s.ok());
 
+#ifdef MILVUS_GPU_VERSION
+    /* gpu resource config */
     s = config.SetEngineConfigGpuSearchThreshold("-1");
     ASSERT_FALSE(s.ok());
 
-    /* gpu resource config */
     s = config.SetGpuResourceConfigEnable("ok");
     ASSERT_FALSE(s.ok());
 
-#ifdef MILVUS_GPU_VERSION
     s = config.SetGpuResourceConfigCacheCapacity("a");
     ASSERT_FALSE(s.ok());
     s = config.SetGpuResourceConfigCacheCapacity("128");

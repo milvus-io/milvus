@@ -170,10 +170,11 @@ class Config {
     CheckEngineConfigUseBlasThreshold(const std::string& value);
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
+
+#ifdef MILVUS_GPU_VERSION
+    /* gpu resource config */
     Status
     CheckEngineConfigGpuSearchThreshold(const std::string& value);
-
-    /* gpu resource config */
     Status
     CheckGpuResourceConfigEnable(const std::string& value);
     Status
@@ -184,6 +185,7 @@ class Config {
     CheckGpuResourceConfigSearchResources(const std::vector<std::string>& value);
     Status
     CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>& value);
+#endif
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -239,6 +241,8 @@ class Config {
     GetEngineConfigUseBlasThreshold(int64_t& value);
     Status
     GetEngineConfigOmpThreadNum(int64_t& value);
+
+#ifdef MILVUS_GPU_VERSION
     Status
     GetEngineConfigGpuSearchThreshold(int64_t& value);
 
@@ -253,6 +257,7 @@ class Config {
     GetGpuResourceConfigSearchResources(std::vector<int64_t>& value);
     Status
     GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value);
+#endif
 
  public:
     /* server config */
@@ -300,10 +305,11 @@ class Config {
     SetEngineConfigUseBlasThreshold(const std::string& value);
     Status
     SetEngineConfigOmpThreadNum(const std::string& value);
+
+#ifdef MILVUS_GPU_VERSION
+    /* gpu resource config */
     Status
     SetEngineConfigGpuSearchThreshold(const std::string& value);
-
-    /* gpu resource config */
     Status
     SetGpuResourceConfigEnable(const std::string& value);
     Status
@@ -314,6 +320,7 @@ class Config {
     SetGpuResourceConfigSearchResources(const std::string& value);
     Status
     SetGpuResourceConfigBuildIndexResources(const std::string& value);
+#endif
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
