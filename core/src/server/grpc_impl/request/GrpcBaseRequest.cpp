@@ -90,8 +90,8 @@ GrpcBaseRequest::SetStatus(ErrorCode error_code, const std::string& error_msg) {
 std::string
 GrpcBaseRequest::TableNotExistMsg(const std::string& table_name) {
     return "Table " + table_name +
-           " not exist. Use milvus.has_table to verify whether the table exists. You also can check if the table name "
-           "exists.";
+           " does not exist. Use milvus.has_table to verify whether the table exists. "
+           "You also can check whether the table name exists.";
 }
 
 Status
