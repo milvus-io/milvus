@@ -1,7 +1,7 @@
 server_config:
   address: 0.0.0.0                  # milvus server ip address (IPv4)
   port: 19530                       # port range: 1025 ~ 65534
-  deploy_mode: cluster_readonly     # deployment type: single, cluster_readonly, cluster_writable
+  deploy_mode: cluster_writable     # deployment type: single, cluster_readonly, cluster_writable
   time_zone: UTC+8
 
 db_config:
@@ -12,7 +12,7 @@ db_config:
                                     # Keep 'dialect://:@:/', and replace other texts with real values
                                     # Replace 'dialect' with 'mysql' or 'sqlite'
 
-  insert_buffer_size: 1             # GB, maximum insert buffer size allowed
+  insert_buffer_size: 2             # GB, maximum insert buffer size allowed
                                     # sum of insert_buffer_size and cpu_cache_capacity cannot exceed total memory
 
   preload_table:                    # preload data at startup, '*' means load all tables, empty value means no preload
@@ -25,9 +25,9 @@ metric_config:
     port: 8080                      # port prometheus uses to fetch metrics
 
 cache_config:
-  cpu_cache_capacity: 4            # GB, CPU memory used for cache
+  cpu_cache_capacity: 2            # GB, CPU memory used for cache
   cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
-  gpu_cache_capacity: 1             # GB, GPU memory used for cache
+  gpu_cache_capacity: 2             # GB, GPU memory used for cache
   gpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
   cache_insert_data: false          # whether to load inserted data into cache
 
