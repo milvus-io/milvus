@@ -106,6 +106,25 @@ class OptimizerInst {
                 server::Config& config = server::Config::GetInstance();
                 config.GetGpuResourceConfigEnable(enable_gpu);
                 if (enable_gpu) {
+                    std::vector<int64_t> build_gpus;
+                    std::vector<int64_t> search_gpus;
+                    int64_t gpu_search_threshold;
+                    config.GetGpuResourceConfigBuildIndexResources(build_gpus);
+                    config.GetGpuResourceConfigSearchResources(search_gpus);
+                    config.GetEngineConfigGpuSearchThreshold(gpu_search_threshold);
+                    std::string build_msg = "Build index gpu:";
+                    for (auto build_id : build_gpus) {
+                        build_msg.append(" gpu" + std::to_string(build_id));
+                    }
+                    SERVER_LOG_DEBUG << build_msg;
+
+                    std::string search_msg = "Search gpu:";
+                    for (auto search_id : search_gpus) {
+                        search_msg.append(" gpu" + std::to_string(search_id));
+                    }
+                    search_msg.append(". gpu_search_threshold:" + std::to_string(gpu_search_threshold));
+                    SERVER_LOG_DEBUG << search_msg;
+
                     pass_list.push_back(std::make_shared<BuildIndexPass>());
                     pass_list.push_back(std::make_shared<FaissFlatPass>());
                     pass_list.push_back(std::make_shared<FaissIVFFlatPass>());

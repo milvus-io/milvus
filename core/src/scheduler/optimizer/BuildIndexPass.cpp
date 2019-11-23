@@ -38,7 +38,7 @@ BuildIndexPass::Run(const TaskPtr& task) {
         return false;
 
     if (build_gpu_ids_.empty()) {
-        SERVER_LOG_WARNING << "BUildIndexPass cannot get build index gpu!";
+        SERVER_LOG_WARNING << "BuildIndexPass cannot get build index gpu!";
         return false;
     }
 
