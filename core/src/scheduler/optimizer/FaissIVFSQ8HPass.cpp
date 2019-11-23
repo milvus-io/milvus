@@ -29,12 +29,14 @@ namespace scheduler {
 
 void
 FaissIVFSQ8HPass::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int64_t>::max();
     }
     s = config.GetGpuResourceConfigSearchResources(gpus);
+#endif
 }
 
 bool
@@ -51,9 +53,12 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
     if (search_job->nq() < threshold_) {
+        SERVER_LOG_DEBUG << "FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!";
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         auto best_device_id = count_ % gpus.size();
+        SERVER_LOG_DEBUG << "FaissIVFSQ8HPass: nq > gpu_search_threshold, specify gpu" << best_device_id
+                         << " to search!";
         count_++;
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
     }
