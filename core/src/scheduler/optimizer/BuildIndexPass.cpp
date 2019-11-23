@@ -38,8 +38,10 @@ BuildIndexPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::BuildIndexTask)
         return false;
 
-    if (build_gpu_ids_.empty())
+    if (build_gpu_ids_.empty()) {
+        SERVER_LOG_WARNING << "BUildIndexPass cannot get build index gpu!";
         return false;
+    }
 
     ResourcePtr res_ptr;
     res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
