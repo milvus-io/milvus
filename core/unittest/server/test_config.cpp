@@ -404,10 +404,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(s.ok());
 
 #ifdef MILVUS_GPU_VERSION
-    /* gpu resource config */
     s = config.SetEngineConfigGpuSearchThreshold("-1");
     ASSERT_FALSE(s.ok());
 
+    /* gpu resource config */
     s = config.SetGpuResourceConfigEnable("ok");
     ASSERT_FALSE(s.ok());
 
