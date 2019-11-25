@@ -112,6 +112,6 @@ if (KNOWHERE_GPU_VERSION)
     install(TARGETS test_customized_index DESTINATION unittest)
 endif ()
 #add_subdirectory(faiss_ori)
-#add_subdirectory(faiss_benchmark)
+add_subdirectory(faiss_benchmark)
 add_subdirectory(test_nsg)
 
