@@ -31,6 +31,10 @@ GET_CURRENT_TIME(BUILD_TIME)
 string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
 message(STATUS "Build time = ${BUILD_TIME}")
 
+if (NOT DEFINED CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
+endif ()
+
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
     execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.* \\(.*\\),.*/\\1/' | sed 's=[a-zA-Z]*\/==g'"
             OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
