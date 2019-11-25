@@ -31,9 +31,21 @@ GET_CURRENT_TIME(BUILD_TIME)
 string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
 message(STATUS "Build time = ${BUILD_TIME}")
 
+if (NOT DEFINED CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
+endif ()
+
+set (GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
+
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
     execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.* \\(.*\\),.*/\\1/' | sed 's=[a-zA-Z]*\/==g'"
             OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    if(NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
+        execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    endif ()
+    if(NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
+        execute_process(COMMAND "git" symbolic-ref --short -q HEAD HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    endif ()
 ENDMACRO(GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
@@ -43,7 +55,7 @@ if (NOT GIT_BRANCH_NAME STREQUAL "")
 endif ()
 
 set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
-string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
+string(REGEX MATCH "${GIT_BRANCH_NAME_REGEX}" MILVUS_VERSION "${MILVUS_VERSION}")
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "Release")
