@@ -8,6 +8,8 @@
 ![Release](https://img.shields.io/badge/release-v0.5.1-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
 
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+
 [中文版](README_CN.md) 
 
 ## What is Milvus
