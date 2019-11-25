@@ -122,13 +122,6 @@ IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     return conf;
 }
 
-#define MatchSubQuantizer(c)                           \
-    if (!(conf->d % c)) {                              \
-        WRAPPER_LOG_DEBUG << "PQ m = " << conf->d / c; \
-        conf->m = conf->d / c;                         \
-        return conf;                                   \
-    }
-
 knowhere::Config
 IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFPQCfg>();
@@ -146,8 +139,11 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
      */
     static std::vector<int64_t> support_sub_quantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
     for (const auto& c : support_sub_quantizer) {
-        // compression radio = dim / c * 4
-        MatchSubQuantizer(c)
+        if (!(conf->d % c)) {
+            conf->m = conf->d / c;
+            WRAPPER_LOG_DEBUG << "PQ m = " << conf->d / c << ", compression radio = " << conf->d / c * 4;
+            return conf;
+        }
     }
 }
 
