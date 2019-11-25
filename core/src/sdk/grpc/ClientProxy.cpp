@@ -250,12 +250,17 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         Status status = client_ptr_->Search(result, search_param);
 
         // step 4: convert result array
-        topk_query_result.row_num = result.row_num();
-        topk_query_result.ids.resize(result.ids().size());
-        memcpy(topk_query_result.ids.data(), result.ids().data(), result.ids().size() * sizeof(int64_t));
-        topk_query_result.distances.resize(result.distances().size());
-        memcpy(topk_query_result.distances.data(), result.distances().data(),
-               result.distances().size() * sizeof(float));
+        topk_query_result.reserve(result.row_num());
+        int64_t nq = result.row_num();
+        int64_t topk = result.ids().size() / nq;
+        for (int64_t i = 0; i < result.row_num(); i++) {
+            milvus::QueryResult one_result;
+            one_result.ids.resize(topk);
+            one_result.distances.resize(topk);
+            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
+            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
+            topk_query_result.emplace_back(one_result);
+        }
 
         return status;
     } catch (std::exception& ex) {

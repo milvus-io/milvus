@@ -182,6 +182,7 @@ Config::ValidateConfig() {
         return s;
     }
 
+#ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold;
     s = GetEngineConfigGpuSearchThreshold(engine_gpu_search_threshold);
     if (!s.ok()) {
@@ -189,35 +190,36 @@ Config::ValidateConfig() {
     }
 
     /* gpu resource config */
-#ifdef MILVUS_GPU_VERSION
     bool gpu_resource_enable;
     s = GetGpuResourceConfigEnable(gpu_resource_enable);
     if (!s.ok()) {
         return s;
     }
 
-    int64_t resource_cache_capacity;
-    s = GetGpuResourceConfigCacheCapacity(resource_cache_capacity);
-    if (!s.ok()) {
-        return s;
-    }
+    if (gpu_resource_enable) {
+        int64_t resource_cache_capacity;
+        s = GetGpuResourceConfigCacheCapacity(resource_cache_capacity);
+        if (!s.ok()) {
+            return s;
+        }
 
-    float resource_cache_threshold;
-    s = GetGpuResourceConfigCacheThreshold(resource_cache_threshold);
-    if (!s.ok()) {
-        return s;
-    }
+        float resource_cache_threshold;
+        s = GetGpuResourceConfigCacheThreshold(resource_cache_threshold);
+        if (!s.ok()) {
+            return s;
+        }
 
-    std::vector<int64_t> search_resources;
-    s = GetGpuResourceConfigSearchResources(search_resources);
-    if (!s.ok()) {
-        return s;
-    }
+        std::vector<int64_t> search_resources;
+        s = GetGpuResourceConfigSearchResources(search_resources);
+        if (!s.ok()) {
+            return s;
+        }
 
-    std::vector<int64_t> index_build_resources;
-    s = GetGpuResourceConfigBuildIndexResources(index_build_resources);
-    if (!s.ok()) {
-        return s;
+        std::vector<int64_t> index_build_resources;
+        s = GetGpuResourceConfigBuildIndexResources(index_build_resources);
+        if (!s.ok()) {
+            return s;
+        }
     }
 #endif
 
@@ -323,13 +325,13 @@ Config::ResetDefaultConfig() {
         return s;
     }
 
+#ifdef MILVUS_GPU_VERSION
+    /* gpu resource config */
     s = SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT);
     if (!s.ok()) {
         return s;
     }
 
-    /* gpu resource config */
-#ifdef MILVUS_GPU_VERSION
     s = SetGpuResourceConfigEnable(CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
     if (!s.ok()) {
         return s;
@@ -630,6 +632,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     return Status::OK();
 }
 
+#ifdef MILVUS_GPU_VERSION
 Status
 Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
@@ -759,6 +762,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     return Status::OK();
 }
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
@@ -979,6 +983,7 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
     return Status::OK();
 }
 
+#ifdef MILVUS_GPU_VERSION
 Status
 Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     std::string str =
@@ -1095,6 +1100,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     }
     return Status::OK();
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 /* server config */
@@ -1282,6 +1288,8 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
     return Status::OK();
 }
 
+#ifdef MILVUS_GPU_VERSION
+/* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     Status s = CheckEngineConfigGpuSearchThreshold(value);
@@ -1292,7 +1300,6 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     return Status::OK();
 }
 
-/* gpu resource config */
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     Status s = CheckGpuResourceConfigEnable(value);
@@ -1346,6 +1353,7 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
     return Status::OK();
 }  // namespace server
+#endif
 
 }  // namespace server
 }  // namespace milvus
