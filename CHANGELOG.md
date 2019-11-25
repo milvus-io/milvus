@@ -24,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#486 - gpu no usage during index building
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
+- \#527 - faiss benchmark not compatible with faiss 1.6.0
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
