@@ -114,7 +114,7 @@ pipeline {
 
                         stage("Deploy to Development") {
                             environment {
-                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll(".", "-")
+                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-")
                                 HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
                             }
 
@@ -249,7 +249,7 @@ pipeline {
 
                         stage("Deploy to Development") {
                             environment {
-                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll(".", "-")
+                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-")
                                 HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
                             }
 
