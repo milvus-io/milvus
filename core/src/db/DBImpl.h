@@ -150,7 +150,7 @@ class DBImpl : public DB {
     BackgroundBuildIndex();
 
     Status
-    MemSerialize();
+    SyncMemData(std::set<std::string>& sync_table_ids);
 
     Status
     GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,
