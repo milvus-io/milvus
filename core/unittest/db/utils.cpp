@@ -132,8 +132,8 @@ BaseTest::SetUp() {
 void
 BaseTest::TearDown() {
     milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
-    milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
 #ifdef MILVUS_GPU_VERSION
+    milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
     knowhere::FaissGpuResourceMgr::GetInstance().Free();
 #endif
 }
