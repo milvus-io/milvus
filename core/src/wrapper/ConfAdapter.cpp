@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 // TODO(lxj): add conf checker
 
@@ -121,6 +122,13 @@ IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     return conf;
 }
 
+#define MatchSubQuantizer(c)                           \
+    if (!(conf->d % c)) {                              \
+        WRAPPER_LOG_DEBUG << "PQ m = " << conf->d / c; \
+        conf->m = conf->d / c;                         \
+        return conf;                                   \
+    }
+
 knowhere::Config
 IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFPQCfg>();
@@ -129,18 +137,18 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
     conf->nbits = 8;
-
-    if (!(conf->d % 4))
-        conf->m = conf->d / 4;  // compression radio = 16
-    else if (!(conf->d % 2))
-        conf->m = conf->d / 2;  // compression radio = 8
-    else if (!(conf->d % 3))
-        conf->m = conf->d / 3;  // compression radio = 12
-    else
-        conf->m = conf->d;  // same as SQ8, compression radio = 4
-
     MatchBase(conf);
-    return conf;
+
+    /*
+     * Faiss 1.6
+     * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supporte with
+     * no precomputed codes. Precomputed codes supports any number of dimensions, but will involve memory overheads.
+     */
+    static std::vector<int64_t> support_sub_quantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
+    for (const auto& c : support_sub_quantizer) {
+        // compression radio = dim / c * 4
+        MatchSubQuantizer(c)
+    }
 }
 
 knowhere::Config
