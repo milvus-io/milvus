@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#486 - gpu no usage during index building
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
+- \#513 - Unittest DELETE_BY_RANGE sometimes failed
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
