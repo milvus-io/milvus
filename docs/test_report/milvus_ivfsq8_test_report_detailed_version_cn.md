@@ -16,25 +16,25 @@
 
 ### 软硬件环境
 
-操作系统: CentOS Linux release 7.6.1810 (Core) 
+操作系统：CentOS Linux release 7.6.1810 (Core) 
 
-CPU: Intel(R) Xeon(R) CPU E5-2678 v3 @ 2.50GHz
+CPU：Intel(R) Xeon(R) CPU E5-2678 v3 @ 2.50GHz
 
-GPU0: GeForce GTX 1080
+GPU0：GeForce GTX 1080
 
-GPU1: GeForce GTX 1080
+GPU1：GeForce GTX 1080
 
-内存: 503GB
+内存：503GB
 
-Docker版本: 18.09
+Docker版本：18.09
 
-NVIDIA Driver版本: 430.34
+NVIDIA Driver版本：430.34
 
-Milvus版本: 0.5.3
+Milvus版本：0.5.3
 
-SDK接口: Python 3.6.8
+SDK接口：Python 3.6.8
 
-pymilvus版本: 0.2.5
+pymilvus版本：0.2.5
 
 
 
@@ -51,7 +51,7 @@ pymilvus版本: 0.2.5
 
 ### 测试指标
 
-- Query Elapsed Time: 数据库查询所有向量的时间（以秒计）。影响Query Elapsed Time的变量:
+- Query Elapsed Time：数据库查询所有向量的时间（以秒计）。影响Query Elapsed Time的变量：
 
   - nq (被查询向量的数量)
 
@@ -59,7 +59,7 @@ pymilvus版本: 0.2.5
   >
   > 被查询向量的数量nq将按照 [1, 5, 10,  200, 400, 600, 800, 1000]的数量分组。 
 
-- Recall: 实际返回的正确结果占总数之比 . 影响Recall的变量:
+- Recall：实际返回的正确结果占总数之比。影响Recall的变量：
 
   - nq (被查询向量的数量)
   - topk (单条查询中最相似的K个结果)
@@ -76,7 +76,7 @@ pymilvus版本: 0.2.5
 
 ### 测试环境
 
-数据集: sift1b-1,000,000,000向量, 128维
+数据集：sift1b-1,000,000,000向量，128维
 
 表格属性：
 
@@ -143,7 +143,7 @@ search_resources: cpu, gpu0
 | nq=800  |  23.24   |
 | nq=1000 |  27.41   |
 
-当nq为1000时，在GPU模式下查询一条128维向量需要耗时约27毫秒。 
+当nq为1000时，在CPU模式下查询一条128维向量需要耗时约27毫秒。 
 
 
 

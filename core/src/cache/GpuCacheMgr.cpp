@@ -25,6 +25,7 @@
 namespace milvus {
 namespace cache {
 
+#ifdef MILVUS_GPU_VERSION
 std::mutex GpuCacheMgr::mutex_;
 std::unordered_map<uint64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
@@ -76,6 +77,7 @@ GpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     return obj;
 }
+#endif
 
 }  // namespace cache
 }  // namespace milvus

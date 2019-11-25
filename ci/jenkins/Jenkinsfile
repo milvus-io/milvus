@@ -50,37 +50,37 @@ pipeline {
                     }
 
                     stages {
-                        stage("Run GPU Version Build") {
+                        stage("Run Build") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-build"
+                                    label "${env.BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
                                 }
                             }
 
                             stages {
-                                stage('GPU Version Build') {
+                                stage('Build') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                             }
                                         }
                                     }
                                 }
-                                stage('GPU Version Code Coverage') {
+                                stage('Code Coverage') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                             }
                                         }
                                     }
                                 }
-                                stage('Upload GPU Version Package') {
+                                stage('Upload Package') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                             }
@@ -90,17 +90,17 @@ pipeline {
                             }
                         }
 
-                        stage("Publish GPU Version docker images") {
+                        stage("Publish docker images") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-publish"
+                                    label "${env.BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                 }
                             }
 
                             stages {
-                                stage('Publish GPU Version') {
+                                stage('Publish') {
                                     steps {
                                         container('publish-images'){
                                             script {
@@ -112,17 +112,22 @@ pipeline {
                             }
                         }
 
-                        stage("Deploy GPU Version to Development") {
+                        stage("Deploy to Development") {
+                            environment {
+                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll(".", "-")
+                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
+                            }
+
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-dev-test"
+                                    label "${env.BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                 }
                             }
 
                             stages {
-                                stage("Deploy GPU Version to Dev") {
+                                stage("Deploy to Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -132,7 +137,7 @@ pipeline {
                                     }
                                 }
 
-                                stage("GPU Version Dev Test") {
+                                stage("Dev Test") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -147,7 +152,7 @@ pipeline {
                                     }
                                 }
 
-                                stage ("Cleanup GPU Version Dev") {
+                                stage ("Cleanup Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -180,37 +185,37 @@ pipeline {
                     }
 
                     stages {
-                        stage("Run CPU Version Build") {
+                        stage("Run Build") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-build"
+                                    label "${env.BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
                                 }
                             }
 
                             stages {
-                                stage('Build CPU Version') {
+                                stage('Build') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                             }
                                         }
                                     }
                                 }
-                                stage('CPU Version Code Coverage') {
+                                stage('Code Coverage') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                             }
                                         }
                                     }
                                 }
-                                stage('Upload CPU Version Package') {
+                                stage('Upload Package') {
                                     steps {
-                                        container('milvus-build-env') {
+                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                             }
@@ -220,17 +225,17 @@ pipeline {
                             }
                         }
 
-                        stage("Publish CPU Version docker images") {
+                        stage("Publish docker images") {
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-publish"
+                                    label "${env.BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                 }
                             }
 
                             stages {
-                                stage('Publish CPU Version') {
+                                stage('Publish') {
                                     steps {
                                         container('publish-images'){
                                             script {
@@ -242,17 +247,22 @@ pipeline {
                             }
                         }
 
-                        stage("Deploy CPU Version to Development") {
+                        stage("Deploy to Development") {
+                            environment {
+                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll(".", "-")
+                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
+                            }
+
                             agent {
                                 kubernetes {
-                                    label "${BINRARY_VERSION}-dev-test"
+                                    label "${env.BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
                                     yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                 }
                             }
 
                             stages {
-                                stage("Deploy CPU Version to Dev") {
+                                stage("Deploy to Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -262,7 +272,7 @@ pipeline {
                                     }
                                 }
 
-                                stage("CPU Version Dev Test") {
+                                stage("Dev Test") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
@@ -277,7 +287,7 @@ pipeline {
                                     }
                                 }
 
-                                stage ("Cleanup CPU Version Dev") {
+                                stage ("Cleanup Dev") {
                                     steps {
                                         container('milvus-test-env') {
                                             script {
