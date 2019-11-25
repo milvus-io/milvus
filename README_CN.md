@@ -8,6 +8,7 @@
 ![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
 [![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
 
+
 # 欢迎来到 Milvus
 
 ## Milvus 是什么
