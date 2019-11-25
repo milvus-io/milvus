@@ -6,6 +6,8 @@
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
 ![Release](https://img.shields.io/badge/release-v0.5.3-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+
 
 # 欢迎来到 Milvus
 
