@@ -7,6 +7,8 @@
 ![Release](https://img.shields.io/badge/release-v0.5.0-orange)
 ![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
 
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+
 - [Slack 频道](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Twitter](https://twitter.com/milvusio)
 - [Facebook](https://www.facebook.com/io.milvus.5)
