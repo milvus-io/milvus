@@ -738,8 +738,7 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
                 ids[i * k + j] = ids_[resset[i][j].id];
                 dist[i * k + j] = resset[i][j].distance;
             }
-        } 
-        else {
+        } else {
             for (unsigned int j = 0; j < resset[i].size(); ++j) {
                 ids[i * k + j] = ids_[resset[i][j].id];
                 dist[i * k + j] = resset[i][j].distance;
@@ -752,21 +751,21 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
     }
     rc.RecordSection("merge");
 
-//>> Debug: test single insert
-// int x_0 = resset[0].size();
-// for (int l = 0; l < resset[0].size(); ++l) {
-//    resset[0].pop_back();
-//}
-// resset.clear();
+    //>> Debug: test single insert
+    // int x_0 = resset[0].size();
+    // for (int l = 0; l < resset[0].size(); ++l) {
+    //    resset[0].pop_back();
+    //}
+    // resset.clear();
 
-// ProfilerStart("xx.prof");
-// std::vector<Neighbor> resset;
-// GetNeighbors(query, resset, nsg, &params);
-// for (int i = 0; i < k; ++i) {
-//    ids[i] = resset[i].id;
-// dist[i] = resset[i].distance;
-//}
-// ProfilerStop();
+    // ProfilerStart("xx.prof");
+    // std::vector<Neighbor> resset;
+    // GetNeighbors(query, resset, nsg, &params);
+    // for (int i = 0; i < k; ++i) {
+    //    ids[i] = resset[i].id;
+    // dist[i] = resset[i].distance;
+    //}
+    // ProfilerStop();
 }
 
 void
