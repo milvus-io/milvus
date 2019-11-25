@@ -1300,7 +1300,8 @@ class TestNameInvalid(object):
         assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_tag_name(self, connect, get_tag_name):
+    def test_add_vectors_with_invalid_tag_name(self, connect, get_table_name, get_tag_name):
+        table_name = get_table_name
         tag_name = get_tag_name
         vectors = gen_vectors(1, dim)
         status, result = connect.add_vectors(table_name, vectors, partition_tag=tag_name)
