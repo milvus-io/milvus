@@ -719,7 +719,7 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
     std::vector<std::vector<Neighbor>> resset(nq);
 
     params.search_length = k;
-    TimeRecorder rc("search");
+    TimeRecorder rc("NsgIndex::search", 1);
     // TODO(linxj): when to use openmp
     if (nq <= 4) {
         GetNeighbors(query, resset[0], nsg, &params);
@@ -730,7 +730,7 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
             GetNeighbors(single_query, resset[i], nsg, &params);
         }
     }
-    rc.RecordSection("cost");
+    rc.RecordSection("search");
     for (unsigned int i = 0; i < nq; ++i) {
         int64_t var = resset[i].size() - k;
         if (var >= 0) {
