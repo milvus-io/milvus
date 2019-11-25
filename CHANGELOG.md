@@ -21,6 +21,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#486 - gpu no usage during index building
+- \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
