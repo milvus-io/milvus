@@ -154,11 +154,10 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
         // todo(linxj): throw exception here.
         return nullptr;
     }
-
-    static int64_t compression_level = 1; // 1:low, 2:high
+    static int64_t compression_level = 1;  // 1:low, 2:high
     if (compression_level == 1) {
-        conf->m = resset[int(resset.size()/2)];
-        WRAPPER_LOG_DEBUG << "PQ m = " << conf->m << ", compression radio = " <<  conf->d / conf->m * 4;
+        conf->m = resset[int(resset.size() / 2)];
+        WRAPPER_LOG_DEBUG << "PQ m = " << conf->m << ", compression radio = " << conf->d / conf->m * 4;
     }
     return conf;
 }
