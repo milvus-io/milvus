@@ -718,45 +718,55 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
                  int64_t* ids, SearchParams& params) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
+    params.search_length = k;
     TimeRecorder rc("search");
-    if (nq == 1) {
+    // TODO(linxj): when to use openmp
+    if (nq <= 4) {
         GetNeighbors(query, resset[0], nsg, &params);
     } else {
-//#pragma omp parallel for schedule(dynamic, 50)
 #pragma omp parallel for
         for (unsigned int i = 0; i < nq; ++i) {
-            // TODO(linxj): when to use openmp
             auto single_query = query + i * dim;
             GetNeighbors(single_query, resset[i], nsg, &params);
         }
     }
-    rc.ElapseFromBegin("cost");
-
+    rc.RecordSection("cost");
     for (unsigned int i = 0; i < nq; ++i) {
-        for (unsigned int j = 0; j < k; ++j) {
-            // ids[i * k + j] = resset[i][j].id;
-
-            // Fix(linxj): bug, reset[i][j] out of range
-            ids[i * k + j] = ids_[resset[i][j].id];
-            dist[i * k + j] = resset[i][j].distance;
+        int64_t var = resset[i].size() - k;
+        if (var >= 0) {
+            for (unsigned int j = 0; j < k; ++j) {
+                ids[i * k + j] = ids_[resset[i][j].id];
+                dist[i * k + j] = resset[i][j].distance;
+            }
+        } 
+        else {
+            for (unsigned int j = 0; j < resset[i].size(); ++j) {
+                ids[i * k + j] = ids_[resset[i][j].id];
+                dist[i * k + j] = resset[i][j].distance;
+            }
+            for (unsigned int j = resset[i].size(); j < k; ++j) {
+                ids[i * k + j] = -1;
+                dist[i * k + j] = -1;
+            }
         }
     }
+    rc.RecordSection("merge");
 
-    //>> Debug: test single insert
-    // int x_0 = resset[0].size();
-    // for (int l = 0; l < resset[0].size(); ++l) {
-    //    resset[0].pop_back();
-    //}
-    // resset.clear();
+//>> Debug: test single insert
+// int x_0 = resset[0].size();
+// for (int l = 0; l < resset[0].size(); ++l) {
+//    resset[0].pop_back();
+//}
+// resset.clear();
 
-    // ProfilerStart("xx.prof");
-    // std::vector<Neighbor> resset;
-    // GetNeighbors(query, resset, nsg, &params);
-    // for (int i = 0; i < k; ++i) {
-    //    ids[i] = resset[i].id;
-    // dist[i] = resset[i].distance;
-    //}
-    // ProfilerStop();
+// ProfilerStart("xx.prof");
+// std::vector<Neighbor> resset;
+// GetNeighbors(query, resset, nsg, &params);
+// for (int i = 0; i < k; ++i) {
+//    ids[i] = resset[i].id;
+// dist[i] = resset[i].distance;
+//}
+// ProfilerStop();
 }
 
 void
