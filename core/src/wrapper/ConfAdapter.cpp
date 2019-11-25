@@ -137,14 +137,30 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supporte with
      * no precomputed codes. Precomputed codes supports any number of dimensions, but will involve memory overheads.
      */
-    static std::vector<int64_t> support_sub_quantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
-    for (const auto& c : support_sub_quantizer) {
-        if (!(conf->d % c)) {
-            conf->m = conf->d / c;
-            WRAPPER_LOG_DEBUG << "PQ m = " << conf->d / c << ", compression radio = " << conf->d / c * 4;
-            return conf;
+    static std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
+    static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
+    std::vector<int64_t> resset;
+    for (const auto& dimperquantizer : support_dim_per_subquantizer) {
+        if (!(conf->d % dimperquantizer)) {
+            auto subquantzier_num = conf->d / dimperquantizer;
+            auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
+            if (finder != support_subquantizer.end()) {
+                resset.push_back(subquantzier_num);
+            }
         }
     }
+
+    if (resset.empty()) {
+        // todo(linxj): throw exception here.
+        return nullptr;
+    }
+
+    static int64_t compression_level = 1; // 1:low, 2:high
+    if (compression_level == 1) {
+        conf->m = resset[int(resset.size()/2)];
+        WRAPPER_LOG_DEBUG << "PQ m = " << conf->m << ", compression radio = " <<  conf->d / conf->m * 4;
+    }
+    return conf;
 }
 
 knowhere::Config
