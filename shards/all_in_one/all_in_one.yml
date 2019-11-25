@@ -3,14 +3,15 @@ services:
     milvus_wr:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus:0.5.0-d102119-ede20b
+        image: milvusdb/milvus
         volumes:
             - /tmp/milvus/db:/opt/milvus/db
+            - ./wr_server.yml:/opt/milvus/conf/server_config.yaml
 
     milvus_ro:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus:0.5.0-d102119-ede20b
+        image: milvusdb/milvus
         volumes:
             - /tmp/milvus/db:/opt/milvus/db
             - ./ro_server.yml:/opt/milvus/conf/server_config.yaml

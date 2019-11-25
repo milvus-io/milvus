@@ -1,0 +1,10 @@
+datasets:
+  - sift-128-euclidean: 
+      index_file_sizes: [1024]
+      index_types: ['ivf_flat']
+      nlists: [16384]
+      search_param:
+        nprobes: [1, 256]
+        top_ks: [10]
+        nqs: [10000]
+hdf5_path: /test/milvus/ann_hdf5/
