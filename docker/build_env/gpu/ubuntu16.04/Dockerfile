@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget && \
     apt-key add /tmp/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
     sh -c 'echo deb https://apt.repos.intel.com/mkl all main > /etc/apt/sources.list.d/intel-mkl.list' && \
     apt-get update && apt-get install -y --no-install-recommends \
-    git flex bison gfortran lsb-core \
+    git flex bison gfortran lsb-core ccache \
     curl libtool automake libboost1.58-all-dev libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
     clang-format-6.0 clang-tidy-6.0 \
     lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281 && \
