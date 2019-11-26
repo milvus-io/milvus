@@ -17,17 +17,23 @@
 
 #pragma once
 
-#include "NSG.h"
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-
 namespace knowhere {
 namespace algo {
 
-extern void
-write_index(NsgIndex* index, MemoryIOWriter& writer);
+struct Distance {
+    virtual float
+    Compare(const float* a, const float* b, unsigned size) const = 0;
+};
 
-extern NsgIndex*
-read_index(MemoryIOReader& reader);
+struct DistanceL2 : public Distance {
+    float
+    Compare(const float* a, const float* b, unsigned size) const override;
+};
+
+struct DistanceIP : public Distance {
+    float
+    Compare(const float* a, const float* b, unsigned size) const override;
+};
 
 }  // namespace algo
 }  // namespace knowhere
