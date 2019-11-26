@@ -54,6 +54,8 @@ fi
 PACKAGE_FILE="ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
 REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
 
+ccache --show-stats
+
 echo "Updating ccache package file: ${PACKAGE_FILE}"
 tar zcf ./${PACKAGE_FILE} -C ${HOME}/.ccache .
 echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
