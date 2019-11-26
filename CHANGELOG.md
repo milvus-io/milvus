@@ -24,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#486 - gpu no usage during index building
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
+- \#523 - Erase file data from cache once the file is marked as deleted
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
 - \#532 - assigin value to `table_name` from confest shell

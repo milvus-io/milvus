@@ -20,6 +20,7 @@
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
+#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -154,7 +155,7 @@ SqliteMetaImpl::Initialize() {
     ConnectorPtr->open_forever();                          // thread safe option
     ConnectorPtr->pragma.journal_mode(journal_mode::WAL);  // WAL => write ahead log
 
-    CleanUp();
+    CleanUpShadowFiles();
 
     return Status::OK();
 }
@@ -1231,7 +1232,7 @@ SqliteMetaImpl::Size(uint64_t& result) {
 }
 
 Status
-SqliteMetaImpl::CleanUp() {
+SqliteMetaImpl::CleanUpShadowFiles() {
     try {
         server::MetricCollector metric;
 
@@ -1269,7 +1270,51 @@ SqliteMetaImpl::CleanUp() {
 }
 
 Status
-SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
+SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
+    auto now = utils::GetMicroSecTimeStamp();
+
+    // erase deleted/backup files from cache
+    try {
+        server::MetricCollector metric;
+
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+        std::vector<int> file_types = {
+            (int)TableFileSchema::TO_DELETE,
+            (int)TableFileSchema::BACKUP,
+        };
+
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
+                                                  &TableFileSchema::table_id_,
+                                                  &TableFileSchema::file_id_,
+                                                  &TableFileSchema::date_),
+                                          where(
+                                              in(&TableFileSchema::file_type_, file_types)
+                                              and
+                                              c(&TableFileSchema::updated_time_)
+                                              < now - seconds * US_PS));
+
+        for (auto& file : files) {
+            TableFileSchema table_file;
+            table_file.id_ = std::get<0>(file);
+            table_file.table_id_ = std::get<1>(file);
+            table_file.file_id_ = std::get<2>(file);
+            table_file.date_ = std::get<3>(file);
+
+            utils::GetTableFilePath(options_, table_file);
+            server::CommonUtil::EraseFromCache(table_file.location_);
+        }
+
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when clean cache", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 

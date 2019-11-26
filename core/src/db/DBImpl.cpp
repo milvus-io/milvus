@@ -112,7 +112,7 @@ DBImpl::Stop() {
     bg_timer_thread_.join();
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        meta_ptr_->CleanUp();
+        meta_ptr_->CleanUpShadowFiles();
     }
 
     // ENGINE_LOG_TRACE << "DB service stop";
@@ -777,11 +777,18 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 
     meta_ptr_->Archive();
 
-    int ttl = 5 * meta::M_SEC;  // default: file will be deleted after 5 minutes
-    if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-        ttl = meta::D_SEC;
+    {
+        uint64_t ttl = 10 * meta::SECOND;  // default: file data will be erase from cache after few seconds
+        meta_ptr_->CleanUpCacheWithTTL(ttl);
     }
-    meta_ptr_->CleanUpFilesWithTTL(ttl);
+
+    {
+        uint64_t ttl = 5 * meta::M_SEC;  // default: file will be deleted after few minutes
+        if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
+            ttl = meta::D_SEC;
+        }
+        meta_ptr_->CleanUpFilesWithTTL(ttl);
+    }
 
     // ENGINE_LOG_TRACE << " Background compaction thread exit";
 }
