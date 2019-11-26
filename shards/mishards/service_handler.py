@@ -49,7 +49,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         status = status_pb2.Status(error_code=status_pb2.SUCCESS,
                                    reason="Success")
         if not files_n_topk_results:
-            return status, []
+            return status, [], []
 
         merge_id_results = []
         merge_dis_results = []
@@ -58,8 +58,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         for files_collection in files_n_topk_results:
             if isinstance(files_collection, tuple):
                 status, _ = files_collection
-                return status, []
-            
+                return status, [], []
+
             row_num = files_collection.row_num
             ids = files_collection.ids
             diss = files_collection.distances  # distance collections
