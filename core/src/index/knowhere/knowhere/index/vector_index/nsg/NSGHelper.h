@@ -17,21 +17,13 @@
 
 #pragma once
 
-#include <x86intrin.h>
-#include <iostream>
-
-#include <faiss/AutoTune.h>
-
-#include "NSG.h"
-#include "knowhere/common/Config.h"
+#include "Neighbor.h"
 
 namespace knowhere {
 namespace algo {
 
 extern int
 InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn);
-extern float
-calculate(const float* a, const float* b, unsigned size);
 
 }  // namespace algo
 }  // namespace knowhere
