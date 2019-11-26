@@ -26,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
+- \#533 - NSG build failed with MetricType Inner Product
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
