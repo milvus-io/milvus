@@ -29,7 +29,8 @@ class DropPartitionRequest : public GrpcBaseRequest {
     Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
 
  protected:
-    explicit DropPartitionRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
+    explicit DropPartitionRequest(const std::shared_ptr<Context>& context,
+                                  const ::milvus::grpc::PartitionParam* partition_param);
 
     Status
     OnExecute() override;

@@ -25,7 +25,7 @@ std::mutex unique_job_mutex;
 uint64_t unique_job_id = 0;
 }  // namespace
 
-Job::Job(JobType type) : type_(type) {
+Job::Job(const std::shared_ptr<Context>& context, JobType type) : context_(context), type_(type) {
     std::lock_guard<std::mutex> lock(unique_job_mutex);
     id_ = unique_job_id++;
 }

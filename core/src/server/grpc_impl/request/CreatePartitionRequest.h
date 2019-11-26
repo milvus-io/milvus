@@ -29,7 +29,8 @@ class CreatePartitionRequest : public GrpcBaseRequest {
     Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
 
  protected:
-    explicit CreatePartitionRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
+    explicit CreatePartitionRequest(const std::shared_ptr<Context>& context,
+                                    const ::milvus::grpc::PartitionParam* partition_param);
 
     Status
     OnExecute() override;

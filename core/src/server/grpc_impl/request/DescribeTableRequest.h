@@ -31,7 +31,8 @@ class DescribeTableRequest : public GrpcBaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name, ::milvus::grpc::TableSchema* schema);
 
  protected:
-    DescribeTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, ::milvus::grpc::TableSchema* schema);
+    DescribeTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                         ::milvus::grpc::TableSchema* schema);
 
     Status
     OnExecute() override;

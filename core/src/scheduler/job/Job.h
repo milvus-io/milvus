@@ -29,6 +29,8 @@
 
 #include "scheduler/interface/interfaces.h"
 
+#include "server/context/Context.h"
+
 namespace milvus {
 namespace scheduler {
 
@@ -57,7 +59,9 @@ class Job : public interface::dumpable {
     Dump() const override;
 
  protected:
-    explicit Job(JobType type);
+    explicit Job(const std::shared_ptr<Context>& context, JobType type);
+
+    const std::shared_ptr<Context>& context_;
 
  private:
     JobId id_ = 0;

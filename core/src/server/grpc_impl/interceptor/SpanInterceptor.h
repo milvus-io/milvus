@@ -23,8 +23,7 @@ class SpanInterceptor : public grpc::experimental::Interceptor {
 
 class SpanInterceptorFactory : public grpc::experimental::ServerInterceptorFactoryInterface {
  public:
-    explicit SpanInterceptorFactory(GrpcInterceptorHookHandler* hook_handler)
-        : hook_handler_(hook_handler) {
+    explicit SpanInterceptorFactory(GrpcInterceptorHookHandler* hook_handler) : hook_handler_(hook_handler) {
     }
 
     grpc::experimental::Interceptor*

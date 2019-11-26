@@ -27,7 +27,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-HasTableRequest::HasTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table)
+HasTableRequest::HasTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                 bool& has_table)
     : GrpcBaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), has_table_(has_table) {
 }
 

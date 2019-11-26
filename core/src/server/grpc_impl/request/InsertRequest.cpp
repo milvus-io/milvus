@@ -29,12 +29,14 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids)
+InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::InsertParam* insert_param,
+                             ::milvus::grpc::VectorIds* record_ids)
     : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), insert_param_(insert_param), record_ids_(record_ids) {
 }
 
 BaseRequestPtr
-InsertRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids) {
+InsertRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::InsertParam* insert_param,
+                      ::milvus::grpc::VectorIds* record_ids) {
     if (insert_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;

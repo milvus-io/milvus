@@ -28,7 +28,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::IndexParam* index_param)
+CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<Context>& context,
+                                       const ::milvus::grpc::IndexParam* index_param)
     : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), index_param_(index_param) {
 }
 

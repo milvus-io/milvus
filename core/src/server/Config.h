@@ -101,7 +101,7 @@ static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 
-//TODO: request id
+// TODO: request id
 static const char* CONFIG_REQUEST_ID_DEFAULT = "request_id";
 
 class Config {

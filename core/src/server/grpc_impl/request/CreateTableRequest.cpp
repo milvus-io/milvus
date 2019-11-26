@@ -27,7 +27,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::TableSchema* schema)
+CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context,
+                                       const ::milvus::grpc::TableSchema* schema)
     : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), schema_(schema) {
 }
 

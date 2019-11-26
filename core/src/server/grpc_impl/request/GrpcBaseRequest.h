@@ -47,7 +47,8 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
 
 class GrpcBaseRequest {
  protected:
-    explicit GrpcBaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
+    explicit GrpcBaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group,
+                             bool async = false);
 
     virtual ~GrpcBaseRequest();
 

@@ -153,8 +153,8 @@ SearchRequest::OnExecute() {
             status = DBWrapper::DB()->Query(context_, table_name_, partition_tags, (size_t)top_k, record_count, nprobe,
                                             vec_f.data(), dates, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
-                                                    vec_f.data(), dates, result_ids, result_distances);
+            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_array_, (size_t)top_k, record_count,
+                                                    nprobe, vec_f.data(), dates, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING

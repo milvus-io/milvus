@@ -29,7 +29,8 @@ class DeleteByDateRequest : public GrpcBaseRequest {
     Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
 
  protected:
-    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
+    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context,
+                                 const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
 
     Status
     OnExecute() override;

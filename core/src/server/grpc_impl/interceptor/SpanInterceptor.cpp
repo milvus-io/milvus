@@ -6,8 +6,7 @@
 using namespace grpc;
 using namespace std;
 
-SpanInterceptor::SpanInterceptor(experimental::ServerRpcInfo* info,
-                                 GrpcInterceptorHookHandler* hook_handler)
+SpanInterceptor::SpanInterceptor(experimental::ServerRpcInfo* info, GrpcInterceptorHookHandler* hook_handler)
     : info_(info), hook_handler_(hook_handler) {
 }
 

@@ -34,7 +34,8 @@ ShowPartitionsRequest::ShowPartitionsRequest(const std::shared_ptr<Context>& con
 }
 
 BaseRequestPtr
-ShowPartitionsRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, ::milvus::grpc::PartitionList* partition_list) {
+ShowPartitionsRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                              ::milvus::grpc::PartitionList* partition_list) {
     return std::shared_ptr<GrpcBaseRequest>(new ShowPartitionsRequest(context, table_name, partition_list));
 }
 

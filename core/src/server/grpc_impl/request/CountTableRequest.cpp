@@ -27,7 +27,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-CountTableRequest::CountTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& row_count)
+CountTableRequest::CountTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                     int64_t& row_count)
     : GrpcBaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), row_count_(row_count) {
 }
 

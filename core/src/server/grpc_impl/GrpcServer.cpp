@@ -107,13 +107,13 @@ GrpcServer::StartService() {
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
-    //Add gRPC interceptor
+    // Add gRPC interceptor
     using InterceptorI = ::grpc::experimental::ServerInterceptorFactoryInterface;
     using InterceptorIPtr = std::unique_ptr<InterceptorI>;
     std::vector<InterceptorIPtr> creators;
 
-    creators.push_back(std::unique_ptr<::grpc::experimental::ServerInterceptorFactoryInterface>(
-        new SpanInterceptorFactory(&service)));
+    creators.push_back(
+        std::unique_ptr<::grpc::experimental::ServerInterceptorFactoryInterface>(new SpanInterceptorFactory(&service)));
 
     builder.experimental().SetInterceptorCreators(std::move(creators));
 
