@@ -29,7 +29,7 @@ namespace scheduler {
 // TODO(wxyu): rewrite
 class XSearchTask : public Task {
  public:
-    explicit XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label);
+    explicit XSearchTask(const std::shared_ptr<Context>& context, TableFileSchemaPtr file, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -49,6 +49,8 @@ class XSearchTask : public Task {
     //                   src_input_k, uint64_t nq, uint64_t topk, bool ascending);
 
  public:
+    const std::shared_ptr<Context> context_;
+
     TableFileSchemaPtr file_;
 
     size_t index_id_ = 0;
