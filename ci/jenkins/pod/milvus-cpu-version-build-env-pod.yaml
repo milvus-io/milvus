@@ -14,6 +14,8 @@ spec:
       valueFrom:
         fieldRef:
           fieldPath: status.podIP
+    - name: BUILD_ENV_IMAGE_ID
+      value: "23476391bec80c64f10d44a6370c73c71f011a6b95114b10ff82a60e771e11c7"
     command:
     - cat
     tty: true

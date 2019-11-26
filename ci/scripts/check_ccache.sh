@@ -2,7 +2,7 @@
 
 OS_NAME="linux"
 CODE_NAME=$(lsb_release -sc)
-OS_MD5=$(lsb_release -s | md5sum | cut -d " " -f 1)
+BUILD_ENV_DOCKER_IMAGE_ID="${BUILD_ENV_IMAGE_ID}"
 BRANCH_NAMES=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's=[a-zA-Z]*\/==g' | awk -F", " '{$1=""; print $0}')
 ARTIFACTORY_URL=""
 CCACHE_DIRECTORY="${HOME}/.ccache"
@@ -43,13 +43,13 @@ fi
 
 for BRANCH_NAME in ${BRANCH_NAMES}
 do
-    echo "fetching ${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${OS_MD5}.tar.gz"
-    wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${OS_MD5}.tar.gz"
+    echo "fetching ${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
     if [[ $? == 0 ]];then
-        wget "${ARTIFACTORY_URL}/${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${OS_MD5}.tar.gz" && \
+        wget "${ARTIFACTORY_URL}/${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
         mkdir -p ${CCACHE_DIRECTORY} && \
-        tar zxf ccache-${OS_NAME}-${CODE_NAME}-${OS_MD5}.tar.gz -C ${CCACHE_DIRECTORY} && \
-        rm ccache-${OS_NAME}-${CODE_NAME}-${OS_MD5}.tar.gz
+        tar zxf ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz -C ${CCACHE_DIRECTORY} && \
+        rm ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz
         if [[ $? == 0 ]];then
             echo "found cache"
             exit 0
