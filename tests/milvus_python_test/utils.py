@@ -114,12 +114,12 @@ def gen_invalid_uris():
 
             # invalid ip
             "tcp:// :%s" % port,
-            "tcp://123.0.0.1:%s" % port,
+            # "tcp://123.0.0.1:%s" % port,
             "tcp://127.0.0:%s" % port,
-            "tcp://255.0.0.0:%s" % port,
-            "tcp://255.255.0.0:%s" % port,
-            "tcp://255.255.255.0:%s" % port,
-            "tcp://255.255.255.255:%s" % port,
+            # "tcp://255.0.0.0:%s" % port,
+            # "tcp://255.255.0.0:%s" % port,
+            # "tcp://255.255.255.0:%s" % port,
+            # "tcp://255.255.255.255:%s" % port,
             "tcp://\n:%s" % port,
 
     ]
