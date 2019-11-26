@@ -2,7 +2,7 @@
 
 OS_NAME="linux"
 CODE_NAME=$(lsb_release -sc)
-OS_MD5=$(lsb_release -s | md5sum | cut -d " " -f 1)
+BUILD_ENV_DOCKER_IMAGE_ID="${BUILD_ENV_IMAGE_ID}"
 BRANCH_NAME=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g')
 ARTIFACTORY_URL=""
 ARTIFACTORY_USER=""
@@ -51,7 +51,7 @@ if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
     exit 1
 fi
 
-PACKAGE_FILE="ccache-${OS_NAME}-${CODE_NAME}-${OS_MD5}.tar.gz"
+PACKAGE_FILE="ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
 REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
 
 echo "Updating ccache package file: ${PACKAGE_FILE}"
