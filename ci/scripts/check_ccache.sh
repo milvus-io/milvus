@@ -57,5 +57,20 @@ do
     fi
 done
 
+if [[ -n "${CHANGE_BRANCH}" && "${BRANCH_NAME}" =~ "PR-" ]];then
+    echo "fetching ${CHANGE_BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    wget -q --method HEAD "${ARTIFACTORY_URL}/${CHANGE_BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    if [[ $? == 0 ]];then
+        wget "${ARTIFACTORY_URL}/${CHANGE_BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
+        mkdir -p ${CCACHE_DIRECTORY} && \
+        tar zxf ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz -C ${CCACHE_DIRECTORY} && \
+        rm ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz
+        if [[ $? == 0 ]];then
+            echo "found cache"
+            exit 0
+        fi
+    fi
+fi
+
 echo "could not download cache" && exit 1
 
