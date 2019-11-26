@@ -18,6 +18,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#412 - Message returned is confused when partition created with null partition name
 - \#416 - Drop the same partition success repeatally
 - \#440 - Query API in customization still uses old version
+- \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
+- \#458 - Index data is not compatible between 0.5 and 0.6
+- \#465 - Server hang caused by searching with nsg index
+- \#486 - gpu no usage during index building
+- \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
+- \#513 - Unittest DELETE_BY_RANGE sometimes failed
+- \#527 - faiss benchmark not compatible with faiss 1.6.0
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -26,6 +33,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#226 - Experimental shards middleware for Milvus
 - \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
+- \#488 - Add log in scheduler/optimizer
+- \#502 - C++ SDK support IVFPQ and SPTAG
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
@@ -41,6 +50,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
 - \#433 - C++ SDK query result is not easy to use
+- \#449 - Add ShowPartitions example for C++ SDK
+- \#470 - Small raw files should not be build index
 
 ## Task
 

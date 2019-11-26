@@ -175,6 +175,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     cpu_mgr->PrintInfo();
 }
 
+#ifdef MILVUS_GPU_VERSION
 TEST(CacheTest, GPU_CACHE_TEST) {
     auto gpu_mgr = milvus::cache::GpuCacheMgr::GetInstance(0);
 
@@ -202,6 +203,7 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
 }
+#endif
 
 TEST(CacheTest, INVALID_TEST) {
     {

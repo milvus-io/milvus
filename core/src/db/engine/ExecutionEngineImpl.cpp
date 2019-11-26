@@ -151,6 +151,7 @@ ExecutionEngineImpl::HybridLoad() const {
         return;
     }
 
+#ifdef MILVUS_GPU_VERSION
     const std::string key = location_ + ".quantizer";
 
     server::Config& config = server::Config::GetInstance();
@@ -205,6 +206,7 @@ ExecutionEngineImpl::HybridLoad() const {
         auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
         cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
     }
+#endif
 }
 
 void
@@ -342,6 +344,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     }
 #endif
 
+#ifdef MILVUS_GPU_VERSION
     auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
@@ -364,16 +367,19 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     if (!already_in_cache) {
         GpuCache(device_id);
     }
+#endif
 
     return Status::OK();
 }
 
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+#ifdef MILVUS_GPU_VERSION
     gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
+#endif
     return Status::OK();
 }
 
@@ -584,15 +590,17 @@ ExecutionEngineImpl::Cache() {
 
 Status
 ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
+#ifdef MILVUS_GPU_VERSION
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
     milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
-
+#endif
     return Status::OK();
 }
 
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
@@ -604,6 +612,9 @@ ExecutionEngineImpl::Init() {
 
     std::string msg = "Invalid gpu_num";
     return Status(SERVER_INVALID_ARGUMENT, msg);
+#else
+    return Status::OK();
+#endif
 }
 
 }  // namespace engine

@@ -297,7 +297,7 @@ class TestTable:
         '''
         table_name = gen_unique_str("test_table")
         status = connect.delete_table(table_name)
-        assert not status.code==0
+        assert not status.OK()
 
     def test_delete_table_repeatedly(self, connect):
         '''

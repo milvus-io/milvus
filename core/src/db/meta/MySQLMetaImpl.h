@@ -108,7 +108,7 @@ class MySQLMetaImpl : public Meta {
 
     Status
     FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                std::vector<std::string>& file_ids) override;
+                TableFilesSchema& table_files) override;
 
     Status
     Archive() override;

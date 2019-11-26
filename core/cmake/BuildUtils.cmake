@@ -74,7 +74,7 @@ function(ExternalProject_Use_Cache project_name package_file install_path)
             ${CMAKE_COMMAND} -E echo
             "Extracting ${package_file} to ${install_path}"
         COMMAND
-            ${CMAKE_COMMAND} -E tar xzvf ${package_file} ${install_path}
+            ${CMAKE_COMMAND} -E tar xzf ${package_file} ${install_path}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
 
