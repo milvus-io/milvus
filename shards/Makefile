@@ -13,6 +13,12 @@ clean_deploy:
 	cd all_in_one && docker-compose -f all_in_one.yml down && cd -
 probe_deploy:
 	docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c "python all_in_one/probe_test.py"
+deploy_m: clean_deploy_m
+	cd all_in_one_with_mysql && docker-compose -f all_in_one.yml up -d && cd -
+clean_deploy_m:
+	cd all_in_one_with_mysql && docker-compose -f all_in_one.yml down && cd -
+probe_deploy_m:
+	docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c "python all_in_one_with_mysql/probe_test.py"
 cluster:
 	cd kubernetes_demo;./start.sh baseup;sleep 10;./start.sh appup;cd -
 clean_cluster:
