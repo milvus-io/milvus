@@ -26,7 +26,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
+- \#532 - assigin value to `table_name` from confest shell
 - \#533 - NSG build failed with MetricType Inner Product
+- \#543 - client raise exception in shards when search results is empty
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -35,6 +37,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#226 - Experimental shards middleware for Milvus
 - \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
+- \#420 - Update shards merge part to match v0.5.3
 - \#488 - Add log in scheduler/optimizer
 - \#502 - C++ SDK support IVFPQ and SPTAG
 
