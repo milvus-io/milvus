@@ -26,10 +26,10 @@ namespace grpc {
 class InsertRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
 
  protected:
-    InsertRequest(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
+    InsertRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
 
     Status
     OnExecute() override;

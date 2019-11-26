@@ -28,10 +28,10 @@ namespace grpc {
 class CountTableRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, int64_t& row_count);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& row_count);
 
  protected:
-    CountTableRequest(const std::string& table_name, int64_t& row_count);
+    CountTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& row_count);
 
     Status
     OnExecute() override;

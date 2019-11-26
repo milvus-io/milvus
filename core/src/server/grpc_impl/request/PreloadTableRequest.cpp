@@ -27,13 +27,13 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-PreloadTableRequest::PreloadTableRequest(const std::string& table_name)
-    : GrpcBaseRequest(DQL_REQUEST_GROUP), table_name_(table_name) {
+PreloadTableRequest::PreloadTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
+    : GrpcBaseRequest(context, DQL_REQUEST_GROUP), table_name_(table_name) {
 }
 
 BaseRequestPtr
-PreloadTableRequest::Create(const std::string& table_name) {
-    return std::shared_ptr<GrpcBaseRequest>(new PreloadTableRequest(table_name));
+PreloadTableRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name) {
+    return std::shared_ptr<GrpcBaseRequest>(new PreloadTableRequest(context, table_name));
 }
 
 Status

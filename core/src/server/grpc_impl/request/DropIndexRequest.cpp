@@ -27,13 +27,13 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-DropIndexRequest::DropIndexRequest(const std::string& table_name)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+DropIndexRequest::DropIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
+    : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name) {
 }
 
 BaseRequestPtr
-DropIndexRequest::Create(const std::string& table_name) {
-    return std::shared_ptr<GrpcBaseRequest>(new DropIndexRequest(table_name));
+DropIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name) {
+    return std::shared_ptr<GrpcBaseRequest>(new DropIndexRequest(context, table_name));
 }
 
 Status

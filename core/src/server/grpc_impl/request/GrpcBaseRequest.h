@@ -23,6 +23,8 @@
 #include "grpc/gen-status/status.pb.h"
 #include "utils/Status.h"
 
+#include "server/context/Context.h"
+
 #include <condition_variable>
 //#include <gperftools/profiler.h>
 #include <memory>
@@ -45,7 +47,7 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
 
 class GrpcBaseRequest {
  protected:
-    explicit GrpcBaseRequest(const std::string& request_group, bool async = false);
+    explicit GrpcBaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
 
     virtual ~GrpcBaseRequest();
 
@@ -85,6 +87,8 @@ class GrpcBaseRequest {
     TableNotExistMsg(const std::string& table_name);
 
  protected:
+    const std::shared_ptr<Context>& context_;
+
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 

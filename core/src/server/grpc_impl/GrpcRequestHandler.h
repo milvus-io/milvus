@@ -31,8 +31,6 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-// TODO
-// set tag (error, error_code)
 #define SET_TRACING_TAG(GRPC_STATUS, SERVER_CONTEXT)                        \
     if ((GRPC_STATUS).error_code() != ::milvus::grpc::ErrorCode::SUCCESS) { \
         GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true); \

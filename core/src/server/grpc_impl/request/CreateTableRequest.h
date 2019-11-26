@@ -26,10 +26,10 @@ namespace grpc {
 class CreateTableRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::TableSchema* schema);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::TableSchema* schema);
 
  protected:
-    explicit CreateTableRequest(const ::milvus::grpc::TableSchema* schema);
+    explicit CreateTableRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::TableSchema* schema);
 
     Status
     OnExecute() override;

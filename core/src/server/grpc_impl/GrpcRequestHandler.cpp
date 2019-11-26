@@ -128,7 +128,7 @@ GrpcRequestHandler::SetContext(::grpc::ServerContext*& server_context, const std
 ::grpc::Status
 GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
                                 ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = CreateTableRequest::Create(request);
+    BaseRequestPtr request_ptr = CreateTableRequest::Create(context_map_[context], request);
     GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
@@ -138,7 +138,7 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::
 GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                              ::milvus::grpc::BoolReply* response) {
     bool has_table = false;
-    BaseRequestPtr request_ptr = HasTableRequest::Create(request->table_name(), has_table);
+    BaseRequestPtr request_ptr = HasTableRequest::Create(context_map_[context], request->table_name(), has_table);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     response->set_bool_reply(has_table);
@@ -149,7 +149,7 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grp
 ::grpc::Status
 GrpcRequestHandler::DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                               ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = DropTableRequest::Create(request->table_name());
+    BaseRequestPtr request_ptr = DropTableRequest::Create(context_map_[context], request->table_name());
     GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
@@ -158,7 +158,7 @@ GrpcRequestHandler::DropTable(::grpc::ServerContext* context, const ::milvus::gr
 ::grpc::Status
 GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                 ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = CreateIndexRequest::Create(request);
+    BaseRequestPtr request_ptr = CreateIndexRequest::Create(context_map_[context], request);
     GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
@@ -167,7 +167,7 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
 ::grpc::Status
 GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
                            ::milvus::grpc::VectorIds* response) {
-    BaseRequestPtr request_ptr = InsertRequest::Create(request, response);
+    BaseRequestPtr request_ptr = InsertRequest::Create(context_map_[context], request, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_RESPONSE(response, grpc_status, context);
@@ -194,7 +194,7 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
     }
     ::milvus::grpc::SearchInFilesParam* request_mutable = const_cast<::milvus::grpc::SearchInFilesParam*>(request);
     BaseRequestPtr request_ptr =
-        SearchRequest::Create(GetContext(context), request_mutable->mutable_search_param(), file_id_array, response);
+        SearchRequest::Create(context_map_[context], request_mutable->mutable_search_param(), file_id_array, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_RESPONSE(response, grpc_status, context);
@@ -204,7 +204,7 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 ::grpc::Status
 GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                   ::milvus::grpc::TableSchema* response) {
-    BaseRequestPtr request_ptr = DescribeTableRequest::Create(request->table_name(), response);
+    BaseRequestPtr request_ptr = DescribeTableRequest::Create(context_map_[context], request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_RESPONSE(response, grpc_status, context);
@@ -215,7 +215,7 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::CountTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                ::milvus::grpc::TableRowCount* response) {
     int64_t row_count = 0;
-    BaseRequestPtr request_ptr = CountTableRequest::Create(request->table_name(), row_count);
+    BaseRequestPtr request_ptr = CountTableRequest::Create(context_map_[context], request->table_name(), row_count);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     response->set_table_row_count(row_count);
@@ -226,7 +226,7 @@ GrpcRequestHandler::CountTable(::grpc::ServerContext* context, const ::milvus::g
 ::grpc::Status
 GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                                ::milvus::grpc::TableNameList* response) {
-    BaseRequestPtr request_ptr = ShowTablesRequest::Create(response);
+    BaseRequestPtr request_ptr = ShowTablesRequest::Create(context_map_[context], response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_RESPONSE(response, grpc_status, context);
@@ -237,7 +237,7 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::g
 GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                         ::milvus::grpc::StringReply* response) {
     std::string result;
-    BaseRequestPtr request_ptr = CmdRequest::Create(request->cmd(), result);
+    BaseRequestPtr request_ptr = CmdRequest::Create(context_map_[context], request->cmd(), result);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     response->set_string_reply(result);
@@ -248,7 +248,7 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 ::grpc::Status
 GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
                                  ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = DeleteByDateRequest::Create(request);
+    BaseRequestPtr request_ptr = DeleteByDateRequest::Create(context_map_[context], request);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_TRACING_TAG(*response, context);
@@ -258,7 +258,7 @@ GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus:
 ::grpc::Status
 GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                  ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = PreloadTableRequest::Create(request->table_name());
+    BaseRequestPtr request_ptr = PreloadTableRequest::Create(context_map_[context], request->table_name());
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_TRACING_TAG(*response, context);
@@ -268,7 +268,7 @@ GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus:
 ::grpc::Status
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                   ::milvus::grpc::IndexParam* response) {
-    BaseRequestPtr request_ptr = DescribeIndexRequest::Create(request->table_name(), response);
+    BaseRequestPtr request_ptr = DescribeIndexRequest::Create(context_map_[context], request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_RESPONSE(response, grpc_status, context);
@@ -278,7 +278,7 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
 ::grpc::Status
 GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                               ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = DropIndexRequest::Create(request->table_name());
+    BaseRequestPtr request_ptr = DropIndexRequest::Create(context_map_[context], request->table_name());
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_TRACING_TAG(*response, context);
@@ -288,7 +288,7 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
 ::grpc::Status
 GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                     ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(request);
+    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context_map_[context], request);
     GrpcRequestScheduler::ExecRequest(request_ptr, response);
     return ::grpc::Status::OK;
 }
@@ -296,7 +296,7 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
 ::grpc::Status
 GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                    ::milvus::grpc::PartitionList* response) {
-    BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(request->table_name(), response);
+    BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(context_map_[context], request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_RESPONSE(response, grpc_status, context);
@@ -306,7 +306,7 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
 ::grpc::Status
 GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                   ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = DropPartitionRequest::Create(request);
+    BaseRequestPtr request_ptr = DropPartitionRequest::Create(context_map_[context], request);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
     SET_TRACING_TAG(*response, context);

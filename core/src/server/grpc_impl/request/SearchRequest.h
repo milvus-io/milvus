@@ -42,7 +42,6 @@ class SearchRequest : public GrpcBaseRequest {
     OnExecute() override;
 
  private:
-    const std::shared_ptr<Context>& context_;
     const ::milvus::grpc::SearchParam* search_param_;
     std::vector<std::string> file_id_array_;
     ::milvus::grpc::TopKQueryResult* topk_result_;

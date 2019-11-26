@@ -28,10 +28,10 @@ namespace grpc {
 class CmdRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& cmd, std::string& result);
+    Create(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result);
 
  protected:
-    CmdRequest(const std::string& cmd, std::string& result);
+    CmdRequest(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result);
 
     Status
     OnExecute() override;

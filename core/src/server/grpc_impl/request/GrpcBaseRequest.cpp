@@ -59,8 +59,8 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
     return Status::OK();
 }
 
-GrpcBaseRequest::GrpcBaseRequest(const std::string& request_group, bool async)
-    : request_group_(request_group), async_(async), done_(false) {
+GrpcBaseRequest::GrpcBaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async)
+    : context_(context), request_group_(request_group), async_(async), done_(false) {
 }
 
 GrpcBaseRequest::~GrpcBaseRequest() {

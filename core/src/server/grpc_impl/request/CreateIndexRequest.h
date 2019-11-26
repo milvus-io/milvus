@@ -26,10 +26,10 @@ namespace grpc {
 class CreateIndexRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::IndexParam* index_param);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::IndexParam* index_param);
 
  protected:
-    explicit CreateIndexRequest(const ::milvus::grpc::IndexParam* index_param);
+    explicit CreateIndexRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::IndexParam* index_param);
 
     Status
     OnExecute() override;

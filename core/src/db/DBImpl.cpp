@@ -402,7 +402,7 @@ DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_
               uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
               ResultDistances& result_distances) {
 
-    auto post_query_ctx = context->Child("Post query");
+    auto query_ctx = context->Child("Query");
 
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -438,18 +438,21 @@ DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
-    post_query_ctx->GetTraceContext()->GetSpan()->Finish();
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return status;
 }
 
 Status
-DBImpl::QueryByFileID(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+DBImpl::QueryByFileID(const std::shared_ptr<Context>& context, const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
                       uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
                       ResultDistances& result_distances) {
+
+    auto query_ctx = context->Child("Query by file id");
+
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -476,8 +479,11 @@ DBImpl::QueryByFileID(const std::string& table_id, const std::vector<std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
+
     return status;
 }
 
@@ -494,8 +500,11 @@ DBImpl::Size(uint64_t& result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
+DBImpl::QueryAsync(const std::shared_ptr<Context>& context, const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
                    uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+
+    auto query_async_ctx = context->Child("Query Async");
+
     server::CollectQueryMetrics metrics(nq);
 
     TimeRecorder rc("");
@@ -519,6 +528,8 @@ DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& fi
     result_ids = job->GetResultIds();
     result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
+
+    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }

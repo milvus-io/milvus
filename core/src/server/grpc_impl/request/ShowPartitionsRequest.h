@@ -28,10 +28,10 @@ namespace grpc {
 class ShowPartitionsRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
 
  protected:
-    ShowPartitionsRequest(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
+    ShowPartitionsRequest(const std::shared_ptr<Context>& context, const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
 
     Status
     OnExecute() override;

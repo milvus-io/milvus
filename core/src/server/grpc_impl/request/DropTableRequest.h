@@ -28,10 +28,10 @@ namespace grpc {
 class DropTableRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name);
 
  protected:
-    explicit DropTableRequest(const std::string& table_name);
+    explicit DropTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
     OnExecute() override;

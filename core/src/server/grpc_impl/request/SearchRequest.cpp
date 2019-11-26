@@ -27,10 +27,10 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_vector_infos,
+SearchRequest::SearchRequest(const std::shared_ptr<Context>& context,
+                             const ::milvus::grpc::SearchParam* search_vector_infos,
                              const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response)
-    : GrpcBaseRequest(DQL_REQUEST_GROUP),
-      context_(context),
+    : GrpcBaseRequest(context, DQL_REQUEST_GROUP),
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
       topk_result_(response) {
@@ -49,7 +49,6 @@ SearchRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::g
 Status
 SearchRequest::OnExecute() {
     try {
-
         auto pre_query_ctx = context_->Child("Pre query");
 
         int64_t top_k = search_param_->topk();
@@ -154,7 +153,7 @@ SearchRequest::OnExecute() {
             status = DBWrapper::DB()->Query(context_, table_name_, partition_tags, (size_t)top_k, record_count, nprobe,
                                             vec_f.data(), dates, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->QueryByFileID(table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
+            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_array_, (size_t)top_k, record_count, nprobe,
                                                     vec_f.data(), dates, result_ids, result_distances);
         }
 
@@ -171,6 +170,8 @@ SearchRequest::OnExecute() {
             return Status::OK();  // empty table
         }
 
+        auto post_query_ctx = context_->Child("Constructing result");
+
         // step 7: construct result array
         topk_result_->set_row_num(record_count);
         topk_result_->mutable_ids()->Resize(static_cast<int>(result_ids.size()), -1);
@@ -178,6 +179,8 @@ SearchRequest::OnExecute() {
         topk_result_->mutable_distances()->Resize(static_cast<int>(result_distances.size()), 0.0);
         memcpy(topk_result_->mutable_distances()->mutable_data(), result_distances.data(),
                result_distances.size() * sizeof(float));
+
+        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

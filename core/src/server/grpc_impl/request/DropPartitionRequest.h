@@ -26,10 +26,10 @@ namespace grpc {
 class DropPartitionRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::PartitionParam* partition_param);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
 
  protected:
-    explicit DropPartitionRequest(const ::milvus::grpc::PartitionParam* partition_param);
+    explicit DropPartitionRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
 
     Status
     OnExecute() override;

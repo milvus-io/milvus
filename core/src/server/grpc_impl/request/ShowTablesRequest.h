@@ -26,10 +26,10 @@ namespace grpc {
 class ShowTablesRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(::milvus::grpc::TableNameList* table_name_list);
+    Create(const std::shared_ptr<Context>& context, ::milvus::grpc::TableNameList* table_name_list);
 
  protected:
-    explicit ShowTablesRequest(::milvus::grpc::TableNameList* table_name_list);
+    explicit ShowTablesRequest(const std::shared_ptr<Context>& context, ::milvus::grpc::TableNameList* table_name_list);
 
     Status
     OnExecute() override;
