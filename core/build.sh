@@ -56,7 +56,7 @@ while getopts "p:d:t:f:ulrcgjhxzme" arg; do
     USE_JFROG_CACHE="ON"
     ;;
   x)
-    CUSTOMIZATION="OFF" # force use ori faiss
+    CUSTOMIZATION="ON"
     ;;
   g)
     GPU_VERSION="ON"
