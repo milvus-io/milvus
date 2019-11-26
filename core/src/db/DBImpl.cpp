@@ -511,7 +511,7 @@ DBImpl::QueryAsync(const std::shared_ptr<Context>& context, const std::string& t
 
     // step 1: get files to search
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(k, nq, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nq, nprobe, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);

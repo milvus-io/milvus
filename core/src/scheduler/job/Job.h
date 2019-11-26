@@ -59,9 +59,7 @@ class Job : public interface::dumpable {
     Dump() const override;
 
  protected:
-    explicit Job(const std::shared_ptr<Context>& context, JobType type);
-
-    const std::shared_ptr<Context>& context_;
+    explicit Job(JobType type);
 
  private:
     JobId id_ = 0;
