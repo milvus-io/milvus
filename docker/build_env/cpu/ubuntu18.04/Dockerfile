@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certifi
     sh -c 'echo deb https://apt.repos.intel.com/mkl all main > /etc/apt/sources.list.d/intel-mkl.list' && \
     wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
-    g++ git gfortran lsb-core \
+    g++ git gfortran lsb-core ccache \
     libboost-serialization-dev libboost-filesystem-dev libboost-system-dev libboost-regex-dev \
     curl libtool automake libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
     clang-format-6.0 clang-tidy-6.0 \
