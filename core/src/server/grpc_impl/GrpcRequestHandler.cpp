@@ -106,7 +106,7 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
     // TODO
     //    auto span = std::move(span_map_[server_rpc_info->server_context()]);
     //    span->Finish();
-//    context_map_[server_rpc_info->server_context()]->GetTraceContext()->GetSpan()->Finish();
+    context_map_[server_rpc_info->server_context()]->GetTraceContext()->GetSpan()->Finish();
     auto search = context_map_.find(server_rpc_info->server_context());
     if (search != context_map_.end()) {
         context_map_.erase(search);
