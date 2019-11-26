@@ -117,10 +117,13 @@ class MySQLMetaImpl : public Meta {
     Size(uint64_t& result) override;
 
     Status
-    CleanUp() override;
+    CleanUpShadowFiles() override;
 
     Status
-    CleanUpFilesWithTTL(uint16_t seconds) override;
+    CleanUpCacheWithTTL(uint64_t seconds) override;
+
+    Status
+    CleanUpFilesWithTTL(uint64_t seconds) override;
 
     Status
     DropAll() override;
