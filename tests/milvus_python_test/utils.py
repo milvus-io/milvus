@@ -58,7 +58,7 @@ def gen_invalid_ips():
             # "255.255.0.0",
             # "255.255.255.0",
             # "255.255.255.255",
-            # "127.0.0",
+            "127.0.0",
             # "123.0.0.2",
             "12-s",
             " ",
@@ -69,7 +69,7 @@ def gen_invalid_ips():
             "\n",
             "\t",
             "中文",
-            "a".join("a" for i in range(256))
+            "a".join("a" for _ in range(256))
     ]
     return ips
 
@@ -263,9 +263,7 @@ def gen_invalid_index_types():
 
 def gen_invalid_nlists():
     nlists = [
-            0,
             -1,
-            1000000000000001,
             # None,
             [1,2,3],
             (1,2),
