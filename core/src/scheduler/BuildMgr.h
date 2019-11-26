@@ -55,6 +55,11 @@ class BuildMgr {
         }
     }
 
+    int64_t
+    NumOfAvailable() {
+        return available_;
+    }
+
  private:
     std::int64_t available_;
     std::mutex mutex_;
