@@ -24,8 +24,11 @@ def resp_handler(err, error_code):
     if resp_class == milvus_pb2.VectorIds:
         return resp_class(status=status, vector_id_array=[])
 
-    if resp_class == milvus_pb2.TopKQueryResultList:
-        return resp_class(status=status, topk_query_result=[])
+    if resp_class == milvus_pb2.TopKQueryResult:
+        return resp_class(status=status,
+                          row_num=0,
+                          ids=[],
+                          distances=[])
 
     if resp_class == milvus_pb2.TableRowCount:
         return resp_class(status=status, table_row_count=-1)
