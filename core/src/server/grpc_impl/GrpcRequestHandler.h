@@ -35,8 +35,8 @@ namespace grpc {
 // set tag (error, error_code)
 #define SET_TRACING_TAG(GRPC_STATUS, SERVER_CONTEXT)                        \
     if ((GRPC_STATUS).error_code() != ::milvus::grpc::ErrorCode::SUCCESS) { \
-        GetContext((SERVER_CONTEXT))->GetTraceContext()->getSpan()->SetTag("error", true); \
-        GetContext((SERVER_CONTEXT))->GetTraceContext()->getSpan()->SetTag("error_message", (GRPC_STATUS).reason()); \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true); \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (GRPC_STATUS).reason()); \
     }
 
 #define SET_RESPONSE(RESPONSE, GRPC_STATUS, SERVER_CONTEXT)                   \
@@ -56,9 +56,9 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
 
-    const std::shared_ptr<Context>& GetContext(::grpc::ServerContext* server_context);
+    const std::shared_ptr<Context>& GetContext(::grpc::ServerContext*& server_context);
 
-    void SetContext(::grpc::ServerContext* server_context, const std::shared_ptr<Context>& context);
+    void SetContext(::grpc::ServerContext*& server_context, const std::shared_ptr<Context>& context);
 
     // *
     // @brief This method is used to create table

@@ -14,7 +14,7 @@ class TraceContext {
     Follower(const std::string& operation_name) const;
 
     const std::unique_ptr<opentracing::Span>&
-    getSpan() const;
+    GetSpan() const;
 
  private:
     //    std::unique_ptr<opentracing::SpanContext> span_context_;

@@ -16,6 +16,6 @@ TraceContext::Follower(const std::string& operation_name) const {
 }
 
 const std::unique_ptr<opentracing::Span>&
-TraceContext::getSpan() const {
+TraceContext::GetSpan() const {
     return span_;
 }

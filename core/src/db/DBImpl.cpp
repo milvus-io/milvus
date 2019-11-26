@@ -441,7 +441,7 @@ DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_
     status = QueryAsync(table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
-    post_query_ctx->GetTraceContext()->getSpan()->Finish();
+    post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return status;
 }

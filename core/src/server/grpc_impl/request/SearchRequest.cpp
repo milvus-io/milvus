@@ -138,7 +138,7 @@ SearchRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
 
-        pre_query_ctx->GetTraceContext()->getSpan()->Finish();
+        pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
         if (file_id_array_.empty()) {
             std::vector<std::string> partition_tags;

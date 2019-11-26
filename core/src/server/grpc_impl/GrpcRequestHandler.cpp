@@ -106,7 +106,7 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
     // TODO
     //    auto span = std::move(span_map_[server_rpc_info->server_context()]);
     //    span->Finish();
-    GetContext(server_rpc_info->server_context())->GetTraceContext()->getSpan()->Finish();
+    context_map_[server_rpc_info->server_context()]->GetTraceContext()->GetSpan()->Finish();
     auto search = context_map_.find(server_rpc_info->server_context());
     if (search != context_map_.end()) {
         context_map_.erase(search);
@@ -114,12 +114,12 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
 }
 
 const std::shared_ptr<Context>&
-GrpcRequestHandler::GetContext(::grpc::ServerContext* server_context) {
+GrpcRequestHandler::GetContext(::grpc::ServerContext*& server_context) {
     return context_map_[server_context];
 }
 
 void
-GrpcRequestHandler::SetContext(::grpc::ServerContext* server_context, const std::shared_ptr<Context>& context) {
+GrpcRequestHandler::SetContext(::grpc::ServerContext*& server_context, const std::shared_ptr<Context>& context) {
     context_map_[server_context] = context;
 }
 
