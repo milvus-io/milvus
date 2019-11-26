@@ -20,7 +20,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Query API in customization still uses old version
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
+- \#465 - Server hang caused by searching with nsg index
 - \#486 - gpu no usage during index building
+- \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
+- \#513 - Unittest DELETE_BY_RANGE sometimes failed
+- \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
 
 ## Feature
@@ -31,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
 - \#488 - Add log in scheduler/optimizer
+- \#502 - C++ SDK support IVFPQ and SPTAG
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version

@@ -120,7 +120,13 @@ TEST(UtilTest, STRINGFUNCTIONS_TEST) {
     milvus::server::StringHelpFunctions::SplitStringByDelimeter(str, ",", result);
     ASSERT_EQ(result.size(), 3UL);
 
+    std::string merge_str;
+    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(result, ",", merge_str);
+    ASSERT_EQ(merge_str, "a,b,c");
     result.clear();
+    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(result, ",", merge_str);
+    ASSERT_TRUE(merge_str.empty());
+
     auto status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
@@ -211,6 +217,11 @@ TEST(UtilTest, STATUS_TEST) {
     str = status.ToString();
     ASSERT_FALSE(str.empty());
 
+    status = milvus::Status(milvus::DB_INVALID_PATH, "mistake");
+    ASSERT_EQ(status.code(), milvus::DB_INVALID_PATH);
+    str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
     status = milvus::Status(milvus::DB_META_TRANSACTION_FAILED, "mistake");
     ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
     str = status.ToString();
@@ -260,6 +271,10 @@ TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {
 
     table_name = std::string(10000, 'a');
     status = milvus::server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
+
+    table_name = "";
+    status = milvus::server::ValidationUtil::ValidatePartitionName(table_name);
     ASSERT_EQ(status.code(), milvus::SERVER_INVALID_TABLE_NAME);
 }
 

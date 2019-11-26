@@ -6,6 +6,8 @@
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
 ![Release](https://img.shields.io/badge/release-v0.5.3-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+
 
 # 欢迎来到 Milvus
 
@@ -15,7 +17,7 @@ Milvus 是一款开源的、针对海量特征向量的相似性搜索引擎。�
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/zh-CN/aboutmilvus/overview/)。
 
-Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及 C++ 的 API 接口。
+Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及[C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) 的 API 接口。
 
 通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.3/) 获取最新版本的功能和更新。
 

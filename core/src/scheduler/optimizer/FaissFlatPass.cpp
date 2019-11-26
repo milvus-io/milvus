@@ -29,6 +29,7 @@ namespace scheduler {
 
 void
 FaissFlatPass::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -38,6 +39,7 @@ FaissFlatPass::Init() {
     if (!s.ok()) {
         throw;
     }
+#endif
 }
 
 bool

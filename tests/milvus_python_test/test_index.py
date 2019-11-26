@@ -1208,9 +1208,9 @@ class TestCreateIndexParamsInvalid(object):
         nlist = index_params["nlist"]
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(table, vectors)
-        # if not isinstance(index_type, int) or not isinstance(nlist, int):
-        with pytest.raises(Exception) as e:
+        if (not index_type) or (not nlist) or (not isinstance(index_type, IndexType)) or (not isinstance(nlist, int)):
+            with pytest.raises(Exception) as e:
+                status = connect.create_index(table, index_params)
+        else:
             status = connect.create_index(table, index_params)
-        # else:
-        #     status = connect.create_index(table, index_params)
-        #     assert not status.OK()
+            assert not status.OK()
