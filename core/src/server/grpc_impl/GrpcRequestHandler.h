@@ -23,7 +23,7 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 
-#include <context/Context.h>
+#include <server/context/Context.h>
 #include "opentracing/tracer.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 

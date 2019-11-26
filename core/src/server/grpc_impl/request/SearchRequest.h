@@ -19,7 +19,7 @@
 
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 
-#include "context/Context.h"
+#include "server/context/Context.h"
 
 #include <string>
 #include <vector>

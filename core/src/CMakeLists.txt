@@ -78,6 +78,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
 set(grpc_server_files
         ${grpc_request_files}
         ${grpc_impl_files}
@@ -88,7 +89,6 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -206,7 +206,7 @@ endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
-add_library(tracing STATIC ${tracing_files})
+add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
 set(tracing_lib
         opentracing
         opentracing_mocktracer
@@ -229,9 +229,9 @@ add_executable(milvus_server
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${server_context_files}
         ${utils_files}
         ${tracing_files}
-        ${context_files}
         )
 
 target_link_libraries(milvus_server

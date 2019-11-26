@@ -1,13 +1,13 @@
 #include "tracing/TracerUtil.h"
 
-#include "tracing/nlohmann/json.hpp"
+#include "thirdparty/nlohmann/json.hpp"
 
 #include <opentracing/dynamic_load.h>
 #include <opentracing/tracer.h>
 #include <fstream>
 #include <iostream>
 
-std::string TracerUtil::tracer_context_header_name_ = "";
+std::string TracerUtil::tracer_context_header_name_;
 
 void
 TracerUtil::InitGlobal(const std::string& config_path) {
@@ -49,6 +49,7 @@ TracerUtil::LoadConfig(const std::string& config_path) {
 
     opentracing::Tracer::InitGlobal(tracer);
 }
+
 const std::string&
 TracerUtil::GetTraceContextHeaderName() {
     return tracer_context_header_name_;

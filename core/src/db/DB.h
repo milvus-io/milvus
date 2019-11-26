@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-#include "context/Context.h"
+#include "server/context/Context.h"
 
 namespace milvus {
 namespace engine {
