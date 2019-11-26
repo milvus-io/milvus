@@ -57,7 +57,7 @@ REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
 echo "Updating ccache package file: ${PACKAGE_FILE}"
 tar zcf ./${PACKAGE_FILE} -C ${HOME}/.ccache .
 echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
-curl -u${ARTIFACTORY_USER}:${ARTIFACTORY_PASSWORD} -T ${PACKAGE_FILE} ${REMOTE_PACKAGE_PATH}
+curl -u${ARTIFACTORY_USER}:${ARTIFACTORY_PASSWORD} -T ${PACKAGE_FILE} ${REMOTE_PACKAGE_PATH}/${PACKAGE_FILE}
 if [[ $? == 0 ]];then
     echo "Uploading ccache package file success !"
     exit 0
