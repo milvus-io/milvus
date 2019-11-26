@@ -218,10 +218,9 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
     return Status::OK();
 }
 
+#ifdef MILVUS_GPU_VERSION
 Status
 ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
-#ifdef MILVUS_GPU_VERSION
-
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
@@ -232,10 +231,9 @@ ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     }
 
     memory = deviceProp.totalGlobalMem;
-#endif
-
     return Status::OK();
 }
+#endif
 
 Status
 ValidationUtil::ValidateIpAddress(const std::string& ip_address) {

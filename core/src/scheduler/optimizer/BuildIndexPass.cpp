@@ -25,11 +25,13 @@ namespace scheduler {
 
 void
 BuildIndexPass::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids_);
     if (!s.ok()) {
         throw;
     }
+#endif
 }
 
 bool
