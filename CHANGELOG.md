@@ -27,6 +27,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#523 - Erase file data from cache once the file is marked as deleted
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
+- \#533 - NSG build failed with MetricType Inner Product
 
 ## Feature
 - \#12 - Pure CPU version for Milvus

@@ -24,6 +24,8 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+
+#include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
 #include "unittest/utils.h"
@@ -95,20 +97,19 @@ TEST_F(NSGInterfaceTest, basic_test) {
         index_->Add(base_dataset, knowhere::Config());
         index_->Seal();
     });
+}
 
-    {
-        // std::cout << "k = 1" << std::endl;
-        // new_index->Search(GenQuery(1), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(10), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(100), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(1000), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(10000), Config::object{{"k", 1}});
+TEST_F(NSGInterfaceTest, comparetest) {
+    knowhere::algo::DistanceL2 distanceL2;
+    knowhere::algo::DistanceIP distanceIP;
 
-        // std::cout << "k = 5" << std::endl;
-        // new_index->Search(GenQuery(1), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(20), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(100), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(300), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(500), Config::object{{"k", 5}});
+    knowhere::TimeRecorder tc("Compare");
+    for (int i = 0; i < 1000; ++i) {
+        distanceL2.Compare(xb.data(), xq.data(), 256);
     }
+    tc.RecordSection("L2");
+    for (int i = 0; i < 1000; ++i) {
+        distanceIP.Compare(xb.data(), xq.data(), 256);
+    }
+    tc.RecordSection("IP");
 }
