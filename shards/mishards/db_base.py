@@ -28,7 +28,12 @@ class DB:
         if url.get_backend_name() == 'sqlite':
             self.engine = create_engine(url)
         else:
-            self.engine = create_engine(uri, pool_size, pool_recycle, pool_timeout, pool_pre_ping, echo, max_overflow)
+            self.engine = create_engine(uri, pool_size=pool_size,
+                                        pool_recycle=pool_size,
+                                        pool_timeout=pool_timeout,
+                                        pool_pre_ping=pool_pre_ping,
+                                        echo=echo,
+                                        max_overflow=max_overflow)
         self.uri = uri
         self.url = url
 
