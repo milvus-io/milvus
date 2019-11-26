@@ -3,7 +3,7 @@
 OS_NAME="linux"
 CODE_NAME=$(lsb_release -sc)
 OS_MD5=$(lsb_release -s | md5sum | cut -d " " -f 1)
-BRANCH_NAME=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's/.* \(.*\),.*/\1/' | sed 's=[a-zA-Z]*\/==g')
+BRANCH_NAME=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g')
 ARTIFACTORY_URL=""
 ARTIFACTORY_USER=""
 ARTIFACTORY_PASSWORD=""
