@@ -27,6 +27,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
 - \#532 - assigin value to `table_name` from confest shell
+- \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
 
 ## Feature

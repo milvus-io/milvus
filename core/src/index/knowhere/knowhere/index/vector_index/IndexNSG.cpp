@@ -115,10 +115,6 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
         build_cfg->CheckValid();  // throw exception
     }
 
-    if (build_cfg->metric_type != METRICTYPE::L2) {
-        KNOWHERE_THROW_MSG("NSG not support this kind of metric type");
-    }
-
     // TODO(linxj): dev IndexFactory, support more IndexType
 #ifdef MILVUS_GPU_VERSION
     auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
