@@ -32,7 +32,7 @@ probe:
 	docker run --rm --name probe --net=host milvusdb/mishards /bin/bash -c "python all_in_one/probe_test.py --port=${PORT} --host=${HOST}"
 clean_coverage:
 	rm -rf cov_html
-clean: clean_coverage clean_deploy clean_cluster
+clean: clean_coverage clean_deploy clean_cluster clean_deploy_m
 style:
 	pycodestyle --config=.
 coverage:
