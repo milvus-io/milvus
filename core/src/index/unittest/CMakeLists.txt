@@ -82,17 +82,17 @@ if (NOT TARGET test_idmap)
 endif ()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
-#<KDT-TEST>
-set(kdt_srcs
+#<SPTAG-TEST>
+set(sptag_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/adapter/SptagAdapter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/preprocessor/Normalize.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexKDT.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexSPTAG.cpp
         )
-if (NOT TARGET test_kdt)
-    add_executable(test_kdt test_kdt.cpp ${kdt_srcs} ${util_srcs})
+if (NOT TARGET test_sptag)
+    add_executable(test_sptag test_sptag.cpp ${sptag_srcs} ${util_srcs})
 endif ()
-target_link_libraries(test_kdt
+target_link_libraries(test_sptag
         SPTAGLibStatic
         ${depend_libs} ${unittest_libs} ${basic_libs})
 
@@ -106,7 +106,7 @@ endif ()
 
 install(TARGETS test_ivf DESTINATION unittest)
 install(TARGETS test_idmap DESTINATION unittest)
-install(TARGETS test_kdt DESTINATION unittest)
+install(TARGETS test_sptag DESTINATION unittest)
 if (KNOWHERE_GPU_VERSION)
     install(TARGETS test_gpuresource DESTINATION unittest)
     install(TARGETS test_customized_index DESTINATION unittest)

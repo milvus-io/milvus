@@ -305,24 +305,30 @@ TEST_F(DBTest, SEARCH_TEST) {
     // test FAISS_IVFSQ8H optimizer
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+    std::vector<std::string> partition_tag;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_dists;
 
     {
-        milvus::engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
+        result_ids.clear();
+        result_dists.clear();
+        stat = db_->Query(TABLE_NAME, partition_tag, k, nq, 10, xq.data(), result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
     {
-        milvus::engine::QueryResults large_nq_results;
-        stat = db_->Query(TABLE_NAME, k, 200, 10, xq.data(), large_nq_results);
+        result_ids.clear();
+        result_dists.clear();
+        stat = db_->Query(TABLE_NAME, partition_tag, k, 200, 10, xq.data(), result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
-        milvus::engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
+        result_ids.clear();
+        result_dists.clear();
+        stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -461,6 +467,13 @@ TEST_F(DBTest, PARTITION_TEST) {
         stat = db_->CreatePartition(table_name, partition_name, partition_tag);
         ASSERT_TRUE(stat.ok());
 
+        // not allow nested partition
+        stat = db_->CreatePartition(partition_name, "dumy", "dummy");
+        ASSERT_FALSE(stat.ok());
+
+        // not allow duplicated partition
+        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        ASSERT_FALSE(stat.ok());
 
         std::vector<float> xb;
         BuildVectors(INSERT_BATCH, xb);

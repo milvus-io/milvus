@@ -22,6 +22,7 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace server {
@@ -38,23 +39,40 @@ DropPartitionRequest::Create(const ::milvus::grpc::PartitionParam* partition_par
 
 Status
 DropPartitionRequest::OnExecute() {
-    if (!partition_param_->partition_name().empty()) {
-        auto status = ValidationUtil::ValidateTableName(partition_param_->partition_name());
-        if (!status.ok()) {
-            return status;
-        }
-        return DBWrapper::DB()->DropPartition(partition_param_->partition_name());
-    } else {
-        auto status = ValidationUtil::ValidateTableName(partition_param_->table_name());
+    std::string table_name = partition_param_->table_name();
+    std::string partition_name = partition_param_->partition_name();
+    std::string partition_tag = partition_param_->tag();
+    if (!partition_name.empty()) {
+        auto status = ValidationUtil::ValidateTableName(partition_name);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidatePartitionTags({partition_param_->tag()});
+        // check partition existence
+        engine::meta::TableSchema table_info;
+        table_info.table_id_ = partition_name;
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST,
+                              "Table " + table_name + "'s partition " + partition_name + " not found");
+            } else {
+                return status;
+            }
+        }
+
+        return DBWrapper::DB()->DropPartition(partition_name);
+    } else {
+        auto status = ValidationUtil::ValidateTableName(table_name);
         if (!status.ok()) {
             return status;
         }
-        return DBWrapper::DB()->DropPartitionByTag(partition_param_->table_name(), partition_param_->tag());
+
+        status = ValidationUtil::ValidatePartitionTags({partition_tag});
+        if (!status.ok()) {
+            return status;
+        }
+        return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
     }
 }
 

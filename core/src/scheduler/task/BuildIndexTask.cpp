@@ -85,7 +85,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
         size_t file_size = to_index_engine_->PhysicalSize();
 
-        std::string info = "Load file id:" + std::to_string(file_->id_) +
+        std::string info = "Load file id:" + std::to_string(file_->id_) + " " + type_str +
                            " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                            " bytes from location: " + file_->location_ + " totally cost";
         double span = rc.ElapseFromBegin(info);
@@ -146,8 +146,7 @@ XBuildIndexTask::Execute() {
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-            std::cout << "ERROR: failed to build index, index file is too large or gpu memory is not enough"
-                      << std::endl;
+            ENGINE_LOG_ERROR << "Failed to build index, index file is too large or gpu memory is not enough";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
@@ -179,8 +178,8 @@ XBuildIndexTask::Execute() {
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-            std::cout << "ERROR: failed to persist index file: " << table_file.location_
-                      << ", possible out of disk space" << std::endl;
+            ENGINE_LOG_ERROR << "Failed to persist index file: " << table_file.location_
+                             << ", possible out of disk space";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);

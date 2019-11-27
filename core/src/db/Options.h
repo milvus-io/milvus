@@ -33,7 +33,7 @@ static const char* ARCHIVE_CONF_DISK = "disk";
 static const char* ARCHIVE_CONF_DAYS = "days";
 
 struct ArchiveConf {
-    using CriteriaT = std::map<std::string, int>;
+    using CriteriaT = std::map<std::string, int64_t>;
 
     explicit ArchiveConf(const std::string& type, const std::string& criterias = std::string());
 

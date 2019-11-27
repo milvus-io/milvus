@@ -99,6 +99,12 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "NSG";
         case milvus::IndexType::IVFSQ8H:
             return "IVFSQ8H";
+        case milvus::IndexType::IVFPQ:
+            return "IVFPQ";
+        case milvus::IndexType::SPTAGKDT:
+            return "SPTAGKDT";
+        case milvus::IndexType::SPTAGBKT:
+            return "SPTAGBKT";
         default:
             return "Unknown index type";
     }
@@ -157,18 +163,20 @@ void
 Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
                          const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
-    size_t nq = topk_query_result.row_num;
-    size_t topk = topk_query_result.ids.size() / nq;
-    std::cout << "Returned result count: " << nq * topk << std::endl;
+    std::cout << "Returned result count: " << topk_query_result.size() << std::endl;
 
-    int32_t index = 0;
-    for (size_t i = 0; i < nq; i++) {
-        auto search_id = search_record_array[index].first;
-        index++;
-        std::cout << "No." << index << " vector " << search_id << " top " << topk << " search result:" << std::endl;
+    if (topk_query_result.size() != search_record_array.size()) {
+        std::cout << "ERROR: Returned result count dones equal nq" << std::endl;
+        return;
+    }
+
+    for (size_t i = 0; i < topk_query_result.size(); i++) {
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        size_t topk = one_result.ids.size();
+        auto search_id = search_record_array[i].first;
+        std::cout << "No." << i << " vector " << search_id << " top " << topk << " search result:" << std::endl;
         for (size_t j = 0; j < topk; j++) {
-            size_t idx = i * nq + j;
-            std::cout << "\t" << topk_query_result.ids[idx] << "\t" << topk_query_result.distances[idx] << std::endl;
+            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
         }
     }
     BLOCK_SPLITER
@@ -178,12 +186,11 @@ void
 Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
                          const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
-    size_t nq = topk_query_result.row_num;
-    size_t result_k = topk_query_result.ids.size() / nq;
-    int64_t index = 0;
+    size_t nq = topk_query_result.size();
     for (size_t i = 0; i < nq; i++) {
-        auto result_id = topk_query_result.ids[i * result_k];
-        auto search_id = search_record_array[index++].first;
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        auto search_id = search_record_array[i].first;
+        int64_t result_id = one_result.ids[0];
         if (result_id != search_id) {
             std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
         } else {
@@ -198,9 +205,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
                 const std::vector<std::string>& partiton_tags, int64_t top_k, int64_t nprobe,
                 const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
                 milvus::TopKQueryResult& topk_query_result) {
-    topk_query_result.distances.clear();
-    topk_query_result.ids.clear();
-    topk_query_result.row_num = 0;
+    topk_query_result.clear();
 
     std::vector<milvus::Range> query_range_array;
     milvus::Range rg;

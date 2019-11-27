@@ -108,7 +108,7 @@ class SqliteMetaImpl : public Meta {
 
     Status
     FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                std::vector<std::string>& file_ids) override;
+                TableFilesSchema& table_files) override;
 
     Status
     Size(uint64_t& result) override;
@@ -117,10 +117,13 @@ class SqliteMetaImpl : public Meta {
     Archive() override;
 
     Status
-    CleanUp() override;
+    CleanUpShadowFiles() override;
 
     Status
-    CleanUpFilesWithTTL(uint16_t seconds) override;
+    CleanUpCacheWithTTL(uint64_t seconds) override;
+
+    Status
+    CleanUpFilesWithTTL(uint64_t seconds) override;
 
     Status
     DropAll() override;

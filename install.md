@@ -3,6 +3,9 @@
 ## Software requirements
 
 - Ubuntu 18.04 or higher
+
+  If your operating system is not Ubuntu 18.04 or higher, we recommend you to pull a [docker image of Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) as your compilation environment.
+  
 - CMake 3.12 or higher
 
 ##### For GPU version, you will also need:

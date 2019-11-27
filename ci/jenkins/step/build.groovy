@@ -1,11 +1,13 @@
 timeout(time: 60, unit: 'MINUTES') {
     dir ("ci/scripts") {
         withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+            def checkResult = sh(script: "./check_ccache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache", returnStatus: true)
             if ("${env.BINRARY_VERSION}" == "gpu") {
-            	sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' && export JFROG_USER_NAME='${USERNAME}' && export JFROG_PASSWORD='${PASSWORD}' && ./build.sh -t ${params.BUILD_TYPE} -o /opt/milvus -l -g -j -u -c"
-        	} else {
-        		sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' && export JFROG_USER_NAME='${USERNAME}' && export JFROG_PASSWORD='${PASSWORD}' && ./build.sh -t ${params.BUILD_TYPE} -o /opt/milvus -l -m -j -u -c"
-        	}
+                sh ". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -o /opt/milvus -l -g -u -c"
+            } else {
+                sh ". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -o /opt/milvus -l -m -u -c"
+            }
+            sh "./update_ccache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache -u ${USERNAME} -p ${PASSWORD}"
         }
     }
 }
