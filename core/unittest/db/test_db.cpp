@@ -666,8 +666,8 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     ASSERT_NE(size, 0UL);
 
     std::vector<milvus::engine::meta::DateT> dates;
-    std::string start_value = CurrentTmDate();
-    std::string end_value = CurrentTmDate(1);
+    std::string start_value = CurrentTmDate(-5);
+    std::string end_value = CurrentTmDate(5);
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
 
     stat = db_->DropTable(TABLE_NAME, dates);
