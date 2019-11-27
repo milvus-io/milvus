@@ -69,7 +69,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 - [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [FAQ](https://www.milvus.io/docs/en/faq/operational_faq/)
+- [Milvus FAQ](https://www.milvus.io/docs/en/faq/operational_faq/)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
