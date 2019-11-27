@@ -31,6 +31,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#532 - assigin value to `table_name` from confest shell
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
+- \#497 - CPU-version search performance decreased 
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
