@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
 - \#486 - gpu no usage during index building
+- \#497 - CPU-version search performance decreased
 - \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
@@ -31,7 +32,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#532 - assigin value to `table_name` from confest shell
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
-- \#497 - CPU-version search performance decreased 
+- \#545 - Avoid dead circle of build index thread when error occurs
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
