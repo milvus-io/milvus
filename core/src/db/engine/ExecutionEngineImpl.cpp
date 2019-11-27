@@ -257,6 +257,11 @@ ExecutionEngineImpl::PhysicalSize() const {
 Status
 ExecutionEngineImpl::Serialize() {
     auto status = write_index(index_, location_);
+
+    // here we reset index size by file size,
+    // since some index type(such as SQ8) data size become smaller after serialized
+    index_->set_size(PhysicalSize());
+
     return status;
 }
 
