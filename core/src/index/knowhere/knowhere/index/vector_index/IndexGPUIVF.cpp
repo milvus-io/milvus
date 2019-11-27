@@ -158,11 +158,11 @@ GPUIVF::CopyGpuToCpu(const Config& config) {
     }
 }
 
-VectorIndexPtr
-GPUIVF::Clone() {
-    auto cpu_idx = CopyGpuToCpu(Config());
-    return knowhere::cloner::CopyCpuToGpu(cpu_idx, gpu_id_, Config());
-}
+// VectorIndexPtr
+// GPUIVF::Clone() {
+//    auto cpu_idx = CopyGpuToCpu(Config());
+//    return knowhere::cloner::CopyCpuToGpu(cpu_idx, gpu_id_, Config());
+//}
 
 VectorIndexPtr
 GPUIVF::CopyGpuToGpu(const int64_t& device_id, const Config& config) {

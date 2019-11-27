@@ -47,10 +47,10 @@ class MockVecIndex : public milvus::engine::VecIndex {
         return milvus::Status();
     }
 
-    milvus::engine::VecIndexPtr
-    Clone() override {
-        return milvus::engine::VecIndexPtr();
-    }
+//    milvus::engine::VecIndexPtr
+//    Clone() override {
+//        return milvus::engine::VecIndexPtr();
+//    }
 
     int64_t
     GetDeviceId() override {
@@ -120,7 +120,7 @@ TEST(CacheTest, DUMMY_TEST) {
     mock_index.Add(1, nullptr, nullptr);
     mock_index.BuildAll(1, nullptr, nullptr, cfg);
     mock_index.Search(1, nullptr, nullptr, nullptr, cfg);
-    mock_index.Clone();
+//    mock_index.Clone();
     mock_index.CopyToCpu(cfg);
     mock_index.CopyToGpu(1, cfg);
     mock_index.GetDeviceId();

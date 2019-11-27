@@ -158,10 +158,10 @@ NSG::Dimension() {
     return index_->dimension;
 }
 
-VectorIndexPtr
-NSG::Clone() {
-    KNOWHERE_THROW_MSG("not support");
-}
+// VectorIndexPtr
+// NSG::Clone() {
+//    KNOWHERE_THROW_MSG("not support");
+//}
 
 void
 NSG::Seal() {

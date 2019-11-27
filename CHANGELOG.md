@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
 - \#486 - gpu no usage during index building
+- \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
 - \#523 - Erase file data from cache once the file is marked as deleted

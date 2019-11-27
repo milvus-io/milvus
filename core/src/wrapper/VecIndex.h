@@ -75,8 +75,8 @@ class VecIndex : public cache::DataObj {
     CopyToCpu(const Config& cfg = Config()) = 0;
 
     // TODO(linxj): Deprecated
-    virtual VecIndexPtr
-    Clone() = 0;
+    //    virtual VecIndexPtr
+    //    Clone() = 0;
 
     virtual int64_t
     GetDeviceId() = 0;
