@@ -164,15 +164,15 @@ IDMAP::Train(const Config& config) {
     index_.reset(index);
 }
 
-VectorIndexPtr
-IDMAP::Clone() {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    auto clone_index = faiss::clone_index(index_.get());
-    std::shared_ptr<faiss::Index> new_index;
-    new_index.reset(clone_index);
-    return std::make_shared<IDMAP>(new_index);
-}
+// VectorIndexPtr
+// IDMAP::Clone() {
+//    std::lock_guard<std::mutex> lk(mutex_);
+//
+//    auto clone_index = faiss::clone_index(index_.get());
+//    std::shared_ptr<faiss::Index> new_index;
+//    new_index.reset(clone_index);
+//    return std::make_shared<IDMAP>(new_index);
+//}
 
 VectorIndexPtr
 IDMAP::CopyCpuToGpu(const int64_t& device_id, const Config& config) {

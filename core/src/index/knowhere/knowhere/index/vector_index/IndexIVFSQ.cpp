@@ -54,10 +54,10 @@ IVFSQ::Train(const DatasetPtr& dataset, const Config& config) {
     return std::make_shared<IVFIndexModel>(ret_index);
 }
 
-VectorIndexPtr
-IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
-    return std::make_shared<IVFSQ>(index);
-}
+// VectorIndexPtr
+// IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
+//    return std::make_shared<IVFSQ>(index);
+//}
 
 VectorIndexPtr
 IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {

@@ -37,10 +37,10 @@ class MockVecIndex : public engine::VecIndex {
              const float* xt = nullptr) {
     }
 
-    engine::VecIndexPtr
-    Clone() override {
-        return milvus::engine::VecIndexPtr();
-    }
+//    engine::VecIndexPtr
+//    Clone() override {
+//        return milvus::engine::VecIndexPtr();
+//    }
 
     int64_t
     GetDeviceId() override {
