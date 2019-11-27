@@ -50,7 +50,6 @@ class TracingConfig:
         }
     }
 
-    max_overflow=0
 
 class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')

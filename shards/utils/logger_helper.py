@@ -1,5 +1,6 @@
 import os
 import datetime
+import copy
 from pytz import timezone
 from logging import Filter
 import logging.config
@@ -59,24 +60,31 @@ class ColorFulFormatColMixin:
         return message_str
 
     def formatTime(self, record, datefmt=None):
-        ret =  super().formatTime(record, datefmt)
+        ret = super().formatTime(record, datefmt)
         ret = COLORS['ASCTIME'] + ret + COLORS['ENDC']
         return ret
 
-    def format_record(self, record):
-        msg_schema = record.levelname + 'M'
-        record.msg = '{}{}{}'.format(COLORS[msg_schema], record.msg, COLORS['ENDC'])
-        record.filename = COLORS['FILENAME'] + record.filename + COLORS['ENDC']
-        record.lineno = '{}{}{}'.format(COLORS['LINENO'], record.lineno, COLORS['ENDC'])
-        record.threadName = '{}{}{}'.format(COLORS['THREAD'], record.threadName, COLORS['ENDC'])
-        record.levelname = COLORS[record.levelname] + record.levelname + COLORS['ENDC']
-        return record
+
+class ColorfulLogRecordProxy(logging.LogRecord):
+    def __init__(self, record):
+        self._record = record
+        msg_level = record.levelname + 'M'
+        self.msg = '{}{}{}'.format(COLORS[msg_level], record.msg, COLORS['ENDC'])
+        self.filename = COLORS['FILENAME'] + record.filename + COLORS['ENDC']
+        self.lineno = '{}{}{}'.format(COLORS['LINENO'], record.lineno, COLORS['ENDC'])
+        self.threadName = '{}{}{}'.format(COLORS['THREAD'], record.threadName, COLORS['ENDC'])
+        self.levelname = COLORS[record.levelname] + record.levelname + COLORS['ENDC']
+
+    def __getattr__(self, attr):
+        if attr not in self.__dict__:
+            return getattr(self._record, attr)
+        return getattr(self, attr)
 
 
 class ColorfulFormatter(ColorFulFormatColMixin, logging.Formatter):
     def format(self, record):
-        record = self.format_record(record)
-        message_str = super(ColorfulFormatter, self).format(record)
+        proxy = ColorfulLogRecordProxy(record)
+        message_str = super().format(proxy)
 
         return message_str
 
