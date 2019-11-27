@@ -11,3 +11,4 @@ __pycache__
 *.md
 *.yml
 *.yaml
+*/metadata/

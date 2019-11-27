@@ -329,7 +329,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->CreateTableFile(table_file);
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
     status = impl_->UpdateTableFile(table_file);
-    status = impl_->CleanUp();
+    status = impl_->CleanUpShadowFiles();
     ASSERT_TRUE(status.ok());
 
     status = impl_->DropTable(table_id);
