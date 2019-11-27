@@ -38,8 +38,8 @@ class IVF : public VectorIndex, public FaissBaseIndex {
     explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
     }
 
-    VectorIndexPtr
-    Clone() override;
+    //    VectorIndexPtr
+    //    Clone() override;
 
     IndexModelPtr
     Train(const DatasetPtr& dataset, const Config& config) override;
@@ -81,8 +81,8 @@ class IVF : public VectorIndex, public FaissBaseIndex {
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config);
 
-    virtual VectorIndexPtr
-    Clone_impl(const std::shared_ptr<faiss::Index>& index);
+    //    virtual VectorIndexPtr
+    //    Clone_impl(const std::shared_ptr<faiss::Index>& index);
 
     virtual void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);

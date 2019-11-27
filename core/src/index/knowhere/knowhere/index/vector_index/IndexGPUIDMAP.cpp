@@ -47,16 +47,16 @@ GPUIDMAP::CopyGpuToCpu(const Config& config) {
     return std::make_shared<IDMAP>(new_index);
 }
 
-VectorIndexPtr
-GPUIDMAP::Clone() {
-    auto cpu_idx = CopyGpuToCpu(Config());
-
-    if (auto idmap = std::dynamic_pointer_cast<IDMAP>(cpu_idx)) {
-        return idmap->CopyCpuToGpu(gpu_id_, Config());
-    } else {
-        KNOWHERE_THROW_MSG("IndexType not Support GpuClone");
-    }
-}
+// VectorIndexPtr
+// GPUIDMAP::Clone() {
+//    auto cpu_idx = CopyGpuToCpu(Config());
+//
+//    if (auto idmap = std::dynamic_pointer_cast<IDMAP>(cpu_idx)) {
+//        return idmap->CopyCpuToGpu(gpu_id_, Config());
+//    } else {
+//        KNOWHERE_THROW_MSG("IndexType not Support GpuClone");
+//    }
+//}
 
 BinarySet
 GPUIDMAP::SerializeImpl() {

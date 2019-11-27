@@ -42,8 +42,8 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
     Search(const DatasetPtr& dataset, const Config& config) override;
     int64_t
     Count() override;
-    VectorIndexPtr
-    Clone() override;
+    //    VectorIndexPtr
+    //    Clone() override;
     int64_t
     Dimension() override;
     void
