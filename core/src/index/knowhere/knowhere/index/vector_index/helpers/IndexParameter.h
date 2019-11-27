@@ -180,10 +180,10 @@ struct SPTAGCfg : public Cfg {
 
     SPTAGCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using SPTAGConfig = std::shared_ptr<SPTAGCfg>;
 

@@ -14,6 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+#ifdef MILVUS_GPU_VERSION
 #pragma once
 
 #include <condition_variable>
@@ -52,3 +53,4 @@ using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

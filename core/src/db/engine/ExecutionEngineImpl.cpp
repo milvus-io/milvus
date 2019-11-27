@@ -257,11 +257,6 @@ ExecutionEngineImpl::PhysicalSize() const {
 Status
 ExecutionEngineImpl::Serialize() {
     auto status = write_index(index_, location_);
-
-    // here we reset index size by file size,
-    // since some index type(such as SQ8) data size become smaller after serialized
-    index_->set_size(PhysicalSize());
-
     return status;
 }
 
@@ -415,18 +410,18 @@ ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-ExecutionEnginePtr
-ExecutionEngineImpl::Clone() {
-    if (index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
-        return nullptr;
-    }
-
-    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
-    ret->Init();
-    ret->index_ = index_->Clone();
-    return ret;
-}
+// ExecutionEnginePtr
+// ExecutionEngineImpl::Clone() {
+//    if (index_ == nullptr) {
+//        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
+//        return nullptr;
+//    }
+//
+//    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
+//    ret->Init();
+//    ret->index_ = index_->Clone();
+//    return ret;
+//}
 
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {

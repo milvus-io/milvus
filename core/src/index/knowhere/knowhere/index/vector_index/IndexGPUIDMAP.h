@@ -41,8 +41,8 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     int64_t*
     GetRawIds() override;
 
-    VectorIndexPtr
-    Clone() override;
+    //    VectorIndexPtr
+    //    Clone() override;
 
     VectorIndexPtr
     CopyGpuToGpu(const int64_t& device_id, const Config& config) override;

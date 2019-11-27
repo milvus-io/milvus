@@ -14,7 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+#ifdef MILVUS_GPU_VERSION
 #include "scheduler/optimizer/FaissIVFSQ8Pass.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
@@ -72,3 +72,4 @@ FaissIVFSQ8Pass::Run(const TaskPtr& task) {
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif
