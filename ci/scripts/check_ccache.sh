@@ -59,7 +59,9 @@ check_ccache() {
 
 for BRANCH_NAME in ${BRANCH_NAMES}
 do
-    check_ccache ${BRANCH_NAME}
+    if [[ "${BRANCH_NAME}" != "HEAD" ]];then
+        check_ccache ${BRANCH_NAME}
+    fi
 done
 
 if [[ -n "${CHANGE_BRANCH}" && "${BRANCH_NAME}" =~ "PR-" ]];then
