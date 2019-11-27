@@ -272,6 +272,7 @@ class TestSearchBase:
         method: search table with the given vectors and tags with "re" expr, check the result
         expected: search status ok, and the length of the result is top_k
         '''
+        tag = "atag"
         new_tag = "new_tag"
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
@@ -288,16 +289,12 @@ class TestSearchBase:
         status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=["new(.*)"])
         logging.getLogger().info(result)
         assert status.OK()
-        assert len(result[0]) == min(len(vectors), top_k)
-        assert check_result(result[1], new_ids[0])
         assert result[0][0].distance > epsilon
         assert result[1][0].distance <= epsilon
         status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=["(.*)tag"])
         logging.getLogger().info(result)
         assert status.OK()
-        assert len(result[0]) == min(len(vectors), top_k)
-        assert check_result(result[1], new_ids[0])
-        assert result[0][0].distance > epsilon
+        assert result[0][0].distance <= epsilon
         assert result[1][0].distance <= epsilon
 
     def test_search_ip_index_params(self, connect, ip_table, get_index_params):
