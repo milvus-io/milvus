@@ -3,16 +3,17 @@
 #include "src/tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 
-using namespace grpc;
-using namespace std;
+namespace milvus {
+namespace server {
+namespace grpc {
 
-SpanInterceptor::SpanInterceptor(experimental::ServerRpcInfo* info, GrpcInterceptorHookHandler* hook_handler)
+SpanInterceptor::SpanInterceptor(::grpc::experimental::ServerRpcInfo* info, GrpcInterceptorHookHandler* hook_handler)
     : info_(info), hook_handler_(hook_handler) {
 }
 
 void
-SpanInterceptor::Intercept(experimental::InterceptorBatchMethods* methods) {
-    if (methods->QueryInterceptionHookPoint(experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA)) {
+SpanInterceptor::Intercept(::grpc::experimental::InterceptorBatchMethods* methods) {
+    if (methods->QueryInterceptionHookPoint(::grpc::experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA)) {
         hook_handler_->OnPostRecvInitialMetaData(info_, methods);
 
         //        cout << "experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA ..." << endl;
@@ -33,7 +34,7 @@ SpanInterceptor::Intercept(experimental::InterceptorBatchMethods* methods) {
         //        auto span_maybe = tracer_->Extract(carrier);
         //        span_ = tracer_->StartSpan(info_->method(), {opentracing::ChildOf(span_maybe->get())});
 
-    } else if (methods->QueryInterceptionHookPoint(experimental::InterceptionHookPoints::PRE_SEND_MESSAGE)) {
+    } else if (methods->QueryInterceptionHookPoint(::grpc::experimental::InterceptionHookPoints::PRE_SEND_MESSAGE)) {
         hook_handler_->OnPreSendMessage(info_, methods);
 
         //        cout << "experimental::InterceptionHookPoints::PRE_SEND_MESSAGE ..." << endl;
@@ -44,7 +45,11 @@ SpanInterceptor::Intercept(experimental::InterceptorBatchMethods* methods) {
     methods->Proceed();
 }
 
-experimental::Interceptor*
-SpanInterceptorFactory::CreateServerInterceptor(grpc::experimental::ServerRpcInfo* info) {
+::grpc::experimental::Interceptor*
+SpanInterceptorFactory::CreateServerInterceptor(::grpc::experimental::ServerRpcInfo* info) {
     return new SpanInterceptor(info, hook_handler_);
 }
+
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus

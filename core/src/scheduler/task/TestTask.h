@@ -24,7 +24,7 @@ namespace scheduler {
 
 class TestTask : public XSearchTask {
  public:
-    explicit TestTask(const std::shared_ptr<Context>& context, TableFileSchemaPtr& file, TaskLabelPtr label);
+    explicit TestTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr& file, TaskLabelPtr label);
 
  public:
     void

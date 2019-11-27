@@ -7,28 +7,36 @@
 
 #include "GrpcInterceptorHookHandler.h"
 
-class SpanInterceptor : public grpc::experimental::Interceptor {
+namespace milvus {
+namespace server {
+namespace grpc {
+
+class SpanInterceptor : public ::grpc::experimental::Interceptor {
  public:
-    SpanInterceptor(grpc::experimental::ServerRpcInfo* info, GrpcInterceptorHookHandler* hook_handler);
+    SpanInterceptor(::grpc::experimental::ServerRpcInfo* info, GrpcInterceptorHookHandler* hook_handler);
 
     void
-    Intercept(grpc::experimental::InterceptorBatchMethods* methods) override;
+    Intercept(::grpc::experimental::InterceptorBatchMethods* methods) override;
 
  private:
-    grpc::experimental::ServerRpcInfo* info_;
+    ::grpc::experimental::ServerRpcInfo* info_;
     GrpcInterceptorHookHandler* hook_handler_;
     //    std::shared_ptr<opentracing::Tracer> tracer_;
     //    std::unique_ptr<opentracing::Span> span_;
 };
 
-class SpanInterceptorFactory : public grpc::experimental::ServerInterceptorFactoryInterface {
+class SpanInterceptorFactory : public ::grpc::experimental::ServerInterceptorFactoryInterface {
  public:
     explicit SpanInterceptorFactory(GrpcInterceptorHookHandler* hook_handler) : hook_handler_(hook_handler) {
     }
 
-    grpc::experimental::Interceptor*
-    CreateServerInterceptor(grpc::experimental::ServerRpcInfo* info) override;
+    ::grpc::experimental::Interceptor*
+    CreateServerInterceptor(::grpc::experimental::ServerRpcInfo* info) override;
 
  private:
     GrpcInterceptorHookHandler* hook_handler_;
 };
+
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus

@@ -386,7 +386,7 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
               uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -398,7 +398,7 @@ DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_
 }
 
 Status
-DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
               uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
               ResultDistances& result_distances) {
 
@@ -447,7 +447,7 @@ DBImpl::Query(const std::shared_ptr<Context>& context, const std::string& table_
 }
 
 Status
-DBImpl::QueryByFileID(const std::shared_ptr<Context>& context, const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
                       uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
                       ResultDistances& result_distances) {
 
@@ -500,7 +500,7 @@ DBImpl::Size(uint64_t& result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::shared_ptr<Context>& context, const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
+DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
                    uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
 
     auto query_async_ctx = context->Child("Query Async");

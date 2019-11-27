@@ -1,5 +1,8 @@
 #include "server/context/Context.h"
 
+namespace milvus {
+namespace server {
+
 Context::Context(const std::string& request_id) : request_id_(request_id) {
 }
 
@@ -25,3 +28,6 @@ Context::Follower(const std::string& operation_name) const {
     new_context->SetTraceContext(trace_context_->Follower(operation_name));
     return new_context;
 }
+
+}  // namespace server
+}  // namespace milvus

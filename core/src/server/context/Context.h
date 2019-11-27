@@ -7,6 +7,9 @@
 
 #include "tracing/TraceContext.h"
 
+namespace milvus {
+namespace server {
+
 class Context {
  public:
     explicit Context(const std::string& request_id);
@@ -27,3 +30,6 @@ class Context {
     std::string request_id_;
     std::shared_ptr<TraceContext> trace_context_;
 };
+
+}  // namespace server
+}  // namespace milvus

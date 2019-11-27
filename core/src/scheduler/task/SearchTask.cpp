@@ -97,7 +97,7 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(const std::shared_ptr<Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
+XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
         if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {

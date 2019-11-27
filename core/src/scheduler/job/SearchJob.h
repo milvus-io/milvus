@@ -46,7 +46,7 @@ using ResultDistances = engine::ResultDistances;
 
 class SearchJob : public Job {
  public:
-    SearchJob(const std::shared_ptr<Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe,
+    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe,
               const float* vectors);
 
  public:
@@ -72,7 +72,7 @@ class SearchJob : public Job {
     Dump() const override;
 
  public:
-    const std::shared_ptr<Context>&
+    const std::shared_ptr<server::Context>&
     GetContext() const;
 
     uint64_t
@@ -106,7 +106,7 @@ class SearchJob : public Job {
     }
 
  private:
-    const std::shared_ptr<Context> context_;
+    const std::shared_ptr<server::Context> context_;
 
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
