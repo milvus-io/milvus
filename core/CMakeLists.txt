@@ -204,6 +204,11 @@ install(DIRECTORY scripts/
         GROUP_EXECUTE GROUP_READ
         WORLD_EXECUTE WORLD_READ
         FILES_MATCHING PATTERN "*.sh")
+install(DIRECTORY scripts/migration
+        DESTINATION scripts
+        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        GROUP_EXECUTE GROUP_READ
+        WORLD_EXECUTE WORLD_READ)
 install(FILES
         conf/server_config.yaml
         conf/log_config.conf
