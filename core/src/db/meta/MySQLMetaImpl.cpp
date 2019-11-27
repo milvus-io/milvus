@@ -1610,10 +1610,35 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 }
             }
 
-            ENGINE_LOG_DEBUG << "Table " << table_id << " currently has raw files:" << raw_count
-                             << " new files:" << new_count << " new_merge files:" << new_merge_count
-                             << " new_index files:" << new_index_count << " to_index files:" << to_index_count
-                             << " index files:" << index_count << " backup files:" << backup_count;
+            std::string msg = "Get table files by type. ";
+            for (int file_type : file_types) {
+                switch (file_type) {
+                    case (int)TableFileSchema::RAW:
+                        msg = msg + "raw files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::NEW:
+                        msg = msg + "new files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::NEW_MERGE:
+                        msg = msg + "new_merge files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::NEW_INDEX:
+                        msg = msg + "new_index files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::TO_INDEX:
+                        msg = msg + "to_index files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::INDEX:
+                        msg = msg + "index files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::BACKUP:
+                        msg = msg + "backup files:" + std::to_string(raw_count);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            ENGINE_LOG_DEBUG << msg;
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
