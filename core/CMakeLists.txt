@@ -187,7 +187,7 @@ endif ()
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
 if ("${MILVUS_DB_PATH}" STREQUAL "")
-    set(MILVUS_DB_PATH "/tmp/milvus")
+    set(MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}")
 endif ()
 
 if (MILVUS_GPU_VERSION)
