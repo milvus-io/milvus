@@ -52,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 - \#314 - add Find FAISS in CMake
 - \#322 - Add option to enable / disable prometheus
+- \#354 - Build migration scripts into milvus docker image
 - \#358 - Add more information in build.sh and install.md
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
