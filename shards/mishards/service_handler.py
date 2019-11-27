@@ -326,7 +326,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         topk_result_list = milvus_pb2.TopKQueryResult(
             status=status_pb2.Status(error_code=status.error_code,
                                      reason=status.reason),
-            row_num=len(id_results),
+            row_num=len(request.query_record_array) if len(id_results) else 0,
             ids=id_results,
             distances=dis_results)
         return topk_result_list
