@@ -7,13 +7,15 @@ metadata:
     componet: gpu-build-env
 spec:
   containers:
-  - name: milvus-build-env
+  - name: milvus-gpu-build-env
     image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.6.0-ubuntu18.04
     env:
     - name: POD_IP
       valueFrom:
         fieldRef:
           fieldPath: status.podIP
+    - name: BUILD_ENV_IMAGE_ID
+      value: "da9023b0f858f072672f86483a869aa87e90a5140864f89e5a012ec766d96dea"
     command:
     - cat
     tty: true

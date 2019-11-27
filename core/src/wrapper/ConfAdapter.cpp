@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 // TODO(lxj): add conf checker
 
@@ -129,17 +130,35 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
     conf->nbits = 8;
-
-    if (!(conf->d % 4))
-        conf->m = conf->d / 4;  // compression radio = 16
-    else if (!(conf->d % 2))
-        conf->m = conf->d / 2;  // compression radio = 8
-    else if (!(conf->d % 3))
-        conf->m = conf->d / 3;  // compression radio = 12
-    else
-        conf->m = conf->d;  // same as SQ8, compression radio = 4
-
     MatchBase(conf);
+
+    /*
+     * Faiss 1.6
+     * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supporte with
+     * no precomputed codes. Precomputed codes supports any number of dimensions, but will involve memory overheads.
+     */
+    static std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
+    static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
+    std::vector<int64_t> resset;
+    for (const auto& dimperquantizer : support_dim_per_subquantizer) {
+        if (!(conf->d % dimperquantizer)) {
+            auto subquantzier_num = conf->d / dimperquantizer;
+            auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
+            if (finder != support_subquantizer.end()) {
+                resset.push_back(subquantzier_num);
+            }
+        }
+    }
+
+    if (resset.empty()) {
+        // todo(linxj): throw exception here.
+        return nullptr;
+    }
+    static int64_t compression_level = 1;  // 1:low, 2:high
+    if (compression_level == 1) {
+        conf->m = resset[int(resset.size() / 2)];
+        WRAPPER_LOG_DEBUG << "PQ m = " << conf->m << ", compression radio = " << conf->d / conf->m * 4;
+    }
     return conf;
 }
 
@@ -198,6 +217,36 @@ NSGConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type)
     if (metaconf.search_length == TEMPMETA_DEFAULT_VALUE) {
         conf->search_length = 30;  // TODO(linxj): hardcode here.
     }
+    return conf;
+}
+
+knowhere::Config
+SPTAGKDTConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::KDTCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    return conf;
+}
+
+knowhere::Config
+SPTAGKDTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::KDTCfg>();
+    conf->k = metaconf.k;
+    return conf;
+}
+
+knowhere::Config
+SPTAGBKTConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::BKTCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    return conf;
+}
+
+knowhere::Config
+SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::BKTCfg>();
+    conf->k = metaconf.k;
     return conf;
 }
 

@@ -85,7 +85,6 @@ class RpcHandlerTest : public testing::Test {
         //        DBWrapper::GetInstance().GetInstance().StartService();
         //        DBWrapper::GetInstance().GetInstance().StopService();
 
-        milvus::server::Config::GetInstance().SetResourceConfigMode("single");
         milvus::server::DBWrapper::GetInstance().StartService();
 
         // initialize handler, create table
@@ -314,6 +313,9 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
+    for (int64_t i = 0; i <  VECTOR_COUNT; i++) {
+        vector_ids.add_vector_id_array(i);
+    }
     // Insert vectors
     // test invalid table name
     handler->Insert(&context, &request, &vector_ids);
@@ -410,7 +412,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     partition_parm.set_partition_name(partition_name);
     handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {

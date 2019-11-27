@@ -20,8 +20,10 @@
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
+#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <mysql++/mysql++.h>
 #include <string.h>
@@ -291,7 +293,7 @@ MySQLMetaImpl::Initialize() {
     // step 5: create meta tables
     try {
         if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-            CleanUp();
+            CleanUpShadowFiles();
         }
 
         {
@@ -958,6 +960,7 @@ MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
         updateTableFilesToIndexQuery << "UPDATE " << META_TABLEFILES
                                      << " SET file_type = " << std::to_string(TableFileSchema::TO_INDEX)
                                      << " WHERE table_id = " << mysqlpp::quote << table_id
+                                     << " AND row_count >= " << std::to_string(meta::BUILD_INDEX_THRESHOLD)
                                      << " AND file_type = " << std::to_string(TableFileSchema::RAW) << ";";
 
         ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesToIndex: " << updateTableFilesToIndexQuery.str();
@@ -1162,17 +1165,23 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
 
     // not allow create partition under partition
     if (!table_schema.owner_table_.empty()) {
-        return Status(DB_ERROR, "Nested partition is not allow");
+        return Status(DB_ERROR, "Nested partition is not allowed");
+    }
+
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    std::string valid_tag = tag;
+    server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+    // not allow duplicated partition
+    std::string exist_partition;
+    GetPartitionName(table_id, valid_tag, exist_partition);
+    if (!exist_partition.empty()) {
+        return Status(DB_ERROR, "Duplicate partition is not allowed");
     }
 
     if (partition_name == "") {
-        // not allow duplicated partition
-        std::string exist_partition;
-        GetPartitionName(table_id, tag, exist_partition);
-        if (!exist_partition.empty()) {
-            return Status(DB_ERROR, "Duplicated partition is not allow");
-        }
-
+        // generate unique partition name
         NextTableId(table_schema.table_id_);
     } else {
         table_schema.table_id_ = partition_name;
@@ -1182,9 +1191,14 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
     table_schema.flag_ = 0;
     table_schema.created_on_ = utils::GetMicroSecTimeStamp();
     table_schema.owner_table_ = table_id;
-    table_schema.partition_tag_ = tag;
+    table_schema.partition_tag_ = valid_tag;
 
-    return CreateTable(table_schema);
+    status = CreateTable(table_schema);
+    if (status.code() == DB_ALREADY_EXIST) {
+        return Status(DB_ALREADY_EXIST, "Partition already exists");
+    }
+
+    return status;
 }
 
 Status
@@ -1231,6 +1245,12 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
+
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
@@ -1240,7 +1260,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
             allPartitionsQuery << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
-                               << table_id << " AND partition_tag = " << mysqlpp::quote << tag << " AND state <> "
+                               << table_id << " AND partition_tag = " << mysqlpp::quote << valid_tag << " AND state <> "
                                << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
@@ -1252,7 +1272,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
             const mysqlpp::Row& resRow = res[0];
             resRow["table_id"].to_string(partition_name);
         } else {
-            return Status(DB_NOT_FOUND, "Partition " + tag + " of table " + table_id + " not found");
+            return Status(DB_NOT_FOUND, "Partition " + valid_tag + " of table " + table_id + " not found");
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN GET PARTITION NAME", e.what());
@@ -1509,13 +1529,13 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
 
 Status
 MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                           std::vector<std::string>& file_ids) {
+                           TableFilesSchema& table_files) {
     if (file_types.empty()) {
         return Status(DB_ERROR, "file types array is empty");
     }
 
     try {
-        file_ids.clear();
+        table_files.clear();
 
         mysqlpp::StoreQueryResult res;
         {
@@ -1535,9 +1555,10 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
 
             mysqlpp::Query hasNonIndexFilesQuery = connectionPtr->query();
             // since table_id is a unique column we just need to check whether it exists or not
-            hasNonIndexFilesQuery << "SELECT file_id, file_type"
-                                  << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
-                                  << " AND file_type in (" << types << ");";
+            hasNonIndexFilesQuery
+                << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
+                << " AND file_type in (" << types << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesByType: " << hasNonIndexFilesQuery.str();
 
@@ -1548,9 +1569,18 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
             int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0;
             int to_index_count = 0, index_count = 0, backup_count = 0;
             for (auto& resRow : res) {
-                std::string file_id;
-                resRow["file_id"].to_string(file_id);
-                file_ids.push_back(file_id);
+                TableFileSchema file_schema;
+                file_schema.id_ = resRow["id"];
+                file_schema.table_id_ = table_id;
+                file_schema.engine_type_ = resRow["engine_type"];
+                resRow["file_id"].to_string(file_schema.file_id_);
+                file_schema.file_type_ = resRow["file_type"];
+                file_schema.file_size_ = resRow["file_size"];
+                file_schema.row_count_ = resRow["row_count"];
+                file_schema.date_ = resRow["date"];
+                file_schema.created_on_ = resRow["created_on"];
+
+                table_files.emplace_back(file_schema);
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
@@ -1681,7 +1711,7 @@ MySQLMetaImpl::Size(uint64_t& result) {
 }
 
 Status
-MySQLMetaImpl::CleanUp() {
+MySQLMetaImpl::CleanUpShadowFiles() {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
@@ -1723,7 +1753,49 @@ MySQLMetaImpl::CleanUp() {
 }
 
 Status
-MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
+MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
+    auto now = utils::GetMicroSecTimeStamp();
+
+    // erase deleted/backup files from cache
+    try {
+        server::MetricCollector metric;
+
+        mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+        if (connectionPtr == nullptr) {
+            return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+        }
+
+        mysqlpp::Query cleanUpFilesWithTTLQuery = connectionPtr->query();
+        cleanUpFilesWithTTLQuery << "SELECT id, table_id, file_id, date"
+                                 << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
+                                 << std::to_string(TableFileSchema::TO_DELETE) << ","
+                                 << std::to_string(TableFileSchema::BACKUP) << ")"
+                                 << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
+
+        mysqlpp::StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
+
+        TableFileSchema table_file;
+        std::vector<std::string> idsToDelete;
+
+        for (auto& resRow : res) {
+            table_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(table_file.table_id_);
+            resRow["file_id"].to_string(table_file.file_id_);
+            table_file.date_ = resRow["date"];
+
+            utils::GetTableFilePath(options_, table_file);
+            server::CommonUtil::EraseFromCache(table_file.location_);
+        }
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 

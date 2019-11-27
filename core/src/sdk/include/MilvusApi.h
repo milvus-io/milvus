@@ -37,6 +37,9 @@ enum class IndexType {
     IVFSQ8 = 3,
     NSG = 4,
     IVFSQ8H = 5,
+    IVFPQ = 6,
+    SPTAGKDT = 7,
+    SPTAGBKT = 8,
 };
 
 enum class MetricType {
@@ -81,11 +84,11 @@ struct RowRecord {
 /**
  * @brief TopK query result
  */
-struct TopKQueryResult {
-    int64_t row_num;
+struct QueryResult {
     std::vector<int64_t> ids;
     std::vector<float> distances;
 };
+using TopKQueryResult = std::vector<QueryResult>;
 
 /**
  * @brief index parameters

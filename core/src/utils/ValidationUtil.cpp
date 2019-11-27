@@ -18,6 +18,7 @@
 #include "utils/ValidationUtil.h"
 #include "Log.h"
 #include "db/engine/ExecutionEngine.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
 #ifdef MILVUS_GPU_VERSION
@@ -169,10 +170,25 @@ ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSc
 }
 
 Status
+ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
+    if (partition_name.empty()) {
+        std::string msg = "Partition name should not be empty.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
+    }
+
+    return ValidateTableName(partition_name);
+}
+
+Status
 ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
-    for (auto& tag : partition_tags) {
-        if (tag.empty()) {
-            std::string msg = "Invalid partition tag: " + tag + ". " + "Partition tag should not be empty.";
+    for (const std::string& tag : partition_tags) {
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        StringHelpFunctions::TrimStringBlank(valid_tag);
+        if (valid_tag.empty()) {
+            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
             SERVER_LOG_ERROR << msg;
             return Status(SERVER_INVALID_NPROBE, msg);
         }
@@ -182,7 +198,7 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
 }
 
 Status
-ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
+ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
@@ -202,10 +218,9 @@ ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
     return Status::OK();
 }
 
-Status
-ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
 #ifdef MILVUS_GPU_VERSION
-
+Status
+ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
@@ -216,10 +231,9 @@ ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
     }
 
     memory = deviceProp.totalGlobalMem;
-#endif
-
     return Status::OK();
 }
+#endif
 
 Status
 ValidationUtil::ValidateIpAddress(const std::string& ip_address) {

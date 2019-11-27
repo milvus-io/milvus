@@ -109,8 +109,7 @@ class Meta {
     FilesToIndex(TableFilesSchema&) = 0;
 
     virtual Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                std::vector<std::string>& file_ids) = 0;
+    FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& table_files) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;
@@ -119,9 +118,13 @@ class Meta {
     Archive() = 0;
 
     virtual Status
-    CleanUp() = 0;
+    CleanUpShadowFiles() = 0;
 
-    virtual Status CleanUpFilesWithTTL(uint16_t) = 0;
+    virtual Status
+    CleanUpCacheWithTTL(uint64_t seconds) = 0;
+
+    virtual Status
+    CleanUpFilesWithTTL(uint64_t seconds) = 0;
 
     virtual Status
     DropAll() = 0;

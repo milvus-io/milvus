@@ -84,12 +84,12 @@ DBImpl::Start() {
         return Status::OK();
     }
 
-    ENGINE_LOG_TRACE << "DB service start";
+    // ENGINE_LOG_TRACE << "DB service start";
     shutting_down_.store(false, std::memory_order_release);
 
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        ENGINE_LOG_TRACE << "StartTimerTasks";
+        // ENGINE_LOG_TRACE << "StartTimerTasks";
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
 
@@ -105,16 +105,17 @@ DBImpl::Stop() {
     shutting_down_.store(true, std::memory_order_release);
 
     // makesure all memory data serialized
-    MemSerialize();
+    std::set<std::string> sync_table_ids;
+    SyncMemData(sync_table_ids);
 
     // wait compaction/buildindex finish
     bg_timer_thread_.join();
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        meta_ptr_->CleanUp();
+        meta_ptr_->CleanUpShadowFiles();
     }
 
-    ENGINE_LOG_TRACE << "DB service stop";
+    // ENGINE_LOG_TRACE << "DB service stop";
     return Status::OK();
 }
 
@@ -279,6 +280,11 @@ DBImpl::DropPartitionByTag(const std::string& table_id, const std::string& parti
 
     std::string partition_name;
     auto status = meta_ptr_->GetPartitionName(table_id, partition_tag, partition_name);
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
+        return status;
+    }
+
     return DropPartition(partition_name);
 }
 
@@ -324,7 +330,10 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
         return SHUTDOWN_ERROR;
     }
 
-    Status status;
+    // serialize memory data
+    std::set<std::string> sync_table_ids;
+    auto status = SyncMemData(sync_table_ids);
+
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
 
@@ -553,7 +562,7 @@ DBImpl::StartMetricTask() {
         return;
     }
 
-    ENGINE_LOG_TRACE << "Start metric task";
+    // ENGINE_LOG_TRACE << "Start metric task";
 
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
@@ -579,16 +588,16 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUTemperature();
     server::Metrics::GetInstance().CPUTemperature();
 
-    ENGINE_LOG_TRACE << "Metric task finished";
+    // ENGINE_LOG_TRACE << "Metric task finished";
 }
 
 Status
-DBImpl::MemSerialize() {
+DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
     std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
     std::set<std::string> temp_table_ids;
     mem_mgr_->Serialize(temp_table_ids);
     for (auto& id : temp_table_ids) {
-        compact_table_ids_.insert(id);
+        sync_table_ids.insert(id);
     }
 
     if (!temp_table_ids.empty()) {
@@ -607,7 +616,7 @@ DBImpl::StartCompactionTask() {
     }
 
     // serialize memory data
-    MemSerialize();
+    SyncMemData(compact_table_ids_);
 
     // compactiong has been finished?
     {
@@ -751,7 +760,7 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 
 void
 DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    ENGINE_LOG_TRACE << "Background compaction thread start";
+    // ENGINE_LOG_TRACE << " Background compaction thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -768,13 +777,20 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 
     meta_ptr_->Archive();
 
-    int ttl = 5 * meta::M_SEC;  // default: file will be deleted after 5 minutes
-    if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-        ttl = meta::D_SEC;
+    {
+        uint64_t ttl = 10 * meta::SECOND;  // default: file data will be erase from cache after few seconds
+        meta_ptr_->CleanUpCacheWithTTL(ttl);
     }
-    meta_ptr_->CleanUpFilesWithTTL(ttl);
 
-    ENGINE_LOG_TRACE << "Background compaction thread exit";
+    {
+        uint64_t ttl = 5 * meta::M_SEC;  // default: file will be deleted after few minutes
+        if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
+            ttl = meta::D_SEC;
+        }
+        meta_ptr_->CleanUpFilesWithTTL(ttl);
+    }
+
+    // ENGINE_LOG_TRACE << " Background compaction thread exit";
 }
 
 void
@@ -807,7 +823,7 @@ DBImpl::StartBuildIndexTask(bool force) {
 
 void
 DBImpl::BackgroundBuildIndex() {
-    ENGINE_LOG_TRACE << "Background build index thread start";
+    // ENGINE_LOG_TRACE << "Background build index thread start";
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
@@ -830,7 +846,26 @@ DBImpl::BackgroundBuildIndex() {
         }
     }
 
-    ENGINE_LOG_TRACE << "Background build index thread exit";
+    // ENGINE_LOG_TRACE << "Background build index thread exit";
+}
+
+Status
+DBImpl::GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,
+                             meta::TableFilesSchema& files) {
+    files.clear();
+    auto status = meta_ptr_->FilesByType(table_id, file_types, files);
+
+    // only build index for files that row count greater than certain threshold
+    for (auto it = files.begin(); it != files.end();) {
+        if ((*it).file_type_ == static_cast<int>(meta::TableFileSchema::RAW) &&
+            (*it).row_count_ < meta::BUILD_INDEX_THRESHOLD) {
+            it = files.erase(it);
+        } else {
+            it++;
+        }
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -853,8 +888,12 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
     auto status = meta_ptr_->ShowPartitions(table_id, partiton_array);
 
     for (auto& tag : partition_tags) {
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
         for (auto& schema : partiton_array) {
-            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, tag)) {
+            if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.table_id_);
             }
         }
@@ -937,18 +976,18 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     }
 
     // get files to build index
-    std::vector<std::string> file_ids;
-    auto status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
+    meta::TableFilesSchema table_files;
+    auto status = GetFilesToBuildIndex(table_id, file_types, table_files);
     int times = 1;
 
-    while (!file_ids.empty()) {
+    while (!table_files.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
         if (index.engine_type_ != (int)EngineType::FAISS_IDMAP) {
             status = meta_ptr_->UpdateTableFilesToIndex(table_id);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10 * 1000, times * 100)));
-        status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
+        GetFilesToBuildIndex(table_id, file_types, table_files);
         times++;
     }
 

@@ -1,4 +1,4 @@
-We manually change two APIs in "milvus.pd.h":
+We manually change two APIs in "milvus.pb.h":
     add_vector_data()
     add_row_id_array()
     add_ids()

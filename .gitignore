@@ -29,3 +29,6 @@ cmake_build
 .coverage
 *.pyc
 cov_html/
+
+# temp
+shards/all_in_one_with_mysql/metadata/
