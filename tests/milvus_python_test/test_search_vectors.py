@@ -266,6 +266,40 @@ class TestSearchBase:
         assert check_result(result[1], new_ids[0])
         assert result[1][0].distance <= epsilon
 
+    def test_search_l2_index_params_partition_F(self, connect, table, get_simple_index_params):
+        '''
+        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        method: search table with the given vectors and tags with "re" expr, check the result
+        expected: search status ok, and the length of the result is top_k
+        '''
+        new_tag = "new_tag"
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        partition_name = gen_unique_str()
+        new_partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, new_partition_name, new_tag)
+        vectors, ids = self.init_data(connect, partition_name)
+        new_vectors, new_ids = self.init_data(connect, new_partition_name, nb=1000)
+        status = connect.create_index(table, index_params)
+        query_vec = [vectors[0], new_vectors[0]]
+        top_k = 10
+        nprobe = 1
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=["new(.*)"])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[1], new_ids[0])
+        assert result[0][0].distance > epsilon
+        assert result[1][0].distance <= epsilon
+        status, result = connect.search_vectors(table, top_k, nprobe, query_vec, partition_tags=["(.*)tag"])
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[1], new_ids[0])
+        assert result[0][0].distance > epsilon
+        assert result[1][0].distance <= epsilon
+
     def test_search_ip_index_params(self, connect, ip_table, get_index_params):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
