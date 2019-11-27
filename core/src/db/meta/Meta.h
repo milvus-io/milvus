@@ -118,9 +118,13 @@ class Meta {
     Archive() = 0;
 
     virtual Status
-    CleanUp() = 0;
+    CleanUpShadowFiles() = 0;
 
-    virtual Status CleanUpFilesWithTTL(uint16_t) = 0;
+    virtual Status
+    CleanUpCacheWithTTL(uint64_t seconds) = 0;
+
+    virtual Status
+    CleanUpFilesWithTTL(uint64_t seconds) = 0;
 
     virtual Status
     DropAll() = 0;

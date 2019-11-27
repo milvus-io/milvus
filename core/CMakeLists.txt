@@ -38,7 +38,7 @@ endif ()
 set (GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
 
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
-    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.* \\(.*\\),.*/\\1/' | sed 's=[a-zA-Z]*\/==g'"
+    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g'"
             OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
     if(NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
         execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
@@ -187,7 +187,7 @@ endif ()
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
 if ("${MILVUS_DB_PATH}" STREQUAL "")
-    set(MILVUS_DB_PATH "/tmp/milvus")
+    set(MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}")
 endif ()
 
 if (MILVUS_GPU_VERSION)

@@ -56,6 +56,9 @@ class CommonUtil {
     ConvertTime(time_t time_integer, tm& time_struct);
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
+
+    static void
+    EraseFromCache(const std::string& item_key);
 };
 
 }  // namespace server

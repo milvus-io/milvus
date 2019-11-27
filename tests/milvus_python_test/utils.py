@@ -69,7 +69,7 @@ def gen_invalid_ips():
             "\n",
             "\t",
             "中文",
-            "a".join("a" for i in range(256))
+            "a".join("a" for _ in range(256))
     ]
     return ips
 
@@ -116,7 +116,7 @@ def gen_invalid_uris():
             "tcp:// :%s" % port,
             # "tcp://123.0.0.1:%s" % port,
             "tcp://127.0.0:%s" % port,
-            "tcp://255.0.0.0:%s" % port,
+            # "tcp://255.0.0.0:%s" % port,
             # "tcp://255.255.0.0:%s" % port,
             # "tcp://255.255.255.0:%s" % port,
             # "tcp://255.255.255.255:%s" % port,

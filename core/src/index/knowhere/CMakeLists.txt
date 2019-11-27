@@ -38,6 +38,7 @@ set(index_srcs
         knowhere/index/vector_index/nsg/NSG.cpp
         knowhere/index/vector_index/nsg/NSGIO.cpp
         knowhere/index/vector_index/nsg/NSGHelper.cpp
+        knowhere/index/vector_index/nsg/Distance.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/FaissBaseIndex.cpp
