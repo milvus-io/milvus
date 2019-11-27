@@ -41,6 +41,7 @@
 #include <iostream>
 #include <set>
 #include <thread>
+#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -50,6 +51,8 @@ namespace {
 constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
 constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
 constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
+
+constexpr uint64_t INDEX_FAILED_RETRY_TIME = 1;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milsvus server is shutdown!");
 
@@ -361,6 +364,7 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     WaitMergeFileFinish();
 
     // step 4: wait and build index
+    status = CleanFailedIndexFileOfTable(table_id);
     status = BuildTableIndexRecursively(table_id, index);
 
     return status;
@@ -828,22 +832,35 @@ DBImpl::BackgroundBuildIndex() {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
-    Status status;
+    Status status = IgnoreFailedIndexFiles(to_index_files);
 
     if (!to_index_files.empty()) {
-        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
-
         // step 2: put build index task to scheduler
+        std::map<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr> job2file_map;
         for (auto& file : to_index_files) {
+            scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
             scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
             job->AddToIndexFiles(file_ptr);
+            scheduler::JobMgrInst::GetInstance()->Put(job);
+            job2file_map.insert(std::make_pair(job, file_ptr));
         }
-        scheduler::JobMgrInst::GetInstance()->Put(job);
-        job->WaitBuildIndexFinish();
-        if (!job->GetStatus().ok()) {
-            Status status = job->GetStatus();
-            ENGINE_LOG_ERROR << "Building index failed: " << status.ToString();
+
+        for (auto iter = job2file_map.begin(); iter != job2file_map.end(); ++iter) {
+            scheduler::BuildIndexJobPtr job = iter->first;
+            meta::TableFileSchema& file_schema = *(iter->second.get());
+            job->WaitBuildIndexFinish();
+            if (!job->GetStatus().ok()) {
+                Status status = job->GetStatus();
+                ENGINE_LOG_ERROR << "Building index job " << job->id() << " failed: " << status.ToString();
+
+                MarkFailedIndexFile(file_schema);
+            } else {
+                MarkSucceedIndexFile(file_schema);
+                ENGINE_LOG_DEBUG << "Building index job " << job->id() << " succeed.";
+            }
         }
+
+        ENGINE_LOG_DEBUG << "Background build index thread finished";
     }
 
     // ENGINE_LOG_TRACE << "Background build index thread exit";
@@ -911,6 +928,7 @@ DBImpl::DropTableRecursively(const std::string& table_id, const meta::DatesT& da
     if (dates.empty()) {
         status = mem_mgr_->EraseMemVector(table_id);  // not allow insert
         status = meta_ptr_->DropTable(table_id);      // soft delete table
+        CleanFailedIndexFileOfTable(table_id);
 
         // scheduler will determine when to delete table files
         auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
@@ -989,6 +1007,8 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10 * 1000, times * 100)));
         GetFilesToBuildIndex(table_id, file_types, table_files);
         times++;
+
+        IgnoreFailedIndexFiles(table_files);
     }
 
     // build index for partition
@@ -1001,12 +1021,23 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
         }
     }
 
+    // failed to build index for some files, return error
+    std::vector<std::string> failed_files;
+    GetFailedIndexFileOfTable(table_id, failed_files);
+    if (!failed_files.empty()) {
+        std::string msg = "Failed to build index for " + std::to_string(failed_files.size()) +
+                          ((failed_files.size() == 1) ? " file" : " files") +
+                          ", file size is too large or gpu memory is not enough";
+        return Status(DB_ERROR, msg);
+    }
+
     return Status::OK();
 }
 
 Status
 DBImpl::DropTableIndexRecursively(const std::string& table_id) {
     ENGINE_LOG_DEBUG << "Drop index for table: " << table_id;
+    CleanFailedIndexFileOfTable(table_id);
     auto status = meta_ptr_->DropTableIndex(table_id);
     if (!status.ok()) {
         return status;
@@ -1044,6 +1075,87 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
         }
 
         row_count += partition_row_count;
+    }
+
+    return Status::OK();
+}
+
+Status
+DBImpl::CleanFailedIndexFileOfTable(const std::string& table_id) {
+    std::lock_guard<std::mutex> lck(index_failed_mutex_);
+    index_failed_files_.erase(table_id);  // rebuild failed index files for this table
+
+    return Status::OK();
+}
+
+Status
+DBImpl::GetFailedIndexFileOfTable(const std::string& table_id, std::vector<std::string>& failed_files) {
+    failed_files.clear();
+    std::lock_guard<std::mutex> lck(index_failed_mutex_);
+    auto iter = index_failed_files_.find(table_id);
+    if (iter != index_failed_files_.end()) {
+        FileID2FailedTimes& failed_map = iter->second;
+        for (auto it_file = failed_map.begin(); it_file != failed_map.end(); ++it_file) {
+            failed_files.push_back(it_file->first);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+DBImpl::MarkFailedIndexFile(const meta::TableFileSchema& file) {
+    std::lock_guard<std::mutex> lck(index_failed_mutex_);
+
+    auto iter = index_failed_files_.find(file.table_id_);
+    if (iter == index_failed_files_.end()) {
+        FileID2FailedTimes failed_files;
+        failed_files.insert(std::make_pair(file.file_id_, 1));
+        index_failed_files_.insert(std::make_pair(file.table_id_, failed_files));
+    } else {
+        auto it_failed_files = iter->second.find(file.file_id_);
+        if (it_failed_files != iter->second.end()) {
+            it_failed_files->second++;
+        } else {
+            iter->second.insert(std::make_pair(file.file_id_, 1));
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+DBImpl::MarkSucceedIndexFile(const meta::TableFileSchema& file) {
+    std::lock_guard<std::mutex> lck(index_failed_mutex_);
+
+    auto iter = index_failed_files_.find(file.table_id_);
+    if (iter != index_failed_files_.end()) {
+        iter->second.erase(file.file_id_);
+    }
+
+    return Status::OK();
+}
+
+Status
+DBImpl::IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files) {
+    std::lock_guard<std::mutex> lck(index_failed_mutex_);
+
+    // there could be some failed files belong to different table.
+    // some files may has failed for several times, no need to build index for these files.
+    // thus we can avoid dead circle for build index operation
+    for (auto it_file = table_files.begin(); it_file != table_files.end();) {
+        auto it_failed_files = index_failed_files_.find((*it_file).table_id_);
+        if (it_failed_files != index_failed_files_.end()) {
+            auto it_failed_file = it_failed_files->second.find((*it_file).file_id_);
+            if (it_failed_file != it_failed_files->second.end()) {
+                if (it_failed_file->second >= INDEX_FAILED_RETRY_TIME) {
+                    it_file = table_files.erase(it_file);
+                    continue;
+                }
+            }
+        }
+
+        ++it_file;
     }
 
     return Status::OK();
