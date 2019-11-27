@@ -178,7 +178,8 @@ TaskTable::PickToLoad(uint64_t limit) {
 
             // if task is a build index task, limit it
             if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
-                if (not BuildMgrInst::GetInstance()->Take()) {
+                if (BuildMgrInst::GetInstance()->NumOfAvailable() < 1) {
+                    SERVER_LOG_WARNING << "BuildMgr doesnot have available place for building index";
                     continue;
                 }
             }

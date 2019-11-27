@@ -178,6 +178,10 @@ Resource::loader_function() {
             if (task_item == nullptr) {
                 break;
             }
+            if (task_item->task->Type() == TaskType::BuildIndexTask && name() == "cpu") {
+                BuildMgrInst::GetInstance()->Take();
+                SERVER_LOG_DEBUG << name() << " load BuildIndexTask";
+            }
             LoadFile(task_item->task);
             task_item->Loaded();
             if (task_item->from) {
@@ -208,7 +212,6 @@ Resource::executor_function() {
             if (task_item == nullptr) {
                 break;
             }
-
             auto start = get_current_timestamp();
             Process(task_item->task);
             auto finish = get_current_timestamp();

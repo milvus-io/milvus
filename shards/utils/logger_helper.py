@@ -3,6 +3,7 @@ import datetime
 from pytz import timezone
 from logging import Filter
 import logging.config
+from utils import colors
 
 
 class InfoFilter(logging.Filter):
@@ -31,29 +32,53 @@ class CriticalFilter(logging.Filter):
 
 
 COLORS = {
-    'HEADER': '\033[95m',
-    'INFO': '\033[92m',
-    'DEBUG': '\033[94m',
-    'WARNING': '\033[93m',
-    'ERROR': '\033[95m',
-    'CRITICAL': '\033[91m',
-    'ENDC': '\033[0m',
+    'HEADER': colors.BWhite,
+    'INFO': colors.On_IWhite + colors.BBlack,
+    'INFOM': colors.White,
+    'DEBUG': colors.On_IBlue + colors.BWhite,
+    'DEBUGM': colors.BIBlue,
+    'WARNING': colors.On_IYellow + colors.BWhite,
+    'WARNINGM': colors.BIYellow,
+    'ERROR': colors.On_IRed + colors.BWhite,
+    'ERRORM': colors.BIRed,
+    'CRITICAL': colors.On_Red + colors.BWhite,
+    'CRITICALM': colors.BRed,
+    'ASCTIME': colors.On_Cyan + colors.BIYellow,
+    'MESSAGE': colors.IGreen,
+    'FILENAME': colors.BCyan,
+    'LINENO': colors.BCyan,
+    'THREAD': colors.BCyan,
+    'ENDC': colors.Color_Off,
 }
 
 
 class ColorFulFormatColMixin:
     def format_col(self, message_str, level_name):
         if level_name in COLORS.keys():
-            message_str = COLORS.get(level_name) + message_str + COLORS.get(
-                'ENDC')
+            message_str = COLORS[level_name] + message_str + COLORS['ENDC']
         return message_str
 
+    def formatTime(self, record, datefmt=None):
+        ret =  super().formatTime(record, datefmt)
+        ret = COLORS['ASCTIME'] + ret + COLORS['ENDC']
+        return ret
 
-class ColorfulFormatter(logging.Formatter, ColorFulFormatColMixin):
+    def format_record(self, record):
+        msg_schema = record.levelname + 'M'
+        record.msg = '{}{}{}'.format(COLORS[msg_schema], record.msg, COLORS['ENDC'])
+        record.filename = COLORS['FILENAME'] + record.filename + COLORS['ENDC']
+        record.lineno = '{}{}{}'.format(COLORS['LINENO'], record.lineno, COLORS['ENDC'])
+        record.threadName = '{}{}{}'.format(COLORS['THREAD'], record.threadName, COLORS['ENDC'])
+        record.levelname = COLORS[record.levelname] + record.levelname + COLORS['ENDC']
+        return record
+
+
+class ColorfulFormatter(ColorFulFormatColMixin, logging.Formatter):
     def format(self, record):
+        record = self.format_record(record)
         message_str = super(ColorfulFormatter, self).format(record)
 
-        return self.format_col(message_str, level_name=record.levelname)
+        return message_str
 
 
 def config(log_level, log_path, name, tz='UTC'):
@@ -76,7 +101,9 @@ def config(log_level, log_path, name, tz='UTC'):
                 'format': '%(asctime)s | %(levelname)s | %(name)s | %(threadName)s: %(message)s (%(filename)s:%(lineno)s)',
             },
             'colorful_console': {
-                'format': '%(asctime)s | %(levelname)s | %(name)s | %(threadName)s: %(message)s (%(filename)s:%(lineno)s)',
+                'format': '%(asctime)s | %(levelname)s: %(message)s (%(filename)s:%(lineno)s) (%(threadName)s)',
+                # 'format': '%(asctime)s | %(levelname)s | %(threadName)s: %(message)s (%(filename)s:%(lineno)s)',
+                # 'format': '%(asctime)s | %(levelname)s | %(name)s | %(threadName)s: %(message)s (%(filename)s:%(lineno)s)',
                 '()': ColorfulFormatter,
             },
         },
