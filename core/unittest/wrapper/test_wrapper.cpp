@@ -182,6 +182,7 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
 TEST(whatever, test_config) {
     milvus::engine::TempMetaConf conf;
     conf.nprobe = 16;
+    conf.dim = 128;
     auto nsg_conf = std::make_shared<milvus::engine::NSGConfAdapter>();
     nsg_conf->Match(conf);
     nsg_conf->MatchSearch(conf, milvus::engine::IndexType::NSG_MIX);

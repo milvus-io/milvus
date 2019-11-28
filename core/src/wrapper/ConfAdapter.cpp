@@ -134,7 +134,7 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
 
     /*
      * Faiss 1.6
-     * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supporte with
+     * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with
      * no precomputed codes. Precomputed codes supports any number of dimensions, but will involve memory overheads.
      */
     static std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
@@ -152,7 +152,12 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
 
     if (resset.empty()) {
         // todo(linxj): throw exception here.
-        return nullptr;
+        WRAPPER_LOG_ERROR << "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-"
+                             "quantizer are currently supported with no precomputed codes.";
+        throw WrapperException(
+            "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims "
+            "per sub-quantizer are currently supported with no precomputed codes.");
+        // return nullptr;
     }
     static int64_t compression_level = 1;  // 1:low, 2:high
     if (compression_level == 1) {
