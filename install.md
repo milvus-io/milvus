@@ -1,7 +1,7 @@
 # Install Milvus from Source Code
 
-- [Build from source](https://github.com/jielinxu/milvus/edit/0.6.0/install.md#build-from-source)
-- [Compile Milvus on Docker](https://github.com/jielinxu/milvus/edit/0.6.0/install.md#compile-milvus-on-docker)
+- [Build from source](#build-from-source)
+- [Compile Milvus on Docker](#compile-milvus-on-docker)
 
 ## Build from source
 
