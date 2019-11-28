@@ -154,8 +154,9 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
         // todo(linxj): throw exception here.
         WRAPPER_LOG_ERROR << "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-"
                              "quantizer are currently supported with no precomputed codes.";
-        throw WrapperException("The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims "
-                               "per sub-quantizer are currently supported with no precomputed codes.");
+        throw WrapperException(
+            "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims "
+            "per sub-quantizer are currently supported with no precomputed codes.");
         // return nullptr;
     }
     static int64_t compression_level = 1;  // 1:low, 2:high
