@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#define USE_FAISS_V0_2_1 0
+#define USE_FAISS_V_0_3_0
 
 #include <gtest/gtest.h>
 
@@ -35,16 +35,20 @@
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_io.h>
 
-#if USE_FAISS_V0_2_1
+#ifdef USE_FAISS_V_0_3_0 // faiss_0.3.0
+
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
+#include <faiss/utils/distances.h>
+
+#else // faiss_0.2.1
+
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/utils.h>
 #include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
-#else
-#include <faiss/gpu/GpuCloner.h>
-#include <faiss/index_factory.h>
-#include <faiss/utils/distances.h>
+
 #endif
 
 #ifdef CUSTOMIZATION
@@ -206,15 +210,11 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
     size_t min_k = std::min(ground_k, k);
     int hit = 0;
     for (int i = 0; i < nq; i++) {
-        // count the num of results exist in ground truth result set
-        // each result replicates INDEX_ADD_LOOPS times
-        for (int j_c = 0; j_c < k; j_c++) {
-            int r_c = index[i * k + j_c];
-            for (int j_g = 0; j_g < min_k / index_add_loops; j_g++) {
-                if (ground_index[i * ground_k + j_g] == r_c) {
-                    hit++;
-                    continue;
-                }
+        std::set<faiss::Index::idx_t> ground(ground_index + i * ground_k, ground_index + i * ground_k + min_k);
+        for (int j = 0; j < min_k; j++) {
+            faiss::Index::idx_t id = index[i * k + j];
+            if (ground.count(id) > 0) {
+                hit++;
             }
         }
     }
