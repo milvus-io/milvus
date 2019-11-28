@@ -319,7 +319,7 @@ spec:
                                     steps {
                                         container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                                load "${env.WORKSPACE}/ci/jenkins/step/internalCoverage.groovy"
                                             }
                                         }
                                     }
