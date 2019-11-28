@@ -42,7 +42,8 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     SetUp() override {
         // Init_with_default();
 #ifdef MILVUS_GPU_VERSION
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, 1024 * 1024 * 200, 1024 * 1024 * 600, 1);
+        int64_t MB = 1024 * 1024;
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
 #endif
         Generate(256, 1000000 / 100, 1);
         index_ = std::make_shared<knowhere::NSG>();
