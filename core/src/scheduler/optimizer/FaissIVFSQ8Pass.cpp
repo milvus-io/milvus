@@ -63,7 +63,7 @@ FaissIVFSQ8Pass::Run(const TaskPtr& task) {
         SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: nq > gpu_search_threshold, specify gpu" << best_device_id
                          << " to search!";
         count_++;
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpus[best_device_id]);
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;

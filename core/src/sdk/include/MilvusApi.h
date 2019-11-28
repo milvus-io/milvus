@@ -85,8 +85,8 @@ struct RowRecord {
  * @brief TopK query result
  */
 struct QueryResult {
-    std::vector<int64_t> ids;                      ///< Query ids result
-    std::vector<float> distances;                  ///< Query distances result
+    std::vector<int64_t> ids;      ///< Query ids result
+    std::vector<float> distances;  ///< Query distances result
 };
 using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
 
