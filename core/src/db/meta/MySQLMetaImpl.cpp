@@ -1615,32 +1615,31 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 }
             }
 
-            std::string msg = "Get table files by type. ";
+            std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
                     case (int)TableFileSchema::RAW:
-                        msg = msg + "raw files:" + std::to_string(raw_count);
+                        msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
                     case (int)TableFileSchema::NEW:
-                        msg = msg + "new files:" + std::to_string(raw_count);
+                        msg = msg + " new files:" + std::to_string(new_count);
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        msg = msg + "new_merge files:" + std::to_string(raw_count);
+                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        msg = msg + "new_index files:" + std::to_string(raw_count);
+                        msg = msg + " new_index files:" + std::to_string(new_index_count);
                         break;
                     case (int)TableFileSchema::TO_INDEX:
-                        msg = msg + "to_index files:" + std::to_string(raw_count);
+                        msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
                     case (int)TableFileSchema::INDEX:
-                        msg = msg + "index files:" + std::to_string(raw_count);
+                        msg = msg + " index files:" + std::to_string(index_count);
                         break;
                     case (int)TableFileSchema::BACKUP:
-                        msg = msg + "backup files:" + std::to_string(raw_count);
+                        msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
