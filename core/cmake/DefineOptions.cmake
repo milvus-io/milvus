@@ -41,9 +41,11 @@ macro(define_option_string name description default)
 endmacro()
 
 #----------------------------------------------------------------------
-set_option_category("GPU version")
+set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
+
+define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")

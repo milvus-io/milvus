@@ -225,11 +225,11 @@ foreach (_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach ()
 
+set(FAISS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/faiss)
 if (DEFINED ENV{FAISS_SOURCE_URL})
     set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
 else ()
     set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz")
-    set(FAISS_MD5 "b02c1a53234f5acc9bea1b0c55524f50")
 endif ()
 
 if (DEFINED ENV{KNOWHERE_ARROW_URL})
@@ -737,12 +737,12 @@ macro(build_faiss)
             set(FAISS_COMPUTE_TYPE "gpu")
         else ()
             set(FAISS_COMPUTE_TYPE "cpu")
-        endif()
+        endif ()
         if (FAISS_WITH_MKL)
             set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMPUTE_TYPE}_mkl_${FAISS_COMBINE_MD5}.tar.gz")
         else ()
             set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMPUTE_TYPE}_openblas_${FAISS_COMBINE_MD5}.tar.gz")
-        endif()
+        endif ()
         set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
         set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
 
@@ -779,21 +779,41 @@ macro(build_faiss)
             endif ()
         endif ()
     else ()
-        externalproject_add(faiss_ep
-                URL
-                ${FAISS_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                CONFIGURE_COMMAND
-                "./configure"
-                ${FAISS_CONFIGURE_ARGS}
-                BUILD_COMMAND
-                ${MAKE} ${MAKE_BUILD_ARGS} all
-                BUILD_IN_SOURCE
-                1
-                INSTALL_COMMAND
-                ${MAKE} install
-                BUILD_BYPRODUCTS
-                ${FAISS_STATIC_LIB})
+        if (CUSTOMIZATION)
+            externalproject_add(faiss_ep
+                    DOWNLOAD_COMMAND
+                    ""
+                    SOURCE_DIR
+                    ${FAISS_SOURCE_DIR}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${FAISS_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS} all
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${FAISS_STATIC_LIB})
+        else ()
+            externalproject_add(faiss_ep
+                    URL
+                    ${FAISS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${FAISS_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS} all
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${FAISS_STATIC_LIB})
+        endif ()
 
         if (NOT FAISS_WITH_MKL)
             ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
