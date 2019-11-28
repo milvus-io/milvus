@@ -290,45 +290,50 @@ MySQLMetaImpl::Initialize() {
     // step 4: validate to avoid open old version schema
     ValidateMetaSchema();
 
-    // step 5: create meta tables
-    try {
-        if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-            CleanUpShadowFiles();
-        }
+    // step 5: clean shadow files
+    if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        CleanUpShadowFiles();
+    }
 
-        {
-            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+    // step 6: try connect mysql server
+    mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
-                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
-            }
+    if (connectionPtr == nullptr) {
+        std::string msg = "Failed to connect MySQL meta server: " + uri;
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_INVALID_META_URI, msg);
+    }
 
-            if (!connectionPtr->thread_aware()) {
-                ENGINE_LOG_ERROR << "MySQL++ wasn't built with thread awareness! Can't run without it.";
-                return Status(DB_ERROR, "MySQL++ wasn't built with thread awareness! Can't run without it.");
-            }
-            mysqlpp::Query InitializeQuery = connectionPtr->query();
+    if (!connectionPtr->thread_aware()) {
+        std::string msg =
+            "Failed to initialize MySQL meta backend: MySQL client component wasn't built with thread awareness";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_INVALID_META_URI, msg);
+    }
 
-            InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " ("
-                            << TABLES_SCHEMA.ToString() + ");";
+    // step 7: create meta table Tables
+    mysqlpp::Query InitializeQuery = connectionPtr->query();
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " (" << TABLES_SCHEMA.ToString() + ");";
 
-            if (!InitializeQuery.exec()) {
-                return HandleException("Initialization Error", InitializeQuery.error());
-            }
+    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-            InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
-                            << TABLEFILES_SCHEMA.ToString() + ");";
+    if (!InitializeQuery.exec()) {
+        std::string msg = "Failed to create meta table 'Tables' in MySQL";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_META_TRANSACTION_FAILED, msg);
+    }
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    // step 8: create meta table TableFiles
+    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
+                    << TABLEFILES_SCHEMA.ToString() + ");";
 
-            if (!InitializeQuery.exec()) {
-                return HandleException("Initialization Error", InitializeQuery.error());
-            }
-        }  // Scoped Connection
-    } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
+    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+
+    if (!InitializeQuery.exec()) {
+        std::string msg = "Failed to create meta table 'TableFiles' in MySQL";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
 
     return Status::OK();
@@ -1610,10 +1615,34 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 }
             }
 
-            ENGINE_LOG_DEBUG << "Table " << table_id << " currently has raw files:" << raw_count
-                             << " new files:" << new_count << " new_merge files:" << new_merge_count
-                             << " new_index files:" << new_index_count << " to_index files:" << to_index_count
-                             << " index files:" << index_count << " backup files:" << backup_count;
+            std::string msg = "Get table files by type.";
+            for (int file_type : file_types) {
+                switch (file_type) {
+                    case (int)TableFileSchema::RAW:
+                        msg = msg + " raw files:" + std::to_string(raw_count);
+                        break;
+                    case (int)TableFileSchema::NEW:
+                        msg = msg + " new files:" + std::to_string(new_count);
+                        break;
+                    case (int)TableFileSchema::NEW_MERGE:
+                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
+                        break;
+                    case (int)TableFileSchema::NEW_INDEX:
+                        msg = msg + " new_index files:" + std::to_string(new_index_count);
+                        break;
+                    case (int)TableFileSchema::TO_INDEX:
+                        msg = msg + " to_index files:" + std::to_string(to_index_count);
+                        break;
+                    case (int)TableFileSchema::INDEX:
+                        msg = msg + " index files:" + std::to_string(index_count);
+                        break;
+                    case (int)TableFileSchema::BACKUP:
+                        msg = msg + " backup files:" + std::to_string(backup_count);
+                        break;
+                    default:break;
+                }
+            }
+            ENGINE_LOG_DEBUG << msg;
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());

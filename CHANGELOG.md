@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
 - \#486 - gpu no usage during index building
+- \#497 - CPU-version search performance decreased
 - \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
@@ -31,7 +32,10 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#532 - assigin value to `table_name` from confest shell
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
-- \#497 - CPU-version search performance decreased 
+- \#545 - Avoid dead circle of build index thread when error occurs
+- \#552 - Server down during building index_type: IVF_PQ using GPU-edition
+- \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#599 - Build index log is incorrect
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -48,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#255 - Add ivfsq8 test report detailed version
 - \#260 - C++ SDK README
 - \#266 - Rpc request source code refactor
+- \#274 - Logger the time cost during preloading data
 - \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#306 - Use int64 for all config integer
@@ -61,6 +66,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#433 - C++ SDK query result is not easy to use
 - \#449 - Add ShowPartitions example for C++ SDK
 - \#470 - Small raw files should not be build index
+- \#584 - Intergrate internal FAISS
 
 ## Task
 
