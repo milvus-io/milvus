@@ -85,18 +85,18 @@ struct RowRecord {
  * @brief TopK query result
  */
 struct QueryResult {
-    std::vector<int64_t> ids;
-    std::vector<float> distances;
+    std::vector<int64_t> ids;                      ///< Query ids result
+    std::vector<float> distances;                  ///< Query distances result
 };
-using TopKQueryResult = std::vector<QueryResult>;
+using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
 
 /**
  * @brief index parameters
  */
 struct IndexParam {
-    std::string table_name;
-    IndexType index_type;
-    int32_t nlist;
+    std::string table_name;  ///< Table name for create index
+    IndexType index_type;    ///< Create index type
+    int32_t nlist;           ///< Index nlist
 };
 
 /**
@@ -211,13 +211,13 @@ class Connection {
     HasTable(const std::string& table_name) = 0;
 
     /**
-     * @brief Delete table method
+     * @brief Drop table method
      *
-     * This method is used to delete table(and its partitions).
+     * This method is used to drop table(and its partitions).
      *
      * @param table_name, target table's name.
      *
-     * @return Indicate if table is delete successfully.
+     * @return Indicate if table is drop successfully.
      */
     virtual Status
     DropTable(const std::string& table_name) = 0;
@@ -239,9 +239,9 @@ class Connection {
     CreateIndex(const IndexParam& index_param) = 0;
 
     /**
-     * @brief Add vector to table
+     * @brief Insert vector to table
      *
-     * This method is used to add vector array to table.
+     * This method is used to insert vector array to table.
      *
      * @param table_name, target table's name.
      * @param partition_tag, target partition's tag, keep empty if no partition.
@@ -264,6 +264,7 @@ class Connection {
      * @param query_record_array, all vector are going to be queried.
      * @param query_range_array, time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
+     * @param nprobe, the number of centroids choose to search.
      * @param topk_query_result_array, result array.
      *
      * @return Indicate if query is successful.
@@ -346,7 +347,7 @@ class Connection {
      *
      * This method is internal used.
      *
-     * @return Server status.
+     * @return Task information in tasktables.
      */
     virtual std::string
     DumpTaskTables() const = 0;
