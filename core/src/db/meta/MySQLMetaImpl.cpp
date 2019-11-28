@@ -1639,7 +1639,8 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                     case (int)TableFileSchema::BACKUP:
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
