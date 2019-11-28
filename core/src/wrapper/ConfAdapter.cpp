@@ -152,7 +152,9 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
 
     if (resset.empty()) {
         // todo(linxj): throw exception here.
-        return nullptr;
+        WRAPPER_LOG_ERROR << "The dims of PQ is wrong!";
+        throw WrapperException("The dims of PQ is wrong!");
+        // return nullptr;
     }
     static int64_t compression_level = 1;  // 1:low, 2:high
     if (compression_level == 1) {
