@@ -28,7 +28,7 @@ class TimeRecorder {
  public:
     explicit TimeRecorder(const std::string& header, int64_t log_level = 1);
 
-    ~TimeRecorder();  // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
+    virtual ~TimeRecorder();  // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
 
     double
     RecordSection(const std::string& msg);
@@ -48,6 +48,13 @@ class TimeRecorder {
     stdclock::time_point start_;
     stdclock::time_point last_;
     int64_t log_level_;
+};
+
+class TimeRecorderAuto : public TimeRecorder {
+ public:
+    explicit TimeRecorderAuto(const std::string& header, int64_t log_level = 1);
+
+    ~TimeRecorderAuto();
 };
 
 }  // namespace milvus
