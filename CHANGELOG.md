@@ -35,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#545 - Avoid dead circle of build index thread when error occurs
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#599 - Build index log is incorrect
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
