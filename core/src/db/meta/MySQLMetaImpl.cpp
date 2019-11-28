@@ -290,45 +290,49 @@ MySQLMetaImpl::Initialize() {
     // step 4: validate to avoid open old version schema
     ValidateMetaSchema();
 
-    // step 5: create meta tables
-    try {
-        if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-            CleanUpShadowFiles();
-        }
+    // step 5: clean shadow files
+    if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        CleanUpShadowFiles();
+    }
 
-        {
-            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+    // step 6: try connect mysql server
+    mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
-                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
-            }
+    if (connectionPtr == nullptr) {
+        std::string msg = "Failed to connect mysql meta server: " + uri;
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_INVALID_META_URI, msg);
+    }
 
-            if (!connectionPtr->thread_aware()) {
-                ENGINE_LOG_ERROR << "MySQL++ wasn't built with thread awareness! Can't run without it.";
-                return Status(DB_ERROR, "MySQL++ wasn't built with thread awareness! Can't run without it.");
-            }
-            mysqlpp::Query InitializeQuery = connectionPtr->query();
+    if (!connectionPtr->thread_aware()) {
+        std::string msg = "MySQL++ wasn't built with thread awareness! Can't run without it.";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_INVALID_META_URI, msg);
+    }
 
-            InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " ("
-                            << TABLES_SCHEMA.ToString() + ");";
+    // step 7: create meta table Tables
+    mysqlpp::Query InitializeQuery = connectionPtr->query();
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " (" << TABLES_SCHEMA.ToString() + ");";
 
-            if (!InitializeQuery.exec()) {
-                return HandleException("Initialization Error", InitializeQuery.error());
-            }
+    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-            InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
-                            << TABLEFILES_SCHEMA.ToString() + ");";
+    if (!InitializeQuery.exec()) {
+        std::string msg = "Failed to create meta table 'Tables' in mysql";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_META_TRANSACTION_FAILED, msg);
+    }
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+    // step 8: create meta table TableFiles
+    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
+                    << TABLEFILES_SCHEMA.ToString() + ");";
 
-            if (!InitializeQuery.exec()) {
-                return HandleException("Initialization Error", InitializeQuery.error());
-            }
-        }  // Scoped Connection
-    } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
+    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+
+    if (!InitializeQuery.exec()) {
+        std::string msg = "Failed to create meta table 'TableFiles' in mysql";
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
 
     return Status::OK();
