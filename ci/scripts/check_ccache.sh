@@ -46,7 +46,7 @@ check_ccache() {
     echo "fetching ${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
     wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
     if [[ $? == 0 ]];then
-        wget "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
+        wget -q "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
         mkdir -p ${CCACHE_DIRECTORY} && \
         tar zxf ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz -C ${CCACHE_DIRECTORY} && \
         rm ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz
