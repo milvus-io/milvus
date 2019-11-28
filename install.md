@@ -152,9 +152,10 @@ $ ./start_server.sh
 `protocol https not supported or disabled in libcurl`.
 First, make sure you have `libcurl4-openssl-dev` installed in your system.
 Then try reinstall CMake from source with `--system-curl` option:
-```shell
-$ ./bootstrap --system-curl 
-$ make 
-$ sudo make install
-```
+
+   ```shell
+   $ ./bootstrap --system-curl 
+   $ make 
+   $ sudo make install
+   ```
 
