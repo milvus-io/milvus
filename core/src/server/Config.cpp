@@ -20,6 +20,7 @@
 #include <iostream>
 #include <regex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config/YamlConfigMgr.h"
@@ -32,6 +33,8 @@ namespace milvus {
 namespace server {
 
 constexpr uint64_t GB = 1UL << 30;
+
+static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"}});
 
 Config&
 Config::GetInstance() {
@@ -68,6 +71,12 @@ Config::LoadConfigFile(const std::string& filename) {
 Status
 Config::ValidateConfig() {
     Status s;
+
+    std::string config_version;
+    s = GetConfigVersion(config_version);
+    if (!s.ok()) {
+        return s;
+    }
 
     /* server config */
     std::string server_addr;
@@ -383,6 +392,16 @@ Config::PrintAll() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+Status
+Config::CheckConfigVersion(const std::string& value) {
+    if (milvus_config_version_map.at(MILVUS_VERSION) != value) {
+        std::string msg = "Invalid config version: " + value +
+                          ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
 Status
 Config::CheckServerConfigAddress(const std::string& value) {
     if (!ValidationUtil::ValidateIpAddress(value).ok()) {
@@ -766,10 +785,14 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
-Config::GetConfigNode(const std::string& name) {
+Config::GetConfigRoot() {
     ConfigMgr* mgr = YamlConfigMgr::GetInstance();
-    ConfigNode& root_node = mgr->GetRootNode();
-    return root_node.GetChild(name);
+    return mgr->GetRootNode();
+}
+
+ConfigNode&
+Config::GetConfigNode(const std::string& name) {
+    return GetConfigRoot().GetChild(name);
 }
 
 Status
@@ -814,6 +837,12 @@ Config::GetConfigSequenceStr(const std::string& parent_key, const std::string& c
         SetConfigValueInMem(parent_key, child_key, value);
     }
     return value;
+}
+
+Status
+Config::GetConfigVersion(std::string& value) {
+    value = GetConfigRoot().GetValue(CONFIG_VERSION);
+    return CheckConfigVersion(value);
 }
 
 Status
