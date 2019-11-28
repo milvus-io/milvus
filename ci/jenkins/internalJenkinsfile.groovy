@@ -18,9 +18,8 @@ pipeline {
     environment {
         PROJECT_NAME = "milvus"
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
-        SEMVER = "${BRANCH_NAME}"
-        JOBNAMES = env.JOB_NAME.split('/')
-        PIPELINE_NAME = "${JOBNAMES[0]}"
+        SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : '${BRANCH_NAME}'}"
+        PIPELINE_NAME = "${env.JOB_NAME.contains('/') ? env.JOB_NAME.getAt(0..(env.JOB_NAME.indexOf('/') - 1)) : '${env.JOB_NAME}'}"
     }
 
     stages {
