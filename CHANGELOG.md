@@ -33,6 +33,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
 - \#545 - Avoid dead circle of build index thread when error occurs
+- \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
 
 ## Feature
