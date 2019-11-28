@@ -120,8 +120,8 @@ $ wget https://github.com/milvus-io/milvus/archive/0.6.0.zip
 Unzip the source package:
 
 ```shell
-$ Apt-get update
-$ Apt-get install unzip
+$ apt-get update
+$ apt-get install unzip
 $ unzip ./0.6.0.zip
 ```
 
