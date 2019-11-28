@@ -35,13 +35,13 @@
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_io.h>
 
-#ifdef USE_FAISS_V_0_3_0 // faiss_0.3.0
+#ifdef USE_FAISS_V_0_3_0  // faiss_0.3.0
 
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/index_factory.h>
 #include <faiss/utils/distances.h>
 
-#else // faiss_0.2.1
+#else  // faiss_0.2.1
 
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/utils.h>
@@ -210,7 +210,8 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
     size_t min_k = std::min(ground_k, k);
     int hit = 0;
     for (int i = 0; i < nq; i++) {
-        std::set<faiss::Index::idx_t> ground(ground_index + i * ground_k, ground_index + i * ground_k + min_k);
+        std::set<faiss::Index::idx_t> ground(ground_index + i * ground_k,
+                                             ground_index + i * ground_k + min_k / index_add_loops);
         for (int j = 0; j < min_k; j++) {
             faiss::Index::idx_t id = index[i * k + j];
             if (ground.count(id) > 0) {
