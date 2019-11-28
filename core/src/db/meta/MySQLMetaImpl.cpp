@@ -299,13 +299,14 @@ MySQLMetaImpl::Initialize() {
     mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
     if (connectionPtr == nullptr) {
-        std::string msg = "Failed to connect mysql meta server: " + uri;
+        std::string msg = "Failed to connect MySQL meta server: " + uri;
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_INVALID_META_URI, msg);
     }
 
     if (!connectionPtr->thread_aware()) {
-        std::string msg = "MySQL++ wasn't built with thread awareness! Can't run without it.";
+        std::string msg =
+            "Failed to initialize MySQL meta backend: MySQL client component wasn't built with thread awareness";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_INVALID_META_URI, msg);
     }
@@ -318,7 +319,7 @@ MySQLMetaImpl::Initialize() {
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
     if (!InitializeQuery.exec()) {
-        std::string msg = "Failed to create meta table 'Tables' in mysql";
+        std::string msg = "Failed to create meta table 'Tables' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
@@ -330,7 +331,7 @@ MySQLMetaImpl::Initialize() {
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
     if (!InitializeQuery.exec()) {
-        std::string msg = "Failed to create meta table 'TableFiles' in mysql";
+        std::string msg = "Failed to create meta table 'TableFiles' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
     }
