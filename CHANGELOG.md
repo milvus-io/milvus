@@ -21,6 +21,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
+- \#485 - Increase code coverage rate
 - \#486 - gpu no usage during index building
 - \#497 - CPU-version search performance decreased
 - \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
