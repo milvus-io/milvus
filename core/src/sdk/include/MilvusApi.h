@@ -142,8 +142,8 @@ class Connection {
     /**
      * @brief Connect
      *
-     * Connect function should be called before any operations
-     * Server will be connected after Connect return OK
+     * This method is used to connect server.
+     * Connect function should be called before any operations.
      *
      * @param param, use to provide server information
      *
@@ -156,10 +156,10 @@ class Connection {
     /**
      * @brief Connect
      *
-     * Connect function should be called before any operations
-     * Server will be connected after Connect return OK
+     * This method is used to connect server.
+     * Connect function should be called before any operations.
      *
-     * @param uri, use to provide server information, example: milvus://ipaddress:port
+     * @param uri, use to provide server uri, example: milvus://ipaddress:port
      *
      * @return Indicate if connect is successful
      */
@@ -169,7 +169,7 @@ class Connection {
     /**
      * @brief connected
      *
-     * Connection status.
+     * This method is used to test whether server is connected.
      *
      * @return Indicate if connection status
      */
@@ -179,7 +179,7 @@ class Connection {
     /**
      * @brief Disconnect
      *
-     * Server will be disconnected after Disconnect return OK
+     * This method is used to disconnect server.
      *
      * @return Indicate if disconnect is successful
      */
@@ -189,7 +189,7 @@ class Connection {
     /**
      * @brief Create table method
      *
-     * This method is used to create table
+     * This method is used to create table.
      *
      * @param param, use to provide table information to be created.
      *
@@ -201,7 +201,7 @@ class Connection {
     /**
      * @brief Test table existence method
      *
-     * This method is used to create table
+     * This method is used to create table.
      *
      * @param table_name, target table's name.
      *
@@ -246,7 +246,10 @@ class Connection {
      * @param table_name, target table's name.
      * @param partition_tag, target partition's tag, keep empty if no partition.
      * @param record_array, vector array is inserted.
-     * @param id_array, after inserted every vector is given a id.
+     * @param id_array,
+     *  specify id for each vector,
+     *  if this array is empty, milvus will generate unique id for each vector,
+     *  and return all ids by this parameter.
      *
      * @return Indicate if vector array are inserted successfully
      */
@@ -259,10 +262,10 @@ class Connection {
      *
      * This method is used to query vector in table.
      *
-     * @param table_name, target table's name, keep empty if no partition.
-     * @param partition_tags, target partitions.
+     * @param table_name, target table's name.
+     * @param partition_tags, target partitions, keep empty if no partition.
      * @param query_record_array, all vector are going to be queried.
-     * @param query_range_array, time ranges, if not specified, will search in whole table
+     * @param query_range_array, [deprecated] time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
      * @param nprobe, the number of centroids choose to search.
      * @param topk_query_result_array, result array.
@@ -305,7 +308,7 @@ class Connection {
      *
      * This method is used to list all tables.
      *
-     * @param table_array, all tables are push into the array.
+     * @param table_array, all tables in database.
      *
      * @return Indicate if this operation is successful.
      */
@@ -353,6 +356,7 @@ class Connection {
     DumpTaskTables() const = 0;
 
     /**
+     * [deprecated]
      * @brief delete tables by date range
      *
      * This method is used to delete table data by date range.
