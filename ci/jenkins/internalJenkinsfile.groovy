@@ -1,17 +1,8 @@
 #!/usr/bin/env groovy
 
-String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
-cron_string =  BRANCH_NAME == "0.6.0" ? "H 1 * * * " : cron_string
-
 pipeline {
     agent none
-
-    triggers {
-        cron """${cron_timezone}
-            ${cron_string}"""
-    }
-
+    
     options {
         timestamps()
     }
@@ -19,9 +10,9 @@ pipeline {
     parameters{
         choice choices: ['Release', 'Debug'], description: 'Build Type', name: 'BUILD_TYPE'
         string defaultValue: 'registry.zilliz.com', description: 'DOCKER REGISTRY URL', name: 'DOKCER_REGISTRY_URL', trim: true
-        string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
-        string defaultValue: 'http://192.168.1.202/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
-        string defaultValue: '1a527823-d2b7-44fd-834b-9844350baf14', description: 'JFROG CREDENTIALS ID', name: 'JFROG_CREDENTIALS_ID', trim: true
+        string defaultValue: 'a54e38ef-c424-4ea9-9224-b25fc20e3924', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
+        string defaultValue: 'http://192.168.1.201/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
+        string defaultValue: '76fd48ab-2b8e-4eed-834d-2eefd23bb3a6', description: 'JFROG CREDENTIALS ID', name: 'JFROG_CREDENTIALS_ID', trim: true
     }
 
     environment {
@@ -55,7 +46,45 @@ pipeline {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: milvus-gpu-build-env
+  labels:
+    app: milvus
+    componet: gpu-build-env
+spec:
+  containers:
+  - name: milvus-gpu-build-env
+    image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.6.0-ubuntu18.04
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: BUILD_ENV_IMAGE_ID
+      value: "da9023b0f858f072672f86483a869aa87e90a5140864f89e5a012ec766d96dea"
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "24Gi"
+        cpu: "8.0"
+        nvidia.com/gpu: 1
+      requests:
+        memory: "16Gi"
+        cpu: "4.0"
+  - name: milvus-mysql
+    image: mysql:5.6
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: 123456
+    ports:
+    - containerPort: 3306
+      name: mysql
+                                    """
                                 }
                             }
 
@@ -73,7 +102,7 @@ pipeline {
                                     steps {
                                         container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                                load "${env.WORKSPACE}/ci/jenkins/step/internalCoverage.groovy"
                                             }
                                         }
                                     }
@@ -95,7 +124,30 @@ pipeline {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/docker-pod.yaml'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: publish
+    componet: docker
+spec:
+  containers:
+  - name: publish-images
+    image: registry.zilliz.com/library/docker:v1.0.0
+    securityContext:
+      privileged: true
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+"""
                                 }
                             }
 
@@ -122,7 +174,29 @@ pipeline {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test-env
+spec:
+  containers:
+  - name: milvus-test-env
+    image: registry.zilliz.com/milvus/milvus-test-env:v0.1
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: test-cluster-config
+"""
                                 }
                             }
 
@@ -172,7 +246,7 @@ pipeline {
                                 }
                             }
                         }
-                    }
+    				}
                 }
 
                 stage ("CPU Version") {
@@ -190,7 +264,44 @@ pipeline {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-build"
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: milvus-cpu-build-env
+  labels:
+    app: milvus
+    componet: cpu-build-env
+spec:
+  containers:
+  - name: milvus-cpu-build-env
+    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.6.0-ubuntu18.04
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: BUILD_ENV_IMAGE_ID
+      value: "23476391bec80c64f10d44a6370c73c71f011a6b95114b10ff82a60e771e11c7"
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "24Gi"
+        cpu: "8.0"
+      requests:
+        memory: "16Gi"
+        cpu: "4.0"
+  - name: milvus-mysql
+    image: mysql:5.6
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: 123456
+    ports:
+    - containerPort: 3306
+      name: mysql
+                                    """
                                 }
                             }
 
@@ -208,7 +319,7 @@ pipeline {
                                     steps {
                                         container("milvus-${env.BINRARY_VERSION}-build-env") {
                                             script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                                load "${env.WORKSPACE}/ci/jenkins/step/internalCoverage.groovy"
                                             }
                                         }
                                     }
@@ -230,7 +341,30 @@ pipeline {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-publish"
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/docker-pod.yaml'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: publish
+    componet: docker
+spec:
+  containers:
+  - name: publish-images
+    image: registry.zilliz.com/library/docker:v1.0.0
+    securityContext:
+      privileged: true
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+"""
                                 }
                             }
 
@@ -257,7 +391,29 @@ pipeline {
                                 kubernetes {
                                     label "${env.BINRARY_VERSION}-dev-test"
                                     defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test-env
+spec:
+  containers:
+  - name: milvus-test-env
+    image: registry.zilliz.com/milvus/milvus-test-env:v0.1
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: test-cluster-config
+"""
                                 }
                             }
 
