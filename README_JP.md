@@ -61,6 +61,8 @@ C++サンプルコードを実行するために、次のコマンドをつか�
 
 - [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs)
 
+- [Milvusのよくある質問](https://www.milvus.io/docs/en/faq/operational_faq/)
+
 - [Milvus Medium](https://medium.com/@milvusio)
 
 - [Milvus CSDN](https://zilliz.blog.csdn.net/)

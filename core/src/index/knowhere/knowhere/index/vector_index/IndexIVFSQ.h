@@ -38,8 +38,8 @@ class IVFSQ : public IVF {
     CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
 
  protected:
-    VectorIndexPtr
-    Clone_impl(const std::shared_ptr<faiss::Index>& index) override;
+    //    VectorIndexPtr
+    //    Clone_impl(const std::shared_ptr<faiss::Index>& index) override;
 };
 
 }  // namespace knowhere

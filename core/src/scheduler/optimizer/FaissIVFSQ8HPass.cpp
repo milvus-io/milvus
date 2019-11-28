@@ -14,7 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+#ifdef MILVUS_GPU_VERSION
 #include "scheduler/optimizer/FaissIVFSQ8HPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
@@ -29,7 +29,7 @@ namespace scheduler {
 
 void
 FaissIVFSQ8HPass::Init() {
-#ifdef MILVUS_GPU_VERSION
+#ifdef CUSTOMIZATION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -41,6 +41,7 @@ FaissIVFSQ8HPass::Init() {
 
 bool
 FaissIVFSQ8HPass::Run(const TaskPtr& task) {
+#ifdef CUSTOMIZATION
     if (task->Type() != TaskType::SearchTask) {
         return false;
     }
@@ -65,7 +66,9 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
     return true;
+#endif
 }
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

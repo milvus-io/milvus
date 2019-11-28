@@ -77,8 +77,8 @@ class ExecutionEngine {
     virtual Status
     CopyToCpu() = 0;
 
-    virtual std::shared_ptr<ExecutionEngine>
-    Clone() = 0;
+    //    virtual std::shared_ptr<ExecutionEngine>
+    //    Clone() = 0;
 
     virtual Status
     Merge(const std::string& location) = 0;

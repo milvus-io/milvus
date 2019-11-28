@@ -62,6 +62,7 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type);
+        conf->Dump();
     }
 
     void

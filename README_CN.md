@@ -69,6 +69,8 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 
 - [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs)
 
+- [Milvus 常见问题](https://www.milvus.io/docs/zh-CN/faq/operational_faq/)
+
 - [Milvus Medium](https://medium.com/@milvusio)
 
 - [Milvus CSDN](https://zilliz.blog.csdn.net/)

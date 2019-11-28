@@ -415,18 +415,18 @@ ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-ExecutionEnginePtr
-ExecutionEngineImpl::Clone() {
-    if (index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
-        return nullptr;
-    }
-
-    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
-    ret->Init();
-    ret->index_ = index_->Clone();
-    return ret;
-}
+// ExecutionEnginePtr
+// ExecutionEngineImpl::Clone() {
+//    if (index_ == nullptr) {
+//        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
+//        return nullptr;
+//    }
+//
+//    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
+//    ret->Init();
+//    ret->index_ = index_->Clone();
+//    return ret;
+//}
 
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {

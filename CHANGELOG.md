@@ -22,6 +22,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
 - \#486 - gpu no usage during index building
+- \#497 - CPU-version search performance decreased
+- \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
 - \#523 - Erase file data from cache once the file is marked as deleted
@@ -30,6 +32,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#532 - assigin value to `table_name` from confest shell
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
+- \#545 - Avoid dead circle of build index thread when error occurs
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -52,12 +55,14 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 - \#314 - add Find FAISS in CMake
 - \#322 - Add option to enable / disable prometheus
+- \#354 - Build migration scripts into milvus docker image
 - \#358 - Add more information in build.sh and install.md
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
 - \#433 - C++ SDK query result is not easy to use
 - \#449 - Add ShowPartitions example for C++ SDK
 - \#470 - Small raw files should not be build index
+- \#584 - Intergrate internal FAISS
 
 ## Task
 

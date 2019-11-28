@@ -25,6 +25,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -34,8 +35,6 @@
 
 namespace milvus {
 namespace engine {
-
-class Env;
 
 namespace meta {
 class Meta;
@@ -179,6 +178,21 @@ class DBImpl : public DB {
     Status
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
+    Status
+    CleanFailedIndexFileOfTable(const std::string& table_id);
+
+    Status
+    GetFailedIndexFileOfTable(const std::string& table_id, std::vector<std::string>& failed_files);
+
+    Status
+    MarkFailedIndexFile(const meta::TableFileSchema& file);
+
+    Status
+    MarkSucceedIndexFile(const meta::TableFileSchema& file);
+
+    Status
+    IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files);
+
  private:
     const DBOptions options_;
 
@@ -200,7 +214,11 @@ class DBImpl : public DB {
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;
-};  // DBImpl
+    std::mutex index_failed_mutex_;
+    using FileID2FailedTimes = std::map<std::string, uint64_t>;
+    using Table2FailedFiles = std::map<std::string, FileID2FailedTimes>;
+    Table2FailedFiles index_failed_files_;  // file id mapping to failed times
+};                                          // DBImpl
 
 }  // namespace engine
 }  // namespace milvus

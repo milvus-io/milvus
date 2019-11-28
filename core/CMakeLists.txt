@@ -35,15 +35,15 @@ if (NOT DEFINED CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
 endif ()
 
-set (GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
+set(GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
 
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
     execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g'"
             OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    if(NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
+    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
         execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
     endif ()
-    if(NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
+    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
         execute_process(COMMAND "git" symbolic-ref --short -q HEAD HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
     endif ()
 ENDMACRO(GET_GIT_BRANCH_NAME)
@@ -79,7 +79,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
     set(MILVUS_VERSION "0.6.0")
-endif()
+endif ()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY)
@@ -141,6 +141,11 @@ if (MILVUS_USE_CCACHE)
     endif (CCACHE_FOUND)
 endif ()
 
+if (CUSTOMIZATION)
+    set(MILVUS_GPU_VERSION ON)
+    add_compile_definitions(CUSTOMIZATION)
+endif ()
+
 set(MILVUS_CPU_VERSION false)
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Milvus GPU version")
@@ -170,10 +175,6 @@ else ()
     endif ()
 endif ()
 
-if (CUSTOMIZATION)
-    add_definitions(-DCUSTOMIZATION)
-endif (CUSTOMIZATION)
-
 config_summary()
 add_subdirectory(src)
 
@@ -187,7 +188,7 @@ endif ()
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
 if ("${MILVUS_DB_PATH}" STREQUAL "")
-    set(MILVUS_DB_PATH "/tmp/milvus")
+    set(MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}")
 endif ()
 
 if (MILVUS_GPU_VERSION)
@@ -204,6 +205,11 @@ install(DIRECTORY scripts/
         GROUP_EXECUTE GROUP_READ
         WORLD_EXECUTE WORLD_READ
         FILES_MATCHING PATTERN "*.sh")
+install(DIRECTORY scripts/migration
+        DESTINATION scripts
+        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        GROUP_EXECUTE GROUP_READ
+        WORLD_EXECUTE WORLD_READ)
 install(FILES
         conf/server_config.yaml
         conf/log_config.conf

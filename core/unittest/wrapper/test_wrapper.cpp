@@ -181,12 +181,22 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
 
 TEST(whatever, test_config) {
     milvus::engine::TempMetaConf conf;
+    conf.nprobe = 16;
     auto nsg_conf = std::make_shared<milvus::engine::NSGConfAdapter>();
     nsg_conf->Match(conf);
-    nsg_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_GPU);
+    nsg_conf->MatchSearch(conf, milvus::engine::IndexType::NSG_MIX);
 
     auto pq_conf = std::make_shared<milvus::engine::IVFPQConfAdapter>();
     pq_conf->Match(conf);
+    pq_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_MIX);
+
+    auto kdt_conf = std::make_shared<milvus::engine::SPTAGKDTConfAdapter>();
+    kdt_conf->Match(conf);
+    kdt_conf->MatchSearch(conf, milvus::engine::IndexType::SPTAG_KDT_RNT_CPU);
+
+    auto bkt_conf = std::make_shared<milvus::engine::SPTAGBKTConfAdapter>();
+    bkt_conf->Match(conf);
+    bkt_conf->MatchSearch(conf, milvus::engine::IndexType::SPTAG_BKT_RNT_CPU);
 }
 
 // #include "knowhere/index/vector_index/IndexIDMAP.h"

@@ -229,7 +229,7 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
 void
 CommonUtil::EraseFromCache(const std::string& item_key) {
     if (item_key.empty()) {
-        SERVER_LOG_ERROR << "Empty key cannot be erased from cache";
+        //        SERVER_LOG_ERROR << "Empty key cannot be erased from cache";
         return;
     }
 
