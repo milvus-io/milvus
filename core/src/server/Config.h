@@ -101,8 +101,10 @@ static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 
-// TODO: request id
-static const char* CONFIG_REQUEST_ID_DEFAULT = "request_id";
+// TODO:
+/* tracing config */
+static const char* CONFIG_TRACING = "tracing_config";
+static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 class Config {
  public:
@@ -262,6 +264,10 @@ class Config {
     Status
     GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value);
 #endif
+
+    /* tracing config */
+    Status
+    GetTracingConfigJsonConfigPath(std::string& value);
 
  public:
     /* server config */

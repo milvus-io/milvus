@@ -29,8 +29,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 
-#include "tracing/TracerUtil.h"
-
 INITIALIZE_EASYLOGGINGPP
 
 void
@@ -70,10 +68,6 @@ print_banner() {
 
 int
 main(int argc, char* argv[]) {
-
-    std::string config_path = "/home/zhiru/work/milvus/core/src/tracing/config.json";
-    TracerUtil::InitGlobal(config_path);
-
     print_banner();
 
     static struct option long_options[] = {{"conf_file", required_argument, nullptr, 'c'},

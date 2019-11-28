@@ -32,6 +32,8 @@
 #include "utils/TimeRecorder.h"
 #include "wrapper/KnowhereResource.h"
 
+#include "tracing/TracerUtil.h"
+
 namespace milvus {
 namespace server {
 
@@ -152,8 +154,14 @@ Server::Start() {
             return s;
         }
 
-        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         Config& config = Config::GetInstance();
+
+        /* Init opentracing tracer from config */
+        std::string tracing_config_path;
+        s = config.GetTracingConfigJsonConfigPath(tracing_config_path);
+        tracing_config_path.empty() ? TracerUtil::InitGlobal() : TracerUtil::InitGlobal(tracing_config_path);
+
+        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         std::string time_zone;
         s = config.GetServerConfigTimeZone(time_zone);
         if (!s.ok()) {
