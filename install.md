@@ -75,9 +75,9 @@ $ ./stop_server.sh
 
 ## Compile Milvus on Docker
 
-With this dockerfile, you should be able to compile CPU-only or GPU-enabled Milvus on any Linux platform that run Docker. To build a GPU-enabled Milvus, you neeed to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
+With this dockerfile, you should be able to compile Milvus on any Linux platform that run Docker. To build a GPU supported Milvus, you neeed to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
 
-### Step 1 Pull Milvus Docker images
+#### Step 1 Pull Milvus Docker images
 
 Pull CPU-only image:
 
@@ -90,7 +90,7 @@ Pull GPU-enabled image:
 ```shell
 $ Docker pull milvusdb/milvus-gpu-build-env:v0.6.0-ubuntu18.04
 ```
-### Step 2 Start the Docker container
+#### Step 2 Start the Docker container
 
 Start a CPU-only container:
 
@@ -108,7 +108,7 @@ To enter the container:
 ```shell
 $ Docker exec -it [container_id] bash
 ```
-### Step 3 Download Milvus source code and compile it in the container
+#### Step 3 Download Milvus source code
 
 Download Milvus source code:
 
@@ -125,14 +125,19 @@ $ Apt-get install unzip
 $ unzip ./0.6.0.zip
 ```
 
-The source code is extracted into a folder called `milvus-0.6.0`. 
+The source code is extracted into a folder called `milvus-0.6.0`. To enter its core directory:
+
+```shell
+$ cd ./milvus-0.6.0/core
+```
+#### Step 4 Compile Milvus in the container
 
 If you are using a CPU-only image, compile it like this:
 ```shell
 $ ./build.sh -t Release
 ```
 
-For GPU-enabled image, you need to add a `-g` parameter:
+If you are using a GPU-enabled image, you need to add a `-g` parameter:
 ```shell
 $ ./build.sh -g -t Release
 ```
