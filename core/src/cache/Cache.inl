@@ -179,7 +179,7 @@ Cache<ItemObj>::print() {
     }
 
     SERVER_LOG_DEBUG << "[Cache item count]: " << cache_count;
-#if 0
+#if 1
     for (auto it = lru_.begin(); it != lru_.end(); ++it) {
         SERVER_LOG_DEBUG << it->first;
     }

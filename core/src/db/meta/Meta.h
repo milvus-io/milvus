@@ -128,9 +128,6 @@ class Meta {
     CleanUpShadowFiles() = 0;
 
     virtual Status
-    CleanUpCacheWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) = 0;
-
-    virtual Status
     CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) = 0;
 
     virtual Status

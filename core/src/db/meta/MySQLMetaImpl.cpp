@@ -1783,55 +1783,6 @@ MySQLMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, CleanUpFilter* filter) {
-    auto now = utils::GetMicroSecTimeStamp();
-
-    // erase deleted/backup files from cache
-    try {
-        server::MetricCollector metric;
-
-        mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
-
-        if (connectionPtr == nullptr) {
-            return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
-        }
-
-        mysqlpp::Query query = connectionPtr->query();
-        query << "SELECT id, table_id, file_id, date"
-              << " FROM " << META_TABLEFILES << " WHERE file_type IN (" << std::to_string(TableFileSchema::TO_DELETE)
-              << "," << std::to_string(TableFileSchema::BACKUP) << ")"
-              << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
-
-        mysqlpp::StoreQueryResult res = query.store();
-
-        TableFileSchema table_file;
-        std::vector<std::string> idsToDelete;
-
-        for (auto& resRow : res) {
-            table_file.id_ = resRow["id"];  // implicit conversion
-            resRow["table_id"].to_string(table_file.table_id_);
-            resRow["file_id"].to_string(table_file.file_id_);
-            table_file.date_ = resRow["date"];
-
-            // check if the file can be erased
-            if (filter && filter->IsIgnored(table_file)) {
-                ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
-                                 << " currently is in use, not able to erase from cache now";
-                continue;  // ignore this file, don't erase it
-            }
-
-            // erase file data from cache
-            utils::GetTableFilePath(options_, table_file);
-            server::CommonUtil::EraseFromCache(table_file.location_);
-        }
-    } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
-    }
-
-    return Status::OK();
-}
-
-Status
 MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
@@ -1875,6 +1826,9 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 // delete file from disk storage
                 utils::DeleteTableFilePath(options_, table_file);
                 ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
+
+                // erase file data from cache
+                server::CommonUtil::EraseFromCache(table_file.location_);
 
                 idsToDelete.emplace_back(std::to_string(table_file.id_));
                 table_ids.insert(table_file.table_id_);
