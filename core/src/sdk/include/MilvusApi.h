@@ -85,18 +85,18 @@ struct RowRecord {
  * @brief TopK query result
  */
 struct QueryResult {
-    std::vector<int64_t> ids;
-    std::vector<float> distances;
+    std::vector<int64_t> ids;      ///< Query ids result
+    std::vector<float> distances;  ///< Query distances result
 };
-using TopKQueryResult = std::vector<QueryResult>;
+using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
 
 /**
  * @brief index parameters
  */
 struct IndexParam {
-    std::string table_name;
-    IndexType index_type;
-    int32_t nlist;
+    std::string table_name;  ///< Table name for create index
+    IndexType index_type;    ///< Create index type
+    int32_t nlist;           ///< Index nlist
 };
 
 /**
@@ -142,8 +142,8 @@ class Connection {
     /**
      * @brief Connect
      *
-     * Connect function should be called before any operations
-     * Server will be connected after Connect return OK
+     * This method is used to connect server.
+     * Connect function should be called before any operations.
      *
      * @param param, use to provide server information
      *
@@ -156,10 +156,10 @@ class Connection {
     /**
      * @brief Connect
      *
-     * Connect function should be called before any operations
-     * Server will be connected after Connect return OK
+     * This method is used to connect server.
+     * Connect function should be called before any operations.
      *
-     * @param uri, use to provide server information, example: milvus://ipaddress:port
+     * @param uri, use to provide server uri, example: milvus://ipaddress:port
      *
      * @return Indicate if connect is successful
      */
@@ -169,7 +169,7 @@ class Connection {
     /**
      * @brief connected
      *
-     * Connection status.
+     * This method is used to test whether server is connected.
      *
      * @return Indicate if connection status
      */
@@ -179,7 +179,7 @@ class Connection {
     /**
      * @brief Disconnect
      *
-     * Server will be disconnected after Disconnect return OK
+     * This method is used to disconnect server.
      *
      * @return Indicate if disconnect is successful
      */
@@ -189,7 +189,7 @@ class Connection {
     /**
      * @brief Create table method
      *
-     * This method is used to create table
+     * This method is used to create table.
      *
      * @param param, use to provide table information to be created.
      *
@@ -201,7 +201,7 @@ class Connection {
     /**
      * @brief Test table existence method
      *
-     * This method is used to create table
+     * This method is used to create table.
      *
      * @param table_name, target table's name.
      *
@@ -211,13 +211,13 @@ class Connection {
     HasTable(const std::string& table_name) = 0;
 
     /**
-     * @brief Delete table method
+     * @brief Drop table method
      *
-     * This method is used to delete table(and its partitions).
+     * This method is used to drop table(and its partitions).
      *
      * @param table_name, target table's name.
      *
-     * @return Indicate if table is delete successfully.
+     * @return Indicate if table is drop successfully.
      */
     virtual Status
     DropTable(const std::string& table_name) = 0;
@@ -239,14 +239,17 @@ class Connection {
     CreateIndex(const IndexParam& index_param) = 0;
 
     /**
-     * @brief Add vector to table
+     * @brief Insert vector to table
      *
-     * This method is used to add vector array to table.
+     * This method is used to insert vector array to table.
      *
      * @param table_name, target table's name.
      * @param partition_tag, target partition's tag, keep empty if no partition.
      * @param record_array, vector array is inserted.
-     * @param id_array, after inserted every vector is given a id.
+     * @param id_array,
+     *  specify id for each vector,
+     *  if this array is empty, milvus will generate unique id for each vector,
+     *  and return all ids by this parameter.
      *
      * @return Indicate if vector array are inserted successfully
      */
@@ -259,11 +262,12 @@ class Connection {
      *
      * This method is used to query vector in table.
      *
-     * @param table_name, target table's name, keep empty if no partition.
-     * @param partition_tags, target partitions.
+     * @param table_name, target table's name.
+     * @param partition_tags, target partitions, keep empty if no partition.
      * @param query_record_array, all vector are going to be queried.
-     * @param query_range_array, time ranges, if not specified, will search in whole table
+     * @param query_range_array, [deprecated] time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
+     * @param nprobe, the number of centroids choose to search.
      * @param topk_query_result_array, result array.
      *
      * @return Indicate if query is successful.
@@ -304,7 +308,7 @@ class Connection {
      *
      * This method is used to list all tables.
      *
-     * @param table_array, all tables are push into the array.
+     * @param table_array, all tables in database.
      *
      * @return Indicate if this operation is successful.
      */
@@ -346,12 +350,13 @@ class Connection {
      *
      * This method is internal used.
      *
-     * @return Server status.
+     * @return Task information in tasktables.
      */
     virtual std::string
     DumpTaskTables() const = 0;
 
     /**
+     * [deprecated]
      * @brief delete tables by date range
      *
      * This method is used to delete table data by date range.
