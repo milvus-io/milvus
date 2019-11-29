@@ -21,6 +21,9 @@
 
 #include <faiss/Index.h>
 #include <stdint.h>
+#include <map>
+#include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -39,6 +42,9 @@ struct TableIndex {
     int32_t nlist_ = 16384;
     int32_t metric_type_ = (int)MetricType::L2;
 };
+
+using File2RefCount = std::map<std::string, int64_t>;
+using Table2Files = std::map<std::string, File2RefCount>;
 
 }  // namespace engine
 }  // namespace milvus

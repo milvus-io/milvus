@@ -82,7 +82,7 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_fil
 
     auto iter = ongoing_files_.find(table_file.table_id_);
     if (iter == ongoing_files_.end()) {
-        meta::File2RefCount files_refcount;
+        File2RefCount files_refcount;
         files_refcount.insert(std::make_pair(table_file.file_id_, 1));
         ongoing_files_.insert(std::make_pair(table_file.table_id_, files_refcount));
     } else {

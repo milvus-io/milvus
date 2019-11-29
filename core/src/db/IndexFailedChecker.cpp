@@ -38,7 +38,7 @@ IndexFailedChecker::GetFailedIndexFileOfTable(const std::string& table_id, std::
     std::lock_guard<std::mutex> lck(mutex_);
     auto iter = index_failed_files_.find(table_id);
     if (iter != index_failed_files_.end()) {
-        meta::File2RefCount& failed_map = iter->second;
+        File2RefCount& failed_map = iter->second;
         for (auto it_file = failed_map.begin(); it_file != failed_map.end(); ++it_file) {
             failed_files.push_back(it_file->first);
         }
@@ -53,7 +53,7 @@ IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file) {
 
     auto iter = index_failed_files_.find(file.table_id_);
     if (iter == index_failed_files_.end()) {
-        meta::File2RefCount failed_files;
+        File2RefCount failed_files;
         failed_files.insert(std::make_pair(file.file_id_, 1));
         index_failed_files_.insert(std::make_pair(file.table_id_, failed_files));
     } else {

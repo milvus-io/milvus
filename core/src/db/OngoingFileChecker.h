@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "db/Types.h"
 #include "meta/Meta.h"
 #include "utils/Status.h"
 
@@ -54,7 +55,7 @@ class OngoingFileChecker : public meta::Meta::CleanUpFilter {
 
  private:
     std::mutex mutex_;
-    meta::Table2Files ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
+    Table2Files ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
 };
 
 }  // namespace engine

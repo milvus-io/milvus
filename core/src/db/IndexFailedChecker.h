@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "db/Types.h"
 #include "meta/Meta.h"
 #include "utils/Status.h"
 
@@ -47,7 +48,7 @@ class IndexFailedChecker {
 
  private:
     std::mutex mutex_;
-    meta::Table2Files index_failed_files_;  // table id mapping to (file id mapping to failed times)
+    Table2Files index_failed_files_;  // table id mapping to (file id mapping to failed times)
 };
 
 }  // namespace engine
