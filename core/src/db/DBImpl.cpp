@@ -1033,10 +1033,10 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     if (!failed_files.empty()) {
         std::string msg = "Failed to build index for " + std::to_string(failed_files.size()) +
                           ((failed_files.size() == 1) ? " file" : " files");
-#ifdef MILVUS_CPU_VERSION
-        msg += ", please double check index parameters.";
-#else
+#ifdef MILVUS_GPU_VERSION
         msg += ", file size is too large or gpu memory is not enough.";
+#else
+        msg += ", please double check index parameters.";
 #endif
         return Status(DB_ERROR, msg);
     }
