@@ -117,7 +117,13 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
 
     // TODO(linxj): dev IndexFactory, support more IndexType
 #ifdef MILVUS_GPU_VERSION
+    auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(build_cfg->gpu_id);
+#if temp_resource == nullptr
+    auto preprocess_index = std::make_shared<IVF>();
+#else
     auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+#endif
+
 #else
     auto preprocess_index = std::make_shared<IVF>();
 #endif
