@@ -570,7 +570,10 @@ class TestIndexIP:
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        assert status.OK()
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            assert not status.OK()
+        else:
+            assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, ip_table, get_index_params):
