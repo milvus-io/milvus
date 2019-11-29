@@ -75,6 +75,9 @@ IndexFailedChecker::MarkSucceedIndexFile(const meta::TableFileSchema& file) {
     auto iter = index_failed_files_.find(file.table_id_);
     if (iter != index_failed_files_.end()) {
         iter->second.erase(file.file_id_);
+        if (iter->second.empty()) {
+            index_failed_files_.erase(file.table_id_);
+        }
     }
 
     return Status::OK();

@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/IndexFailedChecker.h"
+#include "db/OngoingFileChecker.h"
 #include "db/Options.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
@@ -118,4 +120,66 @@ TEST(DBMiscTest, UTILS_TEST) {
 
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());
+}
+
+TEST(DBMiscTest, CHECKER_TEST) {
+    {
+        milvus::engine::IndexFailedChecker checker;
+        milvus::engine::meta::TableFileSchema schema;
+        schema.table_id_ = "aaa";
+        schema.file_id_ = "5000";
+        checker.MarkFailedIndexFile(schema);
+        schema.table_id_ = "bbb";
+        schema.file_id_ = "5001";
+        checker.MarkFailedIndexFile(schema);
+
+        std::vector<std::string> failed_files;
+        checker.GetFailedIndexFileOfTable("aaa", failed_files);
+        ASSERT_EQ(failed_files.size(), 1UL);
+
+        schema.table_id_ = "bbb";
+        schema.file_id_ = "5002";
+        checker.MarkFailedIndexFile(schema);
+        checker.MarkFailedIndexFile(schema);
+
+        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        checker.IgnoreFailedIndexFiles(table_files);
+        ASSERT_TRUE(table_files.empty());
+
+        checker.GetFailedIndexFileOfTable("bbb", failed_files);
+        ASSERT_EQ(failed_files.size(), 2UL);
+
+        checker.MarkSucceedIndexFile(schema);
+        checker.GetFailedIndexFileOfTable("bbb", failed_files);
+        ASSERT_EQ(failed_files.size(), 1UL);
+    }
+
+    {
+        milvus::engine::OngoingFileChecker checker;
+        milvus::engine::meta::TableFileSchema schema;
+        schema.table_id_ = "aaa";
+        schema.file_id_ = "5000";
+        checker.MarkOngoingFile(schema);
+
+        auto ongoing_files = checker.GetOngoingFiles();
+        ASSERT_EQ(ongoing_files.size(), 1UL);
+
+        schema.table_id_ = "bbb";
+        schema.file_id_ = "5001";
+        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        checker.MarkOngoingFiles(table_files);
+
+        ongoing_files = checker.GetOngoingFiles();
+        ASSERT_EQ(ongoing_files.size(), 2UL);
+
+        checker.UnmarkOngoingFile(schema);
+        ongoing_files = checker.GetOngoingFiles();
+        ASSERT_EQ(ongoing_files.size(), 1UL);
+
+        schema.table_id_ = "aaa";
+        schema.file_id_ = "5000";
+        checker.UnmarkOngoingFile(schema);
+        ongoing_files = checker.GetOngoingFiles();
+        ASSERT_EQ(ongoing_files.size(), 0UL);
+    }
 }
