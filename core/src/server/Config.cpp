@@ -205,6 +205,7 @@ Config::ValidateConfig() {
         return s;
     }
 
+    std::cout << "GPU resources " << (gpu_resource_enable ? "ENABLED !" : "DISABLED !") << std::endl;
     if (gpu_resource_enable) {
         int64_t resource_cache_capacity;
         s = GetGpuResourceConfigCacheCapacity(resource_cache_capacity);
