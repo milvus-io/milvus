@@ -121,10 +121,10 @@ class Meta {
     CleanUpShadowFiles() = 0;
 
     virtual Status
-    CleanUpCacheWithTTL(uint64_t seconds) = 0;
+    CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) = 0;
 
     virtual Status
-    CleanUpFilesWithTTL(uint64_t seconds) = 0;
+    CleanUpFilesWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) = 0;
 
     virtual Status
     DropAll() = 0;

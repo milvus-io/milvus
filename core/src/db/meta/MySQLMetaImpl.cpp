@@ -1639,7 +1639,8 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                     case (int)TableFileSchema::BACKUP:
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
@@ -1782,7 +1783,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
+MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) {
     auto now = utils::GetMicroSecTimeStamp();
 
     // erase deleted/backup files from cache
@@ -1795,14 +1796,13 @@ MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
-        mysqlpp::Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-        cleanUpFilesWithTTLQuery << "SELECT id, table_id, file_id, date"
-                                 << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
-                                 << std::to_string(TableFileSchema::TO_DELETE) << ","
-                                 << std::to_string(TableFileSchema::BACKUP) << ")"
-                                 << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
+        mysqlpp::Query query = connectionPtr->query();
+        query << "SELECT id, table_id, file_id, date"
+              << " FROM " << META_TABLEFILES << " WHERE file_type IN (" << std::to_string(TableFileSchema::TO_DELETE)
+              << "," << std::to_string(TableFileSchema::BACKUP) << ")"
+              << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-        mysqlpp::StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
+        mysqlpp::StoreQueryResult res = query.store();
 
         TableFileSchema table_file;
         std::vector<std::string> idsToDelete;
@@ -1824,7 +1824,7 @@ MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
 }
 
 Status
-MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
+MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1839,15 +1839,14 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-            cleanUpFilesWithTTLQuery << "SELECT id, table_id, file_id, date"
-                                     << " FROM " << META_TABLEFILES
-                                     << " WHERE file_type = " << std::to_string(TableFileSchema::TO_DELETE)
-                                     << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
+            mysqlpp::Query query = connectionPtr->query();
+            query << "SELECT id, table_id, file_id, date"
+                  << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(TableFileSchema::TO_DELETE)
+                  << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
 
-            mysqlpp::StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
+            mysqlpp::StoreQueryResult res = query.store();
 
             TableFileSchema table_file;
             std::vector<std::string> idsToDelete;
@@ -1874,13 +1873,12 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
 
                 std::string idsToDeleteStr = idsToDeleteSS.str();
                 idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
-                cleanUpFilesWithTTLQuery << "DELETE FROM " << META_TABLEFILES << " WHERE " << idsToDeleteStr << ";";
+                query << "DELETE FROM " << META_TABLEFILES << " WHERE " << idsToDeleteStr << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
 
-                if (!cleanUpFilesWithTTLQuery.exec()) {
-                    return HandleException("QUERY ERROR WHEN CLEANING UP FILES WITH TTL",
-                                           cleanUpFilesWithTTLQuery.error());
+                if (!query.exec()) {
+                    return HandleException("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", query.error());
                 }
             }
 
@@ -1903,14 +1901,13 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
-            mysqlpp::Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-            cleanUpFilesWithTTLQuery << "SELECT id, table_id"
-                                     << " FROM " << META_TABLES
-                                     << " WHERE state = " << std::to_string(TableSchema::TO_DELETE) << ";";
+            mysqlpp::Query query = connectionPtr->query();
+            query << "SELECT id, table_id"
+                  << " FROM " << META_TABLES << " WHERE state = " << std::to_string(TableSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
 
-            mysqlpp::StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
+            mysqlpp::StoreQueryResult res = query.store();
 
             int64_t remove_tables = 0;
             if (!res.empty()) {
@@ -1926,13 +1923,12 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
                 }
                 std::string idsToDeleteStr = idsToDeleteSS.str();
                 idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
-                cleanUpFilesWithTTLQuery << "DELETE FROM " << META_TABLES << " WHERE " << idsToDeleteStr << ";";
+                query << "DELETE FROM " << META_TABLES << " WHERE " << idsToDeleteStr << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
 
-                if (!cleanUpFilesWithTTLQuery.exec()) {
-                    return HandleException("QUERY ERROR WHEN CLEANING UP TABLES WITH TTL",
-                                           cleanUpFilesWithTTLQuery.error());
+                if (!query.exec()) {
+                    return HandleException("QUERY ERROR WHEN CLEANING UP TABLES WITH TTL", query.error());
                 }
             }
 
@@ -1957,14 +1953,13 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
             }
 
             for (auto& table_id : table_ids) {
-                mysqlpp::Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-                cleanUpFilesWithTTLQuery << "SELECT file_id"
-                                         << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote
-                                         << table_id << ";";
+                mysqlpp::Query query = connectionPtr->query();
+                query << "SELECT file_id"
+                      << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
 
-                mysqlpp::StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
+                mysqlpp::StoreQueryResult res = query.store();
 
                 if (res.empty()) {
                     utils::DeleteTablePath(options_, table_id);

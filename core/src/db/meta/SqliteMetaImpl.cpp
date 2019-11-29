@@ -1294,7 +1294,7 @@ SqliteMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
+SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) {
     auto now = utils::GetMicroSecTimeStamp();
 
     // erase deleted/backup files from cache
@@ -1309,6 +1309,7 @@ SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
             (int)TableFileSchema::BACKUP,
         };
 
+        // collect files to be erased
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                   &TableFileSchema::table_id_,
                                                   &TableFileSchema::file_id_,
@@ -1326,6 +1327,15 @@ SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
             table_file.file_id_ = std::get<2>(file);
             table_file.date_ = std::get<3>(file);
 
+            // check if the file can be deleted
+            auto iter = ignore_files.find(table_file.table_id_);
+            if (iter != ignore_files.end()) {
+                if (iter->second.find(table_file.file_id_) != iter->second.end()) {
+                    continue; // ignore this file, don't delete it
+                }
+            }
+
+            // erase file data from cache
             utils::GetTableFilePath(options_, table_file);
             server::CommonUtil::EraseFromCache(table_file.location_);
         }
@@ -1338,7 +1348,7 @@ SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
 }
 
 Status
-SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
+SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1349,6 +1359,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
+        // collect files to be deleted
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                   &TableFileSchema::table_id_,
                                                   &TableFileSchema::file_id_,
@@ -1368,10 +1379,20 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
                 table_file.file_id_ = std::get<2>(file);
                 table_file.date_ = std::get<3>(file);
 
-                utils::DeleteTableFilePath(options_, table_file);
-                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.file_id_ << " location:" << table_file.location_;
+                // check if the file can be deleted
+                auto iter = ignore_files.find(table_file.table_id_);
+                if (iter != ignore_files.end()) {
+                    if (iter->second.find(table_file.file_id_) != iter->second.end()) {
+                        continue; // ignore this file, don't delete it
+                    }
+                }
+
+                // delete file from meta
                 ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
+                // delete file from disk storage
+                utils::DeleteTableFilePath(options_, table_file);
+                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.file_id_ << " location:" << table_file.location_;
                 table_ids.insert(table_file.table_id_);
             }
             return true;
