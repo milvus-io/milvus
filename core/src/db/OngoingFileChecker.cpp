@@ -108,14 +108,20 @@ OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_f
 
     auto iter = ongoing_files_.find(table_file.table_id_);
     if (iter != ongoing_files_.end()) {
-        iter->second.erase(table_file.file_id_);
-        if (iter->second.empty()) {
-            ongoing_files_.erase(table_file.table_id_);
+        auto it_file = iter->second.find(table_file.file_id_);
+        if (it_file != iter->second.end()) {
+            it_file->second--;
+
+            ENGINE_LOG_DEBUG << "Unmark ongoing file:" << table_file.file_id_ << " refcount:" << it_file->second;
+
+            if (it_file->second <= 0) {
+                iter->second.erase(table_file.file_id_);
+                if (iter->second.empty()) {
+                    ongoing_files_.erase(table_file.table_id_);
+                }
+            }
         }
     }
-
-    ENGINE_LOG_DEBUG << "Mark ongoing file:" << table_file.file_id_
-                     << " refcount:" << ongoing_files_[table_file.table_id_][table_file.file_id_];
 
     return Status::OK();
 }
