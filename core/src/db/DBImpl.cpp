@@ -706,7 +706,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
     // step 3: serialize to disk
     try {
         status = index->Serialize();
-        if (status.ok()) {
+        if (!status.ok()) {
             ENGINE_LOG_ERROR << status.message();
         }
     } catch (std::exception& ex) {

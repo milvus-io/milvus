@@ -169,7 +169,7 @@ XBuildIndexTask::Execute() {
         // step 5: save index file
         try {
             status = index->Serialize();
-            if (status.ok()) {
+            if (!status.ok()) {
                 ENGINE_LOG_ERROR << status.message();
             }
         } catch (std::exception& ex) {

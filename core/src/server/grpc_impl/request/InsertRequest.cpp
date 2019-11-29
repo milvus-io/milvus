@@ -45,7 +45,9 @@ InsertRequest::Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus:
 Status
 InsertRequest::OnExecute() {
     try {
-        TimeRecorder rc("InsertRequest");
+        std::string hdr = "InsertRequest(table=" + insert_param_->table_name() +
+                          ", n=" + std::to_string(insert_param_->row_record_array_size()) + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(insert_param_->table_name());
