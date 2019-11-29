@@ -62,10 +62,10 @@ if [[ -n "${CHANGE_BRANCH}" && "${BRANCH_NAME}" =~ "PR-" ]];then
     check_ccache ${BRANCH_NAME}
 fi
 
-for BRANCH in ${BRANCH_NAMES}
+for CURRENT_BRANCH in ${BRANCH_NAMES}
 do
-    if [[ "${BRANCH}" != "HEAD" ]];then
-        check_ccache ${BRANCH}
+    if [[ "${CURRENT_BRANCH}" != "HEAD" ]];then
+        check_ccache ${CURRENT_BRANCH}
     fi
 done
 
