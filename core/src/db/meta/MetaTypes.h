@@ -23,6 +23,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -96,6 +97,9 @@ struct TableFileSchema {
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;
 using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
+
+using FileIDArray = std::set<std::string>;
+using Table2FileIDs = std::map<std::string, FileIDArray>;
 
 }  // namespace meta
 }  // namespace engine

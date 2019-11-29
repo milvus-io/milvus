@@ -18,8 +18,10 @@
 #pragma once
 
 #include "DB.h"
-#include "Types.h"
-#include "src/db/insert/MemManager.h"
+#include "db/IndexFailedChecker.h"
+#include "db/OngoingFileChecker.h"
+#include "db/Types.h"
+#include "db/insert/MemManager.h"
 #include "utils/ThreadPool.h"
 
 #include <atomic>
@@ -178,21 +180,6 @@ class DBImpl : public DB {
     Status
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
-    Status
-    CleanFailedIndexFileOfTable(const std::string& table_id);
-
-    Status
-    GetFailedIndexFileOfTable(const std::string& table_id, std::vector<std::string>& failed_files);
-
-    Status
-    MarkFailedIndexFile(const meta::TableFileSchema& file);
-
-    Status
-    MarkSucceedIndexFile(const meta::TableFileSchema& file);
-
-    Status
-    IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files);
-
  private:
     const DBOptions options_;
 
@@ -214,11 +201,10 @@ class DBImpl : public DB {
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;
-    std::mutex index_failed_mutex_;
-    using FileID2FailedTimes = std::map<std::string, uint64_t>;
-    using Table2FailedFiles = std::map<std::string, FileID2FailedTimes>;
-    Table2FailedFiles index_failed_files_;  // file id mapping to failed times
-};                                          // DBImpl
+
+    IndexFailedChecker index_failed_checker_;
+    OngoingFileChecker ongoing_files_checker_;
+};  // DBImpl
 
 }  // namespace engine
 }  // namespace milvus
