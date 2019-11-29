@@ -119,42 +119,49 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
 
     GETTENSOR(dataset)
 
-    auto elems = rows * search_cfg->k;
-    auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
-    auto res_dis = (float*)malloc(sizeof(float) * elems);
+    try {
+        auto elems = rows * search_cfg->k;
+        auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
+        auto res_dis = (float *) malloc(sizeof(float) * elems);
 
-    search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
+        search_impl(rows, (float *) p_data, search_cfg->k, res_dis, res_ids, config);
 
-    //    std::stringstream ss_res_id, ss_res_dist;
-    //    for (int i = 0; i < 10; ++i) {
-    //        printf("%llu", res_ids[i]);
-    //        printf("\n");
-    //        printf("%.6f", res_dis[i]);
-    //        printf("\n");
-    //        ss_res_id << res_ids[i] << " ";
-    //        ss_res_dist << res_dis[i] << " ";
-    //    }
-    //    std::cout << std::endl << "after search: " << std::endl;
-    //    std::cout << ss_res_id.str() << std::endl;
-    //    std::cout << ss_res_dist.str() << std::endl << std::endl;
+        //    std::stringstream ss_res_id, ss_res_dist;
+        //    for (int i = 0; i < 10; ++i) {
+        //        printf("%llu", res_ids[i]);
+        //        printf("\n");
+        //        printf("%.6f", res_dis[i]);
+        //        printf("\n");
+        //        ss_res_id << res_ids[i] << " ";
+        //        ss_res_dist << res_dis[i] << " ";
+        //    }
+        //    std::cout << std::endl << "after search: " << std::endl;
+        //    std::cout << ss_res_id.str() << std::endl;
+        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
 
-    //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
-    //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
-    //
-    //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
-    //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
-    //
-    //    auto int64_type = std::make_shared<arrow::Int64Type>();
-    //    auto float_type = std::make_shared<arrow::FloatType>();
-    //
-    //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
-    //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
-    //
-    //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
-    //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
-    //    std::vector<ArrayPtr> array{ids, dists};
+        //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
+        //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
+        //
+        //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
+        //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
+        //
+        //    auto int64_type = std::make_shared<arrow::Int64Type>();
+        //    auto float_type = std::make_shared<arrow::FloatType>();
+        //
+        //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
+        //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
+        //
+        //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
+        //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
+        //    std::vector<ArrayPtr> array{ids, dists};
 
-    return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
+        return std::make_shared<Dataset>((void *) res_ids, (void *) res_dis);
+
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 void
