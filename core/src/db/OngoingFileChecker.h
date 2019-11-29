@@ -28,7 +28,7 @@
 namespace milvus {
 namespace engine {
 
-class OngoingFileChecker {
+class OngoingFileChecker : public meta::Meta::CleanUpFilter {
  public:
     Status
     MarkOngoingFile(const meta::TableFileSchema& table_file);
@@ -42,8 +42,8 @@ class OngoingFileChecker {
     Status
     UnmarkOngoingFiles(const meta::TableFilesSchema& table_files);
 
-    meta::Table2FileIDs
-    GetOngoingFiles();
+    bool
+    IsIgnored(const meta::TableFileSchema& schema) override;
 
  private:
     Status
@@ -54,7 +54,7 @@ class OngoingFileChecker {
 
  private:
     std::mutex mutex_;
-    meta::Table2FileIDs ongoing_files_;
+    meta::Table2Files ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
 };
 
 }  // namespace engine
