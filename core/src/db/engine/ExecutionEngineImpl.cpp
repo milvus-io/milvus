@@ -611,6 +611,9 @@ ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
+    if (!s.ok()) {
+        gpu_num_ = knowhere::INVALID_VALUE;
+    }
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
             return Status::OK();
