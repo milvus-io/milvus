@@ -21,11 +21,11 @@ spec:
     tty: true
     resources:
       limits:
-        memory: "32Gi"
+        memory: "12Gi"
         cpu: "8.0"
         nvidia.com/gpu: 1
       requests:
-        memory: "16Gi"
+        memory: "8Gi"
         cpu: "4.0"
   - name: milvus-mysql
     image: mysql:5.6
