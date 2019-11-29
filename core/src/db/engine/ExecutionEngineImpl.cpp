@@ -112,10 +112,12 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::NSG_MIX);
             break;
         }
+#ifdef CUSTOMIZATION
         case EngineType::FAISS_IVFSQ8H: {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
             break;
         }
+#endif
         case EngineType::FAISS_PQ: {
 #ifdef MILVUS_CPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
