@@ -792,12 +792,12 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     meta_ptr_->Archive();
 
     {
-        uint64_t ttl = 1 * meta::SECOND;  // default: file data will be erase from cache after few seconds
+        uint64_t ttl = 10 * meta::SECOND;  // default: file data will be erase from cache after few seconds
         meta_ptr_->CleanUpCacheWithTTL(ttl, &ongoing_files_checker_);
     }
 
     {
-        uint64_t ttl = 1 * meta::SECOND;  // default: file will be deleted after few seconds
+        uint64_t ttl = 20 * meta::SECOND;  // default: file will be deleted after few seconds
         if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
             ttl = meta::H_SEC;
         }

@@ -168,7 +168,10 @@ XBuildIndexTask::Execute() {
 
         // step 5: save index file
         try {
-            index->Serialize();
+            status = index->Serialize();
+            if (status.ok()) {
+                ENGINE_LOG_DEBUG << "Failed to serilize index file: " << status.message();
+            }
         } catch (std::exception& ex) {
             // typical error: out of disk space or permition denied
             std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
@@ -196,7 +199,13 @@ XBuildIndexTask::Execute() {
         origin_file.file_type_ = engine::meta::TableFileSchema::BACKUP;
 
         engine::meta::TableFilesSchema update_files = {table_file, origin_file};
-        status = meta_ptr->UpdateTableFiles(update_files);
+
+        if (table_file.file_size_ > 0) {  // makesure index file is sucessfully serialized to disk
+            status = meta_ptr->UpdateTableFiles(update_files);
+        } else {
+            status = Status(DB_ERROR, "Illegal index file: out of disk space or memory");
+        }
+
         if (status.ok()) {
             ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << index->PhysicalSize()
                              << " bytes"
