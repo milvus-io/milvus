@@ -89,6 +89,9 @@ OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_f
     auto iter = ongoing_files_.find(table_file.table_id_);
     if (iter != ongoing_files_.end()) {
         iter->second.erase(table_file.file_id_);
+        if (iter->second.empty()) {
+            ongoing_files_.erase(table_file.table_id_);
+        }
     }
 
     return Status::OK();
