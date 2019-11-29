@@ -47,9 +47,7 @@ class IndexFailedChecker {
 
  private:
     std::mutex mutex_;
-    using FileID2FailedTimes = std::map<std::string, uint64_t>;
-    using Table2FailedFiles = std::map<std::string, FileID2FailedTimes>;
-    Table2FailedFiles index_failed_files_;  // file id mapping to failed times
+    meta::Table2Files index_failed_files_;  // table id mapping to (file id mapping to failed times)
 };
 
 }  // namespace engine

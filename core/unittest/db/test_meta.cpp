@@ -335,8 +335,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->DropTable(table_id);
     ASSERT_TRUE(status.ok());
 
-    milvus::engine::meta::Table2FileIDs ignore_files;
-    status = impl_->CleanUpFilesWithTTL(1UL, ignore_files);
+    status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 }
 

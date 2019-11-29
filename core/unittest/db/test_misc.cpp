@@ -20,6 +20,7 @@
 #include "db/Options.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
+#include "db/meta/MetaTypes.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "utils/Exception.h"
 #include "utils/Status.h"
@@ -161,25 +162,21 @@ TEST(DBMiscTest, CHECKER_TEST) {
         schema.file_id_ = "5000";
         checker.MarkOngoingFile(schema);
 
-        auto ongoing_files = checker.GetOngoingFiles();
-        ASSERT_EQ(ongoing_files.size(), 1UL);
+        ASSERT_TRUE(checker.IsIgnored(schema));
 
         schema.table_id_ = "bbb";
         schema.file_id_ = "5001";
         milvus::engine::meta::TableFilesSchema table_files = {schema};
         checker.MarkOngoingFiles(table_files);
 
-        ongoing_files = checker.GetOngoingFiles();
-        ASSERT_EQ(ongoing_files.size(), 2UL);
+        ASSERT_TRUE(checker.IsIgnored(schema));
 
         checker.UnmarkOngoingFile(schema);
-        ongoing_files = checker.GetOngoingFiles();
-        ASSERT_EQ(ongoing_files.size(), 1UL);
+        ASSERT_FALSE(checker.IsIgnored(schema));
 
         schema.table_id_ = "aaa";
         schema.file_id_ = "5000";
         checker.UnmarkOngoingFile(schema);
-        ongoing_files = checker.GetOngoingFiles();
-        ASSERT_EQ(ongoing_files.size(), 0UL);
+        ASSERT_FALSE(checker.IsIgnored(schema));
     }
 }

@@ -16,6 +16,7 @@
 // under the License.
 
 #include "db/OngoingFileChecker.h"
+#include "utils/Log.h"
 
 #include <utility>
 
@@ -56,11 +57,21 @@ OngoingFileChecker::UnmarkOngoingFiles(const meta::TableFilesSchema& table_files
     return Status::OK();
 }
 
-meta::Table2FileIDs
-OngoingFileChecker::GetOngoingFiles() {
-    // return copy
-    // don't return reference(avoid multi-threads conflict)
-    return ongoing_files_;
+bool
+OngoingFileChecker::IsIgnored(const meta::TableFileSchema& schema) {
+    std::lock_guard<std::mutex> lck(mutex_);
+
+    auto iter = ongoing_files_.find(schema.table_id_);
+    if (iter == ongoing_files_.end()) {
+        return false;
+    } else {
+        auto it_file = iter->second.find(schema.file_id_);
+        if (it_file == iter->second.end()) {
+            return false;
+        } else {
+            return (it_file->second > 0);
+        }
+    }
 }
 
 Status
@@ -71,11 +82,20 @@ OngoingFileChecker::MarkOngoingFileNoLock(const meta::TableFileSchema& table_fil
 
     auto iter = ongoing_files_.find(table_file.table_id_);
     if (iter == ongoing_files_.end()) {
-        meta::FileIDArray file_ids = {table_file.file_id_};
-        ongoing_files_.insert(std::make_pair(table_file.table_id_, file_ids));
+        meta::File2RefCount files_refcount;
+        files_refcount.insert(std::make_pair(table_file.file_id_, 1));
+        ongoing_files_.insert(std::make_pair(table_file.table_id_, files_refcount));
     } else {
-        iter->second.insert(table_file.file_id_);
+        auto it_file = iter->second.find(table_file.file_id_);
+        if (it_file == iter->second.end()) {
+            iter->second[table_file.file_id_] = 1;
+        } else {
+            it_file->second++;
+        }
     }
+
+    ENGINE_LOG_DEBUG << "Mark ongoing file:" << table_file.file_id_
+                     << " refcount:" << ongoing_files_[table_file.table_id_][table_file.file_id_];
 
     return Status::OK();
 }
@@ -93,6 +113,9 @@ OngoingFileChecker::UnmarkOngoingFileNoLock(const meta::TableFileSchema& table_f
             ongoing_files_.erase(table_file.table_id_);
         }
     }
+
+    ENGINE_LOG_DEBUG << "Mark ongoing file:" << table_file.file_id_
+                     << " refcount:" << ongoing_files_[table_file.table_id_][table_file.file_id_];
 
     return Status::OK();
 }

@@ -1783,7 +1783,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) {
+MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, CleanUpFilter* filter) {
     auto now = utils::GetMicroSecTimeStamp();
 
     // erase deleted/backup files from cache
@@ -1813,14 +1813,11 @@ MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignore
             resRow["file_id"].to_string(table_file.file_id_);
             table_file.date_ = resRow["date"];
 
-            // check if the file can be deleted
-            auto iter = ignore_files.find(table_file.table_id_);
-            if (iter != ignore_files.end()) {
-                if (iter->second.find(table_file.file_id_) != iter->second.end()) {
-                    ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
-                                     << " currently is in use, not able to erase from cache now";
-                    continue;  // ignore this file, don't delete it
-                }
+            // check if the file can be erased
+            if (filter && filter->IsIgnored(table_file)) {
+                ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
+                                 << " currently is in use, not able to erase from cache now";
+                continue;  // ignore this file, don't erase it
             }
 
             // erase file data from cache
@@ -1835,7 +1832,7 @@ MySQLMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignore
 }
 
 Status
-MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, const Table2FileIDs& ignore_files) {
+MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1869,13 +1866,10 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, const Table2FileIDs& ignore
                 table_file.date_ = resRow["date"];
 
                 // check if the file can be deleted
-                auto iter = ignore_files.find(table_file.table_id_);
-                if (iter != ignore_files.end()) {
-                    if (iter->second.find(table_file.file_id_) != iter->second.end()) {
-                        ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
-                                         << " currently is in use, not able to delete now";
-                        continue;  // ignore this file, don't delete it
-                    }
+                if (filter && filter->IsIgnored(table_file)) {
+                    ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
+                                     << " currently is in use, not able to delete now";
+                    continue;  // ignore this file, don't delete it
                 }
 
                 // delete file from disk storage
