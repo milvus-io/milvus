@@ -21,6 +21,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
+- \#485 - Increase code coverage rate
 - \#486 - gpu no usage during index building
 - \#497 - CPU-version search performance decreased
 - \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
@@ -49,6 +50,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#420 - Update shards merge part to match v0.5.3
 - \#488 - Add log in scheduler/optimizer
 - \#502 - C++ SDK support IVFPQ and SPTAG
+- \#560 - Add version in server config file
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
