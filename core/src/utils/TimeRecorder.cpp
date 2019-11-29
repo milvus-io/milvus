@@ -96,4 +96,11 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
     return span;
 }
 
+TimeRecorderAuto::TimeRecorderAuto(const std::string& header, int64_t log_level) : TimeRecorder(header, log_level) {
+}
+
+TimeRecorderAuto::~TimeRecorderAuto() {
+    ElapseFromBegin("totally cost");
+}
+
 }  // namespace milvus
