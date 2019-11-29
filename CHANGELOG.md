@@ -39,6 +39,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
+- \#606 - No log generated during building index with CPU
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -51,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#488 - Add log in scheduler/optimizer
 - \#502 - C++ SDK support IVFPQ and SPTAG
 - \#560 - Add version in server config file
+- \#605 - Print more messages when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
