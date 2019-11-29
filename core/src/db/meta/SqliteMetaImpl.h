@@ -120,9 +120,6 @@ class SqliteMetaImpl : public Meta {
     CleanUpShadowFiles() override;
 
     Status
-    CleanUpCacheWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) override;
-
-    Status
     CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) override;
 
     Status

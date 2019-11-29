@@ -170,22 +170,26 @@ XBuildIndexTask::Execute() {
         try {
             status = index->Serialize();
             if (status.ok()) {
-                ENGINE_LOG_DEBUG << "Failed to serilize index file: " << status.message();
+                ENGINE_LOG_ERROR << status.message();
             }
         } catch (std::exception& ex) {
-            // typical error: out of disk space or permition denied
             std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
+            status = Status(DB_ERROR, msg);
+        }
 
+        if (!status.ok()) {
+            // if failed to serialize index file to disk
+            // typical error: out of disk space, out of memory or permition denied
             table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
             ENGINE_LOG_ERROR << "Failed to persist index file: " << table_file.location_
-                             << ", possible out of disk space";
+                             << ", possible out of disk space or memory";
 
             build_index_job->BuildIndexDone(to_index_id_);
-            build_index_job->GetStatus() = Status(DB_ERROR, msg);
+            build_index_job->GetStatus() = status;
             to_index_engine_ = nullptr;
             return;
         }
@@ -200,10 +204,8 @@ XBuildIndexTask::Execute() {
 
         engine::meta::TableFilesSchema update_files = {table_file, origin_file};
 
-        if (table_file.file_size_ > 0) {  // makesure index file is sucessfully serialized to disk
+        if (status.ok()) {  // makesure index file is sucessfully serialized to disk
             status = meta_ptr->UpdateTableFiles(update_files);
-        } else {
-            status = Status(DB_ERROR, "Illegal index file: out of disk space or memory");
         }
 
         if (status.ok()) {

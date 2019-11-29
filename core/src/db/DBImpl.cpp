@@ -705,20 +705,27 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
     // step 3: serialize to disk
     try {
-        index->Serialize();
+        status = index->Serialize();
+        if (status.ok()) {
+            ENGINE_LOG_ERROR << status.message();
+        }
     } catch (std::exception& ex) {
-        // typical error: out of disk space or permition denied
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
+        status = Status(DB_ERROR, msg);
+    }
 
+    if (!status.ok()) {
+        // if failed to serialize merge file to disk
+        // typical error: out of disk space, out of memory or permition denied
         table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
         status = meta_ptr_->UpdateTableFile(table_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-        std::cout << "ERROR: failed to persist merged index file: " << table_file.location_
-                  << ", possible out of disk space" << std::endl;
+        ENGINE_LOG_ERROR << "ERROR: failed to persist merged file: " << table_file.location_
+                         << ", possible out of disk space or memory";
 
-        return Status(DB_ERROR, msg);
+        return status;
     }
 
     // step 4: update table files state
@@ -792,12 +799,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     meta_ptr_->Archive();
 
     {
-        uint64_t ttl = 10 * meta::SECOND;  // default: file data will be erase from cache after few seconds
-        meta_ptr_->CleanUpCacheWithTTL(ttl, &ongoing_files_checker_);
-    }
-
-    {
-        uint64_t ttl = 20 * meta::SECOND;  // default: file will be deleted after few seconds
+        uint64_t ttl = 1 * meta::SECOND;  // default: file will be deleted after few seconds
         if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
             ttl = meta::H_SEC;
         }

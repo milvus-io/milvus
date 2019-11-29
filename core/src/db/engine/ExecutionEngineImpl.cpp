@@ -265,6 +265,11 @@ ExecutionEngineImpl::Serialize() {
     index_->set_size(PhysicalSize());
     ENGINE_LOG_DEBUG << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
+    if (index_->Size() == 0) {
+        std::string msg = "Failed to serialize file: " + location_ + " reason: out of disk space or memory";
+        status = Status(DB_ERROR, msg);
+    }
+
     return status;
 }
 
