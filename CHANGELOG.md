@@ -47,6 +47,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#420 - Update shards merge part to match v0.5.3
 - \#488 - Add log in scheduler/optimizer
 - \#502 - C++ SDK support IVFPQ and SPTAG
+- \#560 - Add version in server config file
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
