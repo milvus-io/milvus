@@ -258,6 +258,7 @@ ExecutionEngineImpl::PhysicalSize() const {
 
 Status
 ExecutionEngineImpl::Serialize() {
+    ENGINE_LOG_DEBUG << "Serialize index size: " << index_->Size() << " to file: " << location_;
     auto status = write_index(index_, location_);
 
     // here we reset index size by file size,
@@ -495,6 +496,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, status.message());
     }
 
+    ENGINE_LOG_DEBUG << "Sucessfully build index file: " << location << " size: " << to_index->Size();
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 

@@ -20,7 +20,6 @@
 #include "db/Options.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
-#include "db/meta/MetaTypes.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "utils/Exception.h"
 #include "utils/Status.h"
