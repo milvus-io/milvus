@@ -1331,6 +1331,8 @@ SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds, const Table2FileIDs& ignor
             auto iter = ignore_files.find(table_file.table_id_);
             if (iter != ignore_files.end()) {
                 if (iter->second.find(table_file.file_id_) != iter->second.end()) {
+                    ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
+                                     << " currently is in use, not able to erase from cache now";
                     continue; // ignore this file, don't delete it
                 }
             }
@@ -1383,6 +1385,8 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, const Table2FileIDs& ignor
                 auto iter = ignore_files.find(table_file.table_id_);
                 if (iter != ignore_files.end()) {
                     if (iter->second.find(table_file.file_id_) != iter->second.end()) {
+                        ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
+                                         << " currently is in use, not able to delete now";
                         continue; // ignore this file, don't delete it
                     }
                 }

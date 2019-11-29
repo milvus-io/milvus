@@ -849,15 +849,16 @@ DBImpl::BackgroundBuildIndex() {
         status = ongoing_files_checker_.MarkOngoingFiles(to_index_files);
 
         // step 2: put build index task to scheduler
-        std::map<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr> job2file_map;
+        std::vector<std::pair<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr>> job2file_map;
         for (auto& file : to_index_files) {
             scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
             scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
             job->AddToIndexFiles(file_ptr);
             scheduler::JobMgrInst::GetInstance()->Put(job);
-            job2file_map.insert(std::make_pair(job, file_ptr));
+            job2file_map.push_back(std::make_pair(job, file_ptr));
         }
 
+        // step 3: wait build index finished and mark failed files
         for (auto iter = job2file_map.begin(); iter != job2file_map.end(); ++iter) {
             scheduler::BuildIndexJobPtr job = iter->first;
             meta::TableFileSchema& file_schema = *(iter->second.get());
