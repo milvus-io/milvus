@@ -131,7 +131,7 @@ GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, i
     if (auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
         auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(cfg);
         device_index->nprobe = search_cfg->nprobe;
-        //assert(device_index->getNumProbes() == search_cfg->nprobe);
+        // assert(device_index->getNumProbes() == search_cfg->nprobe);
         ResScope rs(res_, gpu_id_);
         device_index->search(n, (float*)data, k, distances, labels);
     } else {

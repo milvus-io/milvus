@@ -121,10 +121,10 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
 
     try {
         auto elems = rows * search_cfg->k;
-        auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
-        auto res_dis = (float *) malloc(sizeof(float) * elems);
+        auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
+        auto res_dis = (float*)malloc(sizeof(float) * elems);
 
-        search_impl(rows, (float *) p_data, search_cfg->k, res_dis, res_ids, config);
+        search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -155,8 +155,7 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
         //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
         //    std::vector<ArrayPtr> array{ids, dists};
 
-        return std::make_shared<Dataset>((void *) res_ids, (void *) res_dis);
-
+        return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
     } catch (faiss::FaissException& e) {
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
