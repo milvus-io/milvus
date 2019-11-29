@@ -118,8 +118,7 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     // TODO(linxj): dev IndexFactory, support more IndexType
     Graph knng;
 #ifdef MILVUS_GPU_VERSION
-    auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(build_cfg->gpu_id);
-    if (temp_resource == nullptr) {
+    if (build_cfg->gpu_id == knowhere::INVALID_VALUE) {
         auto preprocess_index = std::make_shared<IVF>();
         auto model = preprocess_index->Train(dataset, config);
         preprocess_index->set_index_model(model);
