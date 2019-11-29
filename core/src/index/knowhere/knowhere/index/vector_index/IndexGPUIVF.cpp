@@ -133,9 +133,11 @@ GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, i
         device_index->nprobe = search_cfg->nprobe;
         //        assert(device_index->getNumProbes() == search_cfg->nprobe);
 
-        {
+        try {
             ResScope rs(res_, gpu_id_);
             device_index->search(n, (float*)data, k, distances, labels);
+        } catch (faiss::FaissException& e) {
+            KNOWHERE_THROW_MSG(e.what());
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
