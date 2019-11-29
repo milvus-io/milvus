@@ -28,6 +28,8 @@
 namespace milvus {
 namespace server {
 
+static const char* CONFIG_VERSION = "version";
+
 /* server config */
 static const char* CONFIG_SERVER = "server_config";
 static const char* CONFIG_SERVER_ADDRESS = "address";
@@ -116,6 +118,8 @@ class Config {
 
  private:
     ConfigNode&
+    GetConfigRoot();
+    ConfigNode&
     GetConfigNode(const std::string& name);
     Status
     GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value);
@@ -125,6 +129,9 @@ class Config {
     PrintConfigSection(const std::string& config_node_name);
 
     ///////////////////////////////////////////////////////////////////////////
+    Status
+    CheckConfigVersion(const std::string& value);
+
     /* server config */
     Status
     CheckServerConfigAddress(const std::string& value);
@@ -193,6 +200,8 @@ class Config {
     std::string
     GetConfigSequenceStr(const std::string& parent_key, const std::string& child_key, const std::string& delim = ",",
                          const std::string& default_value = "");
+    Status
+    GetConfigVersion(std::string& value);
 
  public:
     /* server config */
