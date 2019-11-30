@@ -949,7 +949,7 @@ SqliteMetaImpl::Archive() {
         auto &criteria = kv.first;
         auto &limit = kv.second;
         if (criteria == engine::ARCHIVE_CONF_DAYS) {
-            int64_t usecs = limit * D_SEC * US_PS;
+            int64_t usecs = limit * DAY * US_PS;
             int64_t now = utils::GetMicroSecTimeStamp();
             try {
                 //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
