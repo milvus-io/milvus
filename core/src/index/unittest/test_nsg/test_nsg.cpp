@@ -52,6 +52,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 
         auto tmp_conf = std::make_shared<knowhere::NSGCfg>();
         tmp_conf->gpu_id = DEVICEID;
+        tmp_conf->d = 256;
         tmp_conf->knng = 20;
         tmp_conf->nprobe = 8;
         tmp_conf->nlist = 163;
