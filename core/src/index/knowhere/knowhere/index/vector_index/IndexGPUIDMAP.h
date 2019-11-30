@@ -23,6 +23,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace knowhere {
 

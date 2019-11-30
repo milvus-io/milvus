@@ -53,8 +53,8 @@ class NsgIndex {
 
     float* ori_data_;
     int64_t* ids_;
-    Graph nsg;      // final graph
-    Graph knng;     // reset after build
+    Graph nsg;   // final graph
+    Graph knng;  // reset after build
 
     node_t navigation_point;  // offset of node in origin data
 
