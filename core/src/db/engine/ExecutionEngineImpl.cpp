@@ -93,18 +93,18 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
-#ifdef MILVUS_CPU_VERSION
-            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
-#else
+#ifdef MILVUS_GPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
 #endif
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
-#ifdef MILVUS_CPU_VERSION
-            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
-#else
+#ifdef MILVUS_GPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
 #endif
             break;
         }
@@ -119,10 +119,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
 #endif
         case EngineType::FAISS_PQ: {
-#ifdef MILVUS_CPU_VERSION
-            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
-#else
+#ifdef MILVUS_GPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
 #endif
             break;
         }
@@ -618,6 +618,9 @@ ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
+    if (!s.ok()) {
+        gpu_num_ = knowhere::INVALID_VALUE;
+    }
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
             return Status::OK();

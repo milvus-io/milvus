@@ -34,6 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
 - \#545 - Avoid dead circle of build index thread when error occurs
+- \#547 - NSG build failed using GPU-edition if set gpu_enable false
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
 - \#596 - Frequently insert operation cost too much disk space
@@ -73,6 +74,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#449 - Add ShowPartitions example for C++ SDK
 - \#470 - Small raw files should not be build index
 - \#584 - Intergrate internal FAISS
+- \#611 - Remove MILVUS_CPU_VERSION
 
 ## Task
 
