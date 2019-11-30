@@ -18,7 +18,7 @@ index_file_size = 10
 vectors = gen_vectors(nb, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
-BUILD_TIMEOUT = 60
+BUILD_TIMEOUT = 180
 nprobe = 1
 tag = "1970-01-01"
 
