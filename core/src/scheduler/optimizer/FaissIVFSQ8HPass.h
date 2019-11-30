@@ -14,6 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+#ifdef MILVUS_GPU_VERSION
 #pragma once
 
 #include <condition_variable>
@@ -54,3 +55,4 @@ using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

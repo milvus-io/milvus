@@ -20,12 +20,13 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
 #include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
@@ -118,23 +119,32 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
         build_cfg->CheckValid();  // throw exception
     }
 
-    // TODO(linxj): dev IndexFactory, support more IndexType
+    auto idmap = std::make_shared<IDMAP>();
+    idmap->Train(config);
+    idmap->AddWithoutId(dataset, config);
+    Graph knng;
+    float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
-//     auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+    if (build_cfg->gpu_id == knowhere::INVALID_VALUE) {
+        auto preprocess_index = std::make_shared<IVF>();
+        auto model = preprocess_index->Train(dataset, config);
+        preprocess_index->set_index_model(model);
+        preprocess_index->Add(dataset, config);
+        preprocess_index->GenGraph(raw_data, build_cfg->knng, knng, config);
+    } else {
+        // TODO(linxj): use ivf instead?
+        auto gpu_idx = cloner::CopyCpuToGpu(idmap, build_cfg->gpu_id, config);
+        auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
+        gpu_idmap->GenGraph(raw_data, build_cfg->knng, knng, config);
+    }
 #else
     auto preprocess_index = std::make_shared<IVF>();
+    auto model = preprocess_index->Train(dataset, config);
+    preprocess_index->set_index_model(model);
+    preprocess_index->AddWithoutIds(dataset, config);
+    preprocess_index->GenGraph(raw_data, build_cfg->knng, knng, config);
 #endif
-    auto preprocess_index = std::make_shared<IDMAP>();
-    preprocess_index->Train(config);
-    preprocess_index->AddWithoutId(dataset, config);
-    float* raw_data = preprocess_index->GetRawVectors();
-    auto xx = cloner::CopyCpuToGpu(preprocess_index, 0, config);
-    auto ss = std::dynamic_pointer_cast<GPUIDMAP>(xx);
 
-    Graph knng;
-    ss->GenGraph(raw_data, build_cfg->knng, knng, config);
-
-    GETTENSOR(dataset)
     algo::BuildParams b_params;
     b_params.candidate_pool_size = build_cfg->candidate_pool_size;
     b_params.out_degree = build_cfg->out_degree;
@@ -143,6 +153,7 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     auto array = dataset->array()[0];
     auto p_ids = array->data()->GetValues<int64_t>(1, 0);
 
+    GETTENSOR(dataset)
     index_ = std::make_shared<algo::NsgIndex>(dim, rows);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
@@ -164,10 +175,10 @@ NSG::Dimension() {
     return index_->dimension;
 }
 
-VectorIndexPtr
-NSG::Clone() {
-    KNOWHERE_THROW_MSG("not support");
-}
+// VectorIndexPtr
+// NSG::Clone() {
+//    KNOWHERE_THROW_MSG("not support");
+//}
 
 void
 NSG::Seal() {

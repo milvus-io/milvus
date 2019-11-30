@@ -17,7 +17,7 @@ pipeline {
     }
 
     parameters{
-        choice choices: ['Release', 'Debug'], description: '', name: 'BUILD_TYPE'
+        choice choices: ['Release', 'Debug'], description: 'Build Type', name: 'BUILD_TYPE'
         string defaultValue: 'registry.zilliz.com', description: 'DOCKER REGISTRY URL', name: 'DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
         string defaultValue: 'http://192.168.1.202/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
@@ -27,9 +27,8 @@ pipeline {
     environment {
         PROJECT_NAME = "milvus"
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
-        SEMVER = "${BRANCH_NAME}"
-        JOBNAMES = env.JOB_NAME.split('/')
-        PIPELINE_NAME = "${JOBNAMES[0]}"
+        SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
+        PIPELINE_NAME = "${env.JOB_NAME.contains('/') ? env.JOB_NAME.getAt(0..(env.JOB_NAME.indexOf('/') - 1)) : env.JOB_NAME}"
     }
 
     stages {
@@ -102,7 +101,7 @@ pipeline {
                             stages {
                                 stage('Publish') {
                                     steps {
-                                        container('publish-images'){
+                                        container('publish-images') {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
                                             }

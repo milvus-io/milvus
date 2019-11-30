@@ -229,6 +229,7 @@ TEST_F(DBTest, DB_TEST) {
 }
 
 TEST_F(DBTest, SEARCH_TEST) {
+    milvus::scheduler::OptimizerInst::GetInstance()->Init();
     std::string config_path(CONFIG_PATH);
     config_path += CONFIG_FILE;
     milvus::server::Config& config = milvus::server::Config::GetInstance();
@@ -290,7 +291,50 @@ TEST_F(DBTest, SEARCH_TEST) {
         milvus::engine::ResultDistances result_distances;
         stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
+        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
     }
+
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+
+    {
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+
+    {
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+    }
+
+#ifdef CUSTOMIZATION
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
+    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+
+    {
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+    }
+#endif
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
@@ -666,8 +710,8 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     ASSERT_NE(size, 0UL);
 
     std::vector<milvus::engine::meta::DateT> dates;
-    std::string start_value = CurrentTmDate();
-    std::string end_value = CurrentTmDate(1);
+    std::string start_value = CurrentTmDate(-5);
+    std::string end_value = CurrentTmDate(5);
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
 
     stat = db_->DropTable(TABLE_NAME, dates);

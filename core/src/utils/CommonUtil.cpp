@@ -16,6 +16,9 @@
 // under the License.
 
 #include "utils/CommonUtil.h"
+#include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 
 #include <dirent.h>
@@ -27,6 +30,7 @@
 #include <unistd.h>
 #include <iostream>
 #include <thread>
+#include <vector>
 
 #include "boost/filesystem.hpp"
 
@@ -220,6 +224,25 @@ CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
 void
 CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
+}
+
+void
+CommonUtil::EraseFromCache(const std::string& item_key) {
+    if (item_key.empty()) {
+        //        SERVER_LOG_ERROR << "Empty key cannot be erased from cache";
+        return;
+    }
+
+    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
+
+#ifdef MILVUS_GPU_VERSION
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int64_t> gpus;
+    Status s = config.GetGpuResourceConfigSearchResources(gpus);
+    for (auto& gpu : gpus) {
+        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
+    }
+#endif
 }
 
 }  // namespace server

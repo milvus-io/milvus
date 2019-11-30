@@ -54,14 +54,18 @@ fi
 PACKAGE_FILE="ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
 REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
 
-echo "Updating ccache package file: ${PACKAGE_FILE}"
-tar zcf ./${PACKAGE_FILE} -C ${HOME}/.ccache .
-echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
-curl -u${ARTIFACTORY_USER}:${ARTIFACTORY_PASSWORD} -T ${PACKAGE_FILE} ${REMOTE_PACKAGE_PATH}/${PACKAGE_FILE}
-if [[ $? == 0 ]];then
-    echo "Uploading ccache package file success !"
-    exit 0
-else
-    echo "Uploading ccache package file fault !"
-    exit 1
+ccache --show-stats
+
+if [[ "${BRANCH_NAME}" != "HEAD" ]];then
+    echo "Updating ccache package file: ${PACKAGE_FILE}"
+    tar zcf ./${PACKAGE_FILE} -C ${HOME}/.ccache .
+    echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
+    curl -u${ARTIFACTORY_USER}:${ARTIFACTORY_PASSWORD} -T ${PACKAGE_FILE} ${REMOTE_PACKAGE_PATH}/${PACKAGE_FILE}
+    if [[ $? == 0 ]];then
+        echo "Uploading ccache package file success !"
+        exit 0
+    else
+        echo "Uploading ccache package file fault !"
+        exit 1
+    fi
 fi

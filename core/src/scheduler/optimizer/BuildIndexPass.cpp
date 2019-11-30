@@ -19,19 +19,17 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
-
+#ifdef MILVUS_GPU_VERSION
 namespace milvus {
 namespace scheduler {
 
 void
 BuildIndexPass::Init() {
-#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids_);
     if (!s.ok()) {
         throw;
     }
-#endif
 }
 
 bool
@@ -56,3 +54,4 @@ BuildIndexPass::Run(const TaskPtr& task) {
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

@@ -56,17 +56,16 @@ static const char* CONFIG_STR =
     "engine_config:\n"
     "  blas_threshold: 20\n"
     "\n"
-    "resource_config:\n"
-#ifdef MILVUS_CPU_VERSION
-    "  search_resources:\n"
-    "    - cpu\n"
-    "  index_build_device: cpu           # CPU used for building index";
-#else
-    "  search_resources:\n"
-    "    - cpu\n"
+#ifdef MILVUS_GPU_VERSION
+    "gpu_resource_config:\n"
+    "  enable: true                      # whether to enable GPU resources\n"
+    "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
+    "  search_resources:                 # define the GPU devices used for search computation, must be in format gpux\n"
     "    - gpu0\n"
-    "  index_build_device: gpu0          # GPU used for building index";
+    "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
+    "    - gpu0\n"
 #endif
+    "\n";
 
 void
 WriteToFile(const std::string& file_path, const char* content) {

@@ -61,6 +61,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 return status, [], []
 
             row_num = files_collection.row_num
+            # row_num is equal to 0, result is empty
+            if not row_num:
+                continue
+
             ids = files_collection.ids
             diss = files_collection.distances  # distance collections
             # TODO: batch_len is equal to topk, may need to compare with topk
@@ -136,15 +140,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             with self.tracer.start_span('search_{}'.format(addr),
                                         child_of=span):
-                ret = conn.search_vectors_in_files(
-                    table_name=query_params['table_id'],
-                    file_ids=query_params['file_ids'],
-                    query_records=vectors,
-                    top_k=topk,
-                    nprobe=nprobe
-                    )
+                ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
+                                                   file_ids=query_params['file_ids'],
+                                                   query_records=vectors,
+                                                   top_k=topk,
+                                                   nprobe=nprobe)
                 end = time.time()
-                logger.info('search_vectors_in_files takes: {}'.format(end - start))
 
                 all_topk_results.append(ret)
 
@@ -317,12 +318,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                          metadata=metadata)
 
         now = time.time()
-        logger.info('SearchVector takes: {}'.format(now - start))
+        # logger.info('SearchVector takes: {}'.format(now - start))
 
         topk_result_list = milvus_pb2.TopKQueryResult(
             status=status_pb2.Status(error_code=status.error_code,
                                      reason=status.reason),
-            row_num=len(query_record_array),
+            row_num=len(request.query_record_array) if len(id_results) else 0,
             ids=id_results,
             distances=dis_results)
         return topk_result_list

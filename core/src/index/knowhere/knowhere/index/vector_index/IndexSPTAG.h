@@ -36,8 +36,8 @@ class CPUSPTAGRNG : public VectorIndex {
     BinarySet
     Serialize() override;
 
-    VectorIndexPtr
-    Clone() override;
+    //    VectorIndexPtr
+    //    Clone() override;
 
     void
     Load(const BinarySet& index_array) override;

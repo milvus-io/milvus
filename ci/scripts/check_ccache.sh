@@ -41,12 +41,12 @@ if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
     exit 1
 fi
 
-for BRANCH_NAME in ${BRANCH_NAMES}
-do
-    echo "fetching ${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
-    wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+check_ccache() {
+    BRANCH=$1
+    echo "fetching ${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
     if [[ $? == 0 ]];then
-        wget "${ARTIFACTORY_URL}/${BRANCH_NAME}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
+        wget -q "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
         mkdir -p ${CCACHE_DIRECTORY} && \
         tar zxf ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz -C ${CCACHE_DIRECTORY} && \
         rm ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz
@@ -54,6 +54,18 @@ do
             echo "found cache"
             exit 0
         fi
+    fi
+}
+
+if [[ -n "${CHANGE_BRANCH}" && "${BRANCH_NAME}" =~ "PR-" ]];then
+    check_ccache ${CHANGE_BRANCH}
+    check_ccache ${BRANCH_NAME}
+fi
+
+for CURRENT_BRANCH in ${BRANCH_NAMES}
+do
+    if [[ "${CURRENT_BRANCH}" != "HEAD" ]];then
+        check_ccache ${CURRENT_BRANCH}
     fi
 done
 

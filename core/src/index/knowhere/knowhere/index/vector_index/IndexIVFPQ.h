@@ -41,8 +41,8 @@ class IVFPQ : public IVF {
     std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config) override;
 
-    VectorIndexPtr
-    Clone_impl(const std::shared_ptr<faiss::Index>& index) override;
+    //    VectorIndexPtr
+    //    Clone_impl(const std::shared_ptr<faiss::Index>& index) override;
 };
 
 }  // namespace knowhere

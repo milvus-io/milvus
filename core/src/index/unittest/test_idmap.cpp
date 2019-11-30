@@ -139,9 +139,9 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // clone
-        auto clone_index = index_->Clone();
-        auto clone_result = clone_index->Search(query_dataset, conf);
-        AssertAnns(clone_result, nq, k);
+        //        auto clone_index = index_->Clone();
+        //        auto clone_result = clone_index->Search(query_dataset, conf);
+        //        AssertAnns(clone_result, nq, k);
     }
 
     {
@@ -159,9 +159,9 @@ TEST_F(IDMAPTest, copy_test) {
         auto new_result = clone_index->Search(query_dataset, conf);
         AssertAnns(new_result, nq, k);
 
-        auto clone_gpu_idx = clone_index->Clone();
-        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, conf);
-        AssertAnns(clone_gpu_res, nq, k);
+        //        auto clone_gpu_idx = clone_index->Clone();
+        //        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, conf);
+        //        AssertAnns(clone_gpu_res, nq, k);
 
         // gpu to cpu
         auto host_index = knowhere::cloner::CopyGpuToCpu(clone_index, conf);

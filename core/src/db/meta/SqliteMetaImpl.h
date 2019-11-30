@@ -117,10 +117,13 @@ class SqliteMetaImpl : public Meta {
     Archive() override;
 
     Status
-    CleanUp() override;
+    CleanUpShadowFiles() override;
 
     Status
-    CleanUpFilesWithTTL(uint16_t seconds) override;
+    CleanUpCacheWithTTL(uint64_t seconds) override;
+
+    Status
+    CleanUpFilesWithTTL(uint64_t seconds) override;
 
     Status
     DropAll() override;
