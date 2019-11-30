@@ -1801,8 +1801,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             mysqlpp::Query query = connectionPtr->query();
             query << "SELECT id, table_id, file_id, date"
                   << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
-                  << std::to_string(TableFileSchema::TO_DELETE) << ","
-                  << std::to_string(TableFileSchema::BACKUP) << ")"
+                  << std::to_string(TableFileSchema::TO_DELETE) << "," << std::to_string(TableFileSchema::BACKUP) << ")"
                   << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
@@ -1835,7 +1834,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
                     // delete file from disk storage
                     utils::DeleteTableFilePath(options_, table_file);
-                    ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
+                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.id_ << " location:" << table_file.location_;
 
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);
@@ -1863,7 +1862,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             }
 
             if (clean_files > 0) {
-                ENGINE_LOG_DEBUG << "Clean " << clean_files << " files deleted in " << seconds << " seconds";
+                ENGINE_LOG_DEBUG << "Clean " << clean_files << " files expired in " << seconds << " seconds";
             }
         }  // Scoped Connection
     } catch (std::exception& e) {

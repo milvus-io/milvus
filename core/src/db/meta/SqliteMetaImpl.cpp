@@ -1351,7 +1351,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     // delete file from disk storage
                     utils::DeleteTableFilePath(options_, table_file);
 
-                    ENGINE_LOG_DEBUG << "Removing file id:" << table_file.file_id_ << " location:" << table_file.location_;
+                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_ << " location:" << table_file.location_;
                     table_ids.insert(table_file.table_id_);
                 }
 
@@ -1365,7 +1365,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
         }
 
         if (clean_files > 0) {
-            ENGINE_LOG_DEBUG << "Clean " << clean_files << " files deleted in " << seconds << " seconds";
+            ENGINE_LOG_DEBUG << "Clean " << clean_files << " files expired in " << seconds << " seconds";
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when clean table files", e.what());
