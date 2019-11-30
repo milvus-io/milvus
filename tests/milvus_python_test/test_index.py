@@ -18,7 +18,7 @@ index_file_size = 10
 vectors = gen_vectors(nb, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
-BUILD_TIMEOUT = 180
+BUILD_TIMEOUT = 300
 nprobe = 1
 tag = "1970-01-01"
 
@@ -51,27 +51,27 @@ class TestIndexBase:
     """
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index(self, connect, table, get_index_params):
+    def test_create_index(self, connect, table, get_simple_index_params):
         '''
         target: test create index interface
         method: create table and add vectors in it, create index
         expected: return code equals to 0, and search success
         '''
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_params)
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_partition(self, connect, table, get_index_params):
+    def test_create_index_partition(self, connect, table, get_simple_index_params):
         '''
         target: test create index interface
         method: create table, create partition, and add vectors in it, create index
         expected: return code equals to 0, and search success
         '''
         partition_name = gen_unique_str()
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status = connect.create_partition(table, partition_name, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
@@ -91,13 +91,13 @@ class TestIndexBase:
             status = dis_connect.create_index(table, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_search_with_query_vectors(self, connect, table, get_index_params):
+    def test_create_index_search_with_query_vectors(self, connect, table, get_simple_index_params):
         '''
         target: test create index interface, search with more query vectors
         method: create table and add vectors in it, create index
         expected: return code equals to 0, and search success
         '''
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_params)
@@ -291,13 +291,13 @@ class TestIndexBase:
     ******************************************************************
     """
 
-    def test_describe_index(self, connect, table, get_index_params):
+    def test_describe_index(self, connect, table, get_simple_index_params):
         '''
         target: test describe index interface
         method: create table and add vectors in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_params)
@@ -398,13 +398,13 @@ class TestIndexBase:
     ******************************************************************
     """
 
-    def test_drop_index(self, connect, table, get_index_params):
+    def test_drop_index(self, connect, table, get_simple_index_params):
         '''
         target: test drop index interface
         method: create table and add vectors in it, create index, call drop index
         expected: return code 0, and default index param
         '''
-        index_param = get_index_params
+        index_param = get_simple_index_params
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_param)
         assert status.OK()
@@ -418,13 +418,13 @@ class TestIndexBase:
         assert result._table_name == table
         assert result._index_type == IndexType.FLAT
 
-    def test_drop_index_repeatly(self, connect, table, get_index_params):
+    def test_drop_index_repeatly(self, connect, table, get_simple_index_params):
         '''
         target: test drop index repeatly
         method: create index, call drop index, and drop again
         expected: return code 0
         '''
-        index_param = get_index_params
+        index_param = get_simple_index_params
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_param)
         assert status.OK()
@@ -560,13 +560,13 @@ class TestIndexIP:
     """
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index(self, connect, ip_table, get_index_params):
+    def test_create_index(self, connect, ip_table, get_simple_index_params):
         '''
         target: test create index interface
         method: create table and add vectors in it, create index
         expected: return code equals to 0, and search success
         '''
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
@@ -576,14 +576,14 @@ class TestIndexIP:
             assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_partition(self, connect, ip_table, get_index_params):
+    def test_create_index_partition(self, connect, ip_table, get_simple_index_params):
         '''
         target: test create index interface
         method: create table, create partition, and add vectors in it, create index
         expected: return code equals to 0, and search success
         '''
         partition_name = gen_unique_str()
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
@@ -606,13 +606,13 @@ class TestIndexIP:
             status = dis_connect.create_index(ip_table, index_param)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_search_with_query_vectors(self, connect, ip_table, get_index_params):
+    def test_create_index_search_with_query_vectors(self, connect, ip_table, get_simple_index_params):
         '''
         target: test create index interface, search with more query vectors
         method: create table and add vectors in it, create index
         expected: return code equals to 0, and search success
         '''
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
