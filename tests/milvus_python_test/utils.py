@@ -437,7 +437,7 @@ def gen_invalid_index_params():
 
 def gen_index_params():
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]
+    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]
     nlists = [1, 16384, 50000]
 
     def gen_params(index_types, nlists):
@@ -450,7 +450,7 @@ def gen_index_params():
 
 def gen_simple_index_params():
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]
+    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]
     nlists = [1024]
 
     def gen_params(index_types, nlists):
