@@ -15,15 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "scheduler/ResourceFactory.h"
 #include <gtest/gtest.h>
+#include "scheduler/ResourceFactory.h"
 
 namespace {
 
 namespace ms = milvus::scheduler;
 
-} // namespace
+}  // namespace
 
 TEST(ResourceFactoryTest, CREATE) {
     auto disk = ms::ResourceFactory::Create("ssd", "DISK", 0);

@@ -18,19 +18,23 @@
 #include "wrapper/VecIndex.h"
 #include "VecImpl.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "utils/Log.h"
 
+#ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
+#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "wrapper/gpu/GPUVecImpl.h"
+#endif
 
 namespace milvus {
 namespace engine {
@@ -119,43 +123,54 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::IVF>();
             break;
         }
-        case IndexType::FAISS_IVFFLAT_GPU: {
-            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
-            break;
-        }
-        case IndexType::FAISS_IVFFLAT_MIX: {
-            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
-            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
-        }
         case IndexType::FAISS_IVFPQ_CPU: {
             index = std::make_shared<knowhere::IVFPQ>();
+            break;
+        }
+        case IndexType::SPTAG_KDT_RNT_CPU: {
+            index = std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
+            break;
+        }
+        case IndexType::SPTAG_BKT_RNT_CPU: {
+            index = std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
+            break;
+        }
+        case IndexType::FAISS_IVFSQ8_CPU: {
+            index = std::make_shared<knowhere::IVFSQ>();
+            break;
+        }
+
+#ifdef MILVUS_GPU_VERSION
+        case IndexType::FAISS_IVFFLAT_GPU: {
+            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
             break;
         }
         case IndexType::FAISS_IVFPQ_GPU: {
             index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
             break;
         }
-        case IndexType::SPTAG_KDT_RNT_CPU: {
-            index = std::make_shared<knowhere::CPUKDTRNG>();
-            break;
+        case IndexType::FAISS_IVFPQ_MIX: {
+            index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFPQ_MIX);
         }
         case IndexType::FAISS_IVFSQ8_MIX: {
             index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
         }
-        case IndexType::FAISS_IVFSQ8_CPU: {
-            index = std::make_shared<knowhere::IVFSQ>();
-            break;
-        }
         case IndexType::FAISS_IVFSQ8_GPU: {
             index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             break;
+        }
+        case IndexType::FAISS_IVFFLAT_MIX: {
+            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
         }
 #ifdef CUSTOMIZATION
         case IndexType::FAISS_IVFSQ8_HYBRID: {
             index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
             return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
         }
+#endif
 #endif
         case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);
@@ -269,6 +284,10 @@ ConvertToCpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFSQ8_MIX: {
             return IndexType::FAISS_IVFSQ8_CPU;
         }
+        case IndexType::FAISS_IVFPQ_GPU:
+        case IndexType::FAISS_IVFPQ_MIX: {
+            return IndexType::FAISS_IVFPQ_CPU;
+        }
         default: { return type; }
     }
 }
@@ -284,9 +303,12 @@ ConvertToGpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFSQ8_CPU: {
             return IndexType::FAISS_IVFSQ8_GPU;
         }
+        case IndexType::FAISS_IVFPQ_MIX:
+        case IndexType::FAISS_IVFPQ_CPU: {
+            return IndexType::FAISS_IVFPQ_GPU;
+        }
         default: { return type; }
     }
 }
-
 }  // namespace engine
 }  // namespace milvus

@@ -51,13 +51,10 @@ class Meta {
     AllTables(std::vector<TableSchema>& table_schema_array) = 0;
 
     virtual Status
-    UpdateTableIndex(const std::string& table_id, const TableIndex& index) = 0;
-
-    virtual Status
     UpdateTableFlag(const std::string& table_id, int64_t flag) = 0;
 
     virtual Status
-    DeleteTable(const std::string& table_id) = 0;
+    DropTable(const std::string& table_id) = 0;
 
     virtual Status
     DeleteTableFiles(const std::string& table_id) = 0;
@@ -66,19 +63,40 @@ class Meta {
     CreateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status
-    DropPartitionsByDates(const std::string& table_id, const DatesT& dates) = 0;
+    DropDataByDate(const std::string& table_id, const DatesT& dates) = 0;
 
     virtual Status
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) = 0;
-
-    virtual Status
-    UpdateTableFilesToIndex(const std::string& table_id) = 0;
 
     virtual Status
     UpdateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status
     UpdateTableFiles(TableFilesSchema& files) = 0;
+
+    virtual Status
+    UpdateTableIndex(const std::string& table_id, const TableIndex& index) = 0;
+
+    virtual Status
+    UpdateTableFilesToIndex(const std::string& table_id) = 0;
+
+    virtual Status
+    DescribeTableIndex(const std::string& table_id, TableIndex& index) = 0;
+
+    virtual Status
+    DropTableIndex(const std::string& table_id) = 0;
+
+    virtual Status
+    CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag) = 0;
+
+    virtual Status
+    DropPartition(const std::string& partition_name) = 0;
+
+    virtual Status
+    ShowPartitions(const std::string& table_name, std::vector<meta::TableSchema>& partiton_schema_array) = 0;
+
+    virtual Status
+    GetPartitionName(const std::string& table_name, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
     FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
@@ -88,28 +106,25 @@ class Meta {
     FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) = 0;
 
     virtual Status
+    FilesToIndex(TableFilesSchema&) = 0;
+
+    virtual Status
+    FilesByType(const std::string& table_id, const std::vector<int>& file_types, TableFilesSchema& table_files) = 0;
+
+    virtual Status
     Size(uint64_t& result) = 0;
 
     virtual Status
     Archive() = 0;
 
     virtual Status
-    FilesToIndex(TableFilesSchema&) = 0;
+    CleanUpShadowFiles() = 0;
 
     virtual Status
-    FilesByType(const std::string& table_id, const std::vector<int>& file_types,
-                std::vector<std::string>& file_ids) = 0;
+    CleanUpCacheWithTTL(uint64_t seconds) = 0;
 
     virtual Status
-    DescribeTableIndex(const std::string& table_id, TableIndex& index) = 0;
-
-    virtual Status
-    DropTableIndex(const std::string& table_id) = 0;
-
-    virtual Status
-    CleanUp() = 0;
-
-    virtual Status CleanUpFilesWithTTL(uint16_t) = 0;
+    CleanUpFilesWithTTL(uint64_t seconds) = 0;
 
     virtual Status
     DropAll() = 0;

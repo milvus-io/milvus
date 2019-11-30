@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "external/easyloggingpp/easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 
 namespace knowhere {
 

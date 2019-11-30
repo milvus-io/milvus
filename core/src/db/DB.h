@@ -47,44 +47,68 @@ class DB {
 
     virtual Status
     CreateTable(meta::TableSchema& table_schema_) = 0;
+
     virtual Status
-    DeleteTable(const std::string& table_id, const meta::DatesT& dates) = 0;
+    DropTable(const std::string& table_id, const meta::DatesT& dates) = 0;
+
     virtual Status
     DescribeTable(meta::TableSchema& table_schema_) = 0;
+
     virtual Status
     HasTable(const std::string& table_id, bool& has_or_not_) = 0;
+
     virtual Status
     AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
+
     virtual Status
     GetTableRowCount(const std::string& table_id, uint64_t& row_count) = 0;
+
     virtual Status
     PreloadTable(const std::string& table_id) = 0;
+
     virtual Status
     UpdateTableFlag(const std::string& table_id, int64_t flag) = 0;
 
     virtual Status
-    InsertVectors(const std::string& table_id_, uint64_t n, const float* vectors, IDNumbers& vector_ids_) = 0;
+    CreatePartition(const std::string& table_id, const std::string& partition_name,
+                    const std::string& partition_tag) = 0;
 
     virtual Status
-    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) = 0;
 
     virtual Status
-    Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) = 0;
+
+    virtual Status
+    InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,
+                  IDNumbers& vector_ids_) = 0;
+
+    virtual Status
+    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
+          uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+
+    virtual Status
+    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
           uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
           ResultDistances& result_distances) = 0;
+
+    virtual Status
+    QueryByFileID(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+                  uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+                  ResultDistances& result_distances) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;
 
     virtual Status
     CreateIndex(const std::string& table_id, const TableIndex& index) = 0;
+
     virtual Status
     DescribeIndex(const std::string& table_id, TableIndex& index) = 0;
+
     virtual Status
     DropIndex(const std::string& table_id) = 0;
 

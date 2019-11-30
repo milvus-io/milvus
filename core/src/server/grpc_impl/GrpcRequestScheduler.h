@@ -19,6 +19,7 @@
 
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 #include "utils/BlockingQueue.h"
 #include "utils/Status.h"
 
@@ -32,57 +33,8 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-class GrpcBaseTask {
- protected:
-    explicit GrpcBaseTask(const std::string& task_group, bool async = false);
-
-    virtual ~GrpcBaseTask();
-
- public:
-    Status
-    Execute();
-
-    void
-    Done();
-
-    Status
-    WaitToFinish();
-
-    std::string
-    TaskGroup() const {
-        return task_group_;
-    }
-
-    const Status&
-    status() const {
-        return status_;
-    }
-
-    bool
-    IsAsync() const {
-        return async_;
-    }
-
- protected:
-    virtual Status
-    OnExecute() = 0;
-
-    Status
-    SetStatus(ErrorCode error_code, const std::string& error_msg);
-
- protected:
-    mutable std::mutex finish_mtx_;
-    std::condition_variable finish_cond_;
-
-    std::string task_group_;
-    bool async_;
-    bool done_;
-    Status status_;
-};
-
-using BaseTaskPtr = std::shared_ptr<GrpcBaseTask>;
-using TaskQueue = BlockingQueue<BaseTaskPtr>;
-using TaskQueuePtr = std::shared_ptr<TaskQueue>;
+using RequestQueue = BlockingQueue<BaseRequestPtr>;
+using RequestQueuePtr = std::shared_ptr<RequestQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
 class GrpcRequestScheduler {
@@ -100,10 +52,10 @@ class GrpcRequestScheduler {
     Stop();
 
     Status
-    ExecuteTask(const BaseTaskPtr& task_ptr);
+    ExecuteRequest(const BaseRequestPtr& request_ptr);
 
     static void
-    ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status* grpc_status);
+    ExecRequest(BaseRequestPtr& request_ptr, ::milvus::grpc::Status* grpc_status);
 
  protected:
     GrpcRequestScheduler();
@@ -111,15 +63,15 @@ class GrpcRequestScheduler {
     virtual ~GrpcRequestScheduler();
 
     void
-    TakeTaskToExecute(TaskQueuePtr task_queue);
+    TakeToExecute(RequestQueuePtr request_queue);
 
     Status
-    PutTaskToQueue(const BaseTaskPtr& task_ptr);
+    PutToQueue(const BaseRequestPtr& request_ptr);
 
  private:
     mutable std::mutex queue_mtx_;
 
-    std::map<std::string, TaskQueuePtr> task_groups_;
+    std::map<std::string, RequestQueuePtr> request_groups_;
 
     std::vector<ThreadPtr> execute_threads_;
 

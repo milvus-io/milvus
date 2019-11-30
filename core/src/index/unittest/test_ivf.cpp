@@ -20,13 +20,24 @@
 #include <iostream>
 #include <thread>
 
+#ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuIndexIVFFlat.h>
+#endif
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
+
 #include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
+
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#endif
 
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
@@ -39,8 +50,9 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
  protected:
     void
     SetUp() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
-
+#endif
         ParameterType parameter_type;
         std::tie(index_type, parameter_type) = GetParam();
         // Init_with_default();
@@ -50,11 +62,14 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type);
+        conf->Dump();
     }
 
     void
     TearDown() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 
  protected:
@@ -64,15 +79,17 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
 };
 
 INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
-                        Values(std::make_tuple("IVF", ParameterType::ivf),
-                               std::make_tuple("GPUIVF", ParameterType::ivf),
-                               std::make_tuple("IVFPQ", ParameterType::ivfpq),
-                               std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
-                               std::make_tuple("IVFSQ", ParameterType::ivfsq),
+                        Values(
+#ifdef MILVUS_GPU_VERSION
+                            std::make_tuple("GPUIVF", ParameterType::ivf),
+                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("GPUIVFSQ", ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
-                               std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
+                            std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
-                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)));
+#endif
+                            std::make_tuple("IVF", ParameterType::ivf), std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("IVFSQ", ParameterType::ivfsq)));
 
 TEST_P(IVFTest, ivf_basic) {
     assert(!xb.empty());
@@ -148,6 +165,7 @@ TEST_P(IVFTest, ivf_serialize) {
     }
 }
 
+#ifdef MILVUS_GPU_VERSION
 TEST_P(IVFTest, clone_test) {
     assert(!xb.empty());
 
@@ -164,11 +182,13 @@ TEST_P(IVFTest, clone_test) {
     // PrintResult(result, nq, k);
 
     auto AssertEqual = [&](knowhere::DatasetPtr p1, knowhere::DatasetPtr p2) {
-        auto ids_p1 = p1->array()[0];
-        auto ids_p2 = p2->array()[0];
+        auto ids_p1 = p1->ids();
+        auto ids_p2 = p2->ids();
 
         for (int i = 0; i < nq * k; ++i) {
-            EXPECT_EQ(*(ids_p2->data()->GetValues<int64_t>(1, i)), *(ids_p1->data()->GetValues<int64_t>(1, i)));
+            EXPECT_EQ(*((int64_t*)(ids_p2) + i), *((int64_t*)(ids_p1) + i));
+            //            EXPECT_EQ(*(ids_p2->data()->GetValues<int64_t>(1, i)), *(ids_p1->data()->GetValues<int64_t>(1,
+            //            i)));
         }
     };
 
@@ -194,7 +214,7 @@ TEST_P(IVFTest, clone_test) {
 
     {
         // copy from gpu to cpu
-        std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
+        std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "GPUIVFPQ", "IVFSQHybrid"};
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
@@ -219,7 +239,7 @@ TEST_P(IVFTest, clone_test) {
 
     {
         // copy to gpu
-        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFSQ", "GPUIVFSQ"};
+        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFSQ", "GPUIVFSQ", "IVFPQ", "GPUIVFPQ"};
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
@@ -238,7 +258,9 @@ TEST_P(IVFTest, clone_test) {
         }
     }
 }
+#endif
 
+#ifdef MILVUS_GPU_VERSION
 #ifdef CUSTOMIZATION
 TEST_P(IVFTest, gpu_seal_test) {
     std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
@@ -271,5 +293,5 @@ TEST_P(IVFTest, gpu_seal_test) {
     auto with_seal = tc.RecordSection("With seal");
     ASSERT_GE(without_seal, with_seal);
 }
-
+#endif
 #endif

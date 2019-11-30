@@ -8,7 +8,7 @@ import numpy
 import sklearn.preprocessing
 from milvus import Milvus, IndexType, MetricType
 
-logger = logging.getLogger("milvus_ann_acc.client")
+logger = logging.getLogger("milvus_acc.client")
 
 SERVER_HOST_DEFAULT = "127.0.0.1"
 SERVER_PORT_DEFAULT = 19530
@@ -28,17 +28,17 @@ def time_wrapper(func):
 
 
 class MilvusClient(object):
-    def __init__(self, table_name=None, ip=None, port=None):
+    def __init__(self, table_name=None, host=None, port=None):
         self._milvus = Milvus()
         self._table_name = table_name
         try:
-            if not ip:
+            if not host:
                 self._milvus.connect(
                     host = SERVER_HOST_DEFAULT,
                     port = SERVER_PORT_DEFAULT)
             else:
                 self._milvus.connect(
-                    host = ip,
+                    host = host,
                     port = port)
         except Exception as e:
             raise e
@@ -113,7 +113,6 @@ class MilvusClient(object):
         X = X.astype(numpy.float32)
         status, results = self._milvus.search_vectors(self._table_name, top_k, nprobe, X.tolist())
         self.check_status(status)
-        # logger.info(results[0])
         ids = []
         for result in results:
             tmp_ids = []
@@ -125,24 +124,20 @@ class MilvusClient(object):
     def count(self):
         return self._milvus.get_table_row_count(self._table_name)[1]
 
-    def delete(self, timeout=60):
-        logger.info("Start delete table: %s" % self._table_name)
-        self._milvus.delete_table(self._table_name)
-        i = 0
-        while i < timeout:
-            if self.count():
-                time.sleep(1)
-                i = i + 1
-            else:
-                break
-        if i >= timeout:
-            logger.error("Delete table timeout")
+    def delete(self, table_name):
+        logger.info("Start delete table: %s" % table_name)
+        return self._milvus.delete_table(table_name)
 
     def describe(self):
         return self._milvus.describe_table(self._table_name)
 
-    def exists_table(self):
-        return self._milvus.has_table(self._table_name)
+    def exists_table(self, table_name):
+        return self._milvus.has_table(table_name)
+
+    def get_server_version(self):
+        status, res = self._milvus.server_version()
+        self.check_status(status)
+        return res
 
     @time_wrapper
     def preload_table(self):

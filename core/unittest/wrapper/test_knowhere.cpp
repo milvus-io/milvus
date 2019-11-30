@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "server/Config.h"
 #include "wrapper/KnowhereResource.h"
 #include "wrapper/utils.h"
-#include "server/Config.h"
 
 #include <gtest/gtest.h>
 

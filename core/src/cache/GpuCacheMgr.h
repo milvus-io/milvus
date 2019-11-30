@@ -25,6 +25,7 @@
 namespace milvus {
 namespace cache {
 
+#ifdef MILVUS_GPU_VERSION
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 
@@ -42,6 +43,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
     static std::mutex mutex_;
     static std::unordered_map<uint64_t, GpuCacheMgrPtr> instance_;
 };
+#endif
 
 }  // namespace cache
 }  // namespace milvus

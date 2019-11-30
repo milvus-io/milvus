@@ -60,8 +60,8 @@ class VecIndexImpl : public VecIndex {
     Status
     Load(const knowhere::BinarySet& index_binary) override;
 
-    VecIndexPtr
-    Clone() override;
+    //    VecIndexPtr
+    //    Clone() override;
 
     int64_t
     GetDeviceId() override;
@@ -75,41 +75,6 @@ class VecIndexImpl : public VecIndex {
     IndexType type = IndexType::INVALID;
 
     std::shared_ptr<knowhere::VectorIndex> index_ = nullptr;
-};
-
-class IVFMixIndex : public VecIndexImpl {
- public:
-    explicit IVFMixIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
-        : VecIndexImpl(std::move(index), type) {
-    }
-
-    Status
-    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
-             const float* xt) override;
-
-    Status
-    Load(const knowhere::BinarySet& index_binary) override;
-};
-
-class IVFHybridIndex : public IVFMixIndex {
- public:
-    explicit IVFHybridIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
-        : IVFMixIndex(std::move(index), type) {
-    }
-
-    knowhere::QuantizerPtr
-    LoadQuantizer(const Config& conf) override;
-
-    Status
-    SetQuantizer(const knowhere::QuantizerPtr& q) override;
-
-    Status
-    UnsetQuantizer() override;
-    std::pair<VecIndexPtr, knowhere::QuantizerPtr>
-    CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) override;
-
-    VecIndexPtr
-    LoadData(const knowhere::QuantizerPtr& q, const Config& conf) override;
 };
 
 class BFIndex : public VecIndexImpl {

@@ -212,7 +212,13 @@ XSearchTask::Execute() {
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
                 hybrid = true;
             }
-            index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
+            Status s =
+                index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
+            if (!s.ok()) {
+                search_job->GetStatus() = s;
+                search_job->SearchDone(index_id_);
+                return;
+            }
 
             double span = rc.RecordSection(hdr + ", do search");
             //            search_job->AccumSearchCost(span);

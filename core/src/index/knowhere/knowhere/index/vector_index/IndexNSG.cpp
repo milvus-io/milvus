@@ -19,8 +19,10 @@
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexIDMAP.h"
+#endif
+
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
@@ -86,23 +88,24 @@ NSG::Search(const DatasetPtr& dataset, const Config& config) {
     s_params.search_length = build_cfg->search_length;
     index_->Search((float*)p_data, rows, dim, build_cfg->k, res_dis, res_ids, s_params);
 
-    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
-    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
+    //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
+    //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
 
-    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
-    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
-
-    auto int64_type = std::make_shared<arrow::Int64Type>();
-    auto float_type = std::make_shared<arrow::FloatType>();
-
-    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
-    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
-
-    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
-    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
-    std::vector<ArrayPtr> array{ids, dists};
-
-    return std::make_shared<Dataset>(array, nullptr);
+    //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
+    //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
+    //
+    //    auto int64_type = std::make_shared<arrow::Int64Type>();
+    //    auto float_type = std::make_shared<arrow::FloatType>();
+    //
+    //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
+    //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
+    //
+    //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
+    //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
+    //    std::vector<ArrayPtr> array{ids, dists};
+    //
+    //    return std::make_shared<Dataset>(array, nullptr);
+    return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
 }
 
 IndexModelPtr
@@ -112,18 +115,29 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
         build_cfg->CheckValid();  // throw exception
     }
 
-    if (build_cfg->metric_type != METRICTYPE::L2) {
-        KNOWHERE_THROW_MSG("NSG not support this kind of metric type");
-    }
-
     // TODO(linxj): dev IndexFactory, support more IndexType
-    auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+    Graph knng;
+#ifdef MILVUS_GPU_VERSION
+    if (build_cfg->gpu_id == knowhere::INVALID_VALUE) {
+        auto preprocess_index = std::make_shared<IVF>();
+        auto model = preprocess_index->Train(dataset, config);
+        preprocess_index->set_index_model(model);
+        preprocess_index->AddWithoutIds(dataset, config);
+        preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+    } else {
+        auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+        auto model = preprocess_index->Train(dataset, config);
+        preprocess_index->set_index_model(model);
+        preprocess_index->AddWithoutIds(dataset, config);
+        preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+    }
+#else
+    auto preprocess_index = std::make_shared<IVF>();
     auto model = preprocess_index->Train(dataset, config);
     preprocess_index->set_index_model(model);
     preprocess_index->AddWithoutIds(dataset, config);
-
-    Graph knng;
     preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+#endif
 
     algo::BuildParams b_params;
     b_params.candidate_pool_size = build_cfg->candidate_pool_size;
@@ -155,10 +169,10 @@ NSG::Dimension() {
     return index_->dimension;
 }
 
-VectorIndexPtr
-NSG::Clone() {
-    KNOWHERE_THROW_MSG("not support");
-}
+// VectorIndexPtr
+// NSG::Clone() {
+//    KNOWHERE_THROW_MSG("not support");
+//}
 
 void
 NSG::Seal() {
