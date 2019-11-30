@@ -116,17 +116,28 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     }
 
     // TODO(linxj): dev IndexFactory, support more IndexType
+    Graph knng;
 #ifdef MILVUS_GPU_VERSION
-    auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+    if (build_cfg->gpu_id == knowhere::INVALID_VALUE) {
+        auto preprocess_index = std::make_shared<IVF>();
+        auto model = preprocess_index->Train(dataset, config);
+        preprocess_index->set_index_model(model);
+        preprocess_index->AddWithoutIds(dataset, config);
+        preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+    } else {
+        auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+        auto model = preprocess_index->Train(dataset, config);
+        preprocess_index->set_index_model(model);
+        preprocess_index->AddWithoutIds(dataset, config);
+        preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+    }
 #else
     auto preprocess_index = std::make_shared<IVF>();
-#endif
     auto model = preprocess_index->Train(dataset, config);
     preprocess_index->set_index_model(model);
     preprocess_index->AddWithoutIds(dataset, config);
-
-    Graph knng;
     preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+#endif
 
     algo::BuildParams b_params;
     b_params.candidate_pool_size = build_cfg->candidate_pool_size;

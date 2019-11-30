@@ -39,8 +39,6 @@ void
 ConfAdapter::MatchBase(knowhere::Config conf) {
     if (conf->metric_type == knowhere::DEFAULT_TYPE)
         conf->metric_type = knowhere::METRICTYPE::L2;
-    if (conf->gpu_id == knowhere::INVALID_VALUE)
-        conf->gpu_id = 0;
 }
 
 knowhere::Config
