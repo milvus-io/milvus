@@ -1799,7 +1799,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             }
 
             mysqlpp::Query query = connectionPtr->query();
-            query << "SELECT id, table_id, file_id, date"
+            query << "SELECT id, table_id, file_id, file_type, date"
                   << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
                   << std::to_string(TableFileSchema::TO_DELETE) << "," << std::to_string(TableFileSchema::BACKUP) << ")"
                   << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
