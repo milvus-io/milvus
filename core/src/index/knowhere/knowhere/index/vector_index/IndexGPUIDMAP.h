@@ -47,6 +47,9 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     VectorIndexPtr
     CopyGpuToGpu(const int64_t& device_id, const Config& config) override;
 
+    void
+    GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config);
+
  protected:
     void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;

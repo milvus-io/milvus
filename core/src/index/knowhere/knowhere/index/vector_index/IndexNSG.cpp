@@ -21,6 +21,8 @@
 #include "knowhere/common/Timer.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
 #include "knowhere/index/vector_index/IndexIVF.h"
@@ -110,6 +112,7 @@ NSG::Search(const DatasetPtr& dataset, const Config& config) {
 
 IndexModelPtr
 NSG::Train(const DatasetPtr& dataset, const Config& config) {
+    config->Dump();
     auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
     if (build_cfg != nullptr) {
         build_cfg->CheckValid();  // throw exception
@@ -117,23 +120,26 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
 
     // TODO(linxj): dev IndexFactory, support more IndexType
 #ifdef MILVUS_GPU_VERSION
-    auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
+//     auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
 #else
     auto preprocess_index = std::make_shared<IVF>();
 #endif
-    auto model = preprocess_index->Train(dataset, config);
-    preprocess_index->set_index_model(model);
-    preprocess_index->AddWithoutIds(dataset, config);
+    auto preprocess_index = std::make_shared<IDMAP>();
+    preprocess_index->Train(config);
+    preprocess_index->AddWithoutId(dataset, config);
+    float* raw_data = preprocess_index->GetRawVectors();
+    auto xx = cloner::CopyCpuToGpu(preprocess_index, 0, config);
+    auto ss = std::dynamic_pointer_cast<GPUIDMAP>(xx);
 
     Graph knng;
-    preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+    ss->GenGraph(raw_data, build_cfg->knng, knng, config);
 
+    GETTENSOR(dataset)
     algo::BuildParams b_params;
     b_params.candidate_pool_size = build_cfg->candidate_pool_size;
     b_params.out_degree = build_cfg->out_degree;
     b_params.search_length = build_cfg->search_length;
 
-    GETTENSOR(dataset)
     auto array = dataset->array()[0];
     auto p_ids = array->data()->GetValues<int64_t>(1, 0);
 

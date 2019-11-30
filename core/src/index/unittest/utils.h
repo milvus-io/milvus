@@ -93,3 +93,12 @@ struct FileIOReader {
     size_t
     operator()(void* ptr, size_t size);
 };
+
+void
+Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph_, const char* filename);
+
+float*
+fvecs_read(const char* fname, size_t* d_out, size_t* n_out);
+
+int*
+ivecs_read(const char* fname, size_t* d_out, size_t* n_out);

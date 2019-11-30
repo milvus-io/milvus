@@ -121,6 +121,26 @@ IDMAP::Add(const DatasetPtr& dataset, const Config& config) {
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
+void
+IDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    GETTENSOR(dataset)
+
+    // TODO: magic here.
+    auto array = dataset->array()[0];
+
+    std::vector<int64_t> new_ids(rows);
+    for (int i = 0; i < rows; ++i) {
+        new_ids[i] = i;
+    }
+
+    index_->add_with_ids(rows, (float*)p_data, new_ids.data());
+}
+
 int64_t
 IDMAP::Count() {
     return index_->ntotal;

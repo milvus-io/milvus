@@ -52,7 +52,7 @@ class NsgIndex {
     Distance* distance_;
 
     float* ori_data_;
-    int64_t* ids_;  // TODO: support different type
+    int64_t* ids_;
     Graph nsg;      // final graph
     Graph knng;     // reset after build
 
@@ -134,9 +134,6 @@ class NsgIndex {
 
     void
     FindUnconnectedNode(boost::dynamic_bitset<>& flags, int64_t& root);
-
-    // private:
-    //   void GetKnnGraphFromFile();
 };
 
 }  // namespace algo
