@@ -183,7 +183,11 @@ Server::Start() {
 
         // print version information
         SERVER_LOG_INFO << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
-
+#ifdef MILVUS_GPU_VERSION
+        SERVER_LOG_INFO << "GPU edition";
+#else
+        SERVER_LOG_INFO << "CPU edition";
+#endif
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 

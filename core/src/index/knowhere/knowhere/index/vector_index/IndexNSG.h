@@ -49,8 +49,8 @@ class NSG : public VectorIndex {
     Count() override;
     int64_t
     Dimension() override;
-    VectorIndexPtr
-    Clone() override;
+    //    VectorIndexPtr
+    //    Clone() override;
     void
     Seal() override;
 

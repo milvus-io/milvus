@@ -16,15 +16,15 @@
 // under the License.
 
 #include "db/Options.h"
-#include "db/meta/SqliteMetaImpl.h"
-#include "db/engine/EngineFactory.h"
 #include "db/Utils.h"
-#include "utils/Status.h"
+#include "db/engine/EngineFactory.h"
+#include "db/meta/SqliteMetaImpl.h"
 #include "utils/Exception.h"
+#include "utils/Status.h"
 
 #include <gtest/gtest.h>
-#include <thread>
 #include <boost/filesystem.hpp>
+#include <thread>
 #include <vector>
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
@@ -40,7 +40,7 @@ TEST(DBMiscTest, EXCEPTION_TEST) {
 TEST(DBMiscTest, OPTIONS_TEST) {
     try {
         milvus::engine::ArchiveConf archive("$$##");
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         ASSERT_TRUE(true);
     }
 
@@ -61,10 +61,7 @@ TEST(DBMiscTest, OPTIONS_TEST) {
 
     {
         milvus::engine::ArchiveConf archive("delete");
-        milvus::engine::ArchiveConf::CriteriaT criterial = {
-            {"disk", 1024},
-            {"days", 100}
-        };
+        milvus::engine::ArchiveConf::CriteriaT criterial = {{"disk", 1024}, {"days", 100}};
         archive.SetCriterias(criterial);
 
         auto crit = archive.GetCriterias();
@@ -95,17 +92,17 @@ TEST(DBMiscTest, UTILS_TEST) {
     auto status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
-    for (auto &path : options.slave_paths_) {
+    for (auto& path : options.slave_paths_) {
         ASSERT_TRUE(boost::filesystem::exists(path));
     }
 
-//    options.slave_paths.push_back("/");
-//    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
-//    ASSERT_FALSE(status.ok());
-//
-//    options.path = "/";
-//    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
-//    ASSERT_FALSE(status.ok());
+    //    options.slave_paths.push_back("/");
+    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    ASSERT_FALSE(status.ok());
+    //
+    //    options.path = "/";
+    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    ASSERT_FALSE(status.ok());
 
     milvus::engine::meta::TableFileSchema file;
     file.id_ = 50;

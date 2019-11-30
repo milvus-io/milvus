@@ -28,7 +28,7 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_search.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
-cuda_add_executable(test_db
+add_executable(test_db
         ${common_files}
         ${test_files}
         )

@@ -17,6 +17,7 @@
 
 #include <iostream>  // TODO(linxj): using Log instead
 
+#include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
 
 namespace knowhere {
@@ -51,30 +52,18 @@ TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
             std::cout << str_log << std::endl;
             break;
         }
-            // case 1: {
-            //    SERVER_LOG_DEBUG << str_log;
-            //    break;
-            //}
+        case 1: {
+            KNOWHERE_LOG_DEBUG << str_log;
+            break;
+        }
             // case 2: {
-            //    SERVER_LOG_INFO << str_log;
-            //    break;
-            //}
+            //     KNOWHERE_LOG_TRACE << str_log;
+            //     break;
+            // }
             // case 3: {
-            //    SERVER_LOG_WARNING << str_log;
-            //    break;
-            //}
-            // case 4: {
-            //    SERVER_LOG_ERROR << str_log;
-            //    break;
-            //}
-            // case 5: {
-            //    SERVER_LOG_FATAL << str_log;
-            //    break;
-            //}
-            // default: {
-            //    SERVER_LOG_INFO << str_log;
-            //    break;
-            //}
+            //     KNOWHERE_LOG_WARNING << str_log;
+            //     break;
+            // }
     }
 }
 

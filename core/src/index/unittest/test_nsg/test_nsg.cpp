@@ -21,7 +21,11 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
+
+#include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
 #include "unittest/utils.h"
@@ -37,7 +41,10 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     void
     SetUp() override {
         // Init_with_default();
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
+#ifdef MILVUS_GPU_VERSION
+        int64_t MB = 1024 * 1024;
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
+#endif
         Generate(256, 1000000 / 100, 1);
         index_ = std::make_shared<knowhere::NSG>();
 
@@ -51,16 +58,20 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         tmp_conf->candidate_pool_size = 100;
         tmp_conf->metric_type = knowhere::METRICTYPE::L2;
         train_conf = tmp_conf;
+        train_conf->Dump();
 
         auto tmp2_conf = std::make_shared<knowhere::NSGCfg>();
         tmp2_conf->k = k;
         tmp2_conf->search_length = 30;
         search_conf = tmp2_conf;
+        search_conf->Dump();
     }
 
     void
     TearDown() override {
+#ifdef MILVUS_GPU_VERSION
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 
  protected:
@@ -84,25 +95,24 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dimension(), dim);
-    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
+    //    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
     ASSERT_NO_THROW({
         index_->Add(base_dataset, knowhere::Config());
         index_->Seal();
     });
+}
 
-    {
-        // std::cout << "k = 1" << std::endl;
-        // new_index->Search(GenQuery(1), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(10), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(100), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(1000), Config::object{{"k", 1}});
-        // new_index->Search(GenQuery(10000), Config::object{{"k", 1}});
+TEST_F(NSGInterfaceTest, comparetest) {
+    knowhere::algo::DistanceL2 distanceL2;
+    knowhere::algo::DistanceIP distanceIP;
 
-        // std::cout << "k = 5" << std::endl;
-        // new_index->Search(GenQuery(1), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(20), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(100), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(300), Config::object{{"k", 5}});
-        // new_index->Search(GenQuery(500), Config::object{{"k", 5}});
+    knowhere::TimeRecorder tc("Compare");
+    for (int i = 0; i < 1000; ++i) {
+        distanceL2.Compare(xb.data(), xq.data(), 256);
     }
+    tc.RecordSection("L2");
+    for (int i = 0; i < 1000; ++i) {
+        distanceIP.Compare(xb.data(), xq.data(), 256);
+    }
+    tc.RecordSection("IP");
 }

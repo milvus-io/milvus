@@ -18,7 +18,6 @@
 #include "scheduler/SchedInst.h"
 #include "ResourceFactory.h"
 #include "Utils.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "server/Config.h"
 
 #include <set>
@@ -46,18 +45,6 @@ std::mutex BuildMgrInst::mutex_;
 
 void
 load_simple_config() {
-    server::Config& config = server::Config::GetInstance();
-    std::string mode;
-    config.GetResourceConfigMode(mode);
-    std::vector<std::string> pool;
-    config.GetResourceConfigSearchResources(pool);
-
-    // get resources
-    auto gpu_ids = get_gpu_pool();
-
-    int32_t index_build_device_id;
-    config.GetResourceConfigIndexBuildDevice(index_build_device_id);
-
     // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
 
@@ -65,26 +52,50 @@ load_simple_config() {
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, true));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
-    auto pcie = Connection("pcie", 12000);
-    bool find_build_gpu_id = false;
-    for (auto& gpu_id : gpu_ids) {
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
-        if (index_build_device_id == gpu_id) {
-            find_build_gpu_id = true;
+    // get resources
+#ifdef MILVUS_GPU_VERSION
+    bool enable_gpu = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetGpuResourceConfigEnable(enable_gpu);
+    if (enable_gpu) {
+        std::vector<int64_t> gpu_ids;
+        config.GetGpuResourceConfigSearchResources(gpu_ids);
+        std::vector<int64_t> build_gpu_ids;
+        config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids);
+        auto pcie = Connection("pcie", 12000);
+
+        std::vector<int64_t> not_find_build_ids;
+        for (auto& build_id : build_gpu_ids) {
+            bool find_gpu_id = false;
+            for (auto& gpu_id : gpu_ids) {
+                if (gpu_id == build_id) {
+                    find_gpu_id = true;
+                    break;
+                }
+            }
+            if (not find_gpu_id) {
+                not_find_build_ids.emplace_back(build_id);
+            }
+        }
+
+        for (auto& gpu_id : gpu_ids) {
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
+            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
+        }
+
+        for (auto& not_find_id : not_find_build_ids) {
+            ResMgrInst::GetInstance()->Add(
+                ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id, true, true));
+            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
         }
     }
-
-    if (not find_build_gpu_id && index_build_device_id != server::CPU_DEVICE_ID) {
-        ResMgrInst::GetInstance()->Add(
-            ResourceFactory::Create(std::to_string(index_build_device_id), "GPU", index_build_device_id, true, true));
-        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(index_build_device_id), pcie);
-    }
+#endif
 }
 
 void
 StartSchedulerService() {
     load_simple_config();
+    OptimizerInst::GetInstance()->Init();
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
     JobMgrInst::GetInstance()->Start();

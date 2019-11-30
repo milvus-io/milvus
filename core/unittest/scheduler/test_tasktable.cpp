@@ -18,7 +18,6 @@
 #include <gtest/gtest.h>
 #include "scheduler/TaskTable.h"
 #include "scheduler/task/TestTask.h"
-#include "scheduler/tasklabel/DefaultLabel.h"
 
 /************ TaskTableBaseTest ************/
 
@@ -162,9 +161,8 @@ class TaskTableBaseTest : public ::testing::Test {
     SetUp() override {
         milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        auto label = std::make_shared<milvus::scheduler::DefaultLabel>();
-        task1_ = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
-        task2_ = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
+        task1_ = std::make_shared<milvus::scheduler::TestTask>(dummy, nullptr);
+        task2_ = std::make_shared<milvus::scheduler::TestTask>(dummy, nullptr);
     }
 
     milvus::scheduler::TaskPtr invalid_task_;
@@ -320,8 +318,7 @@ class TaskTableAdvanceTest : public ::testing::Test {
     SetUp() override {
         milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto label = std::make_shared<milvus::scheduler::DefaultLabel>();
-            auto task = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
+            auto task = std::make_shared<milvus::scheduler::TestTask>(dummy, nullptr);
             table1_.Put(task);
         }
 

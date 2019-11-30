@@ -75,8 +75,8 @@ class GPUIVF : public IVF, public GPUIndex {
     VectorIndexPtr
     CopyGpuToGpu(const int64_t& device_id, const Config& config) override;
 
-    VectorIndexPtr
-    Clone() final;
+    //    VectorIndexPtr
+    //    Clone() final;
 
  protected:
     void

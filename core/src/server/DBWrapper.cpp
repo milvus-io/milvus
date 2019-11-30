@@ -89,7 +89,7 @@ DBWrapper::StartService() {
     }
 
     // engine config
-    int32_t omp_thread;
+    int64_t omp_thread;
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
@@ -100,7 +100,7 @@ DBWrapper::StartService() {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
     } else {
-        uint32_t sys_thread_cnt = 8;
+        int64_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
             omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
             omp_set_num_threads(omp_thread);
@@ -108,7 +108,7 @@ DBWrapper::StartService() {
     }
 
     // init faiss global variable
-    int32_t use_blas_threshold;
+    int64_t use_blas_threshold;
     s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
@@ -119,7 +119,7 @@ DBWrapper::StartService() {
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;
-    int32_t disk, days;
+    int64_t disk, days;
     s = config.GetDBConfigArchiveDiskThreshold(disk);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;

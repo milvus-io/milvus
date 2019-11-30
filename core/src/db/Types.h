@@ -27,8 +27,7 @@
 namespace milvus {
 namespace engine {
 
-using IDNumber = faiss::Index::idx_t;
-
+typedef int64_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 

@@ -5,8 +5,9 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.2-yellowgreen)
+![Release](https://img.shields.io/badge/release-v0.5.3-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
 
@@ -18,7 +19,7 @@ For more detailed introduction of Milvus and its architecture, see [Milvus overv
 
 Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) APIs. 
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.2/).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.5.3/).
 
 ## Get started
 
@@ -52,18 +53,23 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 
 To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
 
-## Thanks
+## Contributors
 
-We greatly appreciate the help of the following people.
+Below is a list of Milvus contributors. We greatly appreciate your contributions!
 
 - [akihoni](https://github.com/akihoni) provided the CN version of README, and found a broken link in the doc.
 - [goodhamgupta](https://github.com/goodhamgupta) fixed a filename typo in the bootcamp doc.
+- [erdustiggen](https://github.com/erdustiggen) changed from std::cout to LOG for error messages, and fixed a clang format issue as well as some grammatical errors.
 
 ## Resources
 
 - [Milvus.io](https://www.milvus.io)
 
 - [Milvus bootcamp](https://github.com/milvus-io/bootcamp)
+
+- [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
+
+- [Milvus FAQ](https://www.milvus.io/docs/en/faq/operational_faq/)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
@@ -76,5 +82,3 @@ We greatly appreciate the help of the following people.
 ## License
 
 [Apache License 2.0](LICENSE)
-
-

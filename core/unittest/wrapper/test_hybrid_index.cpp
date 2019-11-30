@@ -15,22 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "wrapper/VecIndex.h"
-#include "wrapper/utils.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "wrapper/VecIndex.h"
+#include "wrapper/utils.h"
 
 #include <gtest/gtest.h>
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 
+using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
-using ::testing::Combine;
 
-class KnowhereHybrid
-    : public DataGenBase, public ::testing::Test {
+class KnowhereHybrid : public DataGenBase, public ::testing::Test {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 
         dim = 128;
@@ -40,7 +40,8 @@ class KnowhereHybrid
         GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
     }
 
-    void TearDown() override {
+    void
+    TearDown() override {
         knowhere::FaissGpuResourceMgr::GetInstance().Free();
     }
 

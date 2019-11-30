@@ -15,9 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "metrics/PrometheusMetrics.h"
 #include "server/Config.h"
+#include "metrics/prometheus/PrometheusMetrics.h"
 
 #include <gtest/gtest.h>
 #include <iostream>

@@ -259,13 +259,13 @@ GrpcClient::PreloadTable(milvus::grpc::TableName& table_name) {
 }
 
 Status
-GrpcClient::DeleteByRange(grpc::DeleteByRangeParam& delete_by_range_param) {
+GrpcClient::DeleteByDate(grpc::DeleteByDateParam& delete_by_range_param) {
     ClientContext context;
     ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->DeleteByRange(&context, delete_by_range_param, &response);
+    ::grpc::Status grpc_status = stub_->DeleteByDate(&context, delete_by_range_param, &response);
 
     if (!grpc_status.ok()) {
-        std::cerr << "DeleteByRange gRPC failed!" << std::endl;
+        std::cerr << "DeleteByDate gRPC failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
@@ -307,6 +307,59 @@ GrpcClient::DropIndex(grpc::TableName& table_name) {
 
     if (!grpc_status.ok()) {
         std::cerr << "DropIndex gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
+    return Status::OK();
+}
+
+Status
+GrpcClient::CreatePartition(const grpc::PartitionParam& partition_param) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->CreatePartition(&context, partition_param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "CreatePartition gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
+    return Status::OK();
+}
+
+Status
+GrpcClient::ShowPartitions(const grpc::TableName& table_name, grpc::PartitionList& partition_array) const {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->ShowPartitions(&context, table_name, &partition_array);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "ShowPartitions gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (partition_array.status().error_code() != grpc::SUCCESS) {
+        std::cerr << partition_array.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, partition_array.status().reason());
+    }
+    return Status::OK();
+}
+
+Status
+GrpcClient::DropPartition(const ::milvus::grpc::PartitionParam& partition_param) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->DropPartition(&context, partition_param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "DropPartition gRPC failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 

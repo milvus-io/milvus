@@ -30,9 +30,13 @@ class StringHelpFunctions {
     StringHelpFunctions() = default;
 
  public:
+    // trim blanks from begin and end
+    // "  a b c  "  =>  "a b c"
     static void
     TrimStringBlank(std::string& string);
 
+    // trim quotes from begin and end
+    // "'abc'"  =>  "abc"
     static void
     TrimStringQuote(std::string& string, const std::string& qoute);
 
@@ -46,6 +50,8 @@ class StringHelpFunctions {
     static void
     SplitStringByDelimeter(const std::string& str, const std::string& delimeter, std::vector<std::string>& result);
 
+    // merge strings with delimeter
+    // "a", "b", "c"  => "a,b,c"
     static void
     MergeStringWithDelimeter(const std::vector<std::string>& strs, const std::string& delimeter, std::string& result);
 
@@ -59,6 +65,11 @@ class StringHelpFunctions {
     static Status
     SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
                        std::vector<std::string>& result);
+
+    // std regex match function
+    // regex grammar reference: http://www.cplusplus.com/reference/regex/ECMAScript/
+    static bool
+    IsRegexMatch(const std::string& target_str, const std::string& pattern);
 };
 
 }  // namespace server

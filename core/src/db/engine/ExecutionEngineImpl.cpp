@@ -25,6 +25,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
@@ -85,6 +86,11 @@ ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& l
 
 VecIndexPtr
 ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+#ifdef MILVUS_GPU_VERSION
+    server::Config& config = server::Config::GetInstance();
+    bool gpu_resource_enable = true;
+    config.GetGpuResourceConfigEnable(gpu_resource_enable);
+#endif
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -92,19 +98,48 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
-            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+#ifdef MILVUS_GPU_VERSION
+            if (gpu_resource_enable)
+                index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+            else
+#endif
+                index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
-            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+#ifdef MILVUS_GPU_VERSION
+            if (gpu_resource_enable)
+                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+            else
+#endif
+                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
             break;
         }
         case EngineType::NSG_MIX: {
             index = GetVecIndexFactory(IndexType::NSG_MIX);
             break;
         }
+#ifdef CUSTOMIZATION
         case EngineType::FAISS_IVFSQ8H: {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            break;
+        }
+#endif
+        case EngineType::FAISS_PQ: {
+#ifdef MILVUS_GPU_VERSION
+            if (gpu_resource_enable)
+                index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+            else
+#endif
+                index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
+            break;
+        }
+        case EngineType::SPTAG_KDT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
+            break;
+        }
+        case EngineType::SPTAG_BKT: {
+            index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
             break;
         }
         default: {
@@ -126,8 +161,16 @@ ExecutionEngineImpl::HybridLoad() const {
         return;
     }
 
+#ifdef MILVUS_GPU_VERSION
     const std::string key = location_ + ".quantizer";
-    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+    server::Config& config = server::Config::GetInstance();
+    std::vector<int64_t> gpus;
+    Status s = config.GetGpuResourceConfigSearchResources(gpus);
+    if (!s.ok()) {
+        ENGINE_LOG_ERROR << s.message();
+        return;
+    }
 
     // cache hit
     {
@@ -173,6 +216,7 @@ ExecutionEngineImpl::HybridLoad() const {
         auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
         cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
     }
+#endif
 }
 
 void
@@ -223,6 +267,11 @@ ExecutionEngineImpl::PhysicalSize() const {
 Status
 ExecutionEngineImpl::Serialize() {
     auto status = write_index(index_, location_);
+
+    // here we reset index size by file size,
+    // since some index type(such as SQ8) data size become smaller after serialized
+    index_->set_size(PhysicalSize());
+
     return status;
 }
 
@@ -309,21 +358,43 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         return Status::OK();
     }
 #endif
-    try {
-        index_ = index_->CopyToGpu(device_id);
-        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-    } catch (std::exception& e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status(DB_ERROR, e.what());
+
+#ifdef MILVUS_GPU_VERSION
+    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
+        if (index_ == nullptr) {
+            ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
+            return Status(DB_ERROR, "index is null");
+        }
+
+        try {
+            index_ = index_->CopyToGpu(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+        } catch (std::exception& e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status(DB_ERROR, e.what());
+        }
     }
+
+    if (!already_in_cache) {
+        GpuCache(device_id);
+    }
+#endif
+
     return Status::OK();
 }
 
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+#ifdef MILVUS_GPU_VERSION
+    gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
+#endif
     return Status::OK();
 }
 
@@ -354,18 +425,18 @@ ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-ExecutionEnginePtr
-ExecutionEngineImpl::Clone() {
-    if (index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
-        return nullptr;
-    }
-
-    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
-    ret->Init();
-    ret->index_ = index_->Clone();
-    return ret;
-}
+// ExecutionEnginePtr
+// ExecutionEngineImpl::Clone() {
+//    if (index_ == nullptr) {
+//        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
+//        return nullptr;
+//    }
+//
+//    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
+//    ret->Init();
+//    ret->index_ = index_->Clone();
+//    return ret;
+//}
 
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {
@@ -534,22 +605,34 @@ ExecutionEngineImpl::Cache() {
 
 Status
 ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
+#ifdef MILVUS_GPU_VERSION
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
     milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
-
+#endif
     return Status::OK();
 }
 
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetResourceConfigIndexBuildDevice(gpu_num_);
+    std::vector<int64_t> gpu_ids;
+    Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     if (!s.ok()) {
-        return s;
+        gpu_num_ = knowhere::INVALID_VALUE;
+    }
+    for (auto id : gpu_ids) {
+        if (gpu_num_ == id) {
+            return Status::OK();
+        }
     }
 
+    std::string msg = "Invalid gpu_num";
+    return Status(SERVER_INVALID_ARGUMENT, msg);
+#else
     return Status::OK();
+#endif
 }
 
 }  // namespace engine

@@ -13,16 +13,16 @@ macro(define_option name description default)
 endmacro()
 
 function(list_join lst glue out)
-    if("${${lst}}" STREQUAL "")
+    if ("${${lst}}" STREQUAL "")
         set(${out} "" PARENT_SCOPE)
         return()
-    endif()
+    endif ()
 
     list(GET ${lst} 0 joined)
     list(REMOVE_AT ${lst} 0)
-    foreach(item ${${lst}})
+    foreach (item ${${lst}})
         set(joined "${joined}${glue}${item}")
-    endforeach()
+    endforeach ()
     set(${out} ${joined} PARENT_SCOPE)
 endfunction()
 
@@ -35,22 +35,31 @@ macro(define_option_string name description default)
 
     set("${name}_OPTION_ENUM" ${ARGN})
     list_join("${name}_OPTION_ENUM" "|" "${name}_OPTION_ENUM")
-    if(NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
+    if (NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
         set_property(CACHE ${name} PROPERTY STRINGS ${ARGN})
-    endif()
+    endif ()
 endmacro()
+
+#----------------------------------------------------------------------
+set_option_category("Milvus Build Option")
+
+define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
+
+define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "AUTO")
+set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 
 define_option_string(MILVUS_DEPENDENCY_SOURCE
-                    "Method to use for acquiring MILVUS's build dependencies"
-                    "${MILVUS_DEPENDENCY_SOURCE_DEFAULT}"
-                    "AUTO"
-                    "BUNDLED"
-                    "SYSTEM")
+        "Method to use for acquiring MILVUS's build dependencies"
+        "${MILVUS_DEPENDENCY_SOURCE_DEFAULT}"
+        "AUTO"
+        "BUNDLED"
+        "SYSTEM")
+
+define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
 
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
@@ -70,23 +79,11 @@ define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
     define_option(MILVUS_WITH_LIBUNWIND "Build with libunwind" ON)
     define_option(MILVUS_WITH_GPERFTOOLS "Build with gperftools" ON)
-endif()
+endif ()
 
 define_option(MILVUS_WITH_GRPC "Build with GRPC" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
-
-#----------------------------------------------------------------------
-if(MSVC)
-    set_option_category("MSVC")
-
-    define_option(MSVC_LINK_VERBOSE
-            "Pass verbose linking options when linking libraries and executables"
-            OFF)
-
-    define_option(MILVUS_USE_STATIC_CRT "Build MILVUS with statically linked CRT" OFF)
-endif()
-
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
@@ -94,9 +91,9 @@ set_option_category("Test and benchmark")
 unset(MILVUS_BUILD_TESTS CACHE)
 if (BUILD_UNIT_TEST)
     define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" ON)
-else()
+else ()
     define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" OFF)
-endif(BUILD_UNIT_TEST)
+endif (BUILD_UNIT_TEST)
 
 #----------------------------------------------------------------------
 macro(config_summary)
@@ -108,12 +105,12 @@ macro(config_summary)
     message(STATUS "  Generator: ${CMAKE_GENERATOR}")
     message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
     message(STATUS "  Source directory: ${CMAKE_CURRENT_SOURCE_DIR}")
-    if(${CMAKE_EXPORT_COMPILE_COMMANDS})
+    if (${CMAKE_EXPORT_COMPILE_COMMANDS})
         message(
                 STATUS "  Compile commands: ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json")
-    endif()
+    endif ()
 
-    foreach(category ${MILVUS_OPTION_CATEGORIES})
+    foreach (category ${MILVUS_OPTION_CATEGORIES})
 
         message(STATUS)
         message(STATUS "${category} options:")
@@ -121,50 +118,50 @@ macro(config_summary)
         set(option_names ${MILVUS_${category}_OPTION_NAMES})
 
         set(max_value_length 0)
-        foreach(name ${option_names})
+        foreach (name ${option_names})
             string(LENGTH "\"${${name}}\"" value_length)
-            if(${max_value_length} LESS ${value_length})
+            if (${max_value_length} LESS ${value_length})
                 set(max_value_length ${value_length})
-            endif()
-        endforeach()
+            endif ()
+        endforeach ()
 
-        foreach(name ${option_names})
-            if("${${name}_OPTION_TYPE}" STREQUAL "string")
+        foreach (name ${option_names})
+            if ("${${name}_OPTION_TYPE}" STREQUAL "string")
                 set(value "\"${${name}}\"")
-            else()
+            else ()
                 set(value "${${name}}")
-            endif()
+            endif ()
 
             set(default ${${name}_OPTION_DEFAULT})
             set(description ${${name}_OPTION_DESCRIPTION})
             string(LENGTH ${description} description_length)
-            if(${description_length} LESS 70)
+            if (${description_length} LESS 70)
                 string(
                         SUBSTRING
                         "                                                                     "
                         ${description_length} -1 description_padding)
-            else()
+            else ()
                 set(description_padding "
                 ")
-            endif()
+            endif ()
 
             set(comment "[${name}]")
 
-            if("${value}" STREQUAL "${default}")
+            if ("${value}" STREQUAL "${default}")
                 set(comment "[default] ${comment}")
-            endif()
+            endif ()
 
-            if(NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
+            if (NOT ("${${name}_OPTION_ENUM}" STREQUAL ""))
                 set(comment "${comment} [${${name}_OPTION_ENUM}]")
-            endif()
+            endif ()
 
             string(
                     SUBSTRING "${value}                                                             "
                     0 ${max_value_length} value)
 
             message(STATUS "  ${description} ${description_padding} ${value} ${comment}")
-        endforeach()
+        endforeach ()
 
-    endforeach()
+    endforeach ()
 
 endmacro()

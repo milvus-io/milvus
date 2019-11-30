@@ -33,8 +33,7 @@ namespace milvus {
 namespace interface {
 
 struct dumpable {
-    virtual ~dumpable() {
-    }
+    virtual ~dumpable() = default;
 
     virtual json
     Dump() const = 0;
