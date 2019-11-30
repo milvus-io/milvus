@@ -34,20 +34,31 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
 
     BinarySet
     Serialize() override;
+
     void
     Load(const BinarySet& index_binary) override;
+
     void
     Train(const Config& config);
+
     DatasetPtr
     Search(const DatasetPtr& dataset, const Config& config) override;
+
     int64_t
     Count() override;
+
     VectorIndexPtr
     Clone() override;
+
     int64_t
     Dimension() override;
+
     void
     Add(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    AddWithoutId(const DatasetPtr& dataset, const Config& config);
+
     VectorIndexPtr
     CopyCpuToGpu(const int64_t& device_id, const Config& config);
     void
@@ -55,12 +66,15 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
 
     virtual float*
     GetRawVectors();
+
     virtual int64_t*
     GetRawIds();
 
  protected:
     virtual void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+
+ protected:
     std::mutex mutex_;
 };
 

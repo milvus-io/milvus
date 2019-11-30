@@ -27,6 +27,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
 - \#533 - NSG build failed with MetricType Inner Product
+- \#548 - NSG search accuracy is too low
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
