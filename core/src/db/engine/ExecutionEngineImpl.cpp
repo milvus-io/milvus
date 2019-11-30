@@ -86,9 +86,11 @@ ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& l
 
 VecIndexPtr
 ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
+#endif
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
