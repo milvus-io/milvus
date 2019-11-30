@@ -22,9 +22,9 @@
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
 #include "knowhere/common/Timer.h"
@@ -120,7 +120,7 @@ TEST_F(NSGInterfaceTest, comparetest) {
 }
 
 //#include <src/index/knowhere/knowhere/index/vector_index/nsg/OriNSG.h>
-//TEST(test, ori_nsg) {
+// TEST(test, ori_nsg) {
 //    //    float* p_data = nullptr;
 //    size_t rows, dim;
 //    char* filename = "/mnt/112d53a6-5592-4360-a33b-7fd789456fce/workspace/Data/sift/sift_base.fvecs";
@@ -226,7 +226,7 @@ TEST_F(NSGInterfaceTest, comparetest) {
 //    printf("R@100 = %.4f\n", n_100 / float(nq));
 //}
 //
-//TEST(testxx, test_idmap){
+// TEST(testxx, test_idmap){
 //    int k = 50;
 //    std::string knng_filename =
 //        "/mnt/112d53a6-5592-4360-a33b-7fd789456fce/workspace/Cellar/anns/efanna_graph/tests/sift.50NN.graph";
@@ -234,7 +234,8 @@ TEST_F(NSGInterfaceTest, comparetest) {
 //    Load_nns_graph(gt_knng, knng_filename.c_str());
 //
 //    size_t rows, dim;
-//    char* filename = "/mnt/112d53a6-5592-4360-a33b-7fd789456fce/workspace/Cellar/anns/efanna_graph/tests/siftsmall/siftsmall_base.fvecs";
+//    char* filename =
+//    "/mnt/112d53a6-5592-4360-a33b-7fd789456fce/workspace/Cellar/anns/efanna_graph/tests/siftsmall/siftsmall_base.fvecs";
 //    float* p_data = fvecs_read(filename, &dim, &rows);
 //
 //    std::vector<int64_t> store_ids(rows);

@@ -25,8 +25,8 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 

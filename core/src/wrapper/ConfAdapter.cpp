@@ -204,7 +204,7 @@ NSGConfAdapter::Match(const TempMetaConf& metaconf) {
     auto scale_factor = round(metaconf.dim / 128.0);
     scale_factor = scale_factor >= 4 ? 4 : scale_factor;
     conf->nprobe = int64_t(conf->nlist * 0.01);
-//    conf->knng = 40 + 10 * scale_factor;  // the size of knng
+    //    conf->knng = 40 + 10 * scale_factor;  // the size of knng
     conf->knng = 50;
     conf->search_length = 50 + 5 * scale_factor;
     conf->out_degree = 50 + 5 * scale_factor;
