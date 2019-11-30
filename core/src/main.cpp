@@ -58,10 +58,10 @@ print_banner() {
               << "OpenBLAS"
 #endif
               << " library." << std::endl;
-#ifdef MILVUS_CPU_VERSION
-    std::cout << "You are using Milvus CPU edition" << std::endl;
-#else
+#ifdef MILVUS_GPU_VERSION
     std::cout << "You are using Milvus GPU edition" << std::endl;
+#else
+    std::cout << "You are using Milvus CPU edition" << std::endl;
 #endif
     std::cout << std::endl;
 }

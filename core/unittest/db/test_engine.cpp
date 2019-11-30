@@ -59,6 +59,29 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
+
+    {
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
+                512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_PQ, milvus::engine::MetricType::IP, 1024);
+
+        ASSERT_TRUE(engine_ptr != nullptr);
+    }
+
+    {
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
+                512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
+                milvus::engine::MetricType::L2, 1024);
+
+        ASSERT_TRUE(engine_ptr != nullptr);
+    }
+
+    {
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
+                512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
+                milvus::engine::MetricType::L2, 1024);
+
+        ASSERT_TRUE(engine_ptr != nullptr);
+    }
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
@@ -69,7 +92,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 
     std::vector<float> data;
     std::vector<int64_t> ids;
-    const int row_count = 10000;
+    const int row_count = 500;
     data.reserve(row_count * dimension);
     ids.reserve(row_count);
     for (int64_t i = 0; i < row_count; i++) {
@@ -88,12 +111,15 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     status = engine_ptr->CopyToGpu(0, false);
     // ASSERT_TRUE(status.ok());
 
-    auto new_engine = engine_ptr->Clone();
-    ASSERT_EQ(new_engine->Dimension(), dimension);
-    ASSERT_EQ(new_engine->Count(), ids.size());
-    status = new_engine->CopyToCpu();
+//    auto new_engine = engine_ptr->Clone();
+//    ASSERT_EQ(new_engine->Dimension(), dimension);
+//    ASSERT_EQ(new_engine->Count(), ids.size());
+    status = engine_ptr->CopyToCpu();
     // ASSERT_TRUE(status.ok());
 
-    auto engine_build = new_engine->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+    auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
+    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
+    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
     // ASSERT_TRUE(status.ok());
 }

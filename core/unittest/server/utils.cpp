@@ -28,6 +28,8 @@ namespace {
 static const char* VALID_CONFIG_STR =
     "# Default values are used when you make no changes to the following parameters.\n"
     "\n"
+    "version: 0.1"
+    "\n"
     "server_config:\n"
     "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
     "  port: 19530                       # port range: 1025 ~ 65534\n"
@@ -52,24 +54,21 @@ static const char* VALID_CONFIG_STR =
     "cache_config:\n"
     "  cpu_cache_capacity: 16            # GB, CPU memory used for cache\n"
     "  cpu_cache_threshold: 0.85         \n"
-    "  gpu_cache_capacity: 4             # GB, GPU memory used for cache\n"
-    "  gpu_cache_threshold: 0.85         \n"
     "  cache_insert_data: false          # whether to load inserted data into cache\n"
     "\n"
     "engine_config:\n"
     "  use_blas_threshold: 20            \n"
     "\n"
-    "resource_config:\n"
-#ifdef MILVUS_CPU_VERSION
-    "  search_resources:\n"
-    "    - cpu\n"
-    "  index_build_device: cpu           # CPU used for building index";
-#else
-    "  search_resources:\n"
-    "    - cpu\n"
+#ifdef MILVUS_GPU_VERSION
+    "gpu_resource_config:\n"
+    "  enable: true                      # whether to enable GPU resources\n"
+    "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
+    "  search_resources:                 # define the GPU devices used for search computation, must be in format gpux\n"
     "    - gpu0\n"
-    "  index_build_device: gpu0          # GPU used for building index";
+    "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
+    "    - gpu0\n"
 #endif
+    "\n";
 
 static const char* INVALID_CONFIG_STR = "*INVALID*";
 

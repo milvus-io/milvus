@@ -63,10 +63,10 @@ IVFPQ::GenParams(const Config& config) {
     return params;
 }
 
-VectorIndexPtr
-IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
-    return std::make_shared<IVFPQ>(index);
-}
+// VectorIndexPtr
+// IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
+//    return std::make_shared<IVFPQ>(index);
+//}
 
 VectorIndexPtr
 IVFPQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {

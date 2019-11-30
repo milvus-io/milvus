@@ -256,20 +256,20 @@ IVF::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 #endif
 }
 
-VectorIndexPtr
-IVF::Clone() {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    auto clone_index = faiss::clone_index(index_.get());
-    std::shared_ptr<faiss::Index> new_index;
-    new_index.reset(clone_index);
-    return Clone_impl(new_index);
-}
-
-VectorIndexPtr
-IVF::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
-    return std::make_shared<IVF>(index);
-}
+// VectorIndexPtr
+// IVF::Clone() {
+//    std::lock_guard<std::mutex> lk(mutex_);
+//
+//    auto clone_index = faiss::clone_index(index_.get());
+//    std::shared_ptr<faiss::Index> new_index;
+//    new_index.reset(clone_index);
+//    return Clone_impl(new_index);
+//}
+//
+// VectorIndexPtr
+// IVF::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
+//    return std::make_shared<IVF>(index);
+//}
 
 void
 IVF::Seal() {

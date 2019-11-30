@@ -60,8 +60,8 @@ class VecIndexImpl : public VecIndex {
     Status
     Load(const knowhere::BinarySet& index_binary) override;
 
-    VecIndexPtr
-    Clone() override;
+    //    VecIndexPtr
+    //    Clone() override;
 
     int64_t
     GetDeviceId() override;

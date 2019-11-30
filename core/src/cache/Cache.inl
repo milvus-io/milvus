@@ -99,8 +99,8 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         std::lock_guard<std::mutex> lock(mutex_);
 
         lru_.put(key, item);
-        SERVER_LOG_DEBUG << "Insert " << key << " size:" << item->Size() << " bytes into cache, usage: " << usage_
-                         << " bytes";
+        SERVER_LOG_DEBUG << "Insert " << key << " size: " << item->Size() << " bytes into cache, usage: " << usage_
+                         << " bytes," << " capacity: " << capacity_ << " bytes";
     }
 }
 
@@ -115,7 +115,8 @@ Cache<ItemObj>::erase(const std::string& key) {
     const ItemObj& old_item = lru_.get(key);
     usage_ -= old_item->Size();
 
-    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->Size();
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->Size() << " bytes from cache, usage: " << usage_
+                     << " bytes," << " capacity: " << capacity_ << " bytes";
 
     lru_.erase(key);
 }

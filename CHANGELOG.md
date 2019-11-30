@@ -21,13 +21,26 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
+- \#485 - Increase code coverage rate
 - \#486 - gpu no usage during index building
+- \#497 - CPU-version search performance decreased
+- \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
 - \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
 - \#513 - Unittest DELETE_BY_RANGE sometimes failed
+- \#523 - Erase file data from cache once the file is marked as deleted
 - \#527 - faiss benchmark not compatible with faiss 1.6.0
 - \#530 - BuildIndex stop when do build index and search simultaneously
+- \#532 - assigin value to `table_name` from confest shell
 - \#533 - NSG build failed with MetricType Inner Product
+- \#543 - client raise exception in shards when search results is empty
+- \#545 - Avoid dead circle of build index thread when error occurs
+- \#547 - NSG build failed using GPU-edition if set gpu_enable false
 - \#548 - NSG search accuracy is too low
+- \#552 - Server down during building index_type: IVF_PQ using GPU-edition
+- \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#599 - Build index log is incorrect
+- \#602 - Optimizer specify wrong gpu_id
+- \#606 - No log generated during building index with CPU
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -36,25 +49,32 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#226 - Experimental shards middleware for Milvus
 - \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
 - \#346 - Support build index with multiple gpu
+- \#420 - Update shards merge part to match v0.5.3
 - \#488 - Add log in scheduler/optimizer
 - \#502 - C++ SDK support IVFPQ and SPTAG
+- \#560 - Add version in server config file
+- \#605 - Print more messages when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
 - \#260 - C++ SDK README
 - \#266 - Rpc request source code refactor
+- \#274 - Logger the time cost during preloading data
 - \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#306 - Use int64 for all config integer
 - \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
 - \#314 - add Find FAISS in CMake
 - \#322 - Add option to enable / disable prometheus
+- \#354 - Build migration scripts into milvus docker image
 - \#358 - Add more information in build.sh and install.md
 - \#404 - Add virtual method Init() in Pass abstract class
 - \#409 - Add a Fallback pass in optimizer
 - \#433 - C++ SDK query result is not easy to use
 - \#449 - Add ShowPartitions example for C++ SDK
 - \#470 - Small raw files should not be build index
+- \#584 - Intergrate internal FAISS
+- \#611 - Remove MILVUS_CPU_VERSION
 
 ## Task
 

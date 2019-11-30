@@ -14,7 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+#ifdef MILVUS_GPU_VERSION
 #include "scheduler/optimizer/FaissFlatPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
@@ -29,7 +29,6 @@ namespace scheduler {
 
 void
 FaissFlatPass::Init() {
-#ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -39,7 +38,6 @@ FaissFlatPass::Init() {
     if (!s.ok()) {
         throw;
     }
-#endif
 }
 
 bool
@@ -62,7 +60,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
         auto best_device_id = count_ % gpus.size();
         SERVER_LOG_DEBUG << "FaissFlatPass: nq > gpu_search_threshold, specify gpu" << best_device_id << " to search!";
         count_++;
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpus[best_device_id]);
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
@@ -71,3 +69,4 @@ FaissFlatPass::Run(const TaskPtr& task) {
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

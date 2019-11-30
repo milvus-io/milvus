@@ -72,6 +72,11 @@ include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
 
+if (CUSTOMIZATION)
+    set(MILVUS_GPU_VERSION ON)
+    add_compile_definitions(CUSTOMIZATION)
+endif ()
+
 set(KNOWHERE_CPU_VERSION false)
 if (MILVUS_GPU_VERSION OR KNOWHERE_GPU_VERSION)
     message(STATUS "Building Knowhere GPU version")

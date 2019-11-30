@@ -210,6 +210,9 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
 IndexModelPtr
 CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
+    if (train_config != nullptr) {
+        train_config->CheckValid();  // throw exception
+    }
     DatasetPtr dataset = origin->Clone();
 
     // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
@@ -295,6 +298,9 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 DatasetPtr
 CPUSPTAGRNG::Search(const DatasetPtr& dataset, const Config& config) {
     SetParameters(config);
+    if (config != nullptr) {
+        config->CheckValid();  // throw exception
+    }
     auto tensor = dataset->tensor()[0];
     auto p = (float*)tensor->raw_mutable_data();
     for (auto i = 0; i < 10; ++i) {
@@ -325,10 +331,10 @@ CPUSPTAGRNG::Dimension() {
     return index_ptr_->GetFeatureDim();
 }
 
-VectorIndexPtr
-CPUSPTAGRNG::Clone() {
-    KNOWHERE_THROW_MSG("not support");
-}
+// VectorIndexPtr
+// CPUSPTAGRNG::Clone() {
+//    KNOWHERE_THROW_MSG("not support");
+//}
 
 void
 CPUSPTAGRNG::Seal() {

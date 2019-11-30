@@ -47,8 +47,8 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
     int64_t
     Count() override;
 
-    VectorIndexPtr
-    Clone() override;
+    //    VectorIndexPtr
+    //    Clone() override;
 
     int64_t
     Dimension() override;

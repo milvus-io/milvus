@@ -93,18 +93,18 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
-#ifdef MILVUS_CPU_VERSION
-            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
-#else
+#ifdef MILVUS_GPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
 #endif
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
-#ifdef MILVUS_CPU_VERSION
-            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
-#else
+#ifdef MILVUS_GPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
 #endif
             break;
         }
@@ -112,15 +112,17 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::NSG_MIX);
             break;
         }
+#ifdef CUSTOMIZATION
         case EngineType::FAISS_IVFSQ8H: {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
             break;
         }
+#endif
         case EngineType::FAISS_PQ: {
-#ifdef MILVUS_CPU_VERSION
-            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
-#else
+#ifdef MILVUS_GPU_VERSION
             index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
+#else
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
 #endif
             break;
         }
@@ -257,6 +259,11 @@ ExecutionEngineImpl::PhysicalSize() const {
 Status
 ExecutionEngineImpl::Serialize() {
     auto status = write_index(index_, location_);
+
+    // here we reset index size by file size,
+    // since some index type(such as SQ8) data size become smaller after serialized
+    index_->set_size(PhysicalSize());
+
     return status;
 }
 
@@ -410,18 +417,18 @@ ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-ExecutionEnginePtr
-ExecutionEngineImpl::Clone() {
-    if (index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
-        return nullptr;
-    }
-
-    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
-    ret->Init();
-    ret->index_ = index_->Clone();
-    return ret;
-}
+// ExecutionEnginePtr
+// ExecutionEngineImpl::Clone() {
+//    if (index_ == nullptr) {
+//        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
+//        return nullptr;
+//    }
+//
+//    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
+//    ret->Init();
+//    ret->index_ = index_->Clone();
+//    return ret;
+//}
 
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {
@@ -604,6 +611,9 @@ ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
+    if (!s.ok()) {
+        gpu_num_ = knowhere::INVALID_VALUE;
+    }
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
             return Status::OK();

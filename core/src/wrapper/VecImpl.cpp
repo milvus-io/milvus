@@ -180,13 +180,13 @@ VecIndexImpl::CopyToCpu(const Config& cfg) {
 #endif
 }
 
-VecIndexPtr
-VecIndexImpl::Clone() {
-    // TODO(linxj): exception handle
-    auto clone_index = std::make_shared<VecIndexImpl>(index_->Clone(), type);
-    clone_index->dim = dim;
-    return clone_index;
-}
+// VecIndexPtr
+// VecIndexImpl::Clone() {
+//    // TODO(linxj): exception handle
+//    auto clone_index = std::make_shared<VecIndexImpl>(index_->Clone(), type);
+//    clone_index->dim = dim;
+//    return clone_index;
+//}
 
 int64_t
 VecIndexImpl::GetDeviceId() {
