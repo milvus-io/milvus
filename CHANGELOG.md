@@ -37,6 +37,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#547 - NSG build failed using GPU-edition if set gpu_enable false
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#579 - Build index hang in GPU version when gpu_resources disabled
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
