@@ -1395,7 +1395,7 @@ MySQLMetaImpl::Archive() {
         auto& criteria = kv.first;
         auto& limit = kv.second;
         if (criteria == engine::ARCHIVE_CONF_DAYS) {
-            size_t usecs = limit * D_SEC * US_PS;
+            size_t usecs = limit * DAY * US_PS;
             int64_t now = utils::GetMicroSecTimeStamp();
 
             try {
