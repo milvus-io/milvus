@@ -145,7 +145,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
         int day = rand_r(&seed) % (days_num * 2);
-        table_file.created_on_ = ts - day * milvus::engine::meta::D_SEC * milvus::engine::meta::US_PS - 10000;
+        table_file.created_on_ = ts - day * milvus::engine::meta::DAY * milvus::engine::meta::US_PS - 10000;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         days.push_back(day);
