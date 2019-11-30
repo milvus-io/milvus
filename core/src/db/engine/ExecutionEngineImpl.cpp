@@ -463,7 +463,7 @@ ExecutionEngineImpl::Merge(const std::string& location) {
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
         auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Merge: Add Error";
+            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
         }
         return status;
     } else {

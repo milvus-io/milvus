@@ -1800,7 +1800,9 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
             mysqlpp::Query query = connectionPtr->query();
             query << "SELECT id, table_id, file_id, date"
-                  << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(TableFileSchema::TO_DELETE)
+                  << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
+                  << std::to_string(TableFileSchema::TO_DELETE) << ","
+                  << std::to_string(TableFileSchema::BACKUP) << ")"
                   << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
@@ -1810,11 +1812,13 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             TableFileSchema table_file;
             std::vector<std::string> idsToDelete;
 
+            int64_t clean_files = 0;
             for (auto& resRow : res) {
                 table_file.id_ = resRow["id"];  // implicit conversion
                 resRow["table_id"].to_string(table_file.table_id_);
                 resRow["file_id"].to_string(table_file.file_id_);
                 table_file.date_ = resRow["date"];
+                table_file.file_type_ = resRow["file_type"];
 
                 // check if the file can be deleted
                 if (filter && filter->IsIgnored(table_file)) {
@@ -1823,15 +1827,21 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     continue;  // ignore this file, don't delete it
                 }
 
-                // delete file from disk storage
-                utils::DeleteTableFilePath(options_, table_file);
-                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
-
                 // erase file data from cache
+                // because GetTableFilePath won't able to generate file path after the file is deleted
+                utils::GetTableFilePath(options_, table_file);
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
-                idsToDelete.emplace_back(std::to_string(table_file.id_));
-                table_ids.insert(table_file.table_id_);
+                if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
+                    // delete file from disk storage
+                    utils::DeleteTableFilePath(options_, table_file);
+                    ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
+
+                    idsToDelete.emplace_back(std::to_string(table_file.id_));
+                    table_ids.insert(table_file.table_id_);
+                }
+
+                clean_files++;
             }
 
             // delete file from meta
@@ -1852,8 +1862,8 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 }
             }
 
-            if (res.size() > 0) {
-                ENGINE_LOG_DEBUG << "Clean " << res.size() << " files deleted in " << seconds << " seconds";
+            if (clean_files > 0) {
+                ENGINE_LOG_DEBUG << "Clean " << clean_files << " files deleted in " << seconds << " seconds";
             }
         }  // Scoped Connection
     } catch (std::exception& e) {

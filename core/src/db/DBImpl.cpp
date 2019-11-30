@@ -722,7 +722,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
         status = meta_ptr_->UpdateTableFile(table_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-        ENGINE_LOG_ERROR << "ERROR: failed to persist merged file: " << table_file.location_
+        ENGINE_LOG_ERROR << "Failed to persist merged file: " << table_file.location_
                          << ", possible out of disk space or memory";
 
         return status;
@@ -803,6 +803,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
         if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
             ttl = meta::H_SEC;
         }
+
         meta_ptr_->CleanUpFilesWithTTL(ttl, &ongoing_files_checker_);
     }
 
@@ -839,14 +840,13 @@ DBImpl::StartBuildIndexTask(bool force) {
 
 void
 DBImpl::BackgroundBuildIndex() {
-    // ENGINE_LOG_TRACE << "Background build index thread start";
-
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
     Status status = index_failed_checker_.IgnoreFailedIndexFiles(to_index_files);
 
     if (!to_index_files.empty()) {
+        ENGINE_LOG_DEBUG << "Background build index thread begin";
         status = ongoing_files_checker_.MarkOngoingFiles(to_index_files);
 
         // step 2: put build index task to scheduler
@@ -870,17 +870,15 @@ DBImpl::BackgroundBuildIndex() {
 
                 index_failed_checker_.MarkFailedIndexFile(file_schema);
             } else {
-                index_failed_checker_.MarkSucceedIndexFile(file_schema);
                 ENGINE_LOG_DEBUG << "Building index job " << job->id() << " succeed.";
-            }
-        }
 
-        status = ongoing_files_checker_.UnmarkOngoingFiles(to_index_files);
+                index_failed_checker_.MarkSucceedIndexFile(file_schema);
+            }
+            status = ongoing_files_checker_.UnmarkOngoingFile(file_schema);
+        }
 
         ENGINE_LOG_DEBUG << "Background build index thread finished";
     }
-
-    // ENGINE_LOG_TRACE << "Background build index thread exit";
 }
 
 Status
