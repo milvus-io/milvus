@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#248 - Reside src/external in thirdparty
 - \#316 - Some files not merged after vectors added
 - \#327 - Search does not use GPU when index type is FLAT
+- \#331 - Add exception handle when search fail
 - \#340 - Test cases run failed on 0.6.0
 - \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
