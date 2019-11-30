@@ -709,9 +709,9 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 
     meta_ptr_->Archive();
 
-    int ttl = 5 * meta::M_SEC;  // default: file will be deleted after 5 minutes
+    int ttl = 5 * meta::MINUTE;  // default: file will be deleted after 5 minutes
     if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-        ttl = meta::D_SEC;
+        ttl = meta::DAY;
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 
