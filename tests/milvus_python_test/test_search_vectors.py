@@ -48,6 +48,8 @@ class TestSearchBase:
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("skip pq case temporary")
         return request.param
 
     @pytest.fixture(
@@ -58,6 +60,8 @@ class TestSearchBase:
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("skip pq case temporary")
         return request.param
     """
     generate top-k params
@@ -89,13 +93,13 @@ class TestSearchBase:
         else:
             assert not status.OK()
 
-    def test_search_l2_index_params(self, connect, table, get_index_params):
+    def test_search_l2_index_params(self, connect, table, get_simple_index_params):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         vectors, ids = self.init_data(connect, table)
         status = connect.create_index(table, index_params)
@@ -297,14 +301,14 @@ class TestSearchBase:
         assert result[0][0].distance <= epsilon
         assert result[1][0].distance <= epsilon
 
-    def test_search_ip_index_params(self, connect, ip_table, get_index_params):
+    def test_search_ip_index_params(self, connect, ip_table, get_simple_index_params):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
         
-        index_params = get_index_params
+        index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         vectors, ids = self.init_data(connect, ip_table)
         status = connect.create_index(ip_table, index_params)

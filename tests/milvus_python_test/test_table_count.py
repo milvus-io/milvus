@@ -270,6 +270,8 @@ class TestTableCountIP:
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("skip pq case temporary")
         return request.param
 
     def test_table_rows_count(self, connect, ip_table, add_vectors_nb):

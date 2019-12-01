@@ -43,6 +43,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
+- \#631 - FAISS isn't compiled with O3 option
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -77,6 +78,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#470 - Small raw files should not be build index
 - \#584 - Intergrate internal FAISS
 - \#611 - Remove MILVUS_CPU_VERSION
+- \#634 - FAISS GPU version is compiled with O0
 
 ## Task
 
