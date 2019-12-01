@@ -17,7 +17,7 @@ NVCC         = @NVCC@
 CUDA_ROOT    = @CUDA_PREFIX@
 CUDA_ARCH    = @CUDA_ARCH@
 NVCCFLAGS    = -I $(CUDA_ROOT)/targets/x86_64-linux/include/ \
--O0 -g \
+-O3 \
 -Xcompiler -fPIC \
 -Xcudafe --diag_suppress=unrecognized_attribute \
 $(CUDA_ARCH) \
