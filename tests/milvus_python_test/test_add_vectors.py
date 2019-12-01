@@ -31,6 +31,8 @@ class TestAddBase:
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_add_vector_create_table(self, connect, table):
