@@ -25,7 +25,7 @@ struct PageLockMemory {
 public:
     PageLockMemory() : data(nullptr), nbytes(0) {}
 
-    PageLockMemory(size_t size);
+    explicit PageLockMemory(size_t size);
 
     ~PageLockMemory();
 
@@ -240,7 +240,10 @@ struct ReadOnlyArrayInvertedLists: InvertedLists {
     std::vector <size_t> readonly_offset;
     bool valid;
 
+    ReadOnlyArrayInvertedLists(size_t nlist, size_t code_size);
+
     ReadOnlyArrayInvertedLists(size_t nlist, size_t code_size, const std::vector<size_t>& list_length);
+
     explicit ReadOnlyArrayInvertedLists(const ArrayInvertedLists& other);
 
     // Use default copy construct, just copy pointer, DON'T COPY pin_readonly_codes AND pin_readonly_ids

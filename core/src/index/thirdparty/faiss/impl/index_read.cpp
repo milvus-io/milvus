@@ -219,24 +219,60 @@ InvertedLists *read_InvertedLists (IOReader *f, int io_flags) {
         READANDCHECK((uint8_t *) ails->pin_readonly_codes->data, n * code_size);
         return ails;
     } else if (h == fourcc ("ilar") && !(io_flags & IO_FLAG_MMAP)) {
-        auto ails = new ArrayInvertedLists (0, 0);
-        READ1 (ails->nlist);
-        READ1 (ails->code_size);
-        ails->ids.resize (ails->nlist);
-        ails->codes.resize (ails->nlist);
-        std::vector<size_t> sizes (ails->nlist);
-        read_ArrayInvertedLists_sizes (f, sizes);
-        for (size_t i = 0; i < ails->nlist; i++) {
-            ails->ids[i].resize (sizes[i]);
-            ails->codes[i].resize (sizes[i] * ails->code_size);
+        size_t nlist;
+        size_t code_size;
+        READ1(nlist);
+        READ1(code_size);
+
+        std::vector<std::vector<Index::idx_t>> ids(nlist);
+        std::vector<std::vector<uint8_t>> codes(nlist);
+
+        std::vector<size_t> sizes (nlist);
+        read_ArrayInvertedLists_sizes(f, sizes);
+
+        for (size_t i = 0; i < nlist; ++ i) {
+            ids[i].resize (sizes[i]);
+            codes[i].resize (sizes[i] * code_size);
         }
-        for (size_t i = 0; i < ails->nlist; i++) {
-            size_t n = ails->ids[i].size();
+
+        for (size_t i = 0; i < nlist; i++) {
+            size_t n = ids[i].size();
             if (n > 0) {
-                READANDCHECK (ails->codes[i].data(), n * ails->code_size);
-                READANDCHECK (ails->ids[i].data(), n);
+                READANDCHECK (codes[i].data(), n * code_size);
+                READANDCHECK (ids[i].data(), n);
             }
         }
+
+        auto ails = new ReadOnlyArrayInvertedLists(nlist, code_size);
+        std::vector <uint8_t> readonly_codes;
+        std::vector <Index::idx_t> readonly_ids;
+        ails->readonly_length.reserve(nlist);
+        size_t offset = 0;
+        for (auto& list_ids : ids) {
+            ails->readonly_length.emplace_back(list_ids.size());
+            ails->readonly_offset.emplace_back(offset);
+            offset += list_ids.size();
+            readonly_ids.insert(readonly_ids.end(), list_ids.begin(), list_ids.end());
+        }
+
+        for(auto& list_codes : codes) {
+            readonly_codes.insert(readonly_codes.end(), list_codes.begin(), list_codes.end());
+        }
+
+        {
+            size_t size = readonly_codes.size() * sizeof(uint8_t);
+            ails->pin_readonly_codes = std::make_shared<PageLockMemory>(size);
+            memcpy(ails->pin_readonly_codes->data, readonly_codes.data(), size);
+        }
+
+        {
+            size_t size = readonly_ids.size() * sizeof(Index::idx_t);
+            ails->pin_readonly_ids = std::make_shared<PageLockMemory>(size);
+            memcpy(ails->pin_readonly_ids->data, readonly_ids.data(), size);
+        }
+
+        ails->valid = true;
+
         return ails;
     } else if (h == fourcc ("ilar") && (io_flags & IO_FLAG_MMAP)) {
         // then we load it as an OnDiskInvertedLists

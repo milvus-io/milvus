@@ -60,8 +60,6 @@ FaissBaseIndex::LoadImpl(const BinarySet& index_binary) {
     faiss::Index* index = faiss::read_index(&reader);
 
     index_.reset(index);
-
-    SealImpl();
 }
 
 void

@@ -239,6 +239,9 @@ ArrayInvertedLists::~ArrayInvertedLists ()
  * ReadOnlyArrayInvertedLists implementations
  *****************************************************************/
 
+ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(size_t nlist, size_t code_size)
+        : InvertedLists(nlist, code_size) {}
+
 ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(size_t nlist,
                                                        size_t code_size, const std::vector<size_t>& list_length)
         : InvertedLists (nlist, code_size),
