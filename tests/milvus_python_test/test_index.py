@@ -636,10 +636,7 @@ class TestIndexIP:
         top_k = 5
         status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
         logging.getLogger().info(result)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
+        assert status.OK()
         assert len(result) == len(query_vecs)
 
     # TODO: enable
@@ -975,9 +972,12 @@ class TestIndexIP:
         expected: return code 0, and default index param
         '''
         index_params = get_simple_index_params
-        status, ids = connect.add_vectors(ip_table, vectors)
+        # status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        assert status.OK()        
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            assert not status.OK()
+        else:
+            assert status.OK()
         status, result = connect.describe_index(ip_table)
         logging.getLogger().info(result)
         status = connect.drop_index(ip_table)
