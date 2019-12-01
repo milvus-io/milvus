@@ -76,6 +76,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#470 - Small raw files should not be build index
 - \#584 - Intergrate internal FAISS
 - \#611 - Remove MILVUS_CPU_VERSION
+- \#634 - FAISS GPU version is compiled with O0
 
 ## Task
 
