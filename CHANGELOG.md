@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#248 - Reside src/external in thirdparty
 - \#316 - Some files not merged after vectors added
 - \#327 - Search does not use GPU when index type is FLAT
+- \#331 - Add exception handle when search fail
 - \#340 - Test cases run failed on 0.6.0
 - \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
@@ -21,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
 - \#458 - Index data is not compatible between 0.5 and 0.6
 - \#465 - Server hang caused by searching with nsg index
+- \#485 - Increase code coverage rate
 - \#486 - gpu no usage during index building
 - \#497 - CPU-version search performance decreased
 - \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
@@ -33,6 +35,15 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#533 - NSG build failed with MetricType Inner Product
 - \#543 - client raise exception in shards when search results is empty
 - \#545 - Avoid dead circle of build index thread when error occurs
+- \#547 - NSG build failed using GPU-edition if set gpu_enable false
+- \#548 - NSG search accuracy is too low
+- \#552 - Server down during building index_type: IVF_PQ using GPU-edition
+- \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#579 - Build index hang in GPU version when gpu_resources disabled
+- \#599 - Build index log is incorrect
+- \#602 - Optimizer specify wrong gpu_id
+- \#606 - No log generated during building index with CPU
+- \#631 - FAISS isn't compiled with O3 option
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -44,11 +55,14 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#420 - Update shards merge part to match v0.5.3
 - \#488 - Add log in scheduler/optimizer
 - \#502 - C++ SDK support IVFPQ and SPTAG
+- \#560 - Add version in server config file
+- \#605 - Print more messages when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
 - \#260 - C++ SDK README
 - \#266 - Rpc request source code refactor
+- \#274 - Logger the time cost during preloading data
 - \#275 - Rename C++ SDK IndexType
 - \#284 - Change C++ SDK to shared library
 - \#306 - Use int64 for all config integer
@@ -63,6 +77,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#449 - Add ShowPartitions example for C++ SDK
 - \#470 - Small raw files should not be build index
 - \#584 - Intergrate internal FAISS
+- \#611 - Remove MILVUS_CPU_VERSION
+- \#634 - FAISS GPU version is compiled with O0
 
 ## Task
 

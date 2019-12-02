@@ -25,6 +25,7 @@
 #include "optimizer/BuildIndexPass.h"
 #include "optimizer/FaissFlatPass.h"
 #include "optimizer/FaissIVFFlatPass.h"
+#include "optimizer/FaissIVFPQPass.h"
 #include "optimizer/FaissIVFSQ8HPass.h"
 #include "optimizer/FaissIVFSQ8Pass.h"
 #include "optimizer/FallbackPass.h"
@@ -129,7 +130,10 @@ class OptimizerInst {
                     pass_list.push_back(std::make_shared<FaissFlatPass>());
                     pass_list.push_back(std::make_shared<FaissIVFFlatPass>());
                     pass_list.push_back(std::make_shared<FaissIVFSQ8Pass>());
+#ifdef CUSTOMIZATION
                     pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
+#endif
+                    pass_list.push_back(std::make_shared<FaissIVFPQPass>());
                 }
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());

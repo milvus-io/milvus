@@ -1,5 +1,7 @@
 # Default values are used when you make no changes to the following parameters.
 
+version: 0.1                        # config version
+
 server_config:
   address: 0.0.0.0                  # milvus server ip address (IPv4)
   port: 19530                       # milvus server port, must in range [1025, 65534]

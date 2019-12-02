@@ -594,6 +594,8 @@ class TestTable:
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
+            # if request.param["index_type"] == IndexType.IVF_PQ:
+            #     pytest.skip("sq8h not support in open source")
         return request.param
 
     @pytest.mark.level(1)

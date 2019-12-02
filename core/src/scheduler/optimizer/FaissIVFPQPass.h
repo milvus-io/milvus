@@ -14,47 +14,45 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+#ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <limits>
+#include <list>
+#include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include "Pass.h"
 
 namespace milvus {
+namespace scheduler {
 
-class TimeRecorder {
-    using stdclock = std::chrono::high_resolution_clock;
+class FaissIVFPQPass : public Pass {
+ public:
+    FaissIVFPQPass() = default;
 
  public:
-    explicit TimeRecorder(const std::string& header, int64_t log_level = 1);
-
-    virtual ~TimeRecorder();  // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
-
-    double
-    RecordSection(const std::string& msg);
-
-    double
-    ElapseFromBegin(const std::string& msg);
-
-    static std::string
-    GetTimeSpanStr(double span);
-
- private:
     void
-    PrintTimeRecord(const std::string& msg, double span);
+    Init() override;
+
+    bool
+    Run(const TaskPtr& task) override;
 
  private:
-    std::string header_;
-    stdclock::time_point start_;
-    stdclock::time_point last_;
-    int64_t log_level_;
+    int64_t threshold_ = std::numeric_limits<int64_t>::max();
+    int64_t count_ = 0;
+    std::vector<int64_t> gpus;
 };
 
-class TimeRecorderAuto : public TimeRecorder {
- public:
-    explicit TimeRecorderAuto(const std::string& header, int64_t log_level = 1);
+using FaissIVFPQPassPtr = std::shared_ptr<FaissIVFPQPass>;
 
-    ~TimeRecorderAuto();
-};
-
+}  // namespace scheduler
 }  // namespace milvus
+#endif

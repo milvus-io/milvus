@@ -182,7 +182,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    // get all table files from parent table
+    // step 1: get all table files from parent table
     meta::DatesT dates;
     std::vector<size_t> ids;
     meta::TableFilesSchema files_array;
@@ -191,7 +191,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
         return status;
     }
 
-    // get files from partition tables
+    // step 2: get files from partition tables
     std::vector<meta::TableSchema> partiton_array;
     status = meta_ptr_->ShowPartitions(table_id, partiton_array);
     for (auto& schema : partiton_array) {
@@ -203,6 +203,10 @@ DBImpl::PreloadTable(const std::string& table_id) {
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t available_size = cache_total - cache_usage;
 
+    // step 3: load file one by one
+    ENGINE_LOG_DEBUG << "Begin pre-load table:" + table_id + ", totally " << files_array.size()
+                     << " files need to be pre-loaded";
+    TimeRecorderAuto rc("Pre-load table:" + table_id);
     for (auto& file : files_array) {
         ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
                                                          (MetricType)file.metric_type_, file.nlist_);
@@ -213,10 +217,12 @@ DBImpl::PreloadTable(const std::string& table_id) {
 
         size += engine->PhysicalSize();
         if (size > available_size) {
+            ENGINE_LOG_DEBUG << "Pre-load canceled since cache almost full";
             return Status(SERVER_CACHE_FULL, "Cache is full");
         } else {
             try {
-                // step 1: load index
+                std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
+                TimeRecorderAuto rc_1(msg);
                 engine->Load(true);
             } catch (std::exception& ex) {
                 std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
@@ -853,13 +859,13 @@ DBImpl::BackgroundBuildIndex() {
 
     if (!to_index_files.empty()) {
         // step 2: put build index task to scheduler
-        std::map<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr> job2file_map;
+        std::vector<std::pair<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr>> job2file_map;
         for (auto& file : to_index_files) {
             scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(meta_ptr_, options_);
             scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
             job->AddToIndexFiles(file_ptr);
             scheduler::JobMgrInst::GetInstance()->Put(job);
-            job2file_map.insert(std::make_pair(job, file_ptr));
+            job2file_map.push_back(std::make_pair(job, file_ptr));
         }
 
         for (auto iter = job2file_map.begin(); iter != job2file_map.end(); ++iter) {
@@ -1044,11 +1050,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     if (!failed_files.empty()) {
         std::string msg = "Failed to build index for " + std::to_string(failed_files.size()) +
                           ((failed_files.size() == 1) ? " file" : " files");
-#ifdef MILVUS_CPU_VERSION
         msg += ", please double check index parameters.";
-#else
-        msg += ", file size is too large or gpu memory is not enough.";
-#endif
         return Status(DB_ERROR, msg);
     }
 

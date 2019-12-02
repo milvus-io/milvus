@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "scheduler/optimizer/FaissIVFSQ8Pass.h"
+#include "scheduler/optimizer/FaissIVFPQPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
@@ -28,7 +28,7 @@ namespace milvus {
 namespace scheduler {
 
 void
-FaissIVFSQ8Pass::Init() {
+FaissIVFPQPass::Init() {
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
@@ -43,25 +43,24 @@ FaissIVFSQ8Pass::Init() {
 }
 
 bool
-FaissIVFSQ8Pass::Run(const TaskPtr& task) {
+FaissIVFPQPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask) {
         return false;
     }
 
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8) {
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_PQ) {
         return false;
     }
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
     if (search_job->nq() < threshold_) {
-        SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: nq < gpu_search_threshold, specify cpu to search!";
+        SERVER_LOG_DEBUG << "FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!";
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         auto best_device_id = count_ % gpus.size();
-        SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: nq > gpu_search_threshold, specify gpu" << best_device_id
-                         << " to search!";
+        SERVER_LOG_DEBUG << "FaissIVFPQPass: nq > gpu_search_threshold, specify gpu" << best_device_id << " to search!";
         count_++;
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpus[best_device_id]);
     }
