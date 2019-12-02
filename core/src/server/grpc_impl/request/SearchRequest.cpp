@@ -51,7 +51,9 @@ SearchRequest::OnExecute() {
         int64_t top_k = search_param_->topk();
         int64_t nprobe = search_param_->nprobe();
 
-        std::string hdr = "SearchRequest(k=" + std::to_string(top_k) + ", nprob=" + std::to_string(nprobe) + ")";
+        std::string hdr = "SearchRequest(table=" + search_param_->table_name() +
+                          ", nq=" + std::to_string(search_param_->query_record_array_size()) +
+                          ", k=" + std::to_string(top_k) + ", nprob=" + std::to_string(nprobe) + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check table name

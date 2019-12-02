@@ -1294,51 +1294,7 @@ SqliteMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-SqliteMetaImpl::CleanUpCacheWithTTL(uint64_t seconds) {
-    auto now = utils::GetMicroSecTimeStamp();
-
-    // erase deleted/backup files from cache
-    try {
-        server::MetricCollector metric;
-
-        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-
-        std::vector<int> file_types = {
-            (int)TableFileSchema::TO_DELETE,
-            (int)TableFileSchema::BACKUP,
-        };
-
-        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                  &TableFileSchema::table_id_,
-                                                  &TableFileSchema::file_id_,
-                                                  &TableFileSchema::date_),
-                                          where(
-                                              in(&TableFileSchema::file_type_, file_types)
-                                              and
-                                              c(&TableFileSchema::updated_time_)
-                                              < now - seconds * US_PS));
-
-        for (auto& file : files) {
-            TableFileSchema table_file;
-            table_file.id_ = std::get<0>(file);
-            table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.date_ = std::get<3>(file);
-
-            utils::GetTableFilePath(options_, table_file);
-            server::CommonUtil::EraseFromCache(table_file.location_);
-        }
-
-    } catch (std::exception& e) {
-        return HandleException("Encounter exception when clean cache", e.what());
-    }
-
-    return Status::OK();
-}
-
-Status
-SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
+SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1346,33 +1302,60 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
     try {
         server::MetricCollector metric;
 
+        std::vector<int> file_types = {
+            (int)TableFileSchema::TO_DELETE,
+            (int)TableFileSchema::BACKUP,
+        };
+
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
+        // collect files to be deleted
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                   &TableFileSchema::table_id_,
                                                   &TableFileSchema::file_id_,
+                                                  &TableFileSchema::file_type_,
                                                   &TableFileSchema::date_),
                                           where(
-                                              c(&TableFileSchema::file_type_) ==
-                                              (int)TableFileSchema::TO_DELETE
+                                              in(&TableFileSchema::file_type_, file_types)
                                               and
                                               c(&TableFileSchema::updated_time_)
                                               < now - seconds * US_PS));
 
+        int64_t clean_files = 0;
         auto commited = ConnectorPtr->transaction([&]() mutable {
             TableFileSchema table_file;
             for (auto& file : files) {
                 table_file.id_ = std::get<0>(file);
                 table_file.table_id_ = std::get<1>(file);
                 table_file.file_id_ = std::get<2>(file);
-                table_file.date_ = std::get<3>(file);
+                table_file.file_type_ = std::get<3>(file);
+                table_file.date_ = std::get<4>(file);
 
-                utils::DeleteTableFilePath(options_, table_file);
-                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.file_id_ << " location:" << table_file.location_;
-                ConnectorPtr->remove<TableFileSchema>(table_file.id_);
+                // check if the file can be deleted
+                if (filter && filter->IsIgnored(table_file)) {
+                    ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
+                                     << " currently is in use, not able to delete now";
+                    continue; // ignore this file, don't delete it
+                }
 
-                table_ids.insert(table_file.table_id_);
+                // erase from cache, must do this before file deleted,
+                // because GetTableFilePath won't able to generate file path after the file is deleted
+                utils::GetTableFilePath(options_, table_file);
+                server::CommonUtil::EraseFromCache(table_file.location_);
+
+                if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
+                    // delete file from meta
+                    ConnectorPtr->remove<TableFileSchema>(table_file.id_);
+
+                    // delete file from disk storage
+                    utils::DeleteTableFilePath(options_, table_file);
+
+                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_ << " location:" << table_file.location_;
+                    table_ids.insert(table_file.table_id_);
+
+                    clean_files++;
+                }
             }
             return true;
         });
@@ -1381,8 +1364,8 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds) {
             return HandleException("CleanUpFilesWithTTL error: sqlite transaction failed");
         }
 
-        if (files.size() > 0) {
-            ENGINE_LOG_DEBUG << "Clean " << files.size() << " files deleted in " << seconds << " seconds";
+        if (clean_files > 0) {
+            ENGINE_LOG_DEBUG << "Clean " << clean_files << " files expired in " << seconds << " seconds";
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when clean table files", e.what());

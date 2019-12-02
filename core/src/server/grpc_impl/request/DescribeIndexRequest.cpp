@@ -39,7 +39,8 @@ DescribeIndexRequest::Create(const std::string& table_name, ::milvus::grpc::Inde
 Status
 DescribeIndexRequest::OnExecute() {
     try {
-        TimeRecorder rc("DescribeIndexRequest");
+        std::string hdr = "DescribeIndexRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
