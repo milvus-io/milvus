@@ -972,9 +972,11 @@ class TestIndexIP:
         expected: return code 0, and default index param
         '''
         index_params = get_simple_index_params
+        status, mode = connect._cmd("mode")
+        assert status.OK()
         # status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
+        if str(mode) == "GPU" and index_params["index_type"] == IndexType.IVF_PQ:
             assert not status.OK()
         else:
             assert status.OK()
