@@ -17,21 +17,27 @@ class Factory(RouterMixin):
 
     def routing(self, table_name, metadata=None, **kwargs):
         range_array = kwargs.pop('range_array', None)
+        partition_tags = kwargs.pop('partition_tags', [])
         return self._route(table_name, range_array, metadata, **kwargs)
 
-    def _route(self, table_name, range_array, metadata=None, **kwargs):
+    def _route(self, table_name, range_array, metadata=None, partition_tags=None, **kwargs):
         # PXU TODO: Implement Thread-local Context
         # PXU TODO: Session life mgt
-        try:
-            table = db.Session.query(Tables).filter(
-                and_(Tables.table_id == table_name,
-                     Tables.state != Tables.TO_DELETE)).first()
-        except sqlalchemy_exc.SQLAlchemyError as e:
-            raise exceptions.DBError(message=str(e), metadata=metadata)
+        table_names = [table_name] if not partition_tags else partition_tags
+        total_files = []
+        for tn in table_names:
+            try:
+                table = db.Session.query(Tables).filter(
+                    and_(Tables.table_id == tn,
+                         Tables.state != Tables.TO_DELETE)).first()
+            except sqlalchemy_exc.SQLAlchemyError as e:
+                raise exceptions.DBError(message=str(e), metadata=metadata)
 
-        if not table:
-            raise exceptions.TableNotFoundError(table_name, metadata=metadata)
-        files = table.files_to_search(range_array)
+            if not table:
+                raise exceptions.TableNotFoundError(table_name, metadata=metadata)
+            files = table.files_to_search(range_array)
+            total_files.append(files)
+
         db.remove_session()
 
         servers = self.conn_mgr.conn_names
@@ -41,12 +47,13 @@ class Factory(RouterMixin):
 
         routing = {}
 
-        for f in files:
-            target_host = ring.get_node(str(f.id))
-            sub = routing.get(target_host, None)
-            if not sub:
-                routing[target_host] = {'table_id': table_name, 'file_ids': []}
-            routing[target_host]['file_ids'].append(str(f.id))
+        for files in total_files:
+            for f in files:
+                target_host = ring.get_node(str(f.id))
+                sub = routing.get(target_host, None)
+                if not sub:
+                    routing[target_host] = {'table_id': table_name, 'file_ids': []}
+                routing[target_host]['file_ids'].append(str(f.id))
 
         return routing
 

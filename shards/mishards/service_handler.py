@@ -107,6 +107,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                   topk,
                   nprobe,
                   range_array=None,
+                  partition_tags=None,
                   **kwargs):
         metadata = kwargs.get('metadata', None)
         range_array = [
@@ -119,6 +120,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         with self.tracer.start_span('get_routing', child_of=p_span):
             routing = self.router.routing(table_id,
                                           range_array=range_array,
+                                          partition_tags=partition_tags,
                                           metadata=metadata)
         logger.info('Routing: {}'.format(routing))
 
@@ -315,6 +317,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                          topk,
                                                          nprobe,
                                                          query_range_array,
+                                                         partition_tags=getattr(request, "partition_tag_array", []),
                                                          metadata=metadata)
 
         now = time.time()
