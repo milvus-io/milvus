@@ -116,6 +116,7 @@ MemManagerImpl::EraseMemVector(const std::string& table_id) {
 size_t
 MemManagerImpl::GetCurrentMutableMem() {
     size_t total_mem = 0;
+    std::unique_lock<std::mutex> lock(mutex_);
     for (auto& kv : mem_id_map_) {
         auto memTable = kv.second;
         total_mem += memTable->GetCurrentMem();
@@ -126,6 +127,7 @@ MemManagerImpl::GetCurrentMutableMem() {
 size_t
 MemManagerImpl::GetCurrentImmutableMem() {
     size_t total_mem = 0;
+    std::unique_lock<std::mutex> lock(serialization_mtx_);
     for (auto& mem_table : immu_mem_list_) {
         total_mem += mem_table->GetCurrentMem();
     }
