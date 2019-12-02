@@ -32,10 +32,6 @@ namespace knowhere {
 IndexModelPtr
 GPUIVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
-    if (build_cfg->metric_type == knowhere::METRICTYPE::IP) {
-        KNOWHERE_LOG_ERROR << "PQ not support IP in GPU version!";
-        throw KnowhereException("PQ not support IP in GPU version!");
-    }
     if (build_cfg != nullptr) {
         build_cfg->CheckValid();  // throw exception
     }

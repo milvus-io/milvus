@@ -59,7 +59,7 @@ IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, co
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
-        throw WrapperException(e.what());
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
