@@ -46,7 +46,9 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer) : tracer_(tracer) {
+GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer) : tracer_(tracer), random_num_generator_() {
+    std::random_device random_device;
+    random_num_generator_.seed(random_device());
 }
 
 void
@@ -76,10 +78,13 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     // TODO
     auto server_context = server_rpc_info->server_context();
     auto client_metadata = server_context->client_metadata();
-    std::string request_id = "random";
+    std::string request_id;
     auto request_id_kv = client_metadata.find("request_id");
     if (request_id_kv != client_metadata.end()) {
         request_id = request_id_kv->second.data();
+    }
+    else {
+        request_id = std::to_string(random_id()) + std::to_string(random_id());
     }
     //    text_map.clear();
     //    TextMapCarrier dummy_carrier(text_map);
@@ -121,6 +126,16 @@ GrpcRequestHandler::GetContext(::grpc::ServerContext*& server_context) {
 void
 GrpcRequestHandler::SetContext(::grpc::ServerContext*& server_context, const std::shared_ptr<Context>& context) {
     context_map_[server_context] = context;
+}
+
+uint64_t
+GrpcRequestHandler::random_id() const {
+    std::lock_guard<std::mutex> lock(random_mutex_);
+    auto value = random_num_generator_();
+    while (value == 0) {
+        value = random_num_generator_();
+    }
+    return value;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

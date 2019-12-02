@@ -24,6 +24,7 @@
 #include "grpc/gen-status/status.pb.h"
 
 #include <server/context/Context.h>
+#include <random>
 #include "opentracing/tracer.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 
@@ -59,6 +60,9 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
     void
     SetContext(::grpc::ServerContext*& server_context, const std::shared_ptr<Context>& context);
+
+    uint64_t
+    random_id() const;
 
     // *
     // @brief This method is used to create table
@@ -229,6 +233,9 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
     //    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
+
+    mutable std::mt19937_64 random_num_generator_;
+    mutable std::mutex random_mutex_;
 };
 
 }  // namespace grpc
