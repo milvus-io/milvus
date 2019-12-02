@@ -43,7 +43,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
+- \#616 - IP search metric_type is not supported by IVF_PQ index
 - \#631 - FAISS isn't compiled with O3 option
+- \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
