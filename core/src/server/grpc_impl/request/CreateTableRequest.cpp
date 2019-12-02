@@ -22,6 +22,7 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace server {
@@ -42,7 +43,9 @@ CreateTableRequest::Create(const ::milvus::grpc::TableSchema* schema) {
 
 Status
 CreateTableRequest::OnExecute() {
-    TimeRecorder rc("CreateTableRequest");
+    std::string hdr = "CreateTableRequest(table=" + schema_->table_name() +
+                      ", dimension=" + std::to_string(schema_->dimension()) + ")";
+    TimeRecorder rc(hdr);
 
     try {
         // step 1: check arguments

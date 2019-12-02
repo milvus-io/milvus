@@ -271,6 +271,12 @@ ExecutionEngineImpl::Serialize() {
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
     index_->set_size(PhysicalSize());
+    ENGINE_LOG_DEBUG << "Finish serialize index file: " << location_ << " size: " << index_->Size();
+
+    if (index_->Size() == 0) {
+        std::string msg = "Failed to serialize file: " + location_ + " reason: out of disk space or memory";
+        status = Status(DB_ERROR, msg);
+    }
 
     return status;
 }
@@ -465,7 +471,9 @@ ExecutionEngineImpl::Merge(const std::string& location) {
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
         auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Merge: Add Error";
+            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
+        } else {
+            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
         }
         return status;
     } else {
@@ -503,6 +511,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, status.message());
     }
 
+    ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
