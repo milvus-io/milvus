@@ -295,6 +295,15 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
+    {  // search by specify index file
+        milvus::engine::meta::DatesT dates;
+        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+    }
+
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
@@ -346,15 +355,6 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-    }
-
-    {  // search by specify index file
-        milvus::engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
