@@ -39,7 +39,8 @@ CountTableRequest::Create(const std::string& table_name, int64_t& row_count) {
 Status
 CountTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("CountTableRequest");
+        std::string hdr = "CountTableRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);

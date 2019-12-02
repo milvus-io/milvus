@@ -36,6 +36,13 @@ static const char* META_TABLEFILES = "TableFiles";
 
 class Meta {
  public:
+    class CleanUpFilter {
+     public:
+        virtual bool
+        IsIgnored(const TableFileSchema& schema) = 0;
+    };
+
+ public:
     virtual ~Meta() = default;
 
     virtual Status
@@ -121,10 +128,7 @@ class Meta {
     CleanUpShadowFiles() = 0;
 
     virtual Status
-    CleanUpCacheWithTTL(uint64_t seconds) = 0;
-
-    virtual Status
-    CleanUpFilesWithTTL(uint64_t seconds) = 0;
+    CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) = 0;
 
     virtual Status
     DropAll() = 0;
