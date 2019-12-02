@@ -47,6 +47,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#616 - IP search metric_type is not supported by IVF_PQ index
 - \#631 - FAISS isn't compiled with O3 option
 - \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
+- \#649 - Typo "partiton" should be "partition"
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
