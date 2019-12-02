@@ -89,7 +89,7 @@ class DBImpl : public DB {
     DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) override;
 
     Status
-    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) override;
+    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) override;
 
     Status
     InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,

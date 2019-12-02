@@ -804,7 +804,7 @@ SqliteMetaImpl::DropPartition(const std::string& partition_name) {
 }
 
 Status
-SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) {
+SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) {
     try {
         server::MetricCollector metric;
 
@@ -816,7 +816,7 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
             meta::TableSchema partition_schema;
             partition_schema.table_id_ = partition_name;
             DescribeTable(partition_schema);
-            partiton_schema_array.emplace_back(partition_schema);
+            partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when show partitions", e.what());

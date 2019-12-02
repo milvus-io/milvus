@@ -45,6 +45,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
 - \#631 - FAISS isn't compiled with O3 option
+- \#649 - Typo "partiton" should be "partition"
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
