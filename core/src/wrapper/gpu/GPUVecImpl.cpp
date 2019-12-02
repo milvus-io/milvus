@@ -16,7 +16,6 @@
 // under the License.
 
 #include "wrapper/gpu/GPUVecImpl.h"
-#include <src/wrapper/WrapperException.h>
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
@@ -26,6 +25,7 @@
 #include "src/wrapper/DataTransfer.h"
 #include "utils/Log.h"
 #include "wrapper/VecImpl.h"
+#include "wrapper/WrapperException.h"
 
 /*
  * no parameter check in this layer.
@@ -60,7 +60,6 @@ IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, co
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         throw WrapperException(e.what());
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
