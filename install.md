@@ -3,6 +3,8 @@
 - [Build from source](#build-from-source)
 - [Compile Milvus on Docker](#compile-milvus-on-docker)
 
+If you encounter any problems/issues compiling Milvus from source, please refer to [Troubleshooting](#troubleshooting).
+
 ## Build from source
 
 ### Requirements
@@ -151,11 +153,11 @@ $ ./start_server.sh
 1. If you encounter the following error when compiling: 
 `protocol https not supported or disabled in libcurl`.
 First, make sure you have `libcurl4-openssl-dev` installed in your system.
-Then try reinstall CMake from source with `--system-curl` option:
+Then try reinstalling the latest CMake from source with `--system-curl` option:
 
    ```shell
    $ ./bootstrap --system-curl 
    $ make 
    $ sudo make install
    ```
-
+If the `--system-curl` doesn't work, you can also reinstall CMake in **Ubuntu Software** on your local computer.
