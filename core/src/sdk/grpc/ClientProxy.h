@@ -58,7 +58,7 @@ class ClientProxy : public Connection {
            std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string& table_name, const std::vector<std::string>& partiton_tags,
+    Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
            const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) override;
 

@@ -1212,7 +1212,7 @@ MySQLMetaImpl::DropPartition(const std::string& partition_name) {
 }
 
 Status
-MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) {
+MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -1236,7 +1236,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             meta::TableSchema partition_schema;
             resRow["table_id"].to_string(partition_schema.table_id_);
             DescribeTable(partition_schema);
-            partiton_schema_array.emplace_back(partition_schema);
+            partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN SHOW PARTITIONS", e.what());
