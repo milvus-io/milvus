@@ -46,7 +46,8 @@ Status
 InsertRequest::OnExecute() {
     try {
         std::string hdr = "InsertRequest(table=" + insert_param_->table_name() +
-                          ", n=" + std::to_string(insert_param_->row_record_array_size()) + ")";
+                          ", n=" + std::to_string(insert_param_->row_record_array_size()) +
+                          ", partition_tag=" + insert_param_->partition_tag() + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments

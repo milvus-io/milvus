@@ -39,7 +39,8 @@ HasTableRequest::Create(const std::string& table_name, bool& has_table) {
 Status
 HasTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("HasTableRequest");
+        std::string hdr = "HasTableRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);

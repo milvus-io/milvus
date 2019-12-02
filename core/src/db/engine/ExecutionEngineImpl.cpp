@@ -472,6 +472,8 @@ ExecutionEngineImpl::Merge(const std::string& location) {
         auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
+        } else {
+            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
         }
         return status;
     } else {

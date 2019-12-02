@@ -39,7 +39,8 @@ PreloadTableRequest::Create(const std::string& table_name) {
 Status
 PreloadTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("PreloadTableRequest");
+        std::string hdr = "PreloadTableRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
