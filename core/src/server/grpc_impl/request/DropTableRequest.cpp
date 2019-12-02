@@ -40,7 +40,8 @@ DropTableRequest::Create(const std::shared_ptr<Context>& context, const std::str
 Status
 DropTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("DropTableRequest");
+        std::string hdr = "DropTableRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);

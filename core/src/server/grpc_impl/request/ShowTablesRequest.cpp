@@ -39,6 +39,8 @@ ShowTablesRequest::Create(const std::shared_ptr<Context>& context, ::milvus::grp
 
 Status
 ShowTablesRequest::OnExecute() {
+    TimeRecorder rc("ShowTablesRequest");
+
     std::vector<engine::meta::TableSchema> schema_array;
     auto statuts = DBWrapper::DB()->AllTables(schema_array);
     if (!statuts.ok()) {

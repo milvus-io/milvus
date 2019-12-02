@@ -22,6 +22,7 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace server {
@@ -44,7 +45,10 @@ CreatePartitionRequest::Create(const std::shared_ptr<Context>& context,
 
 Status
 CreatePartitionRequest::OnExecute() {
-    TimeRecorder rc("CreatePartitionRequest");
+    std::string hdr = "CreatePartitionRequest(table=" + partition_param_->table_name() +
+                      ", partition_name=" + partition_param_->partition_name() +
+                      ", partition_tag=" + partition_param_->tag() + ")";
+    TimeRecorder rc(hdr);
 
     try {
         // step 1: check arguments

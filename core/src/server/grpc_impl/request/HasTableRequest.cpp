@@ -40,7 +40,8 @@ HasTableRequest::Create(const std::shared_ptr<Context>& context, const std::stri
 Status
 HasTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("HasTableRequest");
+        std::string hdr = "HasTableRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);

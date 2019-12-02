@@ -40,7 +40,8 @@ DescribeTableRequest::Create(const std::shared_ptr<Context>& context, const std:
 
 Status
 DescribeTableRequest::OnExecute() {
-    TimeRecorder rc("DescribeTableRequest");
+    std::string hdr = "DescribeTableRequest(table=" + table_name_ + ")";
+    TimeRecorder rc(hdr);
 
     try {
         // step 1: check arguments
