@@ -16,7 +16,7 @@
       "jaegerDebugHeader": "demo-debug-id",
       "jaegerBaggageHeader": "demo-baggage",
       "TraceContextHeaderName": "demo-span-context",
-      "traceBaggageHeaderPrefix": "demo-ctx-"
+      "traceBaggageHeaderPrefix": "demo-ctx"
     },
     "baggage_restrictions": {
       "denyBaggageOnInitializationFailure": false,

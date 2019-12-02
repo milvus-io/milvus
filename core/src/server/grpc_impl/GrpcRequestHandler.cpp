@@ -67,6 +67,10 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
         text_map[std::string(context_kv->first.data(), context_kv->first.length())] =
             std::string(context_kv->second.data(), context_kv->second.length());
     }
+    //test debug mode
+//    if (std::string(server_rpc_info->method()).find("Search") != std::string::npos) {
+//        text_map["demo-debug-id"] = "debug-id";
+//    }
 
     TextMapCarrier carrier{text_map};
     auto span_context_maybe = tracer_->Extract(carrier);
