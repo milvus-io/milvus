@@ -25,7 +25,6 @@
 #include "src/wrapper/DataTransfer.h"
 #include "utils/Log.h"
 #include "wrapper/VecImpl.h"
-#include "wrapper/WrapperException.h"
 
 /*
  * no parameter check in this layer.
