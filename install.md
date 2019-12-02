@@ -116,15 +116,13 @@ Download Milvus source code:
 
 ```shell
 $ cd /home
-$ wget https://github.com/milvus-io/milvus/archive/0.6.0.zip
+$ wget https://github.com/milvus-io/milvus/archive/0.6.0.tar.gz
 ```
 
-Unzip the source package:
+Extract the source package:
 
 ```shell
-$ apt-get update
-$ apt-get install unzip
-$ unzip ./0.6.0.zip
+$ tar xvf ./v0.6.0.tar.gz
 ```
 
 The source code is extracted into a folder called `milvus-0.6.0`. To enter its core directory:
