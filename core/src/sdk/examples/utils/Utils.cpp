@@ -202,7 +202,7 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
 
 void
 Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
-                const std::vector<std::string>& partiton_tags, int64_t top_k, int64_t nprobe,
+                const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
                 const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
                 milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
@@ -222,7 +222,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
         BLOCK_SPLITER
         milvus_sdk::TimeRecorder rc("search");
         milvus::Status stat =
-            conn->Search(table_name, partiton_tags, record_array, query_range_array, top_k, nprobe, topk_query_result);
+            conn->Search(table_name, partition_tags, record_array, query_range_array, top_k, nprobe, topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }
