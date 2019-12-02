@@ -1838,9 +1838,9 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);
-                }
 
-                clean_files++;
+                    clean_files++;
+                }
             }
 
             // delete file from meta

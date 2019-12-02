@@ -1353,9 +1353,9 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
                     ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_ << " location:" << table_file.location_;
                     table_ids.insert(table_file.table_id_);
-                }
 
-                clean_files++;
+                    clean_files++;
+                }
             }
             return true;
         });
