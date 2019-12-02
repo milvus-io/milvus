@@ -695,7 +695,6 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
         auto file_schema = file;
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
-        ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
         if (index_size >= file_schema.index_file_size_) {

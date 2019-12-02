@@ -39,7 +39,8 @@ DropIndexRequest::Create(const std::string& table_name) {
 Status
 DropIndexRequest::OnExecute() {
     try {
-        TimeRecorder rc("DropIndexRequest");
+        std::string hdr = "DropIndexRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);

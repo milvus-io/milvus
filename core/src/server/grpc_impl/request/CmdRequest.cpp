@@ -17,6 +17,8 @@
 
 #include "server/grpc_impl/request/CmdRequest.h"
 #include "scheduler/SchedInst.h"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #include <memory>
 
@@ -35,6 +37,9 @@ CmdRequest::Create(const std::string& cmd, std::string& result) {
 
 Status
 CmdRequest::OnExecute() {
+    std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
+    TimeRecorder rc(hdr);
+
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "tasktable") {
