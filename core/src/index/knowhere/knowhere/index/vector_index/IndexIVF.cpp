@@ -119,42 +119,48 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
 
     GETTENSOR(dataset)
 
-    auto elems = rows * search_cfg->k;
-    auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
-    auto res_dis = (float*)malloc(sizeof(float) * elems);
+    try {
+        auto elems = rows * search_cfg->k;
+        auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
+        auto res_dis = (float*)malloc(sizeof(float) * elems);
 
-    search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
+        search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
 
-    //    std::stringstream ss_res_id, ss_res_dist;
-    //    for (int i = 0; i < 10; ++i) {
-    //        printf("%llu", res_ids[i]);
-    //        printf("\n");
-    //        printf("%.6f", res_dis[i]);
-    //        printf("\n");
-    //        ss_res_id << res_ids[i] << " ";
-    //        ss_res_dist << res_dis[i] << " ";
-    //    }
-    //    std::cout << std::endl << "after search: " << std::endl;
-    //    std::cout << ss_res_id.str() << std::endl;
-    //    std::cout << ss_res_dist.str() << std::endl << std::endl;
+        //    std::stringstream ss_res_id, ss_res_dist;
+        //    for (int i = 0; i < 10; ++i) {
+        //        printf("%llu", res_ids[i]);
+        //        printf("\n");
+        //        printf("%.6f", res_dis[i]);
+        //        printf("\n");
+        //        ss_res_id << res_ids[i] << " ";
+        //        ss_res_dist << res_dis[i] << " ";
+        //    }
+        //    std::cout << std::endl << "after search: " << std::endl;
+        //    std::cout << ss_res_id.str() << std::endl;
+        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
 
-    //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
-    //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
-    //
-    //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
-    //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
-    //
-    //    auto int64_type = std::make_shared<arrow::Int64Type>();
-    //    auto float_type = std::make_shared<arrow::FloatType>();
-    //
-    //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
-    //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
-    //
-    //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
-    //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
-    //    std::vector<ArrayPtr> array{ids, dists};
+        //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
+        //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
+        //
+        //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
+        //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
+        //
+        //    auto int64_type = std::make_shared<arrow::Int64Type>();
+        //    auto float_type = std::make_shared<arrow::FloatType>();
+        //
+        //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
+        //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
+        //
+        //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
+        //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
+        //    std::vector<ArrayPtr> array{ids, dists};
 
-    return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
+        return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 void
@@ -189,35 +195,34 @@ IVF::Dimension() {
 }
 
 void
-IVF::GenGraph(const int64_t& k, Graph& graph, const DatasetPtr& dataset, const Config& config) {
-    GETTENSOR(dataset)
-
+IVF::GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config) {
+    int64_t K = k + 1;
     auto ntotal = Count();
 
-    auto batch_size = 100;
+    size_t dim = config->d;
+    auto batch_size = 1000;
     auto tail_batch_size = ntotal % batch_size;
     auto batch_search_count = ntotal / batch_size;
     auto total_search_count = tail_batch_size == 0 ? batch_search_count : batch_search_count + 1;
 
-    std::vector<float> res_dis(k * batch_size);
+    std::vector<float> res_dis(K * batch_size);
     graph.resize(ntotal);
     Graph res_vec(total_search_count);
     for (int i = 0; i < total_search_count; ++i) {
-        auto b_size = i == total_search_count - 1 && tail_batch_size != 0 ? tail_batch_size : batch_size;
+        auto b_size = (i == (total_search_count - 1)) && tail_batch_size != 0 ? tail_batch_size : batch_size;
 
         auto& res = res_vec[i];
-        res.resize(k * b_size);
+        res.resize(K * b_size);
 
-        auto xq = p_data + batch_size * dim * i;
-        search_impl(b_size, (float*)xq, k, res_dis.data(), res.data(), config);
+        auto xq = data + batch_size * dim * i;
+        search_impl(b_size, (float*)xq, K, res_dis.data(), res.data(), config);
 
-        int tmp = 0;
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
             node.resize(k);
-            for (int m = 0; m < k && tmp < k * b_size; ++m, ++tmp) {
-                // TODO(linxj): avoid memcopy here.
-                node[m] = res[tmp];
+            auto start_pos = j * K + 1;
+            for (int m = 0, cursor = start_pos; m < k && cursor < start_pos + k; ++m, ++cursor) {
+                node[m] = res[cursor];
             }
         }
     }

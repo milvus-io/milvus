@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#248 - Reside src/external in thirdparty
 - \#316 - Some files not merged after vectors added
 - \#327 - Search does not use GPU when index type is FLAT
+- \#331 - Add exception handle when search fail
 - \#340 - Test cases run failed on 0.6.0
 - \#353 - Rename config.h.in to version.h.in
 - \#374 - sdk_simple return empty result
@@ -35,12 +36,15 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#543 - client raise exception in shards when search results is empty
 - \#545 - Avoid dead circle of build index thread when error occurs
 - \#547 - NSG build failed using GPU-edition if set gpu_enable false
+- \#548 - NSG search accuracy is too low
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#579 - Build index hang in GPU version when gpu_resources disabled
 - \#596 - Frequently insert operation cost too much disk space
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
+- \#631 - FAISS isn't compiled with O3 option
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -75,6 +79,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#470 - Small raw files should not be build index
 - \#584 - Intergrate internal FAISS
 - \#611 - Remove MILVUS_CPU_VERSION
+- \#634 - FAISS GPU version is compiled with O0
 
 ## Task
 
