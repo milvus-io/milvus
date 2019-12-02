@@ -40,6 +40,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
 - \#579 - Build index hang in GPU version when gpu_resources disabled
+- \#596 - Frequently insert operation cost too much disk space
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
@@ -59,6 +60,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#502 - C++ SDK support IVFPQ and SPTAG
 - \#560 - Add version in server config file
 - \#605 - Print more messages when server start
+- \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version

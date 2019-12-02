@@ -38,7 +38,8 @@ DescribeTableRequest::Create(const std::string& table_name, ::milvus::grpc::Tabl
 
 Status
 DescribeTableRequest::OnExecute() {
-    TimeRecorder rc("DescribeTableRequest");
+    std::string hdr = "DescribeTableRequest(table=" + table_name_ + ")";
+    TimeRecorder rc(hdr);
 
     try {
         // step 1: check arguments
