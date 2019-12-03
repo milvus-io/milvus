@@ -48,6 +48,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#631 - FAISS isn't compiled with O3 option
 - \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
 - \#649 - Typo "partiton" should be "partition"
+- \#654 - Random crash when frequently insert vector one by one
 
 ## Feature
 - \#12 - Pure CPU version for Milvus

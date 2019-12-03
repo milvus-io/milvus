@@ -41,7 +41,7 @@ ShowPartitionsRequest::Create(const std::string& table_name, ::milvus::grpc::Par
 Status
 ShowPartitionsRequest::OnExecute() {
     std::string hdr = "ShowPartitionsRequest(table=" + table_name_ + ")";
-    TimeRecorder rc(hdr);
+    TimeRecorderAuto rc(hdr);
 
     auto status = ValidationUtil::ValidateTableName(table_name_);
     if (!status.ok()) {

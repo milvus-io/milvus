@@ -61,7 +61,7 @@ DropTableRequest::OnExecute() {
             }
         }
 
-        rc.ElapseFromBegin("check validation");
+        rc.RecordSection("check validation");
 
         // step 3: Drop table
         std::vector<DB_DATE> dates;
