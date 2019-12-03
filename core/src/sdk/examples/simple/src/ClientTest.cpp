@@ -20,11 +20,8 @@
 #include "sdk/examples/utils/TimeRecorder.h"
 #include "sdk/examples/utils/Utils.h"
 
-#include <time.h>
-#include <unistd.h>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,7 +39,7 @@ constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-constexpr int32_t N_LIST = 15000;
+constexpr int32_t N_LIST = 16384;
 
 milvus::TableSchema
 BuildTableSchema() {
