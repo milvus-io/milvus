@@ -20,11 +20,9 @@
 #include "sdk/examples/utils/TimeRecorder.h"
 #include "sdk/examples/utils/Utils.h"
 
-#include <time.h>
-#include <unistd.h>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,7 +40,7 @@ constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-constexpr int32_t N_LIST = 15000;
+constexpr int32_t N_LIST = 16384;
 
 milvus::TableSchema
 BuildTableSchema() {
@@ -67,6 +65,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus::ConnectParam param = {address, port};
         stat = conn->Connect(param);
         std::cout << "Connect function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     {  // server version
@@ -83,11 +82,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::vector<std::string> tables;
         stat = conn->ShowTables(tables);
         std::cout << "ShowTables function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         std::cout << "All tables: " << std::endl;
         for (auto& table : tables) {
             int64_t row_count = 0;
             //            conn->DropTable(table);
             stat = conn->CountTable(table, row_count);
+            ASSERT_TRUE(stat.ok());
             std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
     }
@@ -96,6 +97,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus::TableSchema tb_schema = BuildTableSchema();
         stat = conn->CreateTable(tb_schema);
         std::cout << "CreateTable function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         milvus_sdk::Utils::PrintTableSchema(tb_schema);
 
         bool has_table = conn->HasTable(tb_schema.table_name);
@@ -108,6 +110,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus::TableSchema tb_schema;
         stat = conn->DescribeTable(TABLE_NAME, tb_schema);
         std::cout << "DescribeTable function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         milvus_sdk::Utils::PrintTableSchema(tb_schema);
     }
 
@@ -126,6 +129,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             milvus_sdk::TimeRecorder rc(title);
             stat = conn->Insert(TABLE_NAME, "", record_array, record_ids);
             std::cout << "InsertVector function call status: " << stat.message() << std::endl;
+            ASSERT_TRUE(stat.ok());
             std::cout << "Returned id array count: " << record_ids.size() << std::endl;
         }
     }
@@ -156,16 +160,19 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus_sdk::Utils::PrintIndexParam(index1);
         stat = conn->CreateIndex(index1);
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
 
         milvus::IndexParam index2;
         stat = conn->DescribeIndex(TABLE_NAME, index2);
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         milvus_sdk::Utils::PrintIndexParam(index2);
     }
 
     {  // preload table
         stat = conn->PreloadTable(TABLE_NAME);
         std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     {  // search vectors
@@ -178,9 +185,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // drop index
         stat = conn->DropIndex(TABLE_NAME);
         std::cout << "DropIndex function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
 
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
+        ASSERT_TRUE(stat.ok());
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
@@ -191,16 +200,19 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
         stat = conn->DeleteByDate(TABLE_NAME, rg);
         std::cout << "DeleteByDate function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     {  // drop table
         stat = conn->DropTable(TABLE_NAME);
         std::cout << "DropTable function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     {  // server status
         std::string status = conn->ServerStatus();
         std::cout << "Server status before disconnect: " << status << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
     milvus::Connection::Destroy(conn);
     {  // server status

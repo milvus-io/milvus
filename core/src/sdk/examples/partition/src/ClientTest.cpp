@@ -18,14 +18,12 @@
 #include "sdk/examples/partition/src/ClientTest.h"
 #include "MilvusApi.h"
 #include "sdk/examples/utils/Utils.h"
+#include "sdk/examples/utils/TimeRecorder.h"
 
-#include <src/sdk/examples/utils/TimeRecorder.h>
-#include <time.h>
-#include <unistd.h>
+#include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,7 +40,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-constexpr int32_t N_LIST = 15000;
+constexpr int32_t N_LIST = 16384;
 constexpr int32_t PARTITION_COUNT = 5;
 constexpr int32_t TARGET_PARTITION = 3;
 
@@ -77,12 +75,14 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus::ConnectParam param = {address, port};
         stat = conn->Connect(param);
         std::cout << "Connect function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     {  // create table
         milvus::TableSchema tb_schema = BuildTableSchema();
         stat = conn->CreateTable(tb_schema);
         std::cout << "CreateTable function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         milvus_sdk::Utils::PrintTableSchema(tb_schema);
     }
 
@@ -91,12 +91,14 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             milvus::PartitionParam partition_param = BuildPartitionParam(i);
             stat = conn->CreatePartition(partition_param);
             std::cout << "CreatePartition function call status: " << stat.message() << std::endl;
+            ASSERT_TRUE(stat.ok());
             milvus_sdk::Utils::PrintPartitionParam(partition_param);
         }
 
         // show partitions
         milvus::PartitionList partition_array;
         stat = conn->ShowPartitions(TABLE_NAME, partition_array);
+        ASSERT_TRUE(stat.ok());
 
         std::cout << partition_array.size() << " partitions created:" << std::endl;
         for (auto& partition : partition_array) {
@@ -119,6 +121,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             std::string title = "Insert " + std::to_string(record_array.size()) + " vectors No." + std::to_string(i);
             milvus_sdk::TimeRecorder rc(title);
             stat = conn->Insert(TABLE_NAME, std::to_string(i % PARTITION_COUNT), record_array, record_ids);
+            ASSERT_TRUE(stat.ok());
         }
     }
 
@@ -136,6 +139,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // table row count
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
+        ASSERT_TRUE(stat.ok());
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
@@ -163,16 +167,19 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus_sdk::Utils::PrintIndexParam(index1);
         stat = conn->CreateIndex(index1);
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
 
         milvus::IndexParam index2;
         stat = conn->DescribeIndex(TABLE_NAME, index2);
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         milvus_sdk::Utils::PrintIndexParam(index2);
     }
 
     {  // table row count
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
+        ASSERT_TRUE(stat.ok());
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
@@ -181,11 +188,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus_sdk::Utils::PrintPartitionParam(param1);
         stat = conn->DropPartition(param1);
         std::cout << "DropPartition function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     {  // table row count
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
+        ASSERT_TRUE(stat.ok());
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
@@ -203,12 +212,14 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
+        ASSERT_TRUE(stat.ok());
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
     {  // drop table
         stat = conn->DropTable(TABLE_NAME);
         std::cout << "DropTable function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
     }
 
     milvus::Connection::Destroy(conn);

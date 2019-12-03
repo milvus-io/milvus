@@ -27,6 +27,7 @@ add_executable(sdk_simple
 
 target_link_libraries(sdk_simple
         milvus_sdk
+        gtest
         pthread
         )
 

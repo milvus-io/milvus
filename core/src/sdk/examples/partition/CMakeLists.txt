@@ -28,6 +28,7 @@ add_executable(sdk_partition
 
 target_link_libraries(sdk_partition
         milvus_sdk
+        gtest
         pthread
         )
 

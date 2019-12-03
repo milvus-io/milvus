@@ -18,11 +18,11 @@
 #include "sdk/examples/utils/Utils.h"
 #include "sdk/examples/utils/TimeRecorder.h"
 
+#include <gtest/gtest.h>
 #include <time.h>
 #include <unistd.h>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -194,7 +194,7 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
         if (result_id != search_id) {
             std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
         } else {
-            std::cout << "Check result sucessfully" << std::endl;
+            std::cout << "No." << i << " Check result successfully" << std::endl;
         }
     }
     BLOCK_SPLITER
@@ -224,6 +224,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
         milvus::Status stat =
             conn->Search(table_name, partition_tags, record_array, query_range_array, top_k, nprobe, topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
+        ASSERT_TRUE(stat.ok());
         BLOCK_SPLITER
     }
 
