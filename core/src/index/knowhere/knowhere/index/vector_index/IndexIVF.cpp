@@ -195,35 +195,34 @@ IVF::Dimension() {
 }
 
 void
-IVF::GenGraph(const int64_t& k, Graph& graph, const DatasetPtr& dataset, const Config& config) {
-    GETTENSOR(dataset)
-
+IVF::GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config) {
+    int64_t K = k + 1;
     auto ntotal = Count();
 
-    auto batch_size = 100;
+    size_t dim = config->d;
+    auto batch_size = 1000;
     auto tail_batch_size = ntotal % batch_size;
     auto batch_search_count = ntotal / batch_size;
     auto total_search_count = tail_batch_size == 0 ? batch_search_count : batch_search_count + 1;
 
-    std::vector<float> res_dis(k * batch_size);
+    std::vector<float> res_dis(K * batch_size);
     graph.resize(ntotal);
     Graph res_vec(total_search_count);
     for (int i = 0; i < total_search_count; ++i) {
-        auto b_size = i == total_search_count - 1 && tail_batch_size != 0 ? tail_batch_size : batch_size;
+        auto b_size = (i == (total_search_count - 1)) && tail_batch_size != 0 ? tail_batch_size : batch_size;
 
         auto& res = res_vec[i];
-        res.resize(k * b_size);
+        res.resize(K * b_size);
 
-        auto xq = p_data + batch_size * dim * i;
-        search_impl(b_size, (float*)xq, k, res_dis.data(), res.data(), config);
+        auto xq = data + batch_size * dim * i;
+        search_impl(b_size, (float*)xq, K, res_dis.data(), res.data(), config);
 
-        int tmp = 0;
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
             node.resize(k);
-            for (int m = 0; m < k && tmp < k * b_size; ++m, ++tmp) {
-                // TODO(linxj): avoid memcopy here.
-                node[m] = res[tmp];
+            auto start_pos = j * K + 1;
+            for (int m = 0, cursor = start_pos; m < k && cursor < start_pos + k; ++m, ++cursor) {
+                node[m] = res[cursor];
             }
         }
     }

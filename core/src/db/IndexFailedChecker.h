@@ -17,34 +17,39 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
+#include "db/Types.h"
+#include "meta/Meta.h"
+#include "utils/Status.h"
 
-#include <faiss/Index.h>
-#include <stdint.h>
 #include <map>
-#include <set>
+#include <mutex>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace milvus {
 namespace engine {
 
-typedef int64_t IDNumber;
-typedef IDNumber* IDNumberPtr;
-typedef std::vector<IDNumber> IDNumbers;
+class IndexFailedChecker {
+ public:
+    Status
+    CleanFailedIndexFileOfTable(const std::string& table_id);
 
-typedef std::vector<faiss::Index::idx_t> ResultIds;
-typedef std::vector<faiss::Index::distance_t> ResultDistances;
+    Status
+    GetFailedIndexFileOfTable(const std::string& table_id, std::vector<std::string>& failed_files);
 
-struct TableIndex {
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t nlist_ = 16384;
-    int32_t metric_type_ = (int)MetricType::L2;
+    Status
+    MarkFailedIndexFile(const meta::TableFileSchema& file);
+
+    Status
+    MarkSucceedIndexFile(const meta::TableFileSchema& file);
+
+    Status
+    IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files);
+
+ private:
+    std::mutex mutex_;
+    Table2Files index_failed_files_;  // table id mapping to (file id mapping to failed times)
 };
-
-using File2RefCount = std::map<std::string, int64_t>;
-using Table2Files = std::map<std::string, File2RefCount>;
 
 }  // namespace engine
 }  // namespace milvus

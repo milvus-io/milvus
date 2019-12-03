@@ -38,6 +38,8 @@ ShowTablesRequest::Create(::milvus::grpc::TableNameList* table_name_list) {
 
 Status
 ShowTablesRequest::OnExecute() {
+    TimeRecorderAuto rc("ShowTablesRequest");
+
     std::vector<engine::meta::TableSchema> schema_array;
     auto statuts = DBWrapper::DB()->AllTables(schema_array);
     if (!statuts.ok()) {

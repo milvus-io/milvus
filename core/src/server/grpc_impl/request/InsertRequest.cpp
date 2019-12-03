@@ -45,7 +45,10 @@ InsertRequest::Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus:
 Status
 InsertRequest::OnExecute() {
     try {
-        TimeRecorder rc("InsertRequest");
+        std::string hdr = "InsertRequest(table=" + insert_param_->table_name() +
+                          ", n=" + std::to_string(insert_param_->row_record_array_size()) +
+                          ", partition_tag=" + insert_param_->partition_tag() + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(insert_param_->table_name());
@@ -119,8 +122,6 @@ InsertRequest::OnExecute() {
                    table_info.dimension_ * sizeof(float));
         }
 
-        rc.ElapseFromBegin("prepare vectors data");
-
         // step 5: insert vectors
         auto vec_count = static_cast<uint64_t>(insert_param_->row_record_array_size());
         std::vector<int64_t> vec_ids(insert_param_->row_id_array_size(), 0);
@@ -130,9 +131,9 @@ InsertRequest::OnExecute() {
             memcpy(target_data, src_data, static_cast<size_t>(sizeof(int64_t) * insert_param_->row_id_array_size()));
         }
 
+        rc.RecordSection("prepare vectors data");
         status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), insert_param_->partition_tag(), vec_count,
                                                 vec_f.data(), vec_ids);
-        rc.ElapseFromBegin("add vectors to engine");
         if (!status.ok()) {
             return status;
         }

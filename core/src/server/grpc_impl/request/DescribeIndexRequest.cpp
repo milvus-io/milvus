@@ -39,7 +39,8 @@ DescribeIndexRequest::Create(const std::string& table_name, ::milvus::grpc::Inde
 Status
 DescribeIndexRequest::OnExecute() {
     try {
-        TimeRecorder rc("DescribeIndexRequest");
+        std::string hdr = "DescribeIndexRequest(table=" + table_name_ + ")";
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -57,8 +58,6 @@ DescribeIndexRequest::OnExecute() {
         index_param_->set_table_name(table_name_);
         index_param_->mutable_index()->set_index_type(index.engine_type_);
         index_param_->mutable_index()->set_nlist(index.nlist_);
-
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

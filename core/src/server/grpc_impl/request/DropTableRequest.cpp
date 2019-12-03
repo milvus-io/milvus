@@ -40,7 +40,8 @@ DropTableRequest::Create(const std::string& table_name) {
 Status
 DropTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("DropTableRequest");
+        std::string hdr = "DropTableRequest(table=" + table_name_ + ")";
+        TimeRecorder rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -60,7 +61,7 @@ DropTableRequest::OnExecute() {
             }
         }
 
-        rc.ElapseFromBegin("check validation");
+        rc.RecordSection("check validation");
 
         // step 3: Drop table
         std::vector<DB_DATE> dates;

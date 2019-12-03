@@ -36,12 +36,17 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#543 - client raise exception in shards when search results is empty
 - \#545 - Avoid dead circle of build index thread when error occurs
 - \#547 - NSG build failed using GPU-edition if set gpu_enable false
+- \#548 - NSG search accuracy is too low
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
 - \#579 - Build index hang in GPU version when gpu_resources disabled
+- \#596 - Frequently insert operation cost too much disk space
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
+- \#631 - FAISS isn't compiled with O3 option
+- \#649 - Typo "partiton" should be "partition"
+- \#654 - Random crash when frequently insert vector one by one
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -55,6 +60,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#502 - C++ SDK support IVFPQ and SPTAG
 - \#560 - Add version in server config file
 - \#605 - Print more messages when server start
+- \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
@@ -76,6 +82,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#470 - Small raw files should not be build index
 - \#584 - Intergrate internal FAISS
 - \#611 - Remove MILVUS_CPU_VERSION
+- \#634 - FAISS GPU version is compiled with O0
 
 ## Task
 

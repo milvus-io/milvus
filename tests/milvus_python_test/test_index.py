@@ -14,7 +14,7 @@ from utils import *
 
 nb = 10000
 dim = 128
-index_file_size = 10
+index_file_size = 20
 vectors = gen_vectors(nb, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
@@ -64,6 +64,18 @@ class TestIndexBase:
         assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_no_vectors(self, connect, table, get_simple_index_params):
+        '''
+        target: test create index interface
+        method: create table and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        index_params = get_simple_index_params
+        logging.getLogger().info(index_params)
+        status = connect.create_index(table, index_params)
+        assert status.OK()
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, table, get_simple_index_params):
         '''
         target: test create index interface
@@ -72,6 +84,8 @@ class TestIndexBase:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(index_params)
         status = connect.create_partition(table, partition_name, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
@@ -242,6 +256,8 @@ class TestIndexBase:
         expected: return code equals to 0
         '''
         index_param = get_simple_index_params
+        if index_param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_index(table, index_param)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
@@ -255,6 +271,8 @@ class TestIndexBase:
         '''
         status, ids = connect.add_vectors(table, vectors)
         index_param = get_simple_index_params
+        if index_param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_index(table, index_param)
         status = connect.create_index(table, index_param)
         assert status.OK()
@@ -291,15 +309,15 @@ class TestIndexBase:
     ******************************************************************
     """
 
-    def test_describe_index(self, connect, table, get_simple_index_params):
+    def test_describe_index(self, connect, table, get_index_params):
         '''
         target: test describe index interface
         method: create table and add vectors in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
-        index_params = get_simple_index_params
+        index_params = get_index_params
         logging.getLogger().info(index_params)
-        status, ids = connect.add_vectors(table, vectors)
+        # status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_params)
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
@@ -325,6 +343,8 @@ class TestIndexBase:
                      'metric_type': MetricType.L2}
             connect.create_table(param)
             index_params = get_simple_index_params
+            if index_params["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("Skip some PQ cases")
             logging.getLogger().info(index_params)
             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
             status = connect.create_index(table_name, index_params)
@@ -405,7 +425,7 @@ class TestIndexBase:
         expected: return code 0, and default index param
         '''
         index_param = get_simple_index_params
-        status, ids = connect.add_vectors(table, vectors)
+        # status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_param)
         assert status.OK()
         status, result = connect.describe_index(table)
@@ -425,7 +445,7 @@ class TestIndexBase:
         expected: return code 0
         '''
         index_param = get_simple_index_params
-        status, ids = connect.add_vectors(table, vectors)
+        # status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, index_param)
         assert status.OK()
         status, result = connect.describe_index(table)
@@ -494,10 +514,9 @@ class TestIndexBase:
         expected: return code 0
         '''
         index_params = get_simple_index_params
-        status, ids = connect.add_vectors(table, vectors)
+        # status, ids = connect.add_vectors(table, vectors)
         for i in range(2):
             status = connect.create_index(table, index_params)
-
             assert status.OK()
             status, result = connect.describe_index(table)
             logging.getLogger().info(result)
@@ -517,7 +536,7 @@ class TestIndexBase:
         '''
         nlist = 16384
         index_params = [{"index_type": IndexType.IVFLAT, "nlist": nlist}, {"index_type": IndexType.IVF_SQ8, "nlist": nlist}]
-        status, ids = connect.add_vectors(table, vectors)
+        # status, ids = connect.add_vectors(table, vectors)
         for i in range(2):
             status = connect.create_index(table, index_params[i])
             assert status.OK()
@@ -570,10 +589,7 @@ class TestIndexIP:
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
+        assert status.OK()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, ip_table, get_simple_index_params):
@@ -584,14 +600,13 @@ class TestIndexIP:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(index_params)
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
         status = connect.create_index(partition_name, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
+        assert status.OK()
 
     @pytest.mark.level(2)
     def test_create_index_without_connect(self, dis_connect, ip_table):
@@ -616,17 +631,13 @@ class TestIndexIP:
         logging.getLogger().info(index_params)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
-            logging.getLogger().info(connect.describe_index(ip_table))
-            query_vecs = [vectors[0], vectors[1], vectors[2]]
-            top_k = 5
-            status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
-            logging.getLogger().info(result)
-            assert status.OK()
-            assert len(result) == len(query_vecs)
+        logging.getLogger().info(connect.describe_index(ip_table))
+        query_vecs = [vectors[0], vectors[1], vectors[2]]
+        top_k = 5
+        status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == len(query_vecs)
 
     # TODO: enable
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -734,6 +745,8 @@ class TestIndexIP:
         expected: return code equals to 0
         '''
         index_param = get_simple_index_params
+        if index_param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_index(ip_table, index_param)
         status, ids = connect.add_vectors(ip_table, vectors)
         assert status.OK()
@@ -792,7 +805,7 @@ class TestIndexIP:
         '''
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
-        status, ids = connect.add_vectors(ip_table, vectors)
+        # status, ids = connect.add_vectors(ip_table, vectors[:5000])
         status = connect.create_index(ip_table, index_params)
         status, result = connect.describe_index(ip_table)
         logging.getLogger().info(result)
@@ -808,6 +821,8 @@ class TestIndexIP:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(index_params)
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
@@ -831,6 +846,8 @@ class TestIndexIP:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(index_params)
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
@@ -856,6 +873,8 @@ class TestIndexIP:
         new_partition_name = gen_unique_str()
         new_tag = "new_tag"
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(index_params)
         status = connect.create_partition(ip_table, partition_name, tag)
         status = connect.create_partition(ip_table, new_partition_name, new_tag)
@@ -892,6 +911,8 @@ class TestIndexIP:
                      'metric_type': MetricType.IP}
             connect.create_table(param)
             index_params = get_simple_index_params
+            if index_params["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("Skip some PQ cases")
             logging.getLogger().info(index_params)
             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
             status = connect.create_index(table_name, index_params)
@@ -944,28 +965,30 @@ class TestIndexIP:
     ******************************************************************
     """
 
-    def test_drop_index(self, connect, ip_table, get_index_params):
+    def test_drop_index(self, connect, ip_table, get_simple_index_params):
         '''
         target: test drop index interface
         method: create table and add vectors in it, create index, call drop index
         expected: return code 0, and default index param
         '''
-        index_params = get_index_params
-        status, ids = connect.add_vectors(ip_table, vectors)
+        index_params = get_simple_index_params
+        status, mode = connect._cmd("mode")
+        assert status.OK()
+        # status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
+        if str(mode) == "GPU" and index_params["index_type"] == IndexType.IVF_PQ:
             assert not status.OK()
         else:
-            assert status.OK()        
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            status = connect.drop_index(ip_table)
             assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == ip_table
-            assert result._index_type == IndexType.FLAT
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        status = connect.drop_index(ip_table)
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ip_table
+        assert result._index_type == IndexType.FLAT
 
     def test_drop_index_partition(self, connect, ip_table, get_simple_index_params):
         '''
@@ -975,22 +998,21 @@ class TestIndexIP:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            status = connect.drop_index(ip_table)
-            assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == ip_table
-            assert result._index_type == IndexType.FLAT
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        status = connect.drop_index(ip_table)
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ip_table
+        assert result._index_type == IndexType.FLAT
 
     def test_drop_index_partition_A(self, connect, ip_table, get_simple_index_params):
         '''
@@ -1000,25 +1022,24 @@ class TestIndexIP:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
         status = connect.create_index(partition_name, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
-            status = connect.drop_index(ip_table)
-            assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == ip_table
-            assert result._index_type == IndexType.FLAT
-            status, result = connect.describe_index(partition_name)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == partition_name
-            assert result._index_type == IndexType.FLAT
+        assert status.OK()
+        status = connect.drop_index(ip_table)
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ip_table
+        assert result._index_type == IndexType.FLAT
+        status, result = connect.describe_index(partition_name)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == partition_name
+        assert result._index_type == IndexType.FLAT
 
     def test_drop_index_partition_B(self, connect, ip_table, get_simple_index_params):
         '''
@@ -1028,25 +1049,24 @@ class TestIndexIP:
         '''
         partition_name = gen_unique_str()
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_partition(ip_table, partition_name, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
         status = connect.create_index(partition_name, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
-            status = connect.drop_index(partition_name)
-            assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == ip_table
-            assert result._index_type == IndexType.FLAT
-            status, result = connect.describe_index(partition_name)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == partition_name
-            assert result._index_type == IndexType.FLAT
+        assert status.OK()
+        status = connect.drop_index(partition_name)
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ip_table
+        assert result._index_type == IndexType.FLAT
+        status, result = connect.describe_index(partition_name)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == partition_name
+        assert result._index_type == IndexType.FLAT
 
     def test_drop_index_partition_C(self, connect, ip_table, get_simple_index_params):
         '''
@@ -1058,31 +1078,30 @@ class TestIndexIP:
         new_partition_name = gen_unique_str()
         new_tag = "new_tag"
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status = connect.create_partition(ip_table, partition_name, tag)
         status = connect.create_partition(ip_table, new_partition_name, new_tag)
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
-            status = connect.drop_index(new_partition_name)
-            assert status.OK()
-            status, result = connect.describe_index(new_partition_name)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == new_partition_name
-            assert result._index_type == IndexType.FLAT
-            status, result = connect.describe_index(partition_name)
-            logging.getLogger().info(result)
-            assert result._nlist == index_params["nlist"]
-            assert result._table_name == partition_name
-            assert result._index_type == index_params["index_type"]
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            assert result._nlist == index_params["nlist"]
-            assert result._table_name == ip_table
-            assert result._index_type == index_params["index_type"]
+        assert status.OK()
+        status = connect.drop_index(new_partition_name)
+        assert status.OK()
+        status, result = connect.describe_index(new_partition_name)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == new_partition_name
+        assert result._index_type == IndexType.FLAT
+        status, result = connect.describe_index(partition_name)
+        logging.getLogger().info(result)
+        assert result._nlist == index_params["nlist"]
+        assert result._table_name == partition_name
+        assert result._index_type == index_params["index_type"]
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        assert result._nlist == index_params["nlist"]
+        assert result._table_name == ip_table
+        assert result._index_type == index_params["index_type"]
 
     def test_drop_index_repeatly(self, connect, ip_table, get_simple_index_params):
         '''
@@ -1091,23 +1110,20 @@ class TestIndexIP:
         expected: return code 0
         '''
         index_params = get_simple_index_params
-        status, ids = connect.add_vectors(ip_table, vectors)
+        # status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
-            assert not status.OK()
-        else:
-            assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            status = connect.drop_index(ip_table)
-            assert status.OK()
-            status = connect.drop_index(ip_table)
-            assert status.OK()
-            status, result = connect.describe_index(ip_table)
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == ip_table
-            assert result._index_type == IndexType.FLAT
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        status = connect.drop_index(ip_table)
+        assert status.OK()
+        status = connect.drop_index(ip_table)
+        assert status.OK()
+        status, result = connect.describe_index(ip_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ip_table
+        assert result._index_type == IndexType.FLAT
 
     @pytest.mark.level(2)
     def test_drop_index_without_connect(self, dis_connect, ip_table):
@@ -1145,22 +1161,21 @@ class TestIndexIP:
         expected: return code 0
         '''
         index_params = get_simple_index_params
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status, ids = connect.add_vectors(ip_table, vectors)
         for i in range(2):
             status = connect.create_index(ip_table, index_params)
-            if index_params["index_type"] == IndexType.IVF_PQ:
-                assert not status.OK()
-            else:
-                assert status.OK()
-                status, result = connect.describe_index(ip_table)
-                logging.getLogger().info(result)
-                status = connect.drop_index(ip_table)
-                assert status.OK()
-                status, result = connect.describe_index(ip_table)
-                logging.getLogger().info(result)
-                assert result._nlist == 16384
-                assert result._table_name == ip_table
-                assert result._index_type == IndexType.FLAT
+            assert status.OK()
+            status, result = connect.describe_index(ip_table)
+            logging.getLogger().info(result)
+            status = connect.drop_index(ip_table)
+            assert status.OK()
+            status, result = connect.describe_index(ip_table)
+            logging.getLogger().info(result)
+            assert result._nlist == 16384
+            assert result._table_name == ip_table
+            assert result._index_type == IndexType.FLAT
 
     def test_create_drop_index_repeatly_different_index_params(self, connect, ip_table):
         '''
@@ -1200,7 +1215,7 @@ class TestIndexTableInvalid(object):
     def get_table_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_create_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         nlist = 16384
@@ -1208,13 +1223,13 @@ class TestIndexTableInvalid(object):
         status = connect.create_index(table_name, index_param)
         assert not status.OK()
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_describe_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         status, result = connect.describe_index(table_name)
         assert not status.OK()   
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_drop_index_with_invalid_tablename(self, connect, get_table_name):
         table_name = get_table_name
         status = connect.drop_index(table_name)
@@ -1232,13 +1247,13 @@ class TestCreateIndexParamsInvalid(object):
     def get_index_params(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_create_index_with_invalid_index_params(self, connect, table, get_index_params):
         index_params = get_index_params
         index_type = index_params["index_type"]
         nlist = index_params["nlist"]
         logging.getLogger().info(index_params)
-        status, ids = connect.add_vectors(table, vectors)
+        # status, ids = connect.add_vectors(table, vectors)
         if (not index_type) or (not nlist) or (not isinstance(index_type, IndexType)) or (not isinstance(nlist, int)):
             with pytest.raises(Exception) as e:
                 status = connect.create_index(table, index_params)

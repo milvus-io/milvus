@@ -536,12 +536,12 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->CreatePartition(table_name, "", "0");
     ASSERT_FALSE(stat.ok());
 
-    std::vector<milvus::engine::meta::TableSchema> partiton_schema_array;
-    stat = db_->ShowPartitions(table_name, partiton_schema_array);
+    std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
+    stat = db_->ShowPartitions(table_name, partition_schema_array);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(partiton_schema_array.size(), PARTITION_COUNT);
+    ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT);
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
-        ASSERT_EQ(partiton_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
+        ASSERT_EQ(partition_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
     }
 
     { // build index

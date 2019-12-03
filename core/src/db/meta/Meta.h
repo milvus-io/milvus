@@ -36,6 +36,13 @@ static const char* META_TABLEFILES = "TableFiles";
 
 class Meta {
  public:
+    class CleanUpFilter {
+     public:
+        virtual bool
+        IsIgnored(const TableFileSchema& schema) = 0;
+    };
+
+ public:
     virtual ~Meta() = default;
 
     virtual Status
@@ -93,7 +100,7 @@ class Meta {
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& table_name, std::vector<meta::TableSchema>& partiton_schema_array) = 0;
+    ShowPartitions(const std::string& table_name, std::vector<meta::TableSchema>& partition_schema_array) = 0;
 
     virtual Status
     GetPartitionName(const std::string& table_name, const std::string& tag, std::string& partition_name) = 0;
@@ -121,10 +128,7 @@ class Meta {
     CleanUpShadowFiles() = 0;
 
     virtual Status
-    CleanUpCacheWithTTL(uint64_t seconds) = 0;
-
-    virtual Status
-    CleanUpFilesWithTTL(uint64_t seconds) = 0;
+    CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) = 0;
 
     virtual Status
     DropAll() = 0;
