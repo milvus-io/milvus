@@ -14,8 +14,9 @@ MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
 CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
-INSTALL_PREFIX="/opt/milvus"
+INSTALL_PREFIX="/var/lib/milvus"
 FAISS_ROOT=""
+PRIVILEGES="OFF"
 CUSTOMIZATION="OFF" # default use origin faiss
 BUILD_COVERAGE="OFF"
 USE_JFROG_CACHE="OFF"
@@ -24,7 +25,7 @@ GPU_VERSION="OFF"
 WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "o:t:b:f:gxulcjmh" arg
+while getopts "o:t:b:f:pgxulcjmh" arg
 do
         case $arg in
              o)
@@ -38,6 +39,9 @@ do
                 ;;
              f)
                 FAISS_ROOT=$OPTARG # FAISS ROOT PATH
+                ;;
+             p)
+                PRIVILEGES="ON" # ELEVATED PRIVILEGES
                 ;;
              g)
                 GPU_VERSION="ON";
@@ -65,10 +69,11 @@ do
                 echo "
 
 parameter:
--o: install prefix(default: /opt/milvus)
+-o: install prefix(default: /var/lib/milvus)
 -t: build type(default: Debug)
 -b: core code build directory
 -f: faiss root path
+-p: install command with elevated privileges
 -g: gpu version
 -x: milvus customization (default: OFF)
 -u: building unit test options(default: OFF)
@@ -79,7 +84,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-g] [-x] [-u] [-l] [-c] [-j] [-m] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-x] [-u] [-l] [-c] [-j] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -143,4 +148,9 @@ fi
 
 # compile and build
 make -j8 || exit 1
-make install || exit 1
+
+if [[ ${PRIVILEGES} == "ON" ]];then
+    sudo make install || exit 1
+else
+    make install || exit 1
+fi

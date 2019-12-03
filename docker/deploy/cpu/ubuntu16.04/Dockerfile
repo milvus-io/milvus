@@ -7,13 +7,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/libmysqlclient_r.so
 
-COPY ./docker-entrypoint.sh /opt
-COPY ./milvus /opt/milvus
-ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/milvus/lib"
+COPY ./milvus /var/lib/milvus
+COPY ./docker-entrypoint.sh /var/lib/milvus
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
-WORKDIR /opt/milvus
+WORKDIR /var/lib/milvus
 
-ENTRYPOINT [ "/opt/docker-entrypoint.sh" ]
+ENTRYPOINT [ "/var/lib/milvus/docker-entrypoint.sh" ]
 
 CMD [ "start" ]
 

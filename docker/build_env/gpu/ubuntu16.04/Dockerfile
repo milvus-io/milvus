@@ -21,7 +21,7 @@ RUN sh -c 'echo export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2019.5
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
-WORKDIR /opt/milvus
+WORKDIR /root
 
 ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
 CMD [ "start" ]
