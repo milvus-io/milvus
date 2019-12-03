@@ -14,7 +14,7 @@ MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
 CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
-INSTALL_PREFIX="/opt/milvus"
+INSTALL_PREFIX="/var/lib/milvus"
 FAISS_ROOT=""
 CUSTOMIZATION="OFF" # default use origin faiss
 BUILD_COVERAGE="OFF"
@@ -65,7 +65,7 @@ do
                 echo "
 
 parameter:
--o: install prefix(default: /opt/milvus)
+-o: install prefix(default: /var/lib/milvus)
 -t: build type(default: Debug)
 -b: core code build directory
 -f: faiss root path

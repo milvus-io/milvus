@@ -1,15 +1,15 @@
 timeout(time: 5, unit: 'MINUTES') {
-    dir ("ci/jenkins/scripts") {
-        sh "pip3 install -r requirements.txt"
-        sh "./yaml_processor.py merge -f /opt/milvus/conf/server_config.yaml -m ../yaml/update_server_config.yaml -i && rm /opt/milvus/conf/server_config.yaml.bak"
-        sh "sed -i 's/\\/tmp\\/milvus/\\/opt\\/milvus/g' /opt/milvus/conf/log_config.conf"
-    }
-    sh "rm -rf /opt/milvus/unittest"
-    sh "tar -zcvf ./${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz -C /opt/ milvus"
+    // dir ("ci/jenkins/scripts") {
+    //     sh "pip3 install -r requirements.txt"
+    //     sh "./yaml_processor.py merge -f ${env.MILVUS_INSTALL_PREFIX}/conf/server_config.yaml -m ../yaml/update_server_config.yaml -i && rm ${env.MILVUS_ROOT_PATH}/conf/server_config.yaml.bak"
+    // }
+
+    sh "rm -rf ${env.MILVUS_INSTALL_PREFIX}/unittest"
+    sh "tar -zcvf ./${env.PROJECT_NAME}-${env.PACKAGE_VERSION}.tar.gz -C ${env.MILVUS_ROOT_PATH}/ ${env.PROJECT_NAME}"
     withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
-        def uploadStatus = sh(returnStatus: true, script: "curl -u${JFROG_USERNAME}:${JFROG_PASSWORD} -T ./${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz ${params.JFROG_ARTFACTORY_URL}/milvus/package/${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz")
+        def uploadStatus = sh(returnStatus: true, script: "curl -u${JFROG_USERNAME}:${JFROG_PASSWORD} -T ./${env.PROJECT_NAME}-${env.PACKAGE_VERSION}.tar.gz ${params.JFROG_ARTFACTORY_URL}/milvus/package/${env.PROJECT_NAME}-${env.PACKAGE_VERSION}.tar.gz")
         if (uploadStatus != 0) {
-            error("\" ${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz \" upload to \" ${params.JFROG_ARTFACTORY_URL}/milvus/package/${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz \" failed!")
+            error("\" ${env.PROJECT_NAME}-${env.PACKAGE_VERSION}.tar.gz \" upload to \" ${params.JFROG_ARTFACTORY_URL}/milvus/package/${env.PROJECT_NAME}-${env.PACKAGE_VERSION}.tar.gz \" failed!")
         }
     }
 }
