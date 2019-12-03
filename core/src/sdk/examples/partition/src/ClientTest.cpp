@@ -17,15 +17,12 @@
 
 #include "sdk/examples/partition/src/ClientTest.h"
 #include "MilvusApi.h"
+#include "sdk/examples/utils/TimeRecorder.h"
 #include "sdk/examples/utils/Utils.h"
 
-#include <src/sdk/examples/utils/TimeRecorder.h>
-#include <time.h>
-#include <unistd.h>
 #include <chrono>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,7 +39,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-constexpr int32_t N_LIST = 15000;
+constexpr int32_t N_LIST = 16384;
 constexpr int32_t PARTITION_COUNT = 5;
 constexpr int32_t TARGET_PARTITION = 3;
 
