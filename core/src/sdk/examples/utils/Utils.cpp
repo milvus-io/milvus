@@ -22,7 +22,6 @@
 #include <unistd.h>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -194,7 +193,7 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
         if (result_id != search_id) {
             std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
         } else {
-            std::cout << "Check result sucessfully" << std::endl;
+            std::cout << "No." << i << " Check result successfully" << std::endl;
         }
     }
     BLOCK_SPLITER
