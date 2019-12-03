@@ -46,7 +46,7 @@ DeleteByDateRequest::Create(const ::milvus::grpc::DeleteByDateParam* delete_by_r
 Status
 DeleteByDateRequest::OnExecute() {
     try {
-        TimeRecorder rc("DeleteByDateRequest");
+        TimeRecorderAuto rc("DeleteByDateRequest");
 
         // step 1: check arguments
         std::string table_name = delete_by_range_param_->table_name();
@@ -67,7 +67,7 @@ DeleteByDateRequest::OnExecute() {
             }
         }
 
-        rc.ElapseFromBegin("check validation");
+        rc.RecordSection("check validation");
 
         // step 3: check date range, and convert to db dates
         std::vector<DB_DATE> dates;

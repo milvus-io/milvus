@@ -20,6 +20,12 @@
 
 namespace faiss {
 
+/*
+ * Use pin memory to build Readonly Inverted list will accelerate cuda memory copy, but it will downgrade cpu ivf search
+ * performance. read only inverted list structure will also make ivf search performance not stable. ISSUE 500 mention
+ * this problem. Best performance is the original inverted list with non pin memory.
+ */
+
 PageLockMemory::PageLockMemory(size_t size) : nbytes(size) {
     CUDA_VERIFY(cudaHostAlloc(&data, size, 0));
 }

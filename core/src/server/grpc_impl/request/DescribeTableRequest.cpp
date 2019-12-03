@@ -38,7 +38,8 @@ DescribeTableRequest::Create(const std::string& table_name, ::milvus::grpc::Tabl
 
 Status
 DescribeTableRequest::OnExecute() {
-    TimeRecorder rc("DescribeTableRequest");
+    std::string hdr = "DescribeTableRequest(table=" + table_name_ + ")";
+    TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
@@ -62,8 +63,6 @@ DescribeTableRequest::OnExecute() {
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    rc.ElapseFromBegin("totally cost");
 
     return Status::OK();
 }

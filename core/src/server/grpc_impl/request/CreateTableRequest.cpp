@@ -22,6 +22,7 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace server {
@@ -42,7 +43,9 @@ CreateTableRequest::Create(const ::milvus::grpc::TableSchema* schema) {
 
 Status
 CreateTableRequest::OnExecute() {
-    TimeRecorder rc("CreateTableRequest");
+    std::string hdr = "CreateTableRequest(table=" + schema_->table_name() +
+                      ", dimension=" + std::to_string(schema_->dimension()) + ")";
+    TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
@@ -85,8 +88,6 @@ CreateTableRequest::OnExecute() {
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    rc.ElapseFromBegin("totally cost");
 
     return Status::OK();
 }

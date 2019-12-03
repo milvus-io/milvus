@@ -176,6 +176,11 @@ Cache<ItemObj>::print() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         cache_count = lru_.size();
+#if 0
+        for (auto it = lru_.begin(); it != lru_.end(); ++it) {
+            SERVER_LOG_DEBUG << it->first;
+        }
+#endif
     }
 
     SERVER_LOG_DEBUG << "[Cache item count]: " << cache_count;

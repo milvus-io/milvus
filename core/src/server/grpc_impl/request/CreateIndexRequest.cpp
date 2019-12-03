@@ -44,7 +44,8 @@ CreateIndexRequest::Create(const ::milvus::grpc::IndexParam* index_param) {
 Status
 CreateIndexRequest::OnExecute() {
     try {
-        TimeRecorder rc("CreateIndexRequest");
+        std::string hdr = "CreateIndexRequest(table=" + index_param_->table_name() + ")";
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         std::string table_name_ = index_param_->table_name();
@@ -82,8 +83,6 @@ CreateIndexRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

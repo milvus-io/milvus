@@ -39,7 +39,8 @@ CountTableRequest::Create(const std::string& table_name, int64_t& row_count) {
 Status
 CountTableRequest::OnExecute() {
     try {
-        TimeRecorder rc("CountTableRequest");
+        std::string hdr = "CountTableRequest(table=" + table_name_ + ")";
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -59,8 +60,6 @@ CountTableRequest::OnExecute() {
         }
 
         row_count_ = static_cast<int64_t>(row_count);
-
-        rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
