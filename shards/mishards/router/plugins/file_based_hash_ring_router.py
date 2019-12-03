@@ -1,6 +1,6 @@
 import logging
 from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from mishards.models import Tables
 from mishards.router import RouterMixin
 from mishards import exceptions, db
@@ -24,7 +24,8 @@ class Factory(RouterMixin):
         # PXU TODO: Session life mgt
 
         if not partition_tags:
-            cond = and_(Tables.table_id == table_name,
+            cond = and_(
+                        or_(Tables.table_id == table_name, Tables.owner_table == table_name),
                         Tables.state != Tables.TO_DELETE)
         else:
             cond = and_(Tables.state != Tables.TO_DELETE,
