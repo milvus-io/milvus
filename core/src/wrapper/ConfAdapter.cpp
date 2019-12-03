@@ -18,6 +18,7 @@
 #include "wrapper/ConfAdapter.h"
 #include "WrapperException.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 
 #include <cmath>
@@ -129,6 +130,17 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->gpu_id = metaconf.gpu_id;
     conf->nbits = 8;
     MatchBase(conf);
+
+#ifdef MILVUS_GPU_VERSION
+    Status s;
+    bool enable_gpu = false;
+    server::Config& config = server::Config::GetInstance();
+    s = config.GetGpuResourceConfigEnable(enable_gpu);
+    if (s.ok() && conf->metric_type == knowhere::METRICTYPE::IP) {
+        WRAPPER_LOG_ERROR << "PQ not support IP in GPU version!";
+        throw WrapperException("PQ not support IP in GPU version!");
+    }
+#endif
 
     /*
      * Faiss 1.6
