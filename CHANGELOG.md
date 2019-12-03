@@ -47,6 +47,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#631 - FAISS isn't compiled with O3 option
 - \#649 - Typo "partiton" should be "partition"
 - \#654 - Random crash when frequently insert vector one by one
+- \#658 - Milvus error out when building SQ8H index without GPU resources
 
 ## Feature
 - \#12 - Pure CPU version for Milvus

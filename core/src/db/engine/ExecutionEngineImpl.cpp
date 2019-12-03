@@ -121,7 +121,11 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
 #ifdef CUSTOMIZATION
         case EngineType::FAISS_IVFSQ8H: {
-            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            if (gpu_resource_enable) {
+                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            } else {
+                throw Exception(DB_ERROR, "No GPU resources for IVFSQ8H");
+            }
             break;
         }
 #endif
