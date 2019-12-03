@@ -213,6 +213,14 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             bool_reply=_bool)
 
     @mark_grpc_method
+    def DropPartition(self, request, context):
+        _table_name, _partition_name, _tag  = Parser.parse_proto_PartitionParam(request)
+
+        _status = self.router.connection().drop_partition(_table_name, _tag)
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
+    @mark_grpc_method
     def ShowPartitions(self, request, context):
         _status, _table_name = Parser.parse_proto_TableName(request)
         if not _status.OK():
