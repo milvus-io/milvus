@@ -841,8 +841,13 @@ class TestAddIP:
         index_param = get_simple_index_params
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status = connect.create_index(ip_table, index_param)
+        status, mode = connect._cmd("mode")
         assert status.OK()
+        status = connect.create_index(ip_table, index_param)
+        if str(mode) == "GPU" and (index_param["index_type"] == IndexType.IVF_PQ):
+            assert not status.OK()
+        else:
+            assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_add_vector_create_index_another(self, connect, ip_table, get_simple_index_params):
@@ -870,6 +875,8 @@ class TestAddIP:
         expected: status ok
         '''
         index_param = get_simple_index_params
+        if index_param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         time.sleep(1)
