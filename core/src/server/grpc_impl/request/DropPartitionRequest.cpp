@@ -42,7 +42,7 @@ DropPartitionRequest::OnExecute() {
     std::string hdr = "DropPartitionRequest(table=" + partition_param_->table_name() +
                       ", partition_name=" + partition_param_->partition_name() +
                       ", partition_tag=" + partition_param_->tag() + ")";
-    TimeRecorder rc(hdr);
+    TimeRecorderAuto rc(hdr);
 
     std::string table_name = partition_param_->table_name();
     std::string partition_name = partition_param_->partition_name();
