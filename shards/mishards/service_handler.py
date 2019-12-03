@@ -212,6 +212,25 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             error_code=_status.code, reason=_status.message),
             bool_reply=_bool)
 
+    @mark_grpc_method
+    def ShowPartitions(self, request, context):
+        _status, _table_name = Parser.parse_proto_TableName(request)
+        if not _status.OK():
+            return milvus_pb2.PartitionList(status=status_pb2.Status(
+                error_code=_status.code, reason=_status.message),
+                partition_array=[])
+
+        logger.info('ShowPartitions {}'.format(_table_name))
+
+        _status, partition_array = self.router.connection().show_partitions(_table_name)
+
+        return milvus_pb2.PartitionList(status=status_pb2.Status(
+            error_code=_status.code, reason=_status.message),
+            partition_array=[milvus_pb2.PartitionParam(table_name=param.table_name,
+                                                       tag=param.tag,
+                                                       partition_name=param.partition_name)
+                                                       for param in partition_array])
+
     def _delete_table(self, table_name):
         return self.router.connection().delete_table(table_name)
 
