@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#define USE_FAISS_V_0_3_0
+
 #include <gtest/gtest.h>
 
 #include <hdf5.h>
@@ -26,21 +28,6 @@
 #include <cstdio>
 #include <vector>
 
-#define USE_FAISS_V1_5_3 0
-
-#if USE_FAISS_V1_5_3
-#include <faiss/gpu/GpuAutoTune.h>
-#include <faiss/utils.h>
-#include <sys/stat.h>
-#include <cstdlib>
-#include <cstring>
-
-#else
-#include <faiss/gpu/GpuCloner.h>
-#include <faiss/index_factory.h>
-#include <faiss/utils/distances.h>
-#endif
-
 #include <faiss/AutoTune.h>
 #include <faiss/Index.h>
 #include <faiss/IndexIVF.h>
@@ -48,8 +35,26 @@
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_io.h>
 
+#ifdef USE_FAISS_V_0_3_0  // faiss_0.3.0
+
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/index_factory.h>
+#include <faiss/utils/distances.h>
+
+#else  // faiss_0.2.1
+
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/utils.h>
+#include <sys/stat.h>
+#include <cstdlib>
+#include <cstring>
+
+#endif
+
 #ifdef CUSTOMIZATION
 #include <faiss/gpu/GpuIndexIVFSQHybrid.h>
+#else
+#include <faiss/gpu/GpuIndexIVF.h>
 #endif
 
 /*****************************************************
@@ -205,15 +210,12 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
     size_t min_k = std::min(ground_k, k);
     int hit = 0;
     for (int i = 0; i < nq; i++) {
-        // count the num of results exist in ground truth result set
-        // each result replicates INDEX_ADD_LOOPS times
-        for (int j_c = 0; j_c < k; j_c++) {
-            int r_c = index[i * k + j_c];
-            for (int j_g = 0; j_g < min_k / index_add_loops; j_g++) {
-                if (ground_index[i * ground_k + j_g] == r_c) {
-                    hit++;
-                    continue;
-                }
+        std::set<faiss::Index::idx_t> ground(ground_index + i * ground_k,
+                                             ground_index + i * ground_k + min_k / index_add_loops);
+        for (int j = 0; j < min_k; j++) {
+            faiss::Index::idx_t id = index[i * k + j];
+            if (ground.count(id) > 0) {
+                hit++;
             }
         }
     }
@@ -295,10 +297,12 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         cpu_index = faiss::gpu::index_gpu_to_cpu(gpu_index);
         delete gpu_index;
 
+#ifdef CUSTOMIZATION
         faiss::IndexIVF* cpu_ivf_index = dynamic_cast<faiss::IndexIVF*>(cpu_index);
         if (cpu_ivf_index != nullptr) {
             cpu_ivf_index->to_readonly();
         }
+#endif
 
         printf("[%.3f s] Writing index file: %s\n", elapsed() - t0, index_file_name.c_str());
         faiss::write_index(cpu_index, index_file_name.c_str());
@@ -374,13 +378,15 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
     faiss::Index *gpu_index, *index;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
+#ifdef CUSTOMIZATION
         option.allInGpu = true;
 
         faiss::IndexComposition index_composition;
         index_composition.index = cpu_index;
         index_composition.quantizer = nullptr;
-
+#endif
         switch (query_mode) {
+#ifdef CUSTOMIZATION
             case MODE_MIX: {
                 index_composition.mode = 1;  // 0: all data, 1: copy quantizer, 2: copy data
 
@@ -403,7 +409,9 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 index = cpu_index;
                 break;
             }
+#endif
             case MODE_GPU:
+#ifdef CUSTOMIZATION
                 index_composition.mode = 0;  // 0: all data, 1: copy quantizer, 2: copy data
 
                 // warm up the transmission
@@ -412,6 +420,14 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
 
                 copy_time = elapsed();
                 gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, &index_composition, &option);
+#else
+                // warm up the transmission
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, cpu_index, &option);
+                delete gpu_index;
+
+                copy_time = elapsed();
+                gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, cpu_index, &option);
+#endif
                 copy_time = elapsed() - copy_time;
                 printf("[%.3f s] Copy data completed, cost %f s\n", elapsed() - t0, copy_time);
 

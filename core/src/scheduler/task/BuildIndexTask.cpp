@@ -19,6 +19,7 @@
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -85,7 +86,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
         size_t file_size = to_index_engine_->PhysicalSize();
 
-        std::string info = "Load file id:" + std::to_string(file_->id_) +
+        std::string info = "Load file id:" + std::to_string(file_->id_) + " " + type_str +
                            " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                            " bytes from location: " + file_->location_ + " totally cost";
         double span = rc.ElapseFromBegin(info);
@@ -129,24 +130,15 @@ XBuildIndexTask::Execute() {
         try {
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
-                table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
-                status = meta_ptr->UpdateTableFile(table_file);
-                ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_
-                                 << " to to_delete";
-
-                build_index_job->BuildIndexDone(to_index_id_);
-                to_index_engine_ = nullptr;
-                return;
+                throw Exception(DB_ERROR, "index NULL");
             }
         } catch (std::exception& ex) {
-            std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
+            std::string msg = "Build index exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
             table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
-            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-            ENGINE_LOG_ERROR << "Failed to build index, index file is too large or gpu memory is not enough";
+            ENGINE_LOG_DEBUG << "Build index fail, mark file: " << table_file.file_id_ << " to to_delete";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
@@ -168,21 +160,28 @@ XBuildIndexTask::Execute() {
 
         // step 5: save index file
         try {
-            index->Serialize();
+            status = index->Serialize();
+            if (!status.ok()) {
+                ENGINE_LOG_ERROR << status.message();
+            }
         } catch (std::exception& ex) {
-            // typical error: out of disk space or permition denied
             std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
+            status = Status(DB_ERROR, msg);
+        }
 
+        if (!status.ok()) {
+            // if failed to serialize index file to disk
+            // typical error: out of disk space, out of memory or permition denied
             table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
             ENGINE_LOG_ERROR << "Failed to persist index file: " << table_file.location_
-                             << ", possible out of disk space";
+                             << ", possible out of disk space or memory";
 
             build_index_job->BuildIndexDone(to_index_id_);
-            build_index_job->GetStatus() = Status(DB_ERROR, msg);
+            build_index_job->GetStatus() = status;
             to_index_engine_ = nullptr;
             return;
         }
@@ -196,7 +195,11 @@ XBuildIndexTask::Execute() {
         origin_file.file_type_ = engine::meta::TableFileSchema::BACKUP;
 
         engine::meta::TableFilesSchema update_files = {table_file, origin_file};
-        status = meta_ptr->UpdateTableFiles(update_files);
+
+        if (status.ok()) {  // makesure index file is sucessfully serialized to disk
+            status = meta_ptr->UpdateTableFiles(update_files);
+        }
+
         if (status.ok()) {
             ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << index->PhysicalSize()
                              << " bytes"

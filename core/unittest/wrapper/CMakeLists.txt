@@ -18,10 +18,12 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_hybrid_index.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_knowhere.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
+        test_knowhere.cpp
+        test_wrapper.cpp)
+if (MILVUS_GPU_VERSION)
+    set(test_files ${test_files}
+            test_hybrid_index.cpp)
+endif ()
 
 set(wrapper_files
         ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp
@@ -30,7 +32,7 @@ set(wrapper_files
 
 set(util_files
         utils.cpp
-        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         )
 

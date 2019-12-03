@@ -17,6 +17,7 @@
 
 #include "utils/StringHelpFunctions.h"
 
+#include <regex>
 #include <string>
 
 namespace milvus {
@@ -134,6 +135,23 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
     }
 
     return Status::OK();
+}
+
+bool
+StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::string& pattern_str) {
+    // if target_str equals pattern_str, return true
+    if (target_str == pattern_str) {
+        return true;
+    }
+
+    // regex match
+    std::regex pattern(pattern_str);
+    std::smatch results;
+    if (std::regex_search(target_str, results, pattern)) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
 }  // namespace server

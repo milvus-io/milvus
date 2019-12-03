@@ -49,8 +49,8 @@ class VectorIndex : public Index {
     Seal() = 0;
 
     // TODO(linxj): Deprecated
-    virtual VectorIndexPtr
-    Clone() = 0;
+    //    virtual VectorIndexPtr
+    //    Clone() = 0;
 
     virtual int64_t
     Count() = 0;

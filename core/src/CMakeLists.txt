@@ -19,13 +19,15 @@
 
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
+include_directories(${MILVUS_THIRDPARTY_SRC})
 
-include_directories(${CUDA_TOOLKIT_ROOT_DIR}/include)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-#this statement must put here, since the INDEX_INCLUDE_DIRS is defined in code/CMakeList.txt
 add_subdirectory(index)
+if (FAISS_WITH_MKL)
+    add_compile_definitions("WITH_MKL")
+endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
@@ -35,6 +37,7 @@ endforeach ()
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
@@ -64,15 +67,21 @@ set(scheduler_files
         ${scheduler_task_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/easyloggingpp external_easyloggingpp_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/nlohmann external_nlohmann_files)
-set(external_files
-        ${external_easyloggingpp_files}
-        ${external_nlohmann_files}
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+set(thirdparty_files
+        ${thirdparty_easyloggingpp_files}
+        ${thirdparty_nlohmann_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+set(grpc_server_files
+        ${grpc_request_files}
+        ${grpc_impl_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
@@ -84,10 +93,15 @@ set(engine_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
-        ${external_files}
+        ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
         )
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(engine_files ${engine_files}
+            ${metrics_prometheus_files})
+endif ()
 
 set(client_grpc_lib
         grpcpp_channelz
@@ -109,35 +123,50 @@ set(boost_lib
         libboost_serialization.a
         )
 
-set(cuda_lib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-        cudart
-        cublas
-        )
-
 set(third_party_libs
         sqlite
         ${client_grpc_lib}
         yaml-cpp
-        ${prometheus_lib}
-        ${cuda_lib}
         mysqlpp
         zlib
         ${boost_lib}
         )
 
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+if (MILVUS_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
+            )
     set(third_party_libs ${third_party_libs}
-        gperftools
-        libunwind
-        )
+            ${cuda_lib}
+            )
+    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
+    set(engine_files ${engine_files}
+            ${wrapper_gpu_files}
+            )
 endif ()
 
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+if (MILVUS_ENABLE_PROFILING)
+    set(third_party_libs ${third_party_libs}
+            gperftools
+            libunwind
+            )
+endif ()
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(third_party_libs ${third_party_libs}
+            ${prometheus_lib}
+            )
+endif ()
+
 set(engine_libs
         pthread
         libgomp.a
         libgfortran.a
+        dl
         )
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
@@ -147,26 +176,33 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
             )
 endif ()
 
-cuda_add_library(milvus_engine STATIC ${engine_files})
+add_library(milvus_engine STATIC ${engine_files})
 target_link_libraries(milvus_engine
         knowhere
-        ${engine_libs}
         ${third_party_libs}
+        ${engine_libs}
         )
 
-add_library(metrics STATIC ${metrics_files})
+if (MILVUS_WITH_PROMETHEUS)
+    add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
+else ()
+    add_library(metrics STATIC ${metrics_files})
+endif ()
 
 set(metrics_lib
         yaml-cpp
-        ${prometheus_lib}
         )
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(metrics_lib ${metrics_lib}
+            ${prometheus_lib}
+            )
+endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
 set(server_libs
         milvus_engine
-        pthread
-        dl
         metrics
         )
 

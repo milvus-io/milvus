@@ -54,12 +54,12 @@ def gen_long_str(num):
 
 def gen_invalid_ips():
     ips = [
-            "255.0.0.0",
-            "255.255.0.0",
-            "255.255.255.0",
-            "255.255.255.255",
+            # "255.0.0.0",
+            # "255.255.0.0",
+            # "255.255.255.0",
+            # "255.255.255.255",
             "127.0.0",
-            "123.0.0.2",
+            # "123.0.0.2",
             "12-s",
             " ",
             "12 s",
@@ -69,7 +69,7 @@ def gen_invalid_ips():
             "\n",
             "\t",
             "中文",
-            "a".join("a" for i in range(256))
+            "a".join("a" for _ in range(256))
     ]
     return ips
 
@@ -114,12 +114,12 @@ def gen_invalid_uris():
 
             # invalid ip
             "tcp:// :%s" % port,
-            "tcp://123.0.0.1:%s" % port,
+            # "tcp://123.0.0.1:%s" % port,
             "tcp://127.0.0:%s" % port,
-            "tcp://255.0.0.0:%s" % port,
-            "tcp://255.255.0.0:%s" % port,
-            "tcp://255.255.255.0:%s" % port,
-            "tcp://255.255.255.255:%s" % port,
+            # "tcp://255.0.0.0:%s" % port,
+            # "tcp://255.255.0.0:%s" % port,
+            # "tcp://255.255.255.0:%s" % port,
+            # "tcp://255.255.255.255:%s" % port,
             "tcp://\n:%s" % port,
 
     ]
@@ -263,9 +263,7 @@ def gen_invalid_index_types():
 
 def gen_invalid_nlists():
     nlists = [
-            0,
             -1,
-            1000000000000001,
             # None,
             [1,2,3],
             (1,2),
@@ -439,7 +437,7 @@ def gen_invalid_index_params():
 
 def gen_index_params():
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]
+    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]
     nlists = [1, 16384, 50000]
 
     def gen_params(index_types, nlists):
@@ -452,7 +450,7 @@ def gen_index_params():
 
 def gen_simple_index_params():
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]
+    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]
     nlists = [1024]
 
     def gen_params(index_types, nlists):

@@ -15,7 +15,7 @@ table_id = "test_add"
 ADD_TIMEOUT = 60
 nprobe = 1
 epsilon = 0.0001
-
+tag = "1970-01-01"
 
 class TestAddBase:
     """
@@ -31,6 +31,8 @@ class TestAddBase:
         if "internal" not in args:
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_add_vector_create_table(self, connect, table):
@@ -186,6 +188,7 @@ class TestAddBase:
         expected: status ok
         '''
         index_param = get_simple_index_params
+        logging.getLogger().info(index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         status = connect.create_index(table, index_param)
@@ -438,6 +441,80 @@ class TestAddBase:
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         assert len(ids) == nq
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_add_vectors_tag(self, connect, table):
+        '''
+        target: test add vectors in table created before
+        method: create table and add vectors in it, with the partition_tag param
+        expected: the table row count equals to nq
+        '''
+        nq = 5
+        partition_name = gen_unique_str()
+        vectors = gen_vectors(nq, dim)
+        status = connect.create_partition(table, partition_name, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        assert status.OK()
+        assert len(ids) == nq
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_add_vectors_tag_A(self, connect, table):
+        '''
+        target: test add vectors in table created before
+        method: create partition and add vectors in it
+        expected: the table row count equals to nq
+        '''
+        nq = 5
+        partition_name = gen_unique_str()
+        vectors = gen_vectors(nq, dim)
+        status = connect.create_partition(table, partition_name, tag)
+        status, ids = connect.add_vectors(partition_name, vectors)
+        assert status.OK()
+        assert len(ids) == nq
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_add_vectors_tag_not_existed(self, connect, table):
+        '''
+        target: test add vectors in table created before
+        method: create table and add vectors in it, with the not existed partition_tag param
+        expected: status not ok
+        '''
+        nq = 5
+        vectors = gen_vectors(nq, dim)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        assert not status.OK()
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_add_vectors_tag_not_existed_A(self, connect, table):
+        '''
+        target: test add vectors in table created before
+        method: create partition, add vectors with the not existed partition_tag param
+        expected: status not ok
+        '''
+        nq = 5
+        vectors = gen_vectors(nq, dim)
+        new_tag = "new_tag"
+        partition_name = gen_unique_str()
+        status = connect.create_partition(table, partition_name, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=new_tag)
+        assert not status.OK()
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_add_vectors_tag_existed(self, connect, table):
+        '''
+        target: test add vectors in table created before
+        method: create table and add vectors in it repeatly, with the partition_tag param
+        expected: the table row count equals to nq
+        '''
+        nq = 5
+        partition_name = gen_unique_str()
+        vectors = gen_vectors(nq, dim)
+        status = connect.create_partition(table, partition_name, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        for i in range(5):
+            status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+            assert status.OK()
+            assert len(ids) == nq
 
     @pytest.mark.level(2)
     def test_add_vectors_without_connect(self, dis_connect, table):
@@ -764,8 +841,13 @@ class TestAddIP:
         index_param = get_simple_index_params
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status = connect.create_index(ip_table, index_param)
+        status, mode = connect._cmd("mode")
         assert status.OK()
+        status = connect.create_index(ip_table, index_param)
+        if str(mode) == "GPU" and (index_param["index_type"] == IndexType.IVF_PQ):
+            assert not status.OK()
+        else:
+            assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_add_vector_create_index_another(self, connect, ip_table, get_simple_index_params):
@@ -793,6 +875,8 @@ class TestAddIP:
         expected: status ok
         '''
         index_param = get_simple_index_params
+        if index_param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         time.sleep(1)
@@ -1198,7 +1282,8 @@ class TestAddAdvance:
         assert len(ids) == nb
         assert status.OK()
 
-class TestAddTableNameInvalid(object):
+
+class TestNameInvalid(object):
     """
     Test adding vectors with invalid table names
     """
@@ -1209,11 +1294,26 @@ class TestAddTableNameInvalid(object):
     def get_table_name(self, request):
         yield request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_table_names()
+    )
+    def get_tag_name(self, request):
+        yield request.param
+
     @pytest.mark.level(2)
-    def test_add_vectors_with_invalid_tablename(self, connect, get_table_name):
+    def test_add_vectors_with_invalid_table_name(self, connect, get_table_name):
         table_name = get_table_name
         vectors = gen_vectors(1, dim)
         status, result = connect.add_vectors(table_name, vectors)
+        assert not status.OK()
+
+    @pytest.mark.level(2)
+    def test_add_vectors_with_invalid_tag_name(self, connect, get_table_name, get_tag_name):
+        table_name = get_table_name
+        tag_name = get_tag_name
+        vectors = gen_vectors(1, dim)
+        status, result = connect.add_vectors(table_name, vectors, partition_tag=tag_name)
         assert not status.OK()
 
 

@@ -15,16 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/IndexFailedChecker.h"
+#include "db/OngoingFileChecker.h"
 #include "db/Options.h"
-#include "db/meta/SqliteMetaImpl.h"
-#include "db/engine/EngineFactory.h"
 #include "db/Utils.h"
-#include "utils/Status.h"
+#include "db/engine/EngineFactory.h"
+#include "db/meta/SqliteMetaImpl.h"
 #include "utils/Exception.h"
+#include "utils/Status.h"
 
 #include <gtest/gtest.h>
-#include <thread>
 #include <boost/filesystem.hpp>
+#include <thread>
 #include <vector>
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
@@ -40,7 +42,7 @@ TEST(DBMiscTest, EXCEPTION_TEST) {
 TEST(DBMiscTest, OPTIONS_TEST) {
     try {
         milvus::engine::ArchiveConf archive("$$##");
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         ASSERT_TRUE(true);
     }
 
@@ -61,10 +63,7 @@ TEST(DBMiscTest, OPTIONS_TEST) {
 
     {
         milvus::engine::ArchiveConf archive("delete");
-        milvus::engine::ArchiveConf::CriteriaT criterial = {
-            {"disk", 1024},
-            {"days", 100}
-        };
+        milvus::engine::ArchiveConf::CriteriaT criterial = {{"disk", 1024}, {"days", 100}};
         archive.SetCriterias(criterial);
 
         auto crit = archive.GetCriterias();
@@ -95,17 +94,17 @@ TEST(DBMiscTest, UTILS_TEST) {
     auto status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
-    for (auto &path : options.slave_paths_) {
+    for (auto& path : options.slave_paths_) {
         ASSERT_TRUE(boost::filesystem::exists(path));
     }
 
-//    options.slave_paths.push_back("/");
-//    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
-//    ASSERT_FALSE(status.ok());
-//
-//    options.path = "/";
-//    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
-//    ASSERT_FALSE(status.ok());
+    //    options.slave_paths.push_back("/");
+    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    ASSERT_FALSE(status.ok());
+    //
+    //    options.path = "/";
+    //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    //    ASSERT_FALSE(status.ok());
 
     milvus::engine::meta::TableFileSchema file;
     file.id_ = 50;
@@ -121,4 +120,62 @@ TEST(DBMiscTest, UTILS_TEST) {
 
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());
+}
+
+TEST(DBMiscTest, CHECKER_TEST) {
+    {
+        milvus::engine::IndexFailedChecker checker;
+        milvus::engine::meta::TableFileSchema schema;
+        schema.table_id_ = "aaa";
+        schema.file_id_ = "5000";
+        checker.MarkFailedIndexFile(schema);
+        schema.table_id_ = "bbb";
+        schema.file_id_ = "5001";
+        checker.MarkFailedIndexFile(schema);
+
+        std::vector<std::string> failed_files;
+        checker.GetFailedIndexFileOfTable("aaa", failed_files);
+        ASSERT_EQ(failed_files.size(), 1UL);
+
+        schema.table_id_ = "bbb";
+        schema.file_id_ = "5002";
+        checker.MarkFailedIndexFile(schema);
+        checker.MarkFailedIndexFile(schema);
+
+        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        checker.IgnoreFailedIndexFiles(table_files);
+        ASSERT_TRUE(table_files.empty());
+
+        checker.GetFailedIndexFileOfTable("bbb", failed_files);
+        ASSERT_EQ(failed_files.size(), 2UL);
+
+        checker.MarkSucceedIndexFile(schema);
+        checker.GetFailedIndexFileOfTable("bbb", failed_files);
+        ASSERT_EQ(failed_files.size(), 1UL);
+    }
+
+    {
+        milvus::engine::OngoingFileChecker checker;
+        milvus::engine::meta::TableFileSchema schema;
+        schema.table_id_ = "aaa";
+        schema.file_id_ = "5000";
+        checker.MarkOngoingFile(schema);
+
+        ASSERT_TRUE(checker.IsIgnored(schema));
+
+        schema.table_id_ = "bbb";
+        schema.file_id_ = "5001";
+        milvus::engine::meta::TableFilesSchema table_files = {schema};
+        checker.MarkOngoingFiles(table_files);
+
+        ASSERT_TRUE(checker.IsIgnored(schema));
+
+        checker.UnmarkOngoingFile(schema);
+        ASSERT_FALSE(checker.IsIgnored(schema));
+
+        schema.table_id_ = "aaa";
+        schema.file_id_ = "5000";
+        checker.UnmarkOngoingFile(schema);
+        ASSERT_FALSE(checker.IsIgnored(schema));
+    }
 }

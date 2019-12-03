@@ -16,17 +16,15 @@
 # specific language governing permissions and limitations
 # under the License.
 #-------------------------------------------------------------------------------
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 
-foreach(dir ${INDEX_INCLUDE_DIRS})
+foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
-endforeach()
+endforeach ()
 
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
+include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
@@ -60,15 +58,21 @@ set(scheduler_files
         ${scheduler_optimizer_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/easyloggingpp external_easyloggingpp_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/external/nlohmann external_nlohmann_files)
-set(external_files
-        ${external_easyloggingpp_files}
-        ${external_nlohmann_files}
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+set(thirdparty_files
+        ${thirdparty_easyloggingpp_files}
+        ${thirdparty_nlohmann_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+set(grpc_server_files
+        ${grpc_request_files}
+        ${grpc_impl_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
@@ -82,7 +86,7 @@ set(helper_files
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
         ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
-        ${MILVUS_ENGINE_SRC}/external/easyloggingpp/easylogging++.cc
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 
 set(common_files
@@ -93,7 +97,7 @@ set(common_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
-        ${external_files}
+        ${thirdparty_files}
         ${scheduler_files}
         ${wrapper_files}
         ${helper_files}
@@ -112,15 +116,32 @@ set(unittest_libs
         pthread
         metrics
         gfortran
-        prometheus-cpp-pull
-        prometheus-cpp-push
-        prometheus-cpp-core
-        dl
-        z
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-        cudart
-        cublas
         )
+if (MILVUS_WITH_PROMETHEUS)
+    set(unittest_libs ${unittest_libs}
+            prometheus-cpp-push
+            prometheus-cpp-pull
+            prometheus-cpp-core
+            )
+endif ()
+set(unittest_libs ${unittest_libs}
+    dl
+    z
+    )
+
+if (MILVUS_GPU_VERSION)
+    include_directories("${CUDA_INCLUDE_DIRS}")
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(unittest_libs ${unittest_libs}
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
+            )
+    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
+    set(common_files ${common_files}
+            ${wrapper_gpu_files}
+            )
+endif ()
 
 add_subdirectory(db)
 add_subdirectory(wrapper)

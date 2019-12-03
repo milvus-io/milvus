@@ -18,7 +18,6 @@
 #pragma once
 
 #include "NSG.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
@@ -26,6 +25,7 @@ namespace algo {
 
 extern void
 write_index(NsgIndex* index, MemoryIOWriter& writer);
+
 extern NsgIndex*
 read_index(MemoryIOReader& reader);
 

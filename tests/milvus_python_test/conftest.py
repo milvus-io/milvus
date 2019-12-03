@@ -42,16 +42,22 @@ def connect(request):
     port = request.config.getoption("--port")
     milvus = Milvus()
     try:
-        milvus.connect(host=ip, port=port)
-    except:
+        status = milvus.connect(host=ip, port=port)
+        logging.getLogger().info(status)
+        if not status.OK():
+            # try again
+            logging.getLogger().info("------------------------------------")
+            logging.getLogger().info("Try to connect again")
+            logging.getLogger().info("------------------------------------")
+            res = milvus.connect(host=ip, port=port)
+    except Exception as e:
+        logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")
-
     def fin():
         try:
             milvus.disconnect()
         except:
             pass
-
     request.addfinalizer(fin)
     return milvus
 
