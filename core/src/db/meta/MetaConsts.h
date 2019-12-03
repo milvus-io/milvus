@@ -27,10 +27,10 @@ const size_t US_PS = 1000 * MS_PS;
 const size_t NS_PS = 1000 * US_PS;
 
 const size_t SECOND = 1UL;
-const size_t M_SEC = 60 * SECOND;
-const size_t H_SEC = 60 * M_SEC;
-const size_t D_SEC = 24 * H_SEC;
-const size_t W_SEC = 7 * D_SEC;
+const size_t MINUTE = 60 * SECOND;
+const size_t HOUR = 60 * MINUTE;
+const size_t DAY = 24 * HOUR;
+const size_t WEEK = 7 * DAY;
 
 // This value is to ignore small raw files when building index.
 // The reason is:
