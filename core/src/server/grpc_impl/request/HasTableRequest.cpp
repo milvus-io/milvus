@@ -40,7 +40,7 @@ Status
 HasTableRequest::OnExecute() {
     try {
         std::string hdr = "HasTableRequest(table=" + table_name_ + ")";
-        TimeRecorder rc(hdr);
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -53,8 +53,6 @@ HasTableRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

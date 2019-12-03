@@ -52,7 +52,7 @@ constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
 constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
 constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
 
-static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milsvus server is shutdown!");
+static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 
 void
 TraverseFiles(const meta::DatePartionedTableFilesSchema& date_files, meta::TableFilesSchema& files_array) {
@@ -800,7 +800,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     {
         uint64_t ttl = 10 * meta::SECOND;  // default: file will be hard-deleted few seconds after soft-deleted
         if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-            ttl = meta::H_SEC;
+            ttl = meta::HOUR;
         }
 
         meta_ptr_->CleanUpFilesWithTTL(ttl, &ongoing_files_checker_);
