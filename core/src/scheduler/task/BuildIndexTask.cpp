@@ -19,6 +19,7 @@
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -129,24 +130,15 @@ XBuildIndexTask::Execute() {
         try {
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
-                table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
-                status = meta_ptr->UpdateTableFile(table_file);
-                ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_
-                                 << " to to_delete";
-
-                build_index_job->BuildIndexDone(to_index_id_);
-                to_index_engine_ = nullptr;
-                return;
+                throw Exception(DB_ERROR, "index NULL");
             }
         } catch (std::exception& ex) {
-            std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
+            std::string msg = "Build index exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
             table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
-            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-            ENGINE_LOG_ERROR << "Failed to build index, index file is too large or gpu memory is not enough";
+            ENGINE_LOG_DEBUG << "Build index fail, mark file: " << table_file.file_id_ << " to to_delete";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
