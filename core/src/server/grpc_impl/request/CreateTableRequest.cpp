@@ -45,7 +45,7 @@ Status
 CreateTableRequest::OnExecute() {
     std::string hdr = "CreateTableRequest(table=" + schema_->table_name() +
                       ", dimension=" + std::to_string(schema_->dimension()) + ")";
-    TimeRecorder rc(hdr);
+    TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
@@ -88,8 +88,6 @@ CreateTableRequest::OnExecute() {
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    rc.ElapseFromBegin("totally cost");
 
     return Status::OK();
 }
