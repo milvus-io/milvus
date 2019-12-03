@@ -77,7 +77,7 @@ $ ./stop_server.sh
 
 ## Compile Milvus on Docker
 
-With this dockerfile, you should be able to compile Milvus on any Linux platform that run Docker. To build a GPU supported Milvus, you neeed to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
+With the following Docker images, you should be able to compile Milvus on any Linux platform that run Docker. To build a GPU supported Milvus, you neeed to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
 
 ### Step 1 Pull Milvus Docker images
 
