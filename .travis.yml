@@ -17,4 +17,4 @@ install:
   - source $TRAVIS_BUILD_DIR/ci/travis/install_dependency.sh
 
 script:
-  - $TRAVIS_BUILD_DIR/ci/travis/travis_build.sh
+  - sudo $TRAVIS_BUILD_DIR/ci/travis/travis_build.sh
