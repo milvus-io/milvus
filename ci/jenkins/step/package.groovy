@@ -1,7 +1,7 @@
 timeout(time: 5, unit: 'MINUTES') {
     // dir ("ci/jenkins/scripts") {
     //     sh "pip3 install -r requirements.txt"
-    //     sh "./yaml_processor.py merge -f ${env.MILVUS_INSTALL_PREFIX}/conf/server_config.yaml -m ../yaml/update_server_config.yaml -i && rm ${env.MILVUS_ROOT_PATH}/conf/server_config.yaml.bak"
+    //     sh "./yaml_processor.py merge -f ${env.MILVUS_INSTALL_PREFIX}/conf/server_config.yaml -m ../yaml/update_server_config.yaml -i && rm ${env.MILVUS_INSTALL_PREFIX}/conf/server_config.yaml.bak"
     // }
 
     sh "rm -rf ${env.MILVUS_INSTALL_PREFIX}/unittest"
