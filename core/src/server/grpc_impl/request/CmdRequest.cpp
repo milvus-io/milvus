@@ -38,7 +38,7 @@ CmdRequest::Create(const std::string& cmd, std::string& result) {
 Status
 CmdRequest::OnExecute() {
     std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
-    TimeRecorder rc(hdr);
+    TimeRecorderAuto rc(hdr);
 
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
