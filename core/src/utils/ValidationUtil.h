@@ -21,6 +21,7 @@
 #include "utils/Status.h"
 
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -55,10 +56,18 @@ class ValidationUtil {
     ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
 
     static Status
-    ValidateGpuIndex(uint32_t gpu_index);
+    ValidatePartitionName(const std::string& partition_name);
 
     static Status
-    GetGpuMemory(uint32_t gpu_index, size_t& memory);
+    ValidatePartitionTags(const std::vector<std::string>& partition_tags);
+
+    static Status
+    ValidateGpuIndex(int32_t gpu_index);
+
+#ifdef MILVUS_GPU_VERSION
+    static Status
+    GetGpuMemory(int32_t gpu_index, size_t& memory);
+#endif
 
     static Status
     ValidateIpAddress(const std::string& ip_address);

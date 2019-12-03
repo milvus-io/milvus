@@ -1,2 +1,2 @@
 db_config:
-  primary_path: /opt/milvus
+  primary_path: /var/lib/milvus

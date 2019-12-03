@@ -32,6 +32,13 @@ UriCheck(const std::string& uri) {
     return (index != std::string::npos);
 }
 
+void
+CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
+    auto vector_data = target->mutable_vector_data();
+    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
+    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
+}
+
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -138,8 +145,8 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
 }
 
 Status
-ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
-                    std::vector<int64_t>& id_array) {
+ClientProxy::Insert(const std::string& table_name, const std::string& partition_tag,
+                    const std::vector<RowRecord>& record_array, std::vector<int64_t>& id_array) {
     Status status = Status::OK();
     try {
 ////////////////////////////////////////////////////////////////////////////
@@ -185,17 +192,20 @@ ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>&
 #else
         ::milvus::grpc::InsertParam insert_param;
         insert_param.set_table_name(table_name);
+        insert_param.set_partition_tag(partition_tag);
 
         for (auto& record : record_array) {
             ::milvus::grpc::RowRecord* grpc_record = insert_param.add_row_record_array();
-            grpc_record->add_vector_data(record.data.begin(), record.data.end());
+            CopyRowRecord(grpc_record, record);
         }
 
         // Single thread
         ::milvus::grpc::VectorIds vector_ids;
         if (!id_array.empty()) {
             /* set user's ids */
-            insert_param.add_row_id_array(id_array.begin(), id_array.end());
+            auto row_ids = insert_param.mutable_row_id_array();
+            row_ids->Resize(static_cast<int>(id_array.size()), -1);
+            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
             client_ptr_->Insert(vector_ids, insert_param, status);
         } else {
             client_ptr_->Insert(vector_ids, insert_param, status);
@@ -211,18 +221,21 @@ ClientProxy::Insert(const std::string& table_name, const std::vector<RowRecord>&
 }
 
 Status
-ClientProxy::Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
-                    const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
-                    TopKQueryResult& topk_query_result) {
+ClientProxy::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
+                    const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
+                    int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
     try {
         // step 1: convert vectors data
         ::milvus::grpc::SearchParam search_param;
         search_param.set_table_name(table_name);
         search_param.set_topk(topk);
         search_param.set_nprobe(nprobe);
+        for (auto& tag : partition_tags) {
+            search_param.add_partition_tag_array(tag);
+        }
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
-            row_record->add_vector_data(record.data.begin(), record.data.end());
+            CopyRowRecord(row_record, record);
         }
 
         // step 2: convert range array
@@ -237,12 +250,17 @@ ClientProxy::Search(const std::string& table_name, const std::vector<RowRecord>&
         Status status = client_ptr_->Search(result, search_param);
 
         // step 4: convert result array
-        topk_query_result.row_num = result.row_num();
-        topk_query_result.ids.resize(result.ids().size());
-        memcpy(topk_query_result.ids.data(), result.ids().data(), result.ids().size() * sizeof(int64_t));
-        topk_query_result.distances.resize(result.distances().size());
-        memcpy(topk_query_result.distances.data(), result.distances().data(),
-               result.distances().size() * sizeof(float));
+        topk_query_result.reserve(result.row_num());
+        int64_t nq = result.row_num();
+        int64_t topk = result.ids().size() / nq;
+        for (int64_t i = 0; i < result.row_num(); i++) {
+            milvus::QueryResult one_result;
+            one_result.ids.resize(topk);
+            one_result.distances.resize(topk);
+            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
+            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
+            topk_query_result.emplace_back(one_result);
+        }
 
         return status;
     } catch (std::exception& ex) {
@@ -339,13 +357,13 @@ ClientProxy::DumpTaskTables() const {
 }
 
 Status
-ClientProxy::DeleteByRange(milvus::Range& range, const std::string& table_name) {
+ClientProxy::DeleteByDate(const std::string& table_name, const milvus::Range& range) {
     try {
-        ::milvus::grpc::DeleteByRangeParam delete_by_range_param;
+        ::milvus::grpc::DeleteByDateParam delete_by_range_param;
         delete_by_range_param.set_table_name(table_name);
         delete_by_range_param.mutable_range()->set_start_value(range.start_value);
         delete_by_range_param.mutable_range()->set_end_value(range.end_value);
-        return client_ptr_->DeleteByRange(delete_by_range_param);
+        return client_ptr_->DeleteByDate(delete_by_range_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to delete by range: " + std::string(ex.what()));
     }
@@ -388,6 +406,53 @@ ClientProxy::DropIndex(const std::string& table_name) const {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to drop index: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::CreatePartition(const PartitionParam& partition_param) {
+    try {
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_table_name(partition_param.table_name);
+        grpc_partition_param.set_partition_name(partition_param.partition_name);
+        grpc_partition_param.set_tag(partition_param.partition_tag);
+        Status status = client_ptr_->CreatePartition(grpc_partition_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "fail to create partition: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::ShowPartitions(const std::string& table_name, PartitionList& partition_array) const {
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        ::milvus::grpc::PartitionList grpc_partition_list;
+        Status status = client_ptr_->ShowPartitions(grpc_table_name, grpc_partition_list);
+        partition_array.resize(grpc_partition_list.partition_array_size());
+        for (uint64_t i = 0; i < grpc_partition_list.partition_array_size(); ++i) {
+            partition_array[i].table_name = grpc_partition_list.partition_array(i).table_name();
+            partition_array[i].partition_name = grpc_partition_list.partition_array(i).partition_name();
+            partition_array[i].partition_tag = grpc_partition_list.partition_array(i).tag();
+        }
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "fail to show partitions: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::DropPartition(const PartitionParam& partition_param) {
+    try {
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_table_name(partition_param.table_name);
+        grpc_partition_param.set_partition_name(partition_param.partition_name);
+        grpc_partition_param.set_tag(partition_param.partition_tag);
+        Status status = client_ptr_->DropPartition(grpc_partition_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "fail to drop partition: " + std::string(ex.what()));
     }
 }
 

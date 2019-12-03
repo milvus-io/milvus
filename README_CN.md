@@ -4,8 +4,10 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.2-orange)
+![Release](https://img.shields.io/badge/release-v0.5.3-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release_date-October-yellowgreen)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+
 
 # 欢迎来到 Milvus
 
@@ -15,9 +17,9 @@ Milvus 是一款开源的、针对海量特征向量的相似性搜索引擎。�
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/zh-CN/aboutmilvus/overview/)。
 
-Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及 C++ 的 API 接口。
+Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及[C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) 的 API 接口。
 
-通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.2/) 获取最新版本的功能和更新。
+通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.3/) 获取最新版本的功能和更新。
 
 ## 开始使用 Milvus
 
@@ -57,12 +59,17 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 
 - [akihoni](https://github.com/akihoni) 提供了中文版 README，并发现了 README 中的无效链接。
 - [goodhamgupta](https://github.com/goodhamgupta) 发现并修正了在线训练营文档中的文件名拼写错误。
+- [erdustiggen](https://github.com/erdustiggen) 将错误信息里的 std::cout 修改为 LOG，修正了一个 Clang 格式问题和一些语法错误。
 
 ## 相关链接
 
 - [Milvus.io](https://www.milvus.io)
 
 - [Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
+
+- [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs)
+
+- [Milvus 常见问题](https://www.milvus.io/docs/zh-CN/faq/operational_faq/)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
@@ -75,4 +82,3 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 ## 许可协议
 
 [Apache 许可协议2.0版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
-

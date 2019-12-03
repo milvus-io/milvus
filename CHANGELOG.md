@@ -1,6 +1,94 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
+# Milvus 0.6.0 (TODO)
+
+## Bug
+- \#228 - memory usage increased slowly during searching vectors
+- \#246 - Exclude src/external folder from code coverage for jenkin ci
+- \#248 - Reside src/external in thirdparty
+- \#316 - Some files not merged after vectors added
+- \#327 - Search does not use GPU when index type is FLAT
+- \#331 - Add exception handle when search fail
+- \#340 - Test cases run failed on 0.6.0
+- \#353 - Rename config.h.in to version.h.in
+- \#374 - sdk_simple return empty result
+- \#377 - Create partition success if tag name only contains spaces
+- \#397 - sdk_simple return incorrect result
+- \#399 - Create partition should be failed if partition tag existed
+- \#412 - Message returned is confused when partition created with null partition name
+- \#416 - Drop the same partition success repeatally
+- \#440 - Query API in customization still uses old version
+- \#440 - Server cannot startup with gpu_resource_config.enable=false in GPU version
+- \#458 - Index data is not compatible between 0.5 and 0.6
+- \#465 - Server hang caused by searching with nsg index
+- \#485 - Increase code coverage rate
+- \#486 - gpu no usage during index building
+- \#497 - CPU-version search performance decreased
+- \#504 - The code coverage rate of core/src/scheduler/optimizer is too low
+- \#509 - IVF_PQ index build trapped into dead loop caused by invalid params
+- \#513 - Unittest DELETE_BY_RANGE sometimes failed
+- \#523 - Erase file data from cache once the file is marked as deleted
+- \#527 - faiss benchmark not compatible with faiss 1.6.0
+- \#530 - BuildIndex stop when do build index and search simultaneously
+- \#532 - assigin value to `table_name` from confest shell
+- \#533 - NSG build failed with MetricType Inner Product
+- \#543 - client raise exception in shards when search results is empty
+- \#545 - Avoid dead circle of build index thread when error occurs
+- \#547 - NSG build failed using GPU-edition if set gpu_enable false
+- \#548 - NSG search accuracy is too low
+- \#552 - Server down during building index_type: IVF_PQ using GPU-edition
+- \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
+- \#579 - Build index hang in GPU version when gpu_resources disabled
+- \#596 - Frequently insert operation cost too much disk space
+- \#599 - Build index log is incorrect
+- \#602 - Optimizer specify wrong gpu_id
+- \#606 - No log generated during building index with CPU
+- \#616 - IP search metric_type is not supported by IVF_PQ index
+- \#631 - FAISS isn't compiled with O3 option
+- \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
+- \#649 - Typo "partiton" should be "partition"
+- \#654 - Random crash when frequently insert vector one by one
+- \#658 - Milvus error out when building SQ8H index without GPU resources
+
+## Feature
+- \#12 - Pure CPU version for Milvus
+- \#77 - Support table partition
+- \#127 - Support new Index type IVFPQ
+- \#226 - Experimental shards middleware for Milvus
+- \#227 - Support new index types SPTAG-KDT and SPTAG-BKT
+- \#346 - Support build index with multiple gpu
+- \#420 - Update shards merge part to match v0.5.3
+- \#488 - Add log in scheduler/optimizer
+- \#502 - C++ SDK support IVFPQ and SPTAG
+- \#560 - Add version in server config file
+- \#605 - Print more messages when server start
+- \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
+
+## Improvement
+- \#255 - Add ivfsq8 test report detailed version
+- \#260 - C++ SDK README
+- \#266 - Rpc request source code refactor
+- \#274 - Logger the time cost during preloading data
+- \#275 - Rename C++ SDK IndexType
+- \#284 - Change C++ SDK to shared library
+- \#306 - Use int64 for all config integer
+- \#310 - Add Q&A for 'protocol https not supported or disable in libcurl' issue
+- \#314 - add Find FAISS in CMake
+- \#322 - Add option to enable / disable prometheus
+- \#354 - Build migration scripts into milvus docker image
+- \#358 - Add more information in build.sh and install.md
+- \#404 - Add virtual method Init() in Pass abstract class
+- \#409 - Add a Fallback pass in optimizer
+- \#433 - C++ SDK query result is not easy to use
+- \#449 - Add ShowPartitions example for C++ SDK
+- \#470 - Small raw files should not be build index
+- \#584 - Intergrate internal FAISS
+- \#611 - Remove MILVUS_CPU_VERSION
+- \#634 - FAISS GPU version is compiled with O0
+
+## Task
+
 # Milvus 0.5.3 (2019-11-13)
 
 ## Bug
@@ -87,7 +175,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-658 - Fix SQ8 Hybrid can't search
 - MS-665 - IVF_SQ8H search crash when no GPU resource in search_resources
 - \#9 - Change default gpu_cache_capacity to 4
-- \#20 - C++ sdk example get grpc error 
+- \#20 - C++ sdk example get grpc error
 - \#23 - Add unittest to improve code coverage
 - \#31 - make clang-format failed after run build.sh -l
 - \#39 - Create SQ8H index hang if using github server version
@@ -139,7 +227,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-635 - Add compile option to support customized faiss
 - MS-660 - add ubuntu_build_deps.sh
 - \#18 - Add all test cases
-	
+
 # Milvus 0.4.0 (2019-09-12)
 
 ## Bug
@@ -348,11 +436,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-82 - Update server startup welcome message
 - MS-83 - Update vecwise to Milvus
 - MS-77 - Performance issue of post-search action
-- MS-22 - Enhancement for MemVector size control 
+- MS-22 - Enhancement for MemVector size control
 - MS-92 - Unify behavior of debug and release build
 - MS-98 - Install all unit test to installation directory
 - MS-115 - Change is_startup of metric_config switch from true to on
-- MS-122 - Archive criteria config 
+- MS-122 - Archive criteria config
 - MS-124 - HasTable interface
 - MS-126 - Add more error code
 - MS-128 - Change default db path

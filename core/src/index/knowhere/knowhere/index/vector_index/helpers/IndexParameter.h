@@ -42,6 +42,32 @@ constexpr int64_t DEFAULT_OUT_DEGREE = INVALID_VALUE;
 constexpr int64_t DEFAULT_CANDIDATE_SISE = INVALID_VALUE;
 constexpr int64_t DEFAULT_NNG_K = INVALID_VALUE;
 
+// SPTAG Config
+constexpr int64_t DEFAULT_SAMPLES = INVALID_VALUE;
+constexpr int64_t DEFAULT_TPTNUMBER = INVALID_VALUE;
+constexpr int64_t DEFAULT_TPTLEAFSIZE = INVALID_VALUE;
+constexpr int64_t DEFAULT_NUMTOPDIMENSIONTPTSPLIT = INVALID_VALUE;
+constexpr int64_t DEFAULT_NEIGHBORHOODSIZE = INVALID_VALUE;
+constexpr int64_t DEFAULT_GRAPHNEIGHBORHOODSCALE = INVALID_VALUE;
+constexpr int64_t DEFAULT_GRAPHCEFSCALE = INVALID_VALUE;
+constexpr int64_t DEFAULT_REFINEITERATIONS = INVALID_VALUE;
+constexpr int64_t DEFAULT_CEF = INVALID_VALUE;
+constexpr int64_t DEFAULT_MAXCHECKFORREFINEGRAPH = INVALID_VALUE;
+constexpr int64_t DEFAULT_NUMOFTHREADS = INVALID_VALUE;
+constexpr int64_t DEFAULT_MAXCHECK = INVALID_VALUE;
+constexpr int64_t DEFAULT_THRESHOLDOFNUMBEROFCONTINUOUSNOBETTERPROPAGATION = INVALID_VALUE;
+constexpr int64_t DEFAULT_NUMBEROFINITIALDYNAMICPIVOTS = INVALID_VALUE;
+constexpr int64_t DEFAULT_NUMBEROFOTHERDYNAMICPIVOTS = INVALID_VALUE;
+
+// KDT Config
+constexpr int64_t DEFAULT_KDTNUMBER = INVALID_VALUE;
+constexpr int64_t DEFAULT_NUMTOPDIMENSIONKDTSPLIT = INVALID_VALUE;
+
+// BKT Config
+constexpr int64_t DEFAULT_BKTNUMBER = INVALID_VALUE;
+constexpr int64_t DEFAULT_BKTKMEANSK = INVALID_VALUE;
+constexpr int64_t DEFAULT_BKTLEAFSIZE = INVALID_VALUE;
+
 struct IVFCfg : public Cfg {
     int64_t nlist = DEFAULT_NLIST;
     int64_t nprobe = DEFAULT_NPROBE;
@@ -52,6 +78,9 @@ struct IVFCfg : public Cfg {
     }
 
     IVFCfg() = default;
+
+    std::stringstream
+    DumpImpl() override;
 
     bool
     CheckValid() override {
@@ -68,6 +97,9 @@ struct IVFSQCfg : public IVFCfg {
              const int64_t& nbits, METRICTYPE type)
         : IVFCfg(dim, k, gpu_id, nlist, nprobe, type), nbits(nbits) {
     }
+
+    std::stringstream
+    DumpImpl() override;
 
     IVFSQCfg() = default;
 
@@ -119,6 +151,9 @@ struct NSGCfg : public IVFCfg {
 
     NSGCfg() = default;
 
+    std::stringstream
+    DumpImpl() override;
+
     bool
     CheckValid() override {
         return true;
@@ -126,8 +161,57 @@ struct NSGCfg : public IVFCfg {
 };
 using NSGConfig = std::shared_ptr<NSGCfg>;
 
-struct KDTCfg : public Cfg {
-    int64_t tptnubmber = -1;
+struct SPTAGCfg : public Cfg {
+    int64_t samples = DEFAULT_SAMPLES;
+    int64_t tptnumber = DEFAULT_TPTNUMBER;
+    int64_t tptleafsize = DEFAULT_TPTLEAFSIZE;
+    int64_t numtopdimensiontptsplit = DEFAULT_NUMTOPDIMENSIONTPTSPLIT;
+    int64_t neighborhoodsize = DEFAULT_NEIGHBORHOODSIZE;
+    int64_t graphneighborhoodscale = DEFAULT_GRAPHNEIGHBORHOODSCALE;
+    int64_t graphcefscale = DEFAULT_GRAPHCEFSCALE;
+    int64_t refineiterations = DEFAULT_REFINEITERATIONS;
+    int64_t cef = DEFAULT_CEF;
+    int64_t maxcheckforrefinegraph = DEFAULT_MAXCHECKFORREFINEGRAPH;
+    int64_t numofthreads = DEFAULT_NUMOFTHREADS;
+    int64_t maxcheck = DEFAULT_MAXCHECK;
+    int64_t thresholdofnumberofcontinuousnobetterpropagation = DEFAULT_THRESHOLDOFNUMBEROFCONTINUOUSNOBETTERPROPAGATION;
+    int64_t numberofinitialdynamicpivots = DEFAULT_NUMBEROFINITIALDYNAMICPIVOTS;
+    int64_t numberofotherdynamicpivots = DEFAULT_NUMBEROFOTHERDYNAMICPIVOTS;
+
+    SPTAGCfg() = default;
+
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
+using SPTAGConfig = std::shared_ptr<SPTAGCfg>;
+
+struct KDTCfg : public SPTAGCfg {
+    int64_t kdtnumber = DEFAULT_KDTNUMBER;
+    int64_t numtopdimensionkdtsplit = DEFAULT_NUMTOPDIMENSIONKDTSPLIT;
+
+    KDTCfg() = default;
+
+    bool
+    CheckValid() override {
+        return true;
+    };
+};
+using KDTConfig = std::shared_ptr<KDTCfg>;
+
+struct BKTCfg : public SPTAGCfg {
+    int64_t bktnumber = DEFAULT_BKTNUMBER;
+    int64_t bktkmeansk = DEFAULT_BKTKMEANSK;
+    int64_t bktleafsize = DEFAULT_BKTLEAFSIZE;
+
+    BKTCfg() = default;
+
+    bool
+    CheckValid() override {
+        return true;
+    };
+};
+using BKTConfig = std::shared_ptr<BKTCfg>;
 
 }  // namespace knowhere

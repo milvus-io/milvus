@@ -108,10 +108,6 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
 
     auto task_table_type = load_completed_event->task_table_item_->task->label()->Type();
     switch (task_table_type) {
-        case TaskLabelType::DEFAULT: {
-            Action::DefaultLabelTaskScheduler(res_mgr_, resource, load_completed_event);
-            break;
-        }
         case TaskLabelType::SPECIFIED_RESOURCE: {
             Action::SpecifiedResourceLabelTaskScheduler(res_mgr_, resource, load_completed_event);
             break;

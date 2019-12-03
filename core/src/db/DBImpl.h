@@ -18,13 +18,16 @@
 #pragma once
 
 #include "DB.h"
-#include "Types.h"
-#include "src/db/insert/MemManager.h"
+#include "db/IndexFailedChecker.h"
+#include "db/OngoingFileChecker.h"
+#include "db/Types.h"
+#include "db/insert/MemManager.h"
 #include "utils/ThreadPool.h"
 
 #include <atomic>
 #include <condition_variable>
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -34,8 +37,6 @@
 
 namespace milvus {
 namespace engine {
-
-class Env;
 
 namespace meta {
 class Meta;
@@ -57,7 +58,7 @@ class DBImpl : public DB {
     CreateTable(meta::TableSchema& table_schema) override;
 
     Status
-    DeleteTable(const std::string& table_id, const meta::DatesT& dates) override;
+    DropTable(const std::string& table_id, const meta::DatesT& dates) override;
 
     Status
     DescribeTable(meta::TableSchema& table_schema) override;
@@ -78,7 +79,21 @@ class DBImpl : public DB {
     GetTableRowCount(const std::string& table_id, uint64_t& row_count) override;
 
     Status
-    InsertVectors(const std::string& table_id, uint64_t n, const float* vectors, IDNumbers& vector_ids) override;
+    CreatePartition(const std::string& table_id, const std::string& partition_name,
+                    const std::string& partition_tag) override;
+
+    Status
+    DropPartition(const std::string& partition_name) override;
+
+    Status
+    DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) override;
+
+    Status
+    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) override;
+
+    Status
+    InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,
+                  IDNumbers& vector_ids) override;
 
     Status
     CreateIndex(const std::string& table_id, const TableIndex& index) override;
@@ -90,17 +105,18 @@ class DBImpl : public DB {
     DropIndex(const std::string& table_id) override;
 
     Status
-    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          ResultIds& result_ids, ResultDistances& result_distances) override;
+    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
+          uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
-          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) override;
-
-    Status
-    Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
           uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
           ResultDistances& result_distances) override;
+
+    Status
+    QueryByFileID(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+                  uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+                  ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
@@ -135,7 +151,34 @@ class DBImpl : public DB {
     BackgroundBuildIndex();
 
     Status
-    MemSerialize();
+    SyncMemData(std::set<std::string>& sync_table_ids);
+
+    Status
+    GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,
+                         meta::TableFilesSchema& files);
+
+    Status
+    GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
+                     meta::TableFilesSchema& files);
+
+    Status
+    GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,
+                        std::set<std::string>& partition_name_array);
+
+    Status
+    DropTableRecursively(const std::string& table_id, const meta::DatesT& dates);
+
+    Status
+    UpdateTableIndexRecursively(const std::string& table_id, const TableIndex& index);
+
+    Status
+    BuildTableIndexRecursively(const std::string& table_id, const TableIndex& index);
+
+    Status
+    DropTableIndexRecursively(const std::string& table_id);
+
+    Status
+    GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
  private:
     const DBOptions options_;
@@ -158,6 +201,9 @@ class DBImpl : public DB {
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;
+
+    IndexFailedChecker index_failed_checker_;
+    OngoingFileChecker ongoing_files_checker_;
 };  // DBImpl
 
 }  // namespace engine

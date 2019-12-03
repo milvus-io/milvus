@@ -21,8 +21,10 @@
 #include "knowhere/adapter/Structure.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-
+#endif
 #include "Helper.h"
 #include "unittest/utils.h"
 
@@ -116,6 +118,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
     }
 }
 
+#ifdef MILVUS_GPU_VERSION
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
@@ -136,9 +139,9 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // clone
-        auto clone_index = index_->Clone();
-        auto clone_result = clone_index->Search(query_dataset, conf);
-        AssertAnns(clone_result, nq, k);
+        //        auto clone_index = index_->Clone();
+        //        auto clone_result = clone_index->Search(query_dataset, conf);
+        //        AssertAnns(clone_result, nq, k);
     }
 
     {
@@ -156,9 +159,9 @@ TEST_F(IDMAPTest, copy_test) {
         auto new_result = clone_index->Search(query_dataset, conf);
         AssertAnns(new_result, nq, k);
 
-        auto clone_gpu_idx = clone_index->Clone();
-        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, conf);
-        AssertAnns(clone_gpu_res, nq, k);
+        //        auto clone_gpu_idx = clone_index->Clone();
+        //        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, conf);
+        //        AssertAnns(clone_gpu_res, nq, k);
 
         // gpu to cpu
         auto host_index = knowhere::cloner::CopyGpuToCpu(clone_index, conf);
@@ -175,3 +178,4 @@ TEST_F(IDMAPTest, copy_test) {
         AssertAnns(device_result, nq, k);
     }
 }
+#endif

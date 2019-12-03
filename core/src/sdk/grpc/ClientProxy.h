@@ -54,13 +54,13 @@ class ClientProxy : public Connection {
     CreateIndex(const IndexParam& index_param) override;
 
     Status
-    Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
+    Insert(const std::string& table_name, const std::string& partition_tag, const std::vector<RowRecord>& record_array,
            std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
-           const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
-           TopKQueryResult& topk_query_result) override;
+    Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
+           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
@@ -84,7 +84,7 @@ class ClientProxy : public Connection {
     DumpTaskTables() const override;
 
     Status
-    DeleteByRange(Range& range, const std::string& table_name) override;
+    DeleteByDate(const std::string& table_name, const Range& range) override;
 
     Status
     PreloadTable(const std::string& table_name) const override;
@@ -94,6 +94,15 @@ class ClientProxy : public Connection {
 
     Status
     DropIndex(const std::string& table_name) const override;
+
+    Status
+    CreatePartition(const PartitionParam& partition_param) override;
+
+    Status
+    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const override;
+
+    Status
+    DropPartition(const PartitionParam& partition_param) override;
 
  private:
     std::shared_ptr<::grpc::Channel> channel_;

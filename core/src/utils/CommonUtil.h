@@ -30,7 +30,7 @@ class CommonUtil {
     static bool
     GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem);
     static bool
-    GetSystemAvailableThreads(uint32_t& thread_count);
+    GetSystemAvailableThreads(int64_t& thread_count);
 
     static bool
     IsFileExist(const std::string& path);
@@ -56,6 +56,9 @@ class CommonUtil {
     ConvertTime(time_t time_integer, tm& time_struct);
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
+
+    static void
+    EraseFromCache(const std::string& item_key);
 };
 
 }  // namespace server

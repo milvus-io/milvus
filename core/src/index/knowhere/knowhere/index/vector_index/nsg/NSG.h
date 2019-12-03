@@ -22,17 +22,15 @@
 #include <vector>
 
 #include <boost/dynamic_bitset.hpp>
+
+#include "Distance.h"
 #include "Neighbor.h"
+#include "knowhere/common/Config.h"
 
 namespace knowhere {
 namespace algo {
 
 using node_t = int64_t;
-
-enum class MetricType {
-    METRIC_INNER_PRODUCT = 0,
-    METRIC_L2 = 1,
-};
 
 struct BuildParams {
     size_t search_length;
@@ -50,12 +48,13 @@ class NsgIndex {
  public:
     size_t dimension;
     size_t ntotal;           // totabl nb of indexed vectors
-    MetricType metric_type;  // L2 | IP
+    METRICTYPE metric_type;  // L2 | IP
+    Distance* distance_;
 
     float* ori_data_;
-    int64_t* ids_;  // TODO: support different type
-    Graph nsg;      // final graph
-    Graph knng;     // reset after build
+    int64_t* ids_;
+    Graph nsg;   // final graph
+    Graph knng;  // reset after build
 
     node_t navigation_point;  // offset of node in origin data
 
@@ -69,7 +68,7 @@ class NsgIndex {
     size_t out_degree;
 
  public:
-    explicit NsgIndex(const size_t& dimension, const size_t& n, MetricType metric = MetricType::METRIC_L2);
+    explicit NsgIndex(const size_t& dimension, const size_t& n, METRICTYPE metric = METRICTYPE::L2);
 
     NsgIndex() = default;
 
@@ -135,9 +134,6 @@ class NsgIndex {
 
     void
     FindUnconnectedNode(boost::dynamic_bitset<>& flags, int64_t& root);
-
-    // private:
-    //   void GetKnnGraphFromFile();
 };
 
 }  // namespace algo

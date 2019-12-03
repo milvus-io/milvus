@@ -1,26 +1,49 @@
-include_directories(${INDEX_SOURCE_DIR}/thirdparty)
-include_directories(${INDEX_SOURCE_DIR}/include)
-include_directories(/usr/local/cuda/include)
-link_directories(/usr/local/cuda/lib64)
+if (KNOWHERE_GPU_VERSION)
 
-set(unittest_libs
-        gtest gmock gtest_main gmock_main)
+    include_directories(${INDEX_SOURCE_DIR}/thirdparty)
+    include_directories(${INDEX_SOURCE_DIR}/include)
 
-set(depend_libs
-        faiss openblas lapack
-        arrow ${ARROW_PREFIX}/lib/libjemalloc_pic.a
-        )
+    set(unittest_libs
+            gtest gmock gtest_main gmock_main)
 
-set(basic_libs
-        cudart cublas
-        gomp gfortran pthread
-        )
+    set(depend_libs
+            faiss
+            arrow ${ARROW_LIB_DIR}/libjemalloc_pic.a
+            )
+    if (FAISS_WITH_MKL)
+        set(depend_libs ${depend_libs}
+                "-Wl,--start-group \
+                ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
+                ${MKL_LIB_PATH}/libmkl_gnu_thread.a \
+                ${MKL_LIB_PATH}/libmkl_core.a \
+                -Wl,--end-group -lgomp -lpthread -lm -ldl"
+                )
+    else ()
+        set(depend_libs ${depend_libs}
+                lapack
+                openblas)
+    endif ()
 
+    set(basic_libs
+            gomp gfortran pthread
+            )
 
-#<GPU-TEST>
-if(NOT TARGET test_gpu)
-    add_executable(test_gpu gpuresource_test.cpp)
-endif()
-target_link_libraries(test_gpu ${depend_libs} ${unittest_libs} ${basic_libs})
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            cudart
+            cublas
+            )
+    set(basic_libs ${basic_libs}
+            ${cuda_lib}
+            )
 
-install(TARGETS test_gpu DESTINATION unittest)
+    #<GPU-TEST>
+    if (NOT TARGET test_gpu)
+        add_executable(test_gpu gpuresource_test.cpp)
+    endif ()
+    target_link_libraries(test_gpu ${depend_libs} ${unittest_libs} ${basic_libs})
+
+    install(TARGETS test_gpu DESTINATION unittest)
+
+endif ()

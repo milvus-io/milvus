@@ -16,7 +16,11 @@
 // under the License.
 
 #include "wrapper/KnowhereResource.h"
+#ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#endif
+
+#include "scheduler/Utils.h"
 #include "server/Config.h"
 
 #include <map>
@@ -32,6 +36,17 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
 KnowhereResource::Initialize() {
+#ifdef MILVUS_GPU_VERSION
+    Status s;
+    bool enable_gpu = false;
+    server::Config& config = server::Config::GetInstance();
+    s = config.GetGpuResourceConfigEnable(enable_gpu);
+    if (!s.ok())
+        return s;
+
+    if (not enable_gpu)
+        return Status::OK();
+
     struct GpuResourceSetting {
         int64_t pinned_memory = 300 * M_BYTE;
         int64_t temp_memory = 300 * M_BYTE;
@@ -39,31 +54,24 @@ KnowhereResource::Initialize() {
     };
     using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;
     GpuResourcesArray gpu_resources;
-    Status s;
 
     // get build index gpu resource
-    server::Config& config = server::Config::GetInstance();
-
-    int32_t build_index_gpu;
-    s = config.GetResourceConfigIndexBuildDevice(build_index_gpu);
+    std::vector<int64_t> build_index_gpus;
+    s = config.GetGpuResourceConfigBuildIndexResources(build_index_gpus);
     if (!s.ok())
         return s;
 
-    gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
+    for (auto gpu_id : build_index_gpus) {
+        gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
+    }
 
     // get search gpu resource
-    std::vector<std::string> pool;
-    s = config.GetResourceConfigSearchResources(pool);
+    std::vector<int64_t> search_gpus;
+    s = config.GetGpuResourceConfigSearchResources(search_gpus);
     if (!s.ok())
         return s;
 
-    std::set<uint64_t> gpu_ids;
-    for (auto& resource : pool) {
-        if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
-            // invalid
-            continue;
-        }
-        auto gpu_id = std::stoi(resource.substr(3));
+    for (auto& gpu_id : search_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
     }
 
@@ -73,12 +81,16 @@ KnowhereResource::Initialize() {
                                                                 iter->second.temp_memory, iter->second.resource_num);
     }
 
+#endif
+
     return Status::OK();
 }
 
 Status
 KnowhereResource::Finalize() {
+#ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().Free();  // free gpu resource.
+#endif
     return Status::OK();
 }
 
