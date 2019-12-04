@@ -603,7 +603,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     }
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error";
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
     }
     return status;
 }
