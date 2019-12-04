@@ -1,4 +1,5 @@
 
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)<!-- ALL-CONTRIBUTORS-BADGE:END -->
 ![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
@@ -56,6 +57,18 @@ To connect with other users and contributors, welcome to join our [Slack channel
 ## Contributors
 
 Below is a list of Milvus contributors. We greatly appreciate your contributions!
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tr>
+    <td align="center"><a href="https://github.com/akihoni"><img src="https://avatars0.githubusercontent.com/u/36330442?v=4" width="100px;" alt="Sijie Zhang"/><br /><sub><b>Sijie Zhang</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=akihoni" title="Documentation">📖</a></td>
+  </tr>
+</table>
+
+<!-- markdownlint-enable -->
+<!-- prettier-ignore-end -->
+<!-- ALL-CONTRIBUTORS-LIST:END -->
 
 - [akihoni](https://github.com/akihoni) provided the CN version of README, and found a broken link in the doc.
 - [goodhamgupta](https://github.com/goodhamgupta) fixed a filename typo in the bootcamp doc.
