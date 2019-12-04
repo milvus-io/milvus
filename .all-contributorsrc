@@ -1,0 +1,24 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributors": [
+    {
+      "login": "akihoni",
+      "name": "Sijie Zhang",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/36330442?v=4",
+      "profile": "https://github.com/akihoni",
+      "contributions": [
+        "doc"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "projectName": "milvus",
+  "projectOwner": "milvus-io",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "skipCi": true
+}
