@@ -338,7 +338,13 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
+        std::vector<std::string> file_ids;
+        // sometimes this case run fast to merge file and build index, old file will be deleted immediately,
+        // so the QueryByFileID cannot get files to search
+        // input 100 files ids to avoid random failure of this case
+        for (int i = 0; i < 100; i++) {
+            file_ids.push_back(std::to_string(i));
+        }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
