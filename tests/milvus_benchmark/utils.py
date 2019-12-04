@@ -45,12 +45,18 @@ def modify_config(k, v, type=None, file_path="conf/server_config.yaml", db_slave
     if config_dict:
         if k.find("use_blas_threshold") != -1:
             config_dict['engine_config']['use_blas_threshold'] = int(v)
+        elif k.find("use_gpu_threshold") != -1:
+            config_dict['engine_config']['gpu_search_threshold'] = int(v)
         elif k.find("cpu_cache_capacity") != -1:
             config_dict['cache_config']['cpu_cache_capacity'] = int(v)
+        elif k.find("enable_gpu") != -1:
+            config_dict['gpu_resource_config']['enable'] = v
         elif k.find("gpu_cache_capacity") != -1:
-            config_dict['cache_config']['gpu_cache_capacity'] = int(v)
-        elif k.find("resource_pool") != -1:
-            config_dict['resource_config']['resource_pool'] = v
+            config_dict['gpu_resource_config']['cache_capacity'] = int(v)
+        elif k.find("index_build_device") != -1:
+            config_dict['gpu_resource_config']['build_index_resources'] = v
+        elif k.find("search_resources") != -1:  
+            config_dict['resource_config']['resources'] = v
 
         if db_slave:
             config_dict['db_config']['db_slave_path'] = MULTI_DB_SLAVE_PATH
@@ -123,7 +129,7 @@ def run_server(image, mem_limit=None, timeout=30, test_type="local", volume_name
         volumes=volumes,
         runtime="nvidia",
         ports={'19530/tcp': 19530, '8080/tcp': 8080},
-        environment=["OMP_NUM_THREADS=48"],
+        # environment=["OMP_NUM_THREADS=48"],
         # cpuset_cpus=cpu_limit,
         # mem_limit=mem_limit,
         # environment=[""],
