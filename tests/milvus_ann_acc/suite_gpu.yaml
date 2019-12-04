@@ -1,7 +1,7 @@
 datasets:
   - sift-128-euclidean: 
       index_file_sizes: [1024]
-      index_types: ['ivf_flat', 'ivf_sq8']
+      index_types: ['ivf_flat', 'ivf_sq8', 'ivf_sq8h', 'ivf_pq']
       nlists: [16384]
       search_param:
         nprobes: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
