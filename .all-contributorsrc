@@ -1,0 +1,24 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributors": [
+    {
+      "login": "gaolizhou",
+      "name": "gaolizhou",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/2884044?v=4",
+      "profile": "https://github.com/gaolizhou",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "projectName": "milvus",
+  "projectOwner": "milvus-io",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "skipCi": true
+}
