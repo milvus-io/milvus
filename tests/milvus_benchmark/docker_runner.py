@@ -28,6 +28,9 @@ class DockerRunner(Runner):
                 container = None
                 
                 if op_type == "insert":
+                    if not run_params:
+                        logger.debug("No run params")
+                        continue
                     for index, param in enumerate(run_params):
                         logger.info("Definition param: %s" % str(param))
                         table_name = param["table_name"]
@@ -46,11 +49,13 @@ class DockerRunner(Runner):
                             milvus.delete()
                             time.sleep(10)
                         milvus.create_table(table_name, dimension, index_file_size, metric_type)
+                        # debug
+                        # milvus.create_index("ivf_sq8", 16384)
                         res = self.do_insert(milvus, table_name, data_type, dimension, table_size, param["ni_per"])
                         logger.info(res)
 
                         # wait for file merge
-                        time.sleep(6 * (table_size / 500000))
+                        time.sleep(table_size * dimension / 5000000)
                         # Clear up
                         utils.remove_container(container)
 
@@ -80,9 +85,11 @@ class DockerRunner(Runner):
                             for nlist in nlists:
                                 result = milvus.describe_index()
                                 logger.info(result)
-                                milvus.create_index(index_type, nlist)
+                                # milvus.drop_index()
+                                # milvus.create_index(index_type, nlist)
                                 result = milvus.describe_index()
                                 logger.info(result)
+                                logger.info(milvus.count())
                                 # preload index
                                 milvus.preload_table()
                                 logger.info("Start warm up query")
@@ -92,7 +99,7 @@ class DockerRunner(Runner):
                                 for nprobe in nprobes:
                                     logger.info("index_type: %s, nlist: %s, metric_type: %s, nprobe: %s" % (index_type, nlist, metric_type, nprobe))
                                     res = self.do_query(milvus, table_name, top_ks, nqs, nprobe, run_count)
-                                    headers = ["Nprobe/Top-k"]
+                                    headers = ["Nq/Top-k"]
                                     headers.extend([str(top_k) for top_k in top_ks])
                                     utils.print_table(headers, nqs, res)
                         utils.remove_container(container)
@@ -172,7 +179,18 @@ class DockerRunner(Runner):
                                                 avg_acc = self.compute_accuracy(base_name, id_prefix)
                                                 logger.info("Query: <%s> accuracy: %s" % (id_prefix, avg_acc))
                                         else:
-                                            result_ids = self.do_query_ids(milvus, table_name, top_k, nq, nprobe)
+                                            result_ids, result_distances = self.do_query_ids(milvus, table_name, top_k, nq, nprobe)
+                                            debug_file_ids = "0.5.3_result_ids"
+                                            debug_file_distances = "0.5.3_result_distances"
+                                            with open(debug_file_ids, "w+") as fd:
+                                                total = 0
+                                                for index, item in enumerate(result_ids):
+                                                    true_item = true_ids_all[:nq, :top_k].tolist()[index]
+                                                    tmp = set(item).intersection(set(true_item))
+                                                    total = total + len(tmp)
+                                                    fd.write("query: N-%d, intersection: %d, total: %d\n" % (index, len(tmp), total))
+                                                    fd.write("%s\n" % str(item))
+                                                    fd.write("%s\n" % str(true_item))
                                             acc_value = self.get_recall_value(true_ids_all[:nq, :top_k].tolist(), result_ids)
                                             logger.info("Query: <%s> accuracy: %s" % (id_prefix, acc_value))
                     # # print accuracy table
@@ -195,6 +213,7 @@ class DockerRunner(Runner):
                 for index, param in enumerate(run_params):
                     logger.info("Definition param: %s" % str(param))
                     table_name = param["dataset"]
+                    index_type = param["index_type"]
                     volume_name = param["db_path_prefix"]
                     (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
                     
@@ -223,7 +242,9 @@ class DockerRunner(Runner):
 
                     start_time = time.time()
                     insert_vectors = [[random.random() for _ in range(dimension)] for _ in range(10000)]
+                    i = 0
                     while time.time() < start_time + during_time:
+                        i = i + 1
                         processes = []
                         # do query
                         # for i in range(query_process_num):
@@ -243,7 +264,7 @@ class DockerRunner(Runner):
                         nqs = random.sample([x for x in range(1, 1000)], 3)
                         nprobe = random.choice([x for x in range(1, 500)])
                         res = self.do_query(milvus, table_name, top_ks, nqs, nprobe, run_count)
-                        if int(time.time() - start_time) % 120 == 0:
+                        if i % 10 == 0:
                             status, res = milvus_instance.insert(insert_vectors, ids=[x for x in range(len(insert_vectors))])
                             if not status.OK():
                                 logger.error(status)
@@ -251,9 +272,10 @@ class DockerRunner(Runner):
                             # if not status.OK():
                             #     logger.error(status)
                             # index_type = random.choice(["flat", "ivf_flat", "ivf_sq8"])
+                            milvus_instance.create_index(index_type, 16384)
                             result = milvus.describe_index()
                             logger.info(result)
-                            milvus_instance.create_index("ivf_sq8", 16384)
+                            # milvus_instance.create_index("ivf_sq8", 16384)
                     utils.remove_container(container)
 
         else:
