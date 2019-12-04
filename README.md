@@ -72,9 +72,6 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 <!-- prettier-ignore-end -->
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-- [akihoni](https://github.com/akihoni) provided the CN version of README, and found a broken link in the doc.
-- [goodhamgupta](https://github.com/goodhamgupta) fixed a filename typo in the bootcamp doc.
-- [erdustiggen](https://github.com/erdustiggen) changed from std::cout to LOG for error messages, and fixed a clang format issue as well as some grammatical errors.
 
 ## Resources
 
