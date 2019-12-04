@@ -6,6 +6,16 @@
   "commit": false,
   "contributors": [
     {
+
+      "login": "erdustiggen",
+      "name": "erdustiggen",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/25433850?v=4",
+      "profile": "https://github.com/erdustiggen",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
       "login": "gaolizhou",
       "name": "gaolizhou",
       "avatar_url": "https://avatars2.githubusercontent.com/u/2884044?v=4",
@@ -22,6 +32,7 @@
       "contributions": [
         "doc"
       ]
+
     }
   ],
   "contributorsPerLine": 7,

@@ -1,4 +1,5 @@
 
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)<!-- ALL-CONTRIBUTORS-BADGE:END -->
 ![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
@@ -64,6 +65,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 <!-- markdownlint-disable -->
 <table>
   <tr>
+    <td align="center"><a href="https://github.com/erdustiggen"><img src="https://avatars1.githubusercontent.com/u/25433850?v=4" width="100px;" alt="erdustiggen"/><br /><sub><b>erdustiggen</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=erdustiggen" title="Code">💻</a></td>
     <td align="center"><a href="https://github.com/gaolizhou"><img src="https://avatars2.githubusercontent.com/u/2884044?v=4" width="100px;" alt="gaolizhou"/><br /><sub><b>gaolizhou</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=gaolizhou" title="Code">💻</a></td>
     <td align="center"><a href="https://github.com/akihoni"><img src="https://avatars0.githubusercontent.com/u/36330442?v=4" width="100px;" alt="Sijie Zhang"/><br /><sub><b>Sijie Zhang</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=akihoni" title="Documentation">📖</a></td>
   </tr>
