@@ -50,6 +50,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#649 - Typo "partiton" should be "partition"
 - \#654 - Random crash when frequently insert vector one by one
 - \#658 - Milvus error out when building SQ8H index without GPU resources
+- \#670 - Random failure of unittest db_test::SEARCH_TEST
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
