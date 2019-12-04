@@ -51,6 +51,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#654 - Random crash when frequently insert vector one by one
 - \#658 - Milvus error out when building SQ8H index without GPU resources
 - \#668 - Update badge of README
+- \#670 - Random failure of unittest db_test::SEARCH_TEST
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
