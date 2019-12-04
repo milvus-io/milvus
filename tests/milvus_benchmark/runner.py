@@ -18,14 +18,17 @@ SIFT_VECTORS_PER_FILE = 100000
 MAX_NQ = 10001
 FILE_PREFIX = "binary_"
 
-RANDOM_SRC_BINARY_DATA_DIR = '/tmp/random/binary_data'
-SIFT_SRC_DATA_DIR = '/tmp/sift1b/query'
-SIFT_SRC_BINARY_DATA_DIR = '/tmp/sift1b/binary_data'
-SIFT_SRC_GROUNDTRUTH_DATA_DIR = '/tmp/sift1b/groundtruth'
+# FOLDER_NAME = 'ann_1000m/source_data'
+SRC_BINARY_DATA_DIR = '/poc/yuncong/yunfeng/random_data'
+SRC_BINARY_DATA_DIR_high = '/test/milvus/raw_data/random'
+SIFT_SRC_DATA_DIR = '/poc/yuncong/ann_1000m/'
+SIFT_SRC_BINARY_DATA_DIR = SIFT_SRC_DATA_DIR + 'source_data'
+SIFT_SRC_GROUNDTRUTH_DATA_DIR = SIFT_SRC_DATA_DIR + 'gnd'
 
 WARM_TOP_K = 1
 WARM_NQ = 1
 DEFAULT_DIM = 512
+
 
 GROUNDTRUTH_MAP = {
     "1000000": "idx_1M.ivecs",
@@ -45,7 +48,10 @@ def gen_file_name(idx, table_dimension, data_type):
     s = "%05d" % idx
     fname = FILE_PREFIX + str(table_dimension) + "d_" + s + ".npy"
     if data_type == "random":
-        fname = RANDOM_SRC_BINARY_DATA_DIR+'/'+fname
+        if table_dimension == 512:
+            fname = SRC_BINARY_DATA_DIR+'/'+fname
+        elif table_dimension >= 4096:
+            fname = SRC_BINARY_DATA_DIR_high+'/'+fname
     elif data_type == "sift":
         fname = SIFT_SRC_BINARY_DATA_DIR+'/'+fname
     return fname
@@ -87,7 +93,12 @@ class Runner(object):
         qps = 0.0
         ni_time = 0.0
         if data_type == "random":
-            vectors_per_file = VECTORS_PER_FILE
+            if dimension == 512:
+                vectors_per_file = VECTORS_PER_FILE
+            elif dimension == 4096:
+                vectors_per_file = 100000
+            elif dimension == 16384:
+                vectors_per_file = 10000
         elif data_type == "sift":
             vectors_per_file = SIFT_VECTORS_PER_FILE
         if size % vectors_per_file or ni > vectors_per_file:
@@ -101,15 +112,16 @@ class Runner(object):
             loops = vectors_per_file // ni
             for j in range(loops):
                 vectors = data[j*ni:(j+1)*ni].tolist()
-                ni_start_time = time.time()
-                # start insert vectors
-                start_id = i * vectors_per_file + j * ni
-                end_id = start_id + len(vectors)
-                logger.info("Start id: %s, end id: %s" % (start_id, end_id))
-                ids = [k for k in range(start_id, end_id)]
-                status, ids = milvus.insert(vectors, ids=ids)
-                ni_end_time = time.time()
-                total_time = total_time + ni_end_time - ni_start_time
+                if vectors:
+                    ni_start_time = time.time()
+                    # start insert vectors
+                    start_id = i * vectors_per_file + j * ni
+                    end_id = start_id + len(vectors)
+                    logger.info("Start id: %s, end id: %s" % (start_id, end_id))
+                    ids = [k for k in range(start_id, end_id)]
+                    status, ids = milvus.insert(vectors, ids=ids)
+                    ni_end_time = time.time()
+                    total_time = total_time + ni_end_time - ni_start_time
 
         qps = round(size / total_time, 2)
         ni_time = round(total_time / (loops * file_num), 2)
@@ -125,10 +137,10 @@ class Runner(object):
         bi_res = []
         for index, nq in enumerate(nqs):
             tmp_res = []
+            vectors = base_query_vectors[0:nq]
             for top_k in top_ks:
                 avg_query_time = 0.0
                 total_query_time = 0.0
-                vectors = base_query_vectors[0:nq]
                 logger.info("Start query, query params: top-k: {}, nq: {}, actually length of vectors: {}".format(top_k, nq, len(vectors)))
                 for i in range(run_count):
                     logger.info("Start run query, run %d of %s" % (i+1, run_count))
@@ -153,12 +165,16 @@ class Runner(object):
             msg = "Query failed with message: %s" % status.message
             raise Exception(msg)
         result_ids = []
+        result_distances = []
         for result in query_res:
             tmp = []
+            tmp_distance = []
             for item in result:
                 tmp.append(item.id)
+                tmp_distance.append(item.distance)
             result_ids.append(tmp)
-        return result_ids
+            result_distances.append(tmp_distance)
+        return result_ids, result_distances
 
     def do_query_acc(self, milvus, table_name, top_k, nq, nprobe, id_store_name):
         (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
