@@ -1,0 +1,24 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributors": [
+    {
+      "login": "levylll",
+      "name": "levylll",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/5645285?v=4",
+      "profile": "https://github.com/levylll",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "projectName": "milvus",
+  "projectOwner": "milvus-io",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "skipCi": true
+}
