@@ -52,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#658 - Milvus error out when building SQ8H index without GPU resources
 - \#668 - Update badge of README
 - \#670 - Random failure of unittest db_test::SEARCH_TEST
+- \#674 - Server down in stability test
 - \#705 - Fix search SQ8H crash without GPU resource
 
 ## Feature

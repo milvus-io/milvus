@@ -55,7 +55,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
                 type_str = "DISK2CPU";
             } else if (type == LoadType::CPU2GPU) {
                 stat = to_index_engine_->CopyToIndexFileToGpu(device_id);
-                type_str = "CPU2GPU";
+                type_str = "CPU2GPU:" + std::to_string(device_id);
             } else {
                 error_msg = "Wrong load type";
                 stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -128,6 +128,7 @@ XBuildIndexTask::Execute() {
 
         // step 3: build index
         try {
+            ENGINE_LOG_DEBUG << "Begin build index for file:" + table_file.location_;
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
                 throw Exception(DB_ERROR, "index NULL");
