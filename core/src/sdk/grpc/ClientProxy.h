@@ -104,6 +104,12 @@ class ClientProxy : public Connection {
     Status
     DropPartition(const PartitionParam& partition_param) override;
 
+    Status
+    GetConfig(const std::string& parent_node, const std::string& child_node, std::string& value) const override;
+
+    Status
+    SetConfig(const std::string& parent_node, const std::string& child_node, const std::string& value) const override;
+
  private:
     std::shared_ptr<::grpc::Channel> channel_;
 
