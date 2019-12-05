@@ -634,6 +634,7 @@ ExecutionEngineImpl::Init() {
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     if (!s.ok()) {
         gpu_num_ = knowhere::INVALID_VALUE;
+        return s;
     }
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
