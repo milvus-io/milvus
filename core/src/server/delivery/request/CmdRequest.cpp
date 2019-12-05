@@ -38,22 +38,27 @@ Status
 CmdRequest::OnExecute() {
     std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
     TimeRecorderAuto rc(hdr);
+    Status stat;
 
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
+        stat = Status::OK();
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
+        stat = Status::OK();
     } else if (cmd_ == "mode") {
 #ifdef MILVUS_GPU_VERSION
         result_ = "GPU";
 #else
         result_ = "CPU";
 #endif
+        stat = Status::OK();
     } else {
-        result_ = "OK";
+        server::Config& config = server::Config::GetInstance();
+        stat = config.HandleConfigCli(result_, cmd_);
     }
 
-    return Status::OK();
+    return stat;
 }
 
 }  // namespace server

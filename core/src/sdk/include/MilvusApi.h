@@ -442,8 +442,37 @@ class Connection {
      *
      * @return Indicate if partition is delete successfully.
      */
+
     virtual Status
     DropPartition(const PartitionParam& param) = 0;
+
+    /**
+     * @brief Get config method
+     *
+     * This method is used to set config.
+     *
+     * @param parent_node, config parent node name.
+     * @param child_node, config child node name.
+     * @param value, config value.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    GetConfig(const std::string& parent_node, const std::string& child_node, std::string& value) const = 0;
+
+    /**
+     * @brief Set config method
+     *
+     * This method is used to set config.
+     *
+     * @param parent_node, config parent node name.
+     * @param child_node, config child node name.
+     * @param value, config value.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    SetConfig(const std::string& parent_node, const std::string& child_node, const std::string& value) const = 0;
 };
 
 }  // namespace milvus
