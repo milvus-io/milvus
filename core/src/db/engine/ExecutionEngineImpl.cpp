@@ -405,7 +405,6 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
     milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
-    ENGINE_LOG_DEBUG << "CopyToIndexFileToGpu location:" << location_ << " to_index_data:" << to_index_data.get();
 #endif
     return Status::OK();
 }
