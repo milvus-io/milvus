@@ -456,4 +456,25 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
     }
 }
 
+Status
+ClientProxy::GetConfig(const std::string& parent_node, const std::string& child_node, std::string& value) const {
+    std::string config_node_str = parent_node + "." + child_node;
+    try {
+        return client_ptr_->Cmd(value, "get " + config_node_str);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Fail to get config: " + config_node_str);
+    }
+}
+
+Status
+ClientProxy::SetConfig(const std::string& parent_node, const std::string& child_node, const std::string& value) const {
+    std::string config_node_str = parent_node + "." + child_node;
+    try {
+        std::string dummy;
+        return client_ptr_->Cmd(dummy, "set " + config_node_str + " " + value);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Fail to set config: " + config_node_str);
+    }
+}
+
 }  // namespace milvus
