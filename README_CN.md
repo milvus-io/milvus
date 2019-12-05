@@ -17,9 +17,9 @@ Milvus 是一款开源的、针对海量特征向量的相似性搜索引擎。�
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/zh-CN/aboutmilvus/overview/)。
 
-Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及[C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) 的 API 接口。
+Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及[C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) 的 SDK。
 
-通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.5.3/) 获取最新版本的功能和更新。
+通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.6.0/) 获取最新版本的功能和更新。
 
 ## 开始使用 Milvus
 
@@ -53,13 +53,6 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 
 欢迎加入我们的 [Slack 频道](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)以便与其他用户和贡献者进行交流。
 
-## 贡献者
-
-以下是 Milvus 贡献者名单，在此我们深表感谢：
-
-- [akihoni](https://github.com/akihoni) 提供了中文版 README，并发现了 README 中的无效链接。
-- [goodhamgupta](https://github.com/goodhamgupta) 发现并修正了在线训练营文档中的文件名拼写错误。
-- [erdustiggen](https://github.com/erdustiggen) 将错误信息里的 std::cout 修改为 LOG，修正了一个 Clang 格式问题和一些语法错误。
 
 ## 相关链接
 
