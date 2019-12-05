@@ -167,8 +167,7 @@ ConnectionImpl::GetConfig(const std::string& parent_node, const std::string& chi
 }
 
 Status
-ConnectionImpl::SetConfig(const std::string& parent_node, const std::string& child_node,
-                          const std::string& value) const {
+ConnectionImpl::SetConfig(const std::string& parent_node, const std::string& child_node, const std::string& value) const {
     return client_proxy_->SetConfig(parent_node, child_node, value);
 }
 }  // namespace milvus
