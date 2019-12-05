@@ -733,9 +733,7 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
         //set table index type to raw
         ConnectorPtr->update_all(
             set(
-                c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE,
-                c(&TableSchema::nlist_) = DEFAULT_NLIST,
-                c(&TableSchema::metric_type_) = DEFAULT_METRIC_TYPE),
+                c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE),
             where(
                 c(&TableSchema::table_id_) == table_id));
 

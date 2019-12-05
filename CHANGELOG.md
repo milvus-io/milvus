@@ -53,6 +53,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#668 - Update badge of README
 - \#670 - Random failure of unittest db_test::SEARCH_TEST
 - \#674 - Server down in stability test
+- \#696 - Metric_type changed from IP to L2
 - \#705 - Fix search SQ8H crash without GPU resource
 
 ## Feature
