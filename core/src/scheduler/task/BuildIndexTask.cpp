@@ -128,6 +128,7 @@ XBuildIndexTask::Execute() {
 
         // step 3: build index
         try {
+            ENGINE_LOG_DEBUG << "Begin build index for file:" + table_file.location_;
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
                 throw Exception(DB_ERROR, "index NULL");
