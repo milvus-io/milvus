@@ -1138,8 +1138,6 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
             // set table index type to raw
             dropTableIndexQuery << "UPDATE " << META_TABLES
                                 << " SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE)
-                                << " ,nlist = " << std::to_string(DEFAULT_NLIST)
-                                << " ,metric_type = " << std::to_string(DEFAULT_METRIC_TYPE)
                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();

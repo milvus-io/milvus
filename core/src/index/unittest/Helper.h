@@ -53,8 +53,10 @@ IndexFactory(const std::string& type) {
         return std::make_shared<knowhere::GPUIVFPQ>(DEVICEID);
     } else if (type == "GPUIVFSQ") {
         return std::make_shared<knowhere::GPUIVFSQ>(DEVICEID);
+#ifdef CUSTOMIZATION
     } else if (type == "IVFSQHybrid") {
         return std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+#endif
 #endif
     }
 }
