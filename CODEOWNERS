@@ -1,0 +1,5 @@
+# Each line is a component followed by one or more owners. 
+
+/core/cmake @JinHai-CN
+/core/conf @cydrain
+
