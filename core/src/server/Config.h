@@ -113,6 +113,7 @@ static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 class Config {
  public:
+    Config();
     static Config&
     GetInstance();
     Status
@@ -355,6 +356,7 @@ class Config {
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> config_node_map_;
     std::mutex mutex_;
 };
 
