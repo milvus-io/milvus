@@ -103,7 +103,7 @@ $ docker run -it -p 19530:19530 -d milvusdb/milvus-cpu-build-env:v0.6.0-ubuntu18
 Start a GPU container:
 
 ```shell
-$ docker run — runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:v0.6.0-ubuntu18.04
+$ docker run --runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:v0.6.0-ubuntu18.04
 ```
 To enter the container:
 
