@@ -17,9 +17,7 @@
 
 #pragma once
 
-#include "grpc/gen-status/status.grpc.pb.h"
-#include "grpc/gen-status/status.pb.h"
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 #include "utils/BlockingQueue.h"
 #include "utils/Status.h"
 
@@ -31,17 +29,16 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 using RequestQueue = BlockingQueue<BaseRequestPtr>;
 using RequestQueuePtr = std::shared_ptr<RequestQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
-class GrpcRequestScheduler {
+class RequestScheduler {
  public:
-    static GrpcRequestScheduler&
+    static RequestScheduler&
     GetInstance() {
-        static GrpcRequestScheduler scheduler;
+        static RequestScheduler scheduler;
         return scheduler;
     }
 
@@ -55,12 +52,12 @@ class GrpcRequestScheduler {
     ExecuteRequest(const BaseRequestPtr& request_ptr);
 
     static void
-    ExecRequest(BaseRequestPtr& request_ptr, ::milvus::grpc::Status* grpc_status);
+    ExecRequest(BaseRequestPtr& request_ptr);
 
  protected:
-    GrpcRequestScheduler();
+    RequestScheduler();
 
-    virtual ~GrpcRequestScheduler();
+    virtual ~RequestScheduler();
 
     void
     TakeToExecute(RequestQueuePtr request_queue);
@@ -78,6 +75,5 @@ class GrpcRequestScheduler {
     bool stopped_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

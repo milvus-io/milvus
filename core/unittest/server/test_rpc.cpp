@@ -21,7 +21,7 @@
 
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
-#include "server/grpc_impl/GrpcRequestScheduler.h"
+#include "src/server/delivery/RequestScheduler.h"
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 #include "src/version.h"
 
@@ -489,15 +489,15 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto status = request_ptr->Execute();
     ASSERT_TRUE(status.ok());
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().Start();
+    milvus::server::grpc::RequestScheduler::GetInstance().Start();
     ::milvus::grpc::Status grpc_status;
     std::string dummy = "dql";
     milvus::server::grpc::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecRequest(base_task_ptr, &grpc_status);
+    milvus::server::grpc::RequestScheduler::GetInstance().ExecRequest(base_task_ptr, &grpc_status);
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    milvus::server::grpc::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
     request_ptr = nullptr;
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    milvus::server::grpc::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().Stop();
+    milvus::server::grpc::RequestScheduler::GetInstance().Stop();
 }

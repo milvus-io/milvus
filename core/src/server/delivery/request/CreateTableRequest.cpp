@@ -15,7 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/CreateTableRequest.h"
+#include "server/delivery/request/CreateTableRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -26,55 +27,67 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-CreateTableRequest::CreateTableRequest(const ::milvus::grpc::TableSchema* schema)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), schema_(schema) {
+CreateTableRequest::CreateTableRequest(const std::string& table_name,
+                                       int64_t dimension,
+                                       int32_t index_file_size,
+                                       int32_t metric_type)
+    : BaseRequest(DDL_DML_REQUEST_GROUP),
+      table_name_(table_name),
+      dimension_(dimension),
+      index_file_size_(index_file_size),
+      metric_type_(metric_type) {
 }
 
 BaseRequestPtr
-CreateTableRequest::Create(const ::milvus::grpc::TableSchema* schema) {
-    if (schema == nullptr) {
-        SERVER_LOG_ERROR << "grpc input is null!";
-        return nullptr;
-    }
-    return std::shared_ptr<GrpcBaseRequest>(new CreateTableRequest(schema));
+CreateTableRequest::Create(const std::string& table_name,
+                           int64_t dimension,
+                           int32_t index_file_size,
+                           int32_t metric_type) {
+//    if (schema == nullptr) {
+//        SERVER_LOG_ERROR << "grpc input is null!";
+//        return nullptr;
+//    }
+    return std::shared_ptr<BaseRequest>(new CreateTableRequest(table_name,
+                                                               dimension,
+                                                               index_file_size,
+                                                               metric_type));
 }
 
 Status
 CreateTableRequest::OnExecute() {
-    std::string hdr = "CreateTableRequest(table=" + schema_->table_name() +
-                      ", dimension=" + std::to_string(schema_->dimension()) + ")";
+    std::string hdr = "CreateTableRequest(table=" + table_name_ +
+                      ", dimension=" + std::to_string(dimension_) + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(schema_->table_name());
+        auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableDimension(schema_->dimension());
+        status = ValidationUtil::ValidateTableDimension(dimension_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableIndexFileSize(schema_->index_file_size());
+        status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableIndexMetricType(schema_->metric_type());
+        status = ValidationUtil::ValidateTableIndexMetricType(metric_type_);
         if (!status.ok()) {
             return status;
         }
 
         // step 2: construct table schema
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = schema_->table_name();
-        table_info.dimension_ = static_cast<uint16_t>(schema_->dimension());
-        table_info.index_file_size_ = schema_->index_file_size();
-        table_info.metric_type_ = schema_->metric_type();
+        table_info.table_id_ = table_name_;
+        table_info.dimension_ = static_cast<uint16_t>(dimension_);
+        table_info.index_file_size_ = index_file_size_;
+        table_info.metric_type_ = metric_type_;
 
         // step 3: create table
         status = DBWrapper::DB()->CreateTable(table_info);
@@ -92,6 +105,5 @@ CreateTableRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

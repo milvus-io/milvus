@@ -17,30 +17,35 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
-
-#include <string>
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class CmdRequest : public GrpcBaseRequest {
+class CreateTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& cmd, std::string& result);
+    Create(const std::string& table_name,
+           int64_t dimension,
+           int32_t index_file_size,
+           int32_t metric_type);
 
  protected:
-    CmdRequest(const std::string& cmd, std::string& result);
+    explicit CreateTableRequest(const std::string& table_name,
+                                int64_t dimension,
+                                int32_t index_file_size,
+                                int32_t metric_type);
 
     Status
     OnExecute() override;
 
  private:
-    std::string cmd_;
-    std::string& result_;
+//    const ::milvus::grpc::TableSchema* schema_;
+    const std::string table_name_;
+    int64_t dimension_;
+    int32_t index_file_size_;
+    int32_t metric_type_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

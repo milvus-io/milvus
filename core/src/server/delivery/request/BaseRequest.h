@@ -32,7 +32,6 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 static const char* DQL_REQUEST_GROUP = "dql";
 static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
@@ -43,11 +42,11 @@ using DB_DATE = milvus::engine::meta::DateT;
 Status
 ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array, std::vector<DB_DATE>& dates);
 
-class GrpcBaseRequest {
+class BaseRequest {
  protected:
-    explicit GrpcBaseRequest(const std::string& request_group, bool async = false);
+    explicit BaseRequest(const std::string& request_group, bool async = false);
 
-    virtual ~GrpcBaseRequest();
+    virtual ~BaseRequest();
 
  public:
     Status
@@ -94,8 +93,7 @@ class GrpcBaseRequest {
     Status status_;
 };
 
-using BaseRequestPtr = std::shared_ptr<GrpcBaseRequest>;
+using BaseRequestPtr = std::shared_ptr<BaseRequest>;
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

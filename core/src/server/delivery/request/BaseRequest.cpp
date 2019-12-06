@@ -15,13 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "BaseRequest.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
@@ -59,49 +58,48 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
     return Status::OK();
 }
 
-GrpcBaseRequest::GrpcBaseRequest(const std::string& request_group, bool async)
+BaseRequest::BaseRequest(const std::string& request_group, bool async)
     : request_group_(request_group), async_(async), done_(false) {
 }
 
-GrpcBaseRequest::~GrpcBaseRequest() {
+BaseRequest::~BaseRequest() {
     WaitToFinish();
 }
 
 Status
-GrpcBaseRequest::Execute() {
+BaseRequest::Execute() {
     status_ = OnExecute();
     Done();
     return status_;
 }
 
 void
-GrpcBaseRequest::Done() {
+BaseRequest::Done() {
     done_ = true;
     finish_cond_.notify_all();
 }
 
 Status
-GrpcBaseRequest::SetStatus(ErrorCode error_code, const std::string& error_msg) {
+BaseRequest::SetStatus(ErrorCode error_code, const std::string& error_msg) {
     status_ = Status(error_code, error_msg);
     SERVER_LOG_ERROR << error_msg;
     return status_;
 }
 
 std::string
-GrpcBaseRequest::TableNotExistMsg(const std::string& table_name) {
+BaseRequest::TableNotExistMsg(const std::string& table_name) {
     return "Table " + table_name +
            " does not exist. Use milvus.has_table to verify whether the table exists. "
            "You also can check whether the table name exists.";
 }
 
 Status
-GrpcBaseRequest::WaitToFinish() {
+BaseRequest::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
 
     return status_;
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

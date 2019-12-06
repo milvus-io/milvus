@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/CmdRequest.h"
+#include "CmdRequest.h"
 #include "scheduler/SchedInst.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -24,15 +24,14 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 CmdRequest::CmdRequest(const std::string& cmd, std::string& result)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), cmd_(cmd), result_(result) {
+    : BaseRequest(INFO_REQUEST_GROUP), cmd_(cmd), result_(result) {
 }
 
 BaseRequestPtr
 CmdRequest::Create(const std::string& cmd, std::string& result) {
-    return std::shared_ptr<GrpcBaseRequest>(new CmdRequest(cmd, result));
+    return std::shared_ptr<BaseRequest>(new CmdRequest(cmd, result));
 }
 
 Status
@@ -57,6 +56,5 @@ CmdRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

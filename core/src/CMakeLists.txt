@@ -75,11 +75,13 @@ set(thirdparty_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
-set(grpc_server_files
-        ${grpc_request_files}
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
+set(server_service_files
+        ${delivery_request_files}
         ${grpc_impl_files}
+        ${delivery_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -211,7 +213,7 @@ add_executable(milvus_server
         ${metrics_files}
         ${scheduler_files}
         ${server_files}
-        ${grpc_server_files}
+        ${server_service_files}
         ${grpc_service_files}
         ${utils_files}
         )

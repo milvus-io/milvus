@@ -15,31 +15,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/HasTableRequest.h"
+#include "server/delivery/request/CountTableRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
+#include "BaseRequest.h"
 
 #include <memory>
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-HasTableRequest::HasTableRequest(const std::string& table_name, bool& has_table)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), has_table_(has_table) {
+CountTableRequest::CountTableRequest(const std::string& table_name, int64_t& row_count)
+    : BaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), row_count_(row_count) {
 }
 
 BaseRequestPtr
-HasTableRequest::Create(const std::string& table_name, bool& has_table) {
-    return std::shared_ptr<GrpcBaseRequest>(new HasTableRequest(table_name, has_table));
+CountTableRequest::Create(const std::string& table_name, int64_t& row_count) {
+    return std::shared_ptr<BaseRequest>(new CountTableRequest(table_name, row_count));
 }
 
 Status
-HasTableRequest::OnExecute() {
+CountTableRequest::OnExecute() {
     try {
-        std::string hdr = "HasTableRequest(table=" + table_name_ + ")";
+        std::string hdr = "CountTableRequest(table=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -48,11 +48,18 @@ HasTableRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check table existence
-        status = DBWrapper::DB()->HasTable(table_name_, has_table_);
+        // step 2: get row count
+        uint64_t row_count = 0;
+        status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!status.ok()) {
-            return status;
+            if (status.code(), DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            } else {
+                return status;
+            }
         }
+
+        row_count_ = static_cast<int64_t>(row_count);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -60,6 +67,5 @@ HasTableRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

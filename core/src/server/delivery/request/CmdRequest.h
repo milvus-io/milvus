@@ -17,30 +17,28 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "BaseRequest.h"
 
 #include <string>
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class CountTableRequest : public GrpcBaseRequest {
+class CmdRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, int64_t& row_count);
+    Create(const std::string& cmd, std::string& result);
 
  protected:
-    CountTableRequest(const std::string& table_name, int64_t& row_count);
+    CmdRequest(const std::string& cmd, std::string& result);
 
     Status
     OnExecute() override;
 
  private:
-    std::string table_name_;
-    int64_t& row_count_;
+    std::string cmd_;
+    std::string& result_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus
