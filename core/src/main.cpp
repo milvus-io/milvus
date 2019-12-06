@@ -63,6 +63,7 @@ print_banner() {
 #else
     std::cout << "You are using Milvus CPU edition" << std::endl;
 #endif
+    std::cout << "Last commit id: " << LAST_COMMIT_ID << std::endl;
     std::cout << std::endl;
 }
 
