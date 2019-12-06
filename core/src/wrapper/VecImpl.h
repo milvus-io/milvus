@@ -108,7 +108,7 @@ class ToIndexData : public cache::DataObj {
     }
 
  private:
-    int64_t size_;
+    int64_t size_ = 0;
 };
 
 }  // namespace engine

@@ -125,7 +125,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
                 hybrid = true;
             }
             stat = index_engine_->CopyToGpu(device_id, hybrid);
-            type_str = "CPU2GPU";
+            type_str = "CPU2GPU:" + std::to_string(device_id);
         } else if (type == LoadType::GPU2CPU) {
             stat = index_engine_->CopyToCpu();
             type_str = "GPU2CPU";
