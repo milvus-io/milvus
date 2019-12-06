@@ -37,57 +37,6 @@ constexpr int64_t GB = 1UL << 30;
 
 static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"}});
 
-Config::Config() {
-    /* server config */
-    std::unordered_set<std::string> server_node_set;
-    server_node_set.insert(CONFIG_SERVER_ADDRESS);
-    server_node_set.insert(CONFIG_SERVER_PORT);
-    server_node_set.insert(CONFIG_SERVER_DEPLOY_MODE);
-    server_node_set.insert(CONFIG_SERVER_TIME_ZONE);
-    config_node_map_[CONFIG_SERVER] = server_node_set;
-
-    /* db config */
-    std::unordered_set<std::string> db_node_set;
-    db_node_set.insert(CONFIG_DB_PRIMARY_PATH);
-    db_node_set.insert(CONFIG_DB_SECONDARY_PATH);
-    db_node_set.insert(CONFIG_DB_BACKEND_URL);
-    db_node_set.insert(CONFIG_DB_ARCHIVE_DISK_THRESHOLD);
-    db_node_set.insert(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD);
-    db_node_set.insert(CONFIG_DB_INSERT_BUFFER_SIZE);
-    db_node_set.insert(CONFIG_DB_PRELOAD_TABLE);
-    config_node_map_[CONFIG_DB] = db_node_set;
-
-    /* cache config */
-    std::unordered_set<std::string> cache_node_set;
-    cache_node_set.insert(CONFIG_CACHE_CPU_CACHE_CAPACITY);
-    cache_node_set.insert(CONFIG_CACHE_CPU_CACHE_THRESHOLD);
-    cache_node_set.insert(CONFIG_CACHE_CACHE_INSERT_DATA);
-    config_node_map_[CONFIG_CACHE] = cache_node_set;
-
-    /* metric config */
-    std::unordered_set<std::string> metric_node_set;
-    metric_node_set.insert(CONFIG_METRIC_ENABLE_MONITOR);
-    metric_node_set.insert(CONFIG_METRIC_COLLECTOR);
-    metric_node_set.insert(CONFIG_METRIC_PROMETHEUS_PORT);
-    config_node_map_[CONFIG_METRIC] = metric_node_set;
-
-    /* engine config */
-    std::unordered_set<std::string> engine_node_set;
-    engine_node_set.insert(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
-    engine_node_set.insert(CONFIG_ENGINE_OMP_THREAD_NUM);
-    engine_node_set.insert(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
-    config_node_map_[CONFIG_ENGINE] = engine_node_set;
-
-    /* gpu resource config */
-    std::unordered_set<std::string> gpu_resource_node_set;
-    gpu_resource_node_set.insert(CONFIG_GPU_RESOURCE_ENABLE);
-    gpu_resource_node_set.insert(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
-    gpu_resource_node_set.insert(CONFIG_GPU_RESOURCE_CACHE_THRESHOLD);
-    gpu_resource_node_set.insert(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
-    gpu_resource_node_set.insert(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
-    config_node_map_[CONFIG_GPU_RESOURCE] = gpu_resource_node_set;
-}
-
 Config&
 Config::GetInstance() {
     static Config config_inst;
@@ -943,10 +892,10 @@ Config::GetConfigNode(const std::string& name) {
 
 bool
 Config::ConfigNodeValid(const std::string &parent_key, const std::string &child_key) {
-    if (config_node_map_.find(parent_key) == config_node_map_.end()) {
+    if (config_map_.find(parent_key) == config_map_.end()) {
         return false;
     }
-    if (config_node_map_[parent_key].count(child_key) == 0) {
+    if (config_map_[parent_key].count(child_key) == 0) {
         return false;
     }
     return true;
