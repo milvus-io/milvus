@@ -69,6 +69,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#560 - Add version in server config file
 - \#605 - Print more messages when server start
 - \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
+- \#709 - Show last commit id when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
