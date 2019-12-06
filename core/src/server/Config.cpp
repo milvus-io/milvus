@@ -401,7 +401,7 @@ Config::PrintAll() {
 }
 
 Status
-Config::GetConfigCli(const std::string &parent_key, const std::string &child_key, std::string &value) {
+Config::GetConfigCli(const std::string& parent_key, const std::string& child_key, std::string& value) {
     if (!ConfigNodeValid(parent_key, child_key)) {
         std::string str = "Config node invalid: " + parent_key + "." + child_key;
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -410,7 +410,7 @@ Config::GetConfigCli(const std::string &parent_key, const std::string &child_key
 }
 
 Status
-Config::SetConfigCli(const std::string &parent_key, const std::string &child_key, const std::string &value) {
+Config::SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value) {
     if (!ConfigNodeValid(parent_key, child_key)) {
         std::string str = "Config node invalid: " + parent_key + "." + child_key;
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -434,15 +434,13 @@ Config::SetConfigCli(const std::string &parent_key, const std::string &child_key
             return SetEngineConfigUseBlasThreshold(value);
         } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
             return SetEngineConfigOmpThreadNum(value);
-        }
 #ifdef MILVUS_GPU_VERSION
-        else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
+        } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             return SetEngineConfigGpuSearchThreshold(value);
-        }
 #endif
-    }
+        }
 #ifdef MILVUS_GPU_VERSION
-    else if (parent_key == CONFIG_GPU_RESOURCE) {
+    } else if (parent_key == CONFIG_GPU_RESOURCE) {
         if (child_key == CONFIG_GPU_RESOURCE_ENABLE) {
             return SetGpuResourceConfigEnable(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_CAPACITY) {
@@ -454,12 +452,12 @@ Config::SetConfigCli(const std::string &parent_key, const std::string &child_key
         } else if (child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
             return SetGpuResourceConfigBuildIndexResources(value);
         }
-    }
 #endif
+    }
 }
 
 Status
-Config::HandleConfigCli(std::string& result, const std::string &cmd) {
+Config::HandleConfigCli(std::string& result, const std::string& cmd) {
     std::vector<std::string> tokens;
     std::vector<std::string> nodes;
     server::StringHelpFunctions::SplitStringByDelimeter(cmd, " ", tokens);
@@ -891,7 +889,7 @@ Config::GetConfigNode(const std::string& name) {
 }
 
 bool
-Config::ConfigNodeValid(const std::string &parent_key, const std::string &child_key) {
+Config::ConfigNodeValid(const std::string& parent_key, const std::string& child_key) {
     if (config_map_.find(parent_key) == config_map_.end()) {
         return false;
     }
