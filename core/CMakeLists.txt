@@ -36,7 +36,7 @@ if (NOT DEFINED CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
 endif ()
 
-# get Milvus version vis branch name
+# get Milvus version via branch name
 set(GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
 
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
