@@ -48,7 +48,7 @@ CreatePartitionRequest::OnExecute() {
     std::string hdr = "CreatePartitionRequest(table=" + partition_param_->table_name() +
                       ", partition_name=" + partition_param_->partition_name() +
                       ", partition_tag=" + partition_param_->tag() + ")";
-    TimeRecorder rc(hdr);
+    TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
@@ -80,8 +80,6 @@ CreatePartitionRequest::OnExecute() {
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    rc.ElapseFromBegin("totally cost");
 
     return Status::OK();
 }

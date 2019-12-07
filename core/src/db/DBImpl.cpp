@@ -52,7 +52,7 @@ constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
 constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
 constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
 
-static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milsvus server is shutdown!");
+static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 
 void
 TraverseFiles(const meta::DatePartionedTableFilesSchema& date_files, meta::TableFilesSchema& files_array) {
@@ -190,9 +190,9 @@ DBImpl::PreloadTable(const std::string& table_id) {
     }
 
     // step 2: get files from partition tables
-    std::vector<meta::TableSchema> partiton_array;
-    status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-    for (auto& schema : partiton_array) {
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
         status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
     }
 
@@ -296,12 +296,12 @@ DBImpl::DropPartitionByTag(const std::string& table_id, const std::string& parti
 }
 
 Status
-DBImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) {
+DBImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->ShowPartitions(table_id, partiton_schema_array);
+    return meta_ptr_->ShowPartitions(table_id, partition_schema_array);
 }
 
 Status
@@ -430,9 +430,9 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
             return status;
         }
 
-        std::vector<meta::TableSchema> partiton_array;
-        status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-        for (auto& schema : partiton_array) {
+        std::vector<meta::TableSchema> partition_array;
+        status = meta_ptr_->ShowPartitions(table_id, partition_array);
+        for (auto& schema : partition_array) {
             status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
         }
     } else {
@@ -817,7 +817,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     {
         uint64_t ttl = 10 * meta::SECOND;  // default: file will be hard-deleted few seconds after soft-deleted
         if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
-            ttl = meta::H_SEC;
+            ttl = meta::HOUR;
         }
 
         meta_ptr_->CleanUpFilesWithTTL(ttl, &ongoing_files_checker_);
@@ -934,15 +934,15 @@ DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>&
 Status
 DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,
                             std::set<std::string>& partition_name_array) {
-    std::vector<meta::TableSchema> partiton_array;
-    auto status = meta_ptr_->ShowPartitions(table_id, partiton_array);
+    std::vector<meta::TableSchema> partition_array;
+    auto status = meta_ptr_->ShowPartitions(table_id, partition_array);
 
     for (auto& tag : partition_tags) {
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
         server::StringHelpFunctions::TrimStringBlank(valid_tag);
-        for (auto& schema : partiton_array) {
+        for (auto& schema : partition_array) {
             if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.table_id_);
             }
@@ -972,9 +972,9 @@ DBImpl::DropTableRecursively(const std::string& table_id, const meta::DatesT& da
         status = meta_ptr_->DropDataByDate(table_id, dates);
     }
 
-    std::vector<meta::TableSchema> partiton_array;
-    status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-    for (auto& schema : partiton_array) {
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
         status = DropTableRecursively(schema.table_id_, dates);
         if (!status.ok()) {
             return status;
@@ -994,9 +994,9 @@ DBImpl::UpdateTableIndexRecursively(const std::string& table_id, const TableInde
         return status;
     }
 
-    std::vector<meta::TableSchema> partiton_array;
-    status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-    for (auto& schema : partiton_array) {
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
         status = UpdateTableIndexRecursively(schema.table_id_, index);
         if (!status.ok()) {
             return status;
@@ -1045,9 +1045,9 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     }
 
     // build index for partition
-    std::vector<meta::TableSchema> partiton_array;
-    status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-    for (auto& schema : partiton_array) {
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
         status = BuildTableIndexRecursively(schema.table_id_, index);
         if (!status.ok()) {
             return status;
@@ -1077,9 +1077,9 @@ DBImpl::DropTableIndexRecursively(const std::string& table_id) {
     }
 
     // drop partition index
-    std::vector<meta::TableSchema> partiton_array;
-    status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-    for (auto& schema : partiton_array) {
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
         status = DropTableIndexRecursively(schema.table_id_);
         if (!status.ok()) {
             return status;
@@ -1098,9 +1098,9 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
     }
 
     // get partition row count
-    std::vector<meta::TableSchema> partiton_array;
-    status = meta_ptr_->ShowPartitions(table_id, partiton_array);
-    for (auto& schema : partiton_array) {
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
         uint64_t partition_row_count = 0;
         status = GetTableRowCountRecursively(schema.table_id_, partition_row_count);
         if (!status.ok()) {

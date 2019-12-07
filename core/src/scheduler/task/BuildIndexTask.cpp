@@ -19,6 +19,7 @@
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -54,7 +55,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
                 type_str = "DISK2CPU";
             } else if (type == LoadType::CPU2GPU) {
                 stat = to_index_engine_->CopyToIndexFileToGpu(device_id);
-                type_str = "CPU2GPU";
+                type_str = "CPU2GPU:" + std::to_string(device_id);
             } else {
                 error_msg = "Wrong load type";
                 stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -85,7 +86,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
         size_t file_size = to_index_engine_->PhysicalSize();
 
-        std::string info = "Load file id:" + std::to_string(file_->id_) + " " + type_str +
+        std::string info = "Build index task load file id:" + std::to_string(file_->id_) + " " + type_str +
                            " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                            " bytes from location: " + file_->location_ + " totally cost";
         double span = rc.ElapseFromBegin(info);
@@ -127,26 +128,18 @@ XBuildIndexTask::Execute() {
 
         // step 3: build index
         try {
+            ENGINE_LOG_DEBUG << "Begin build index for file:" + table_file.location_;
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
-                table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
-                status = meta_ptr->UpdateTableFile(table_file);
-                ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_
-                                 << " to to_delete";
-
-                build_index_job->BuildIndexDone(to_index_id_);
-                to_index_engine_ = nullptr;
-                return;
+                throw Exception(DB_ERROR, "index NULL");
             }
         } catch (std::exception& ex) {
-            std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
+            std::string msg = "Build index exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
             table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
-            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-            ENGINE_LOG_ERROR << "Failed to build index, index file is too large or gpu memory is not enough";
+            ENGINE_LOG_DEBUG << "Build index fail, mark file: " << table_file.file_id_ << " to to_delete";
 
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = Status(DB_ERROR, msg);

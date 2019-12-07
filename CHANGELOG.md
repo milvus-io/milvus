@@ -44,7 +44,17 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
+- \#616 - IP search metric_type is not supported by IVF_PQ index
 - \#631 - FAISS isn't compiled with O3 option
+- \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
+- \#649 - Typo "partiton" should be "partition"
+- \#654 - Random crash when frequently insert vector one by one
+- \#658 - Milvus error out when building SQ8H index without GPU resources
+- \#668 - Update badge of README
+- \#670 - Random failure of unittest db_test::SEARCH_TEST
+- \#674 - Server down in stability test
+- \#696 - Metric_type changed from IP to L2
+- \#705 - Fix search SQ8H crash without GPU resource
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -59,6 +69,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#560 - Add version in server config file
 - \#605 - Print more messages when server start
 - \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
+- \#709 - Show last commit id when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version

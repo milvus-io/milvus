@@ -734,8 +734,7 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
         ConnectorPtr->update_all(
             set(
                 c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE,
-                c(&TableSchema::nlist_) = DEFAULT_NLIST,
-                c(&TableSchema::metric_type_) = DEFAULT_METRIC_TYPE),
+                c(&TableSchema::nlist_) = DEFAULT_NLIST),
             where(
                 c(&TableSchema::table_id_) == table_id));
 
@@ -804,7 +803,7 @@ SqliteMetaImpl::DropPartition(const std::string& partition_name) {
 }
 
 Status
-SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) {
+SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) {
     try {
         server::MetricCollector metric;
 
@@ -816,7 +815,7 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
             meta::TableSchema partition_schema;
             partition_schema.table_id_ = partition_name;
             DescribeTable(partition_schema);
-            partiton_schema_array.emplace_back(partition_schema);
+            partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when show partitions", e.what());
@@ -1204,7 +1203,7 @@ SqliteMetaImpl::Archive() {
         auto& criteria = kv.first;
         auto& limit = kv.second;
         if (criteria == engine::ARCHIVE_CONF_DAYS) {
-            int64_t usecs = limit * D_SEC * US_PS;
+            int64_t usecs = limit * DAY * US_PS;
             int64_t now = utils::GetMicroSecTimeStamp();
             try {
                 // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here

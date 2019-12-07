@@ -1139,7 +1139,6 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
             dropTableIndexQuery << "UPDATE " << META_TABLES
                                 << " SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE)
                                 << " ,nlist = " << std::to_string(DEFAULT_NLIST)
-                                << " ,metric_type = " << std::to_string(DEFAULT_METRIC_TYPE)
                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
@@ -1212,7 +1211,7 @@ MySQLMetaImpl::DropPartition(const std::string& partition_name) {
 }
 
 Status
-MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) {
+MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -1236,7 +1235,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             meta::TableSchema partition_schema;
             resRow["table_id"].to_string(partition_schema.table_id_);
             DescribeTable(partition_schema);
-            partiton_schema_array.emplace_back(partition_schema);
+            partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN SHOW PARTITIONS", e.what());
@@ -1664,7 +1663,7 @@ MySQLMetaImpl::Archive() {
         auto& criteria = kv.first;
         auto& limit = kv.second;
         if (criteria == engine::ARCHIVE_CONF_DAYS) {
-            size_t usecs = limit * D_SEC * US_PS;
+            size_t usecs = limit * DAY * US_PS;
             int64_t now = utils::GetMicroSecTimeStamp();
 
             try {

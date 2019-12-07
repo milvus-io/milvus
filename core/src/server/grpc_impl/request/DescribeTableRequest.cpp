@@ -41,7 +41,7 @@ DescribeTableRequest::Create(const std::shared_ptr<Context>& context, const std:
 Status
 DescribeTableRequest::OnExecute() {
     std::string hdr = "DescribeTableRequest(table=" + table_name_ + ")";
-    TimeRecorder rc(hdr);
+    TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
@@ -65,8 +65,6 @@ DescribeTableRequest::OnExecute() {
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    rc.ElapseFromBegin("totally cost");
 
     return Status::OK();
 }

@@ -587,6 +587,8 @@ class TestIndexIP:
         '''
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
         assert status.OK()
@@ -629,6 +631,8 @@ class TestIndexIP:
         '''
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
+        if index_params["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip some PQ cases")
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
         logging.getLogger().info(connect.describe_index(ip_table))
@@ -809,9 +813,14 @@ class TestIndexIP:
         status = connect.create_index(ip_table, index_params)
         status, result = connect.describe_index(ip_table)
         logging.getLogger().info(result)
-        assert result._nlist == index_params["nlist"]
         assert result._table_name == ip_table
-        assert result._index_type == index_params["index_type"]
+        status, mode = connect._cmd("mode")
+        if str(mode) == "GPU" and index_params["index_type"] == IndexType.IVF_PQ:
+            assert result._index_type == IndexType.FLAT
+            assert result._nlist == 16384
+        else:
+            assert result._index_type == index_params["index_type"]
+            assert result._nlist == index_params["nlist"]
 
     def test_describe_index_partition(self, connect, ip_table, get_simple_index_params):
         '''
@@ -972,9 +981,11 @@ class TestIndexIP:
         expected: return code 0, and default index param
         '''
         index_params = get_simple_index_params
+        status, mode = connect._cmd("mode")
+        assert status.OK()
         # status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
-        if index_params["index_type"] == IndexType.IVF_PQ:
+        if str(mode) == "GPU" and (index_params["index_type"] == IndexType.IVF_PQ):
             assert not status.OK()
         else:
             assert status.OK()
@@ -1109,8 +1120,14 @@ class TestIndexIP:
         '''
         index_params = get_simple_index_params
         # status, ids = connect.add_vectors(ip_table, vectors)
-        status = connect.create_index(ip_table, index_params)
+        status, mode = connect._cmd("mode")
         assert status.OK()
+        # status, ids = connect.add_vectors(ip_table, vectors)
+        status = connect.create_index(ip_table, index_params)
+        if str(mode) == "GPU" and (index_params["index_type"] == IndexType.IVF_PQ):
+            assert not status.OK()
+        else:
+            assert status.OK()        
         status, result = connect.describe_index(ip_table)
         logging.getLogger().info(result)
         status = connect.drop_index(ip_table)

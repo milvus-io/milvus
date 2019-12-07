@@ -41,7 +41,7 @@ Status
 CountTableRequest::OnExecute() {
     try {
         std::string hdr = "CountTableRequest(table=" + table_name_ + ")";
-        TimeRecorder rc(hdr);
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -61,8 +61,6 @@ CountTableRequest::OnExecute() {
         }
 
         row_count_ = static_cast<int64_t>(row_count);
-
-        rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

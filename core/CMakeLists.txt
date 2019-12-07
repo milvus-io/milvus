@@ -23,6 +23,7 @@ message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# get build time
 MACRO(GET_CURRENT_TIME CURRENT_TIME)
     execute_process(COMMAND "date" +"%Y-%m-%d %H:%M.%S" OUTPUT_VARIABLE ${CURRENT_TIME})
 ENDMACRO(GET_CURRENT_TIME)
@@ -35,6 +36,7 @@ if (NOT DEFINED CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
 endif ()
 
+# get Milvus version via branch name
 set(GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
 
 MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
@@ -57,6 +59,21 @@ endif ()
 set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "${GIT_BRANCH_NAME_REGEX}" MILVUS_VERSION "${MILVUS_VERSION}")
 
+# get last commit id
+MACRO(GET_LAST_COMMIT_ID LAST_COMMIT_ID)
+    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | awk '{print $2}'"
+            OUTPUT_VARIABLE ${LAST_COMMIT_ID})
+ENDMACRO(GET_LAST_COMMIT_ID)
+
+GET_LAST_COMMIT_ID(LAST_COMMIT_ID)
+message(STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
+if (NOT LAST_COMMIT_ID STREQUAL "")
+    string(REGEX REPLACE "\n" "" LAST_COMMIT_ID ${LAST_COMMIT_ID})
+endif ()
+
+set(LAST_COMMIT_ID "${LAST_COMMIT_ID}")
+
+# set build type
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "Release")
 else ()

@@ -36,7 +36,6 @@ struct FaissIVFQuantizer : public Quantizer {
     ~FaissIVFQuantizer() override;
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
-#endif
 
 class IVFSQHybrid : public GPUIVFSQ {
  public:
@@ -93,5 +92,6 @@ class IVFSQHybrid : public GPUIVFSQ {
     int64_t gpu_mode = 0;  // 0,1,2
     int64_t quantizer_gpu_id_ = -1;
 };
+#endif
 
 }  // namespace knowhere
