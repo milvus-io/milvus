@@ -1,7 +1,7 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
-# Milvus 0.6.0 (TODO)
+# Milvus 0.6.0 (2019-12-07)
 
 ## Bug
 - \#228 - memory usage increased slowly during searching vectors
