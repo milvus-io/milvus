@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/PreloadTableRequest.h"
+#include "server/delivery/request/PreloadTableRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -25,15 +25,14 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 PreloadTableRequest::PreloadTableRequest(const std::string& table_name)
-    : GrpcBaseRequest(DQL_REQUEST_GROUP), table_name_(table_name) {
+    : BaseRequest(DQL_REQUEST_GROUP), table_name_(table_name) {
 }
 
 BaseRequestPtr
 PreloadTableRequest::Create(const std::string& table_name) {
-    return std::shared_ptr<GrpcBaseRequest>(new PreloadTableRequest(table_name));
+    return std::shared_ptr<BaseRequest>(new PreloadTableRequest(table_name));
 }
 
 Status
@@ -60,6 +59,5 @@ PreloadTableRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

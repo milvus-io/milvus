@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/CreateIndexRequest.h"
+#include "server/delivery/request/CreateIndexRequest.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
@@ -27,29 +27,30 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-CreateIndexRequest::CreateIndexRequest(const ::milvus::grpc::IndexParam* index_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), index_param_(index_param) {
+CreateIndexRequest::CreateIndexRequest(const std::string& table_name, int32_t index_type, int32_t nlist)
+    : BaseRequest(DDL_DML_REQUEST_GROUP),
+      table_name_(table_name),
+      index_type_(index_type),
+      nlist_(nlist) {
 }
 
 BaseRequestPtr
-CreateIndexRequest::Create(const ::milvus::grpc::IndexParam* index_param) {
-    if (index_param == nullptr) {
-        SERVER_LOG_ERROR << "grpc input is null!";
-        return nullptr;
-    }
-    return std::shared_ptr<GrpcBaseRequest>(new CreateIndexRequest(index_param));
+CreateIndexRequest::Create(const std::string& table_name, int32_t index_type, int32_t nlist) {
+//    if (index_param == nullptr) {
+//        SERVER_LOG_ERROR << "grpc input is null!";
+//        return nullptr;
+//    }
+    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(table_name, index_type, nlist));
 }
 
 Status
 CreateIndexRequest::OnExecute() {
     try {
-        std::string hdr = "CreateIndexRequest(table=" + index_param_->table_name() + ")";
+        std::string hdr = "CreateIndexRequest(table=" + table_name_ +")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        std::string table_name_ = index_param_->table_name();
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
@@ -65,13 +66,12 @@ CreateIndexRequest::OnExecute() {
             return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
         }
 
-        auto& grpc_index = index_param_->index();
-        status = ValidationUtil::ValidateTableIndexType(grpc_index.index_type());
+        status = ValidationUtil::ValidateTableIndexType(index_type_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateTableIndexNlist(grpc_index.nlist());
+        status = ValidationUtil::ValidateTableIndexNlist(nlist_);
         if (!status.ok()) {
             return status;
         }
@@ -84,7 +84,7 @@ CreateIndexRequest::OnExecute() {
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
-        if (s.ok() && grpc_index.index_type() == (int)engine::EngineType::FAISS_PQ &&
+        if (s.ok() && index_type_ == (int)engine::EngineType::FAISS_PQ &&
             table_info.metric_type_ == (int)engine::MetricType::IP) {
             return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
         }
@@ -92,8 +92,8 @@ CreateIndexRequest::OnExecute() {
 
         // step 2: check table existence
         engine::TableIndex index;
-        index.engine_type_ = grpc_index.index_type();
-        index.nlist_ = grpc_index.nlist();
+        index.engine_type_ = index_type_;
+        index.nlist_ = nlist_;
         status = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!status.ok()) {
             return status;
@@ -105,6 +105,5 @@ CreateIndexRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

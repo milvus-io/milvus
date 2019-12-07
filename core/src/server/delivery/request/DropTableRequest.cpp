@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/DropTableRequest.h"
+#include "server/delivery/request/DropTableRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -28,12 +28,12 @@ namespace milvus {
 namespace server {
 
 DropTableRequest::DropTableRequest(const std::string& table_name)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+    : BaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name) {
 }
 
 BaseRequestPtr
 DropTableRequest::Create(const std::string& table_name) {
-    return std::shared_ptr<GrpcBaseRequest>(new DropTableRequest(table_name));
+    return std::shared_ptr<BaseRequest>(new DropTableRequest(table_name));
 }
 
 Status

@@ -17,14 +17,14 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 #include <string>
 
 namespace milvus {
 namespace server {
 
-class DropTableRequest : public GrpcBaseRequest {
+class DropTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::string& table_name);

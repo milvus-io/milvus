@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/CreatePartitionRequest.h"
+#include "server/delivery/request/CreatePartitionRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -26,10 +26,9 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 CreatePartitionRequest::CreatePartitionRequest(const ::milvus::grpc::PartitionParam* partition_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
+    : BaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
 }
 
 BaseRequestPtr
@@ -38,7 +37,7 @@ CreatePartitionRequest::Create(const ::milvus::grpc::PartitionParam* partition_p
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
-    return std::shared_ptr<GrpcBaseRequest>(new CreatePartitionRequest(partition_param));
+    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(partition_param));
 }
 
 Status
@@ -82,6 +81,5 @@ CreatePartitionRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

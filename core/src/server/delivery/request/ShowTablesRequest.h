@@ -17,13 +17,12 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class ShowTablesRequest : public GrpcBaseRequest {
+class ShowTablesRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(::milvus::grpc::TableNameList* table_name_list);
@@ -38,6 +37,5 @@ class ShowTablesRequest : public GrpcBaseRequest {
     ::milvus::grpc::TableNameList* table_name_list_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/ShowTablesRequest.h"
+#include "server/delivery/request/ShowTablesRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -25,15 +25,14 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 ShowTablesRequest::ShowTablesRequest(::milvus::grpc::TableNameList* table_name_list)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), table_name_list_(table_name_list) {
+    : BaseRequest(INFO_REQUEST_GROUP), table_name_list_(table_name_list) {
 }
 
 BaseRequestPtr
 ShowTablesRequest::Create(::milvus::grpc::TableNameList* table_name_list) {
-    return std::shared_ptr<GrpcBaseRequest>(new ShowTablesRequest(table_name_list));
+    return std::shared_ptr<BaseRequest>(new ShowTablesRequest(table_name_list));
 }
 
 Status
@@ -52,6 +51,5 @@ ShowTablesRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

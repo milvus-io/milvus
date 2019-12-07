@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/InsertRequest.h"
+#include "server/delivery/request/InsertRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -27,41 +27,56 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-InsertRequest::InsertRequest(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), insert_param_(insert_param), record_ids_(record_ids) {
+InsertRequest::InsertRequest(const std::string& table_name,
+                             std::vector<std::vector<float>>& records_array,
+                             std::vector<int64_t>& id_array,
+                             const std::string& partition_tag,
+                             std::vector<int64_t>& id_out_array) : BaseRequest(DDL_DML_REQUEST_GROUP),
+                                                                   table_name_(table_name),
+                                                                   records_array_(records_array),
+                                                                   id_array_(id_array),
+                                                                   partition_tag_(partition_tag),
+                                                                   response_ids_(id_out_array) {
 }
 
 BaseRequestPtr
-InsertRequest::Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids) {
-    if (insert_param == nullptr) {
-        SERVER_LOG_ERROR << "grpc input is null!";
-        return nullptr;
-    }
-    return std::shared_ptr<GrpcBaseRequest>(new InsertRequest(insert_param, record_ids));
+InsertRequest::Create(const std::string& table_name,
+                      std::vector<std::vector<float>>& records_array,
+                      std::vector<int64_t>& id_array,
+                      const std::string& partition_tag,
+                      std::vector<int64_t>& id_out_array) {
+//    if (insert_param == nullptr) {
+//        SERVER_LOG_ERROR << "grpc input is null!";
+//        return nullptr;
+//    }
+    return std::shared_ptr<BaseRequest>(new InsertRequest(table_name,
+                                                          records_array,
+                                                          id_array,
+                                                          partition_tag,
+                                                          id_out_array));
 }
 
 Status
 InsertRequest::OnExecute() {
     try {
-        std::string hdr = "InsertRequest(table=" + insert_param_->table_name() +
-                          ", n=" + std::to_string(insert_param_->row_record_array_size()) +
-                          ", partition_tag=" + insert_param_->partition_tag() + ")";
+        std::string hdr = "InsertRequest(table=" + table_name_ +
+                          ", n=" + std::to_string(records_array_.size()) +
+                          ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(insert_param_->table_name());
+        auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
         }
-        if (insert_param_->row_record_array().empty()) {
+        if (records_array_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
-        if (!insert_param_->row_id_array().empty()) {
-            if (insert_param_->row_id_array().size() != insert_param_->row_record_array_size()) {
+        if (!id_array_.empty()) {
+            if (id_array_.size() != records_array_.size()) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID,
                               "The size of vector ID array must be equal to the size of the vector.");
             }
@@ -69,11 +84,11 @@ InsertRequest::OnExecute() {
 
         // step 2: check table existence
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = insert_param_->table_name();
+        table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(insert_param_->table_name()));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
@@ -81,7 +96,7 @@ InsertRequest::OnExecute() {
 
         // step 3: check table flag
         // all user provide id, or all internal id
-        bool user_provide_ids = !insert_param_->row_id_array().empty();
+        bool user_provide_ids = !id_array_.empty();
         // user already provided id before, all insert action require user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
@@ -104,44 +119,44 @@ InsertRequest::OnExecute() {
 #endif
 
         // step 4: prepare float data
-        std::vector<float> vec_f(insert_param_->row_record_array_size() * table_info.dimension_, 0);
+        std::vector<float> vec_f(records_array_.size() * table_info.dimension_, 0);
 
         // TODO(yk): change to one dimension array or use multiple-thread to copy the data
-        for (size_t i = 0; i < insert_param_->row_record_array_size(); i++) {
-            if (insert_param_->row_record_array(i).vector_data().empty()) {
+        for (size_t i = 0; i < records_array_.size(); i++) {
+            if (records_array_.at(i).empty()) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                               "The vector dimension must be equal to the table dimension.");
             }
-            uint64_t vec_dim = insert_param_->row_record_array(i).vector_data().size();
+            uint64_t vec_dim = records_array_.at(i).size();
             if (vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 std::string error_msg = "The vector dimension must be equal to the table dimension.";
                 return Status(error_code, error_msg);
             }
-            memcpy(&vec_f[i * table_info.dimension_], insert_param_->row_record_array(i).vector_data().data(),
+            memcpy(&vec_f[i * table_info.dimension_], records_array_.at(i).data(),
                    table_info.dimension_ * sizeof(float));
         }
 
         // step 5: insert vectors
-        auto vec_count = static_cast<uint64_t>(insert_param_->row_record_array_size());
-        std::vector<int64_t> vec_ids(insert_param_->row_id_array_size(), 0);
-        if (!insert_param_->row_id_array().empty()) {
-            const int64_t* src_data = insert_param_->row_id_array().data();
+        auto vec_count = static_cast<uint64_t>(records_array_.size());
+        std::vector<int64_t> vec_ids(id_array_.size(), 0);
+        if (!id_array_.empty()) {
+            const int64_t* src_data = id_array_.data();
             int64_t* target_data = vec_ids.data();
-            memcpy(target_data, src_data, static_cast<size_t>(sizeof(int64_t) * insert_param_->row_id_array_size()));
+            memcpy(target_data, src_data, static_cast<size_t>(sizeof(int64_t) * id_array_.size()));
         }
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), insert_param_->partition_tag(), vec_count,
+        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count,
                                                 vec_f.data(), vec_ids);
         if (!status.ok()) {
             return status;
         }
         for (int64_t id : vec_ids) {
-            record_ids_->add_vector_id_array(id);
+            response_ids_.push_back(id);
         }
 
-        auto ids_size = record_ids_->vector_id_array_size();
+        auto ids_size = response_ids_.size();
         if (ids_size != vec_count) {
             std::string msg =
                 "Add " + std::to_string(vec_count) + " vectors but only return " + std::to_string(ids_size) + " id";
@@ -151,7 +166,7 @@ InsertRequest::OnExecute() {
         // step 6: update table flag
         user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                          : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
-        status = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(), table_info.flag_);
+        status = DBWrapper::DB()->UpdateTableFlag(table_name_, table_info.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
@@ -166,6 +181,5 @@ InsertRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

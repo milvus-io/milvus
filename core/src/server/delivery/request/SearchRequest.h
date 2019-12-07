@@ -17,16 +17,15 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 #include <string>
 #include <vector>
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class SearchRequest : public GrpcBaseRequest {
+class SearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
@@ -45,6 +44,5 @@ class SearchRequest : public GrpcBaseRequest {
     ::milvus::grpc::TopKQueryResult* topk_result_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

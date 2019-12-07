@@ -17,15 +17,14 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 #include <string>
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class DescribeIndexRequest : public GrpcBaseRequest {
+class DescribeIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::string& table_name, ::milvus::grpc::IndexParam* index_param);
@@ -41,6 +40,5 @@ class DescribeIndexRequest : public GrpcBaseRequest {
     ::milvus::grpc::IndexParam* index_param_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

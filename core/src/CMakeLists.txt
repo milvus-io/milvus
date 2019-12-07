@@ -17,6 +17,8 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
+find_package(oatpp 0.19.10 REQUIRED)
+
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
@@ -206,6 +208,7 @@ target_link_libraries(metrics ${metrics_lib})
 set(server_libs
         milvus_engine
         metrics
+        oatpp::oatpp
         )
 
 add_executable(milvus_server

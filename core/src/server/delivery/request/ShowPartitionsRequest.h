@@ -17,15 +17,14 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 #include <string>
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class ShowPartitionsRequest : public GrpcBaseRequest {
+class ShowPartitionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
@@ -41,6 +40,5 @@ class ShowPartitionsRequest : public GrpcBaseRequest {
     ::milvus::grpc::PartitionList* partition_list_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

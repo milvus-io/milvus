@@ -17,28 +17,38 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class InsertRequest : public GrpcBaseRequest {
+class InsertRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
+    Create(const std::string& table_name,
+           std::vector<std::vector<float>>& records_array,
+           std::vector<int64_t>& id_array,
+           const std::string& partition_tag,
+           std::vector<int64_t>& id_out_array);
 
  protected:
-    InsertRequest(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
+    InsertRequest(const std::string& table_name,
+                  std::vector<std::vector<float>>& records_array,
+                  std::vector<int64_t>& id_array,
+                  const std::string& partition_tag,
+                  std::vector<int64_t>& id_out_array);
 
     Status
     OnExecute() override;
 
  private:
-    const ::milvus::grpc::InsertParam* insert_param_;
-    ::milvus::grpc::VectorIds* record_ids_;
+    const std::string& table_name_;
+    std::vector<std::vector<float>>& records_array_;
+    std::vector<int64_t>& id_array_;
+    const std::string& partition_tag_;
+
+    std::vector<int64_t>& response_ids_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

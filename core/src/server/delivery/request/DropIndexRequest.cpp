@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/DropIndexRequest.h"
+#include "server/delivery/request/DropIndexRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -25,15 +25,14 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 DropIndexRequest::DropIndexRequest(const std::string& table_name)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+    : BaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name) {
 }
 
 BaseRequestPtr
 DropIndexRequest::Create(const std::string& table_name) {
-    return std::shared_ptr<GrpcBaseRequest>(new DropIndexRequest(table_name));
+    return std::shared_ptr<BaseRequest>(new DropIndexRequest(table_name));
 }
 
 Status
@@ -70,6 +69,5 @@ DropIndexRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

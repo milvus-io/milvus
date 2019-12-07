@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/DescribeIndexRequest.h"
+#include "server/delivery/request/DescribeIndexRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -25,15 +25,14 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 DescribeIndexRequest::DescribeIndexRequest(const std::string& table_name, ::milvus::grpc::IndexParam* index_param)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
+    : BaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
 }
 
 BaseRequestPtr
 DescribeIndexRequest::Create(const std::string& table_name, ::milvus::grpc::IndexParam* index_param) {
-    return std::shared_ptr<GrpcBaseRequest>(new DescribeIndexRequest(table_name, index_param));
+    return std::shared_ptr<BaseRequest>(new DescribeIndexRequest(table_name, index_param));
 }
 
 Status
@@ -65,6 +64,5 @@ DescribeIndexRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/DeleteByDateRequest.h"
+#include "server/delivery/request/DeleteByDateRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -27,10 +27,9 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 DeleteByDateRequest::DeleteByDateRequest(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), delete_by_range_param_(delete_by_range_param) {
+    : BaseRequest(DDL_DML_REQUEST_GROUP), delete_by_range_param_(delete_by_range_param) {
 }
 
 BaseRequestPtr
@@ -40,7 +39,7 @@ DeleteByDateRequest::Create(const ::milvus::grpc::DeleteByDateParam* delete_by_r
         return nullptr;
     }
 
-    return std::shared_ptr<GrpcBaseRequest>(new DeleteByDateRequest(delete_by_range_param));
+    return std::shared_ptr<BaseRequest>(new DeleteByDateRequest(delete_by_range_param));
 }
 
 Status
@@ -96,6 +95,5 @@ DeleteByDateRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

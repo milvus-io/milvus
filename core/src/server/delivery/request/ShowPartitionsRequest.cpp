@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/ShowPartitionsRequest.h"
+#include "server/delivery/request/ShowPartitionsRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -26,16 +26,15 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 ShowPartitionsRequest::ShowPartitionsRequest(const std::string& table_name,
                                              ::milvus::grpc::PartitionList* partition_list)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), partition_list_(partition_list) {
+    : BaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), partition_list_(partition_list) {
 }
 
 BaseRequestPtr
 ShowPartitionsRequest::Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list) {
-    return std::shared_ptr<GrpcBaseRequest>(new ShowPartitionsRequest(table_name, partition_list));
+    return std::shared_ptr<BaseRequest>(new ShowPartitionsRequest(table_name, partition_list));
 }
 
 Status
@@ -63,6 +62,5 @@ ShowPartitionsRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

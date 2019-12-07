@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/DropPartitionRequest.h"
+#include "server/delivery/request/DropPartitionRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -28,12 +28,12 @@ namespace milvus {
 namespace server {
 
 DropPartitionRequest::DropPartitionRequest(const ::milvus::grpc::PartitionParam* partition_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
+    : BaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
 }
 
 BaseRequestPtr
 DropPartitionRequest::Create(const ::milvus::grpc::PartitionParam* partition_param) {
-    return std::shared_ptr<GrpcBaseRequest>(new DropPartitionRequest(partition_param));
+    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(partition_param));
 }
 
 Status

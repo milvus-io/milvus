@@ -17,13 +17,12 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class DeleteByDateRequest : public GrpcBaseRequest {
+class DeleteByDateRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
@@ -38,6 +37,5 @@ class DeleteByDateRequest : public GrpcBaseRequest {
     const ::milvus::grpc::DeleteByDateParam* delete_by_range_param_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

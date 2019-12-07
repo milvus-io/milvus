@@ -17,27 +17,27 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
-class CreateIndexRequest : public GrpcBaseRequest {
+class CreateIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::IndexParam* index_param);
+    Create(const std::string& table_name, int32_t index_type, int32_t nlist);
 
  protected:
-    explicit CreateIndexRequest(const ::milvus::grpc::IndexParam* index_param);
+    explicit CreateIndexRequest(const std::string& table_name, int32_t index_type, int32_t nlist);
 
     Status
     OnExecute() override;
 
  private:
-    const ::milvus::grpc::IndexParam* index_param_;
+    const std::string& table_name_;
+    const int32_t index_type_;
+    const int32_t nlist_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

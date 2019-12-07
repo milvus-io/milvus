@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/grpc_impl/request/SearchRequest.h"
+#include "server/delivery/request/SearchRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -25,11 +25,10 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 SearchRequest::SearchRequest(const ::milvus::grpc::SearchParam* search_vector_infos,
                              const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response)
-    : GrpcBaseRequest(DQL_REQUEST_GROUP),
+    : BaseRequest(DQL_REQUEST_GROUP),
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
       topk_result_(response) {
@@ -42,7 +41,7 @@ SearchRequest::Create(const ::milvus::grpc::SearchParam* search_vector_infos,
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
-    return std::shared_ptr<GrpcBaseRequest>(new SearchRequest(search_vector_infos, file_id_array, response));
+    return std::shared_ptr<BaseRequest>(new SearchRequest(search_vector_infos, file_id_array, response));
 }
 
 Status
@@ -185,6 +184,5 @@ SearchRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

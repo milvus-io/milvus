@@ -91,12 +91,10 @@ ErrorMap(ErrorCode code) {
 ::grpc::Status
 GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
                                 ::milvus::grpc::Status* response) {
-    Status status = RequestHandler::CreateTable(
-        request->table_name(),
-        request->dimension(),
-        request->index_file_size(),
-        request->metric_type());
-
+    Status status = RequestHandler::CreateTable(request->table_name(),
+                                                request->dimension(),
+                                                request->index_file_size(),
+                                                request->metric_type());
     ConvertToProtoStatus(status, *response);
 
     return ::grpc::Status::OK;
@@ -111,8 +109,9 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grp
     ::milvus::grpc::Status grpc_status;
     ConvertToProtoStatus(status, grpc_status);
     response->set_bool_reply(has_table);
-    response->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_status()->set_error_code(grpc_status.error_code());
+    response->set_allocated_status(&grpc_status);
+//    response->mutable_status()->set_reason(grpc_status.reason());
+//    response->mutable_status()->set_error_code(grpc_status.error_code());
 
     return ::grpc::Status::OK;
 }
@@ -120,27 +119,49 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grp
 ::grpc::Status
 GrpcRequestHandler::DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                               ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = DropTableRequest::Create(request->table_name());
-    RequestScheduler::ExecRequest(request_ptr, response);
+    Status status = RequestHandler::DropTable(request->table_name());
+    ConvertToProtoStatus(status, *response);
+
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status
 GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                 ::milvus::grpc::Status* response) {
-    BaseRequestPtr request_ptr = CreateIndexRequest::Create(request);
-    RequestScheduler::ExecRequest(request_ptr, response);
+    Status status = RequestHandler::CreateIndex(request->table_name(),
+                                                request->index().index_type(),
+                                                request->index().nlist());
+    ConvertToProtoStatus(status, *response);
+
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status
 GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
                            ::milvus::grpc::VectorIds* response) {
-    BaseRequestPtr request_ptr = InsertRequest::Create(request, response);
-    ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_status()->set_error_code(grpc_status.error_code());
+
+    std::vector<std::vector<float>> record_array;
+    for (size_t i = 0; i < request->row_record_array_size(); i++) {
+        std::vector<float> record(request->row_record_array(i).vector_data().data(),
+                                  request->row_record_array(i).vector_data().data()
+                                  + request->row_record_array(i).vector_data_size());
+        record_array.push_back(record);
+    }
+
+    std::vector<int64_t> id_array(request->row_id_array().data(),
+                                  request->row_id_array().data() + request->row_record_array_size());
+    std::vector<int64_t> id_out_array;
+    Status status = RequestHandler::Insert(request->table_name(),
+                                           record_array,
+                                           id_array,
+                                           request->partition_tag(),
+                                           id_out_array);
+
+    ConvertToProtoStatus(status, *response->mutable_status());
+    for (auto& id : id_out_array) {
+        response->add_vector_id_array(id);
+    }
+
     return ::grpc::Status::OK;
 }
 
