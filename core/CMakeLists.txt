@@ -69,9 +69,10 @@ GET_LAST_COMMIT_ID(LAST_COMMIT_ID)
 message(STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
 if (NOT LAST_COMMIT_ID STREQUAL "")
     string(REGEX REPLACE "\n" "" LAST_COMMIT_ID ${LAST_COMMIT_ID})
+    set(LAST_COMMIT_ID "${LAST_COMMIT_ID}")
+else ()
+    set(LAST_COMMIT_ID "Unknown")
 endif ()
-
-set(LAST_COMMIT_ID "${LAST_COMMIT_ID}")
 
 # set build type
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
