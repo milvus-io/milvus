@@ -371,7 +371,7 @@ TEST_F(MetaTest, INDEX_TEST) {
     status = impl_->DropTableIndex(table_id);
     ASSERT_TRUE(status.ok());
     status = impl_->DescribeTableIndex(table_id, index_out);
-    ASSERT_NE(index_out.metric_type_, index.metric_type_);
+    ASSERT_EQ(index_out.metric_type_, index.metric_type_);
     ASSERT_NE(index_out.nlist_, index.nlist_);
     ASSERT_NE(index_out.engine_type_, index.engine_type_);
 
