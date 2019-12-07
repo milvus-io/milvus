@@ -109,10 +109,11 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext* context, const ::milvus::grp
 
     Status status = RequestHandler::HasTable(request->table_name(), has_table);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+    ConvertToProtoStatus(status, grpc_status);
     response->set_bool_reply(has_table);
     response->mutable_status()->set_reason(grpc_status.reason());
     response->mutable_status()->set_error_code(grpc_status.error_code());
+
     return ::grpc::Status::OK;
 }
 

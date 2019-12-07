@@ -26,7 +26,6 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 DropTableRequest::DropTableRequest(const std::string& table_name)
     : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name) {
@@ -78,6 +77,5 @@ DropTableRequest::OnExecute() {
     return Status::OK();
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

@@ -26,7 +26,6 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 DropPartitionRequest::DropPartitionRequest(const ::milvus::grpc::PartitionParam* partition_param)
     : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
@@ -81,6 +80,5 @@ DropPartitionRequest::OnExecute() {
     }
 }
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus

@@ -23,7 +23,6 @@
 
 namespace milvus {
 namespace server {
-namespace grpc {
 
 class DropTableRequest : public GrpcBaseRequest {
  public:
@@ -40,6 +39,5 @@ class DropTableRequest : public GrpcBaseRequest {
     std::string table_name_;
 };
 
-}  // namespace grpc
 }  // namespace server
 }  // namespace milvus
