@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <opentracing/mocktracer/tracer.h>
 
 #include "scheduler/task/BuildIndexTask.h"
 #include "scheduler/task/SearchTask.h"
@@ -24,8 +25,17 @@ namespace milvus {
 namespace scheduler {
 
 TEST(TaskTest, INVALID_INDEX) {
+    auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
+    opentracing::mocktracer::MockTracerOptions tracer_options;
+    auto mock_tracer =
+        std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+    auto mock_span = mock_tracer->StartSpan("mock_span");
+    auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+    dummy_context->SetTraceContext(trace_context);
+
+    TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
     auto search_task =
-        std::make_shared<XSearchTask>(std::make_shared<server::Context>("dummy_request_id"), nullptr, nullptr);
+        std::make_shared<XSearchTask>(dummy_context, dummy_file, nullptr);
     search_task->Load(LoadType::TEST, 10);
 
     auto build_task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);
