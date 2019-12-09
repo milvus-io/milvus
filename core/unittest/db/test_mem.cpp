@@ -257,8 +257,8 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), GetTableName(), tags, topk, 1,
-                          nprobe, search.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, 1, nprobe, search.data(), result_ids,
+                          result_distances);
         ASSERT_EQ(result_ids[0], pair.first);
         ASSERT_LT(result_distances[0], 1e-4);
     }
@@ -330,8 +330,8 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
             START_TIMER;
 
             std::vector<std::string> tags;
-            stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), GetTableName(), tags, k,
-                              qb, 10, qxb.data(), result_ids, result_distances);
+            stat =
+                db_->Query(dummy_context_, GetTableName(), tags, k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 

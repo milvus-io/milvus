@@ -98,8 +98,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
 
             START_TIMER;
             std::vector<std::string> tags;
-            stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), TABLE_NAME, tags, k, qb,
-                              10, qxb.data(), result_ids, result_distances);
+            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
@@ -196,8 +195,7 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), TABLE_NAME, tags, k, nq, 10,
-                      xq.data(), result_ids, result_distances);
+    stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
 }
 
@@ -358,8 +356,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), TABLE_NAME, tags, 10, nq, 10,
-                          xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, 10, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -367,8 +364,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         tags.clear();
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), TABLE_NAME, tags, 10, nq, 10,
-                          xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, 10, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -376,8 +372,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         tags.push_back("\\d");
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(std::make_shared<milvus::server::Context>("dummy_request_id"), TABLE_NAME, tags, 10, nq, 10,
-                          xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, 10, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
     }
