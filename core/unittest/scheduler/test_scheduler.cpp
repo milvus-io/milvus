@@ -37,10 +37,10 @@ class MockVecIndex : public engine::VecIndex {
              const float* xt = nullptr) {
     }
 
-//    engine::VecIndexPtr
-//    Clone() override {
-//        return milvus::engine::VecIndexPtr();
-//    }
+    //    engine::VecIndexPtr
+    //    Clone() override {
+    //        return milvus::engine::VecIndexPtr();
+    //    }
 
     int64_t
     GetDeviceId() override {
@@ -99,8 +99,8 @@ class SchedulerTest : public testing::Test {
     void
     SetUp() override {
         res_mgr_ = std::make_shared<ResourceMgr>();
-        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);
-        ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true, false);
+        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, false);
+        ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, false);
         disk_resource_ = res_mgr_->Add(std::move(disk));
         cpu_resource_ = res_mgr_->Add(std::move(cpu));
 
@@ -143,10 +143,10 @@ class SchedulerTest2 : public testing::Test {
  protected:
     void
     SetUp() override {
-        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);
-        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0, true, false);
-        ResourcePtr cpu1 = ResourceFactory::Create("cpu1", "CPU", 1, true, false);
-        ResourcePtr cpu2 = ResourceFactory::Create("cpu2", "CPU", 2, true, false);
+        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, false);
+        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0, false);
+        ResourcePtr cpu1 = ResourceFactory::Create("cpu1", "CPU", 1, false);
+        ResourcePtr cpu2 = ResourceFactory::Create("cpu2", "CPU", 2, false);
 
         res_mgr_ = std::make_shared<ResourceMgr>();
         disk_ = res_mgr_->Add(std::move(disk));
@@ -163,8 +163,8 @@ class SchedulerTest2 : public testing::Test {
         res_mgr_->Connect("cpu0", "cpu2", IO);
 
 #ifdef MILVUS_GPU_VERSION
-        ResourcePtr gpu0 = ResourceFactory::Create("gpu0", "GPU", 0, true, true);
-        ResourcePtr gpu1 = ResourceFactory::Create("gpu1", "GPU", 1, true, true);
+        ResourcePtr gpu0 = ResourceFactory::Create("gpu0", "GPU", 0);
+        ResourcePtr gpu1 = ResourceFactory::Create("gpu1", "GPU", 1);
         gpu_0_ = res_mgr_->Add(std::move(gpu0));
         gpu_1_ = res_mgr_->Add(std::move(gpu1));
         res_mgr_->Connect("cpu1", "gpu0", PCIE1);

@@ -28,8 +28,8 @@ operator<<(std::ostream& out, const CpuResource& resource) {
     return out;
 }
 
-CpuResource::CpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : Resource(std::move(name), ResourceType::CPU, device_id, enable_loader, enable_executor) {
+CpuResource::CpuResource(std::string name, uint64_t device_id, bool enable_executor)
+    : Resource(std::move(name), ResourceType::CPU, device_id, enable_executor) {
 }
 
 void

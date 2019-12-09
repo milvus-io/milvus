@@ -28,8 +28,8 @@ operator<<(std::ostream& out, const TestResource& resource) {
     return out;
 }
 
-TestResource::TestResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : Resource(std::move(name), ResourceType::TEST, device_id, enable_loader, enable_executor) {
+TestResource::TestResource(std::string name, uint64_t device_id, bool enable_executor)
+    : Resource(std::move(name), ResourceType::TEST, device_id, enable_executor) {
 }
 
 void
