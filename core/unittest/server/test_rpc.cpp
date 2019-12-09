@@ -55,9 +55,9 @@ class RpcHandlerTest : public testing::Test {
     SetUp() override {
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
-        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
-        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, true));
-        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
+        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
+        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
+        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0));
 
         auto default_conn = milvus::scheduler::Connection("IO", 500.0);
         auto PCIE = milvus::scheduler::Connection("IO", 11000.0);

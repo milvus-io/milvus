@@ -26,7 +26,7 @@ namespace scheduler {
 
 class CpuResource : public Resource {
  public:
-    explicit CpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
+    explicit CpuResource(std::string name, uint64_t device_id, bool enable_executor);
 
     friend std::ostream&
     operator<<(std::ostream& out, const CpuResource& resource);

@@ -46,10 +46,10 @@ std::mutex BuildMgrInst::mutex_;
 void
 load_simple_config() {
     // create and connect
-    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
+    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, false));
 
     auto io = Connection("io", 500);
-    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, true));
+    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
     // get resources
@@ -79,13 +79,12 @@ load_simple_config() {
         }
 
         for (auto& gpu_id : gpu_ids) {
-            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id));
             ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
         }
 
         for (auto& not_find_id : not_find_build_ids) {
-            ResMgrInst::GetInstance()->Add(
-                ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id, true, true));
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id));
             ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
         }
     }

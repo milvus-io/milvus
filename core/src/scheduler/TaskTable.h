@@ -119,9 +119,6 @@ class TaskTable : public interface::dumpable {
         subscriber_ = std::move(subscriber);
     }
 
-    /*
-     * Put one task;
-     */
     void
     Put(TaskPtr task, TaskTableItemPtr from = nullptr);
 
