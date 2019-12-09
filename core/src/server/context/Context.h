@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include <grpcpp/server_context.h>
-
 #include <memory>
 #include <string>
 #include <unordered_map>
