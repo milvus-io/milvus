@@ -66,6 +66,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
     <td align="center"><a href="https://github.com/gaolizhou"><img src="https://avatars2.githubusercontent.com/u/2884044?v=4" width="100px;" alt=""/><br /><sub><b>gaolizhou</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=gaolizhou" title="Code">💻</a></td>
     <td align="center"><a href="https://github.com/akihoni"><img src="https://avatars0.githubusercontent.com/u/36330442?v=4" width="100px;" alt=""/><br /><sub><b>Sijie Zhang</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=akihoni" title="Documentation">📖</a></td>
     <td align="center"><a href="https://github.com/PizzaL"><img src="https://avatars0.githubusercontent.com/u/5666666?v=4" width="100px;" alt=""/><br /><sub><b>PizzaL</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=PizzaL" title="Code">💻</a></td>
+    <td align="center"><a href="https://github.com/levylll"><img src="https://avatars2.githubusercontent.com/u/5645285?v=4" width="100px;" alt=""/><br /><sub><b>levylll</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=levylll" title="Code">💻</a></td>
   </tr>
 </table>
 
