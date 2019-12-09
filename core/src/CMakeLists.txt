@@ -208,8 +208,8 @@ target_link_libraries(metrics ${metrics_lib})
 
 add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
 set(tracing_lib
-        /usr/local/lib/libopentracing.a
-        /usr/local/lib/libopentracing_mocktracer.a
+        opentracing
+        opentracing_mocktracer
         ${grpc_lib}
         pthread
         z
