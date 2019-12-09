@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+
 #include "scheduler/task/BuildIndexTask.h"
 #include "scheduler/task/SearchTask.h"
 
@@ -23,7 +24,8 @@ namespace milvus {
 namespace scheduler {
 
 TEST(TaskTest, INVALID_INDEX) {
-    auto search_task = std::make_shared<XSearchTask>(nullptr, nullptr);
+    auto search_task =
+        std::make_shared<XSearchTask>(std::make_shared<server::Context>("dummy_request_id"), nullptr, nullptr);
     search_task->Load(LoadType::TEST, 10);
 
     auto build_task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);

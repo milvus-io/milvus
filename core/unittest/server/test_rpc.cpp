@@ -88,7 +88,7 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::DBWrapper::GetInstance().StartService();
 
         // initialize handler, create table
-        handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>();
+        handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
         ::grpc::ServerContext context;
         ::milvus::grpc::TableSchema request;
         ::milvus::grpc::Status status;
@@ -468,7 +468,7 @@ class DummyRequest : public milvus::server::grpc::GrpcBaseRequest {
     }
 
  public:
-    explicit DummyRequest(std::string& dummy) : GrpcBaseRequest(dummy) {
+    explicit DummyRequest(std::string& dummy) : GrpcBaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
     }
 };
 
