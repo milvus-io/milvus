@@ -17,15 +17,12 @@
 
 #include "sdk/examples/partition/src/ClientTest.h"
 #include "MilvusApi.h"
+#include "sdk/examples/utils/TimeRecorder.h"
 #include "sdk/examples/utils/Utils.h"
 
-#include <src/sdk/examples/utils/TimeRecorder.h>
-#include <time.h>
-#include <unistd.h>
 #include <chrono>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,7 +39,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-constexpr int32_t N_LIST = 15000;
+constexpr int32_t N_LIST = 16384;
 constexpr int32_t PARTITION_COUNT = 5;
 constexpr int32_t TARGET_PARTITION = 3;
 
@@ -141,18 +138,18 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {  // search vectors
         std::cout << "Search in correct partition" << std::endl;
-        std::vector<std::string> partiton_tags = {std::to_string(TARGET_PARTITION)};
+        std::vector<std::string> partition_tags = {std::to_string(TARGET_PARTITION)};
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
                                     topk_query_result);
         std::cout << "Search in wrong partition" << std::endl;
-        partiton_tags = {"0"};
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
+        partition_tags = {"0"};
+        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
                                     topk_query_result);
 
         std::cout << "Search by regex matched partition tag" << std::endl;
-        partiton_tags = {"\\d"};
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
+        partition_tags = {"\\d"};
+        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
                                     topk_query_result);
     }
 
@@ -191,9 +188,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {  // search vectors
         std::cout << "Search in whole table" << std::endl;
-        std::vector<std::string> partiton_tags;
+        std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partiton_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
                                     topk_query_result);
     }
 

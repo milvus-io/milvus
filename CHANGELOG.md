@@ -1,7 +1,7 @@
 # Changelog
 
 Please mark all change in change log and use the ticket from JIRA.
-# Milvus 0.6.0 (TODO)
+# Milvus 0.6.0 (2019-12-07)
 
 ## Bug
 - \#228 - memory usage increased slowly during searching vectors
@@ -40,10 +40,21 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#552 - Server down during building index_type: IVF_PQ using GPU-edition
 - \#561 - Milvus server should report exception/error message or terminate on mysql metadata backend error
 - \#579 - Build index hang in GPU version when gpu_resources disabled
+- \#596 - Frequently insert operation cost too much disk space
 - \#599 - Build index log is incorrect
 - \#602 - Optimizer specify wrong gpu_id
 - \#606 - No log generated during building index with CPU
+- \#616 - IP search metric_type is not supported by IVF_PQ index
 - \#631 - FAISS isn't compiled with O3 option
+- \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
+- \#649 - Typo "partiton" should be "partition"
+- \#654 - Random crash when frequently insert vector one by one
+- \#658 - Milvus error out when building SQ8H index without GPU resources
+- \#668 - Update badge of README
+- \#670 - Random failure of unittest db_test::SEARCH_TEST
+- \#674 - Server down in stability test
+- \#696 - Metric_type changed from IP to L2
+- \#705 - Fix search SQ8H crash without GPU resource
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -57,6 +68,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#502 - C++ SDK support IVFPQ and SPTAG
 - \#560 - Add version in server config file
 - \#605 - Print more messages when server start
+- \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
+- \#709 - Show last commit id when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version

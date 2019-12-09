@@ -91,7 +91,7 @@ class SqliteMetaImpl : public Meta {
     DropPartition(const std::string& partition_name) override;
 
     Status
-    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partiton_schema_array) override;
+    ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) override;
 
     Status
     GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
@@ -120,10 +120,7 @@ class SqliteMetaImpl : public Meta {
     CleanUpShadowFiles() override;
 
     Status
-    CleanUpCacheWithTTL(uint64_t seconds) override;
-
-    Status
-    CleanUpFilesWithTTL(uint64_t seconds) override;
+    CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) override;
 
     Status
     DropAll() override;

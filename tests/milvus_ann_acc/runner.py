@@ -55,9 +55,9 @@ def recall_calc(result_ids, true_ids, top_k, recall_k):
     sum_intersect_num = 0
     recall = 0.0
     for index, result_item in enumerate(result_ids):
-        if len(set(true_ids[index][:top_k])) != len(set(result_item)):
-            logger.warning("Error happened: query result length is wrong")
-            continue
+        # if len(set(true_ids[index][:top_k])) != len(set(result_item)):
+        #     logger.warning("Error happened: query result length is wrong")
+        #     continue
         tmp = set(true_ids[index][:recall_k]).intersection(set(result_item))
         sum_intersect_num = sum_intersect_num + len(tmp)
     recall = round(sum_intersect_num / (len(result_ids) * recall_k), 4)

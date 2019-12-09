@@ -5,8 +5,9 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.5.3-yellowgreen)
-![Release_date](https://img.shields.io/badge/release%20date-November-yellowgreen)
+![Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
+![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
 
 
 # Milvus へようこそ
@@ -15,9 +16,9 @@
 
 Milvusは世界中一番早い特徴ベクトルにむかう類似性検索エンジンです。不均質な計算アーキテクチャーに基づいて効率を最大化出来ます。数十億のベクタの中に目標を検索できるまで数ミリ秒しかかからず、最低限の計算資源だけが必要です。
 
-Milvusは安定的な[Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java)又は [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) APIsを提供します。
+Milvusは安定的な[Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java)又は [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) SDKを提供します。
 
-Milvus [リリースノート](https://milvus.io/docs/en/release/v0.5.3/)を読んで最新バージョンや更新情報を手に入れます。
+Milvus [リリースノート](https://milvus.io/docs/en/release/v0.6.0/)を読んで最新バージョンや更新情報を手に入れます。
 
 
 ## はじめに

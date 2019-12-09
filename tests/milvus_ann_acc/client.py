@@ -88,8 +88,10 @@ class MilvusClient(object):
             index_type = IndexType.IVF_SQ8
         elif index_type == "ivf_sq8h":
             index_type = IndexType.IVF_SQ8H
-        elif index_type == "mix_nsg":
-            index_type = IndexType.MIX_NSG
+        elif index_type == "nsg":
+            index_type = IndexType.NSG
+        elif index_type == "ivf_pq":
+            index_type = IndexType.IVF_PQ
         index_params = {
             "index_type": index_type,
             "nlist": nlist,

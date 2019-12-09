@@ -24,6 +24,8 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
+#include "server/Config.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 
 #ifdef MILVUS_GPU_VERSION
@@ -145,6 +147,10 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::GPUIVF>(gpu_device);
             break;
         }
+        case IndexType::FAISS_IVFFLAT_MIX: {
+            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
+        }
         case IndexType::FAISS_IVFPQ_GPU: {
             index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
             break;
@@ -161,16 +167,20 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             break;
         }
-        case IndexType::FAISS_IVFFLAT_MIX: {
-            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
-            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
-        }
+
+#endif
 #ifdef CUSTOMIZATION
         case IndexType::FAISS_IVFSQ8_HYBRID: {
-            index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
-            return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
+            server::Config& config = server::Config::GetInstance();
+            bool gpu_resource_enable = true;
+            config.GetGpuResourceConfigEnable(gpu_resource_enable);
+            if (gpu_resource_enable) {
+                index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+                return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
+            } else {
+                throw Exception(DB_ERROR, "No GPU resources for IndexType::FAISS_IVFSQ8_HYBRID");
+            }
         }
-#endif
 #endif
         case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);

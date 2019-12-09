@@ -17,6 +17,8 @@
 
 #include "server/grpc_impl/request/CmdRequest.h"
 #include "scheduler/SchedInst.h"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #include <memory>
 
@@ -35,10 +37,19 @@ CmdRequest::Create(const std::string& cmd, std::string& result) {
 
 Status
 CmdRequest::OnExecute() {
+    std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
+    TimeRecorderAuto rc(hdr);
+
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
+    } else if (cmd_ == "mode") {
+#ifdef MILVUS_GPU_VERSION
+        result_ = "GPU";
+#else
+        result_ = "CPU";
+#endif
     } else {
         result_ = "OK";
     }

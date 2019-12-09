@@ -16,6 +16,7 @@
 // under the License.
 
 #include "server/grpc_impl/request/CreateIndexRequest.h"
+#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -44,7 +45,8 @@ CreateIndexRequest::Create(const ::milvus::grpc::IndexParam* index_param) {
 Status
 CreateIndexRequest::OnExecute() {
     try {
-        TimeRecorder rc("CreateIndexRequest");
+        std::string hdr = "CreateIndexRequest(table=" + index_param_->table_name() + ")";
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         std::string table_name_ = index_param_->table_name();
@@ -74,6 +76,20 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
+#ifdef MILVUS_GPU_VERSION
+        Status s;
+        bool enable_gpu = false;
+        server::Config& config = server::Config::GetInstance();
+        s = config.GetGpuResourceConfigEnable(enable_gpu);
+        engine::meta::TableSchema table_info;
+        table_info.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (s.ok() && grpc_index.index_type() == (int)engine::EngineType::FAISS_PQ &&
+            table_info.metric_type_ == (int)engine::MetricType::IP) {
+            return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
+        }
+#endif
+
         // step 2: check table existence
         engine::TableIndex index;
         index.engine_type_ = grpc_index.index_type();
@@ -82,8 +98,6 @@ CreateIndexRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

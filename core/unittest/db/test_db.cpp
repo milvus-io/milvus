@@ -338,10 +338,29 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
+        std::vector<std::string> file_ids;
+        // sometimes this case run fast to merge file and build index, old file will be deleted immediately,
+        // so the QueryByFileID cannot get files to search
+        // input 100 files ids to avoid random failure of this case
+        for (int i = 0; i < 100; i++) {
+            file_ids.push_back(std::to_string(i));
+        }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+
+    {
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -369,7 +388,13 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
+        std::vector<std::string> file_ids;
+        // sometimes this case run fast to merge file and build index, old file will be deleted immediately,
+        // so the QueryByFileID cannot get files to search
+        // input 100 files ids to avoid random failure of this case
+        for (int i = 0; i < 100; i++) {
+            file_ids.push_back(std::to_string(i));
+        }
         result_ids.clear();
         result_dists.clear();
         stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_dists);
@@ -536,12 +561,12 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->CreatePartition(table_name, "", "0");
     ASSERT_FALSE(stat.ok());
 
-    std::vector<milvus::engine::meta::TableSchema> partiton_schema_array;
-    stat = db_->ShowPartitions(table_name, partiton_schema_array);
+    std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
+    stat = db_->ShowPartitions(table_name, partition_schema_array);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(partiton_schema_array.size(), PARTITION_COUNT);
+    ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT);
     for (int64_t i = 0; i < PARTITION_COUNT; i++) {
-        ASSERT_EQ(partiton_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
+        ASSERT_EQ(partition_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
     }
 
     { // build index

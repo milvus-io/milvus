@@ -39,7 +39,8 @@ DropIndexRequest::Create(const std::string& table_name) {
 Status
 DropIndexRequest::OnExecute() {
     try {
-        TimeRecorder rc("DropIndexRequest");
+        std::string hdr = "DropIndexRequest(table=" + table_name_ + ")";
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -62,8 +63,6 @@ DropIndexRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-
-        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

@@ -121,7 +121,11 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
 #ifdef CUSTOMIZATION
         case EngineType::FAISS_IVFSQ8H: {
-            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            if (gpu_resource_enable) {
+                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            } else {
+                throw Exception(DB_ERROR, "No GPU resources for IVFSQ8H");
+            }
             break;
         }
 #endif
@@ -271,6 +275,12 @@ ExecutionEngineImpl::Serialize() {
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
     index_->set_size(PhysicalSize());
+    ENGINE_LOG_DEBUG << "Finish serialize index file: " << location_ << " size: " << index_->Size();
+
+    if (index_->Size() == 0) {
+        std::string msg = "Failed to serialize file: " + location_ + " reason: out of disk space or memory";
+        status = Status(DB_ERROR, msg);
+    }
 
     return status;
 }
@@ -390,10 +400,11 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
+    // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
     gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
-    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
+    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
 #endif
     return Status::OK();
 }
@@ -465,7 +476,9 @@ ExecutionEngineImpl::Merge(const std::string& location) {
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
         auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Merge: Add Error";
+            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
+        } else {
+            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
         }
         return status;
     } else {
@@ -503,6 +516,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, status.message());
     }
 
+    ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
@@ -590,7 +604,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     }
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error";
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
     }
     return status;
 }
@@ -621,6 +635,7 @@ ExecutionEngineImpl::Init() {
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     if (!s.ok()) {
         gpu_num_ = knowhere::INVALID_VALUE;
+        return s;
     }
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {

@@ -73,6 +73,7 @@ IVFMixIndex::Load(const knowhere::BinarySet& index_binary) {
     return Status::OK();
 }
 
+#ifdef CUSTOMIZATION
 knowhere::QuantizerPtr
 IVFHybridIndex::LoadQuantizer(const Config& conf) {
     // TODO(linxj): Hardcode here
@@ -158,6 +159,7 @@ IVFHybridIndex::CopyToGpuWithQuantizer(const int64_t& device_id, const Config& c
     }
     return std::make_pair(nullptr, nullptr);
 }
+#endif
 
 }  // namespace engine
 }  // namespace milvus

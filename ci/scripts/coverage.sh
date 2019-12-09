@@ -8,7 +8,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-INSTALL_PREFIX="/opt/milvus"
+INSTALL_PREFIX="/var/lib/milvus"
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
 CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 MYSQL_USER_NAME=root
@@ -38,7 +38,7 @@ do
                 echo "
 
 parameter:
--o: milvus install prefix(default: /opt/milvus)
+-o: milvus install prefix(default: /var/lib/milvus)
 -b: core code build directory
 -u: mysql account
 -p: mysql password

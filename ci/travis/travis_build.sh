@@ -18,7 +18,7 @@ done
 BUILD_COMMON_FLAGS="-t ${MILVUS_BUILD_TYPE} -o ${MILVUS_INSTALL_PREFIX} -b ${MILVUS_BUILD_DIR}"
 
 if [ $only_library_mode == "yes" ]; then
-  ${TRAVIS_BUILD_DIR}/ci/scripts/build.sh ${BUILD_COMMON_FLAGS} -m
+  ${TRAVIS_BUILD_DIR}/ci/scripts/build.sh ${BUILD_COMMON_FLAGS} -m -p
 else
-  ${TRAVIS_BUILD_DIR}/ci/scripts/build.sh ${BUILD_COMMON_FLAGS} -m -u -c
+  ${TRAVIS_BUILD_DIR}/ci/scripts/build.sh ${BUILD_COMMON_FLAGS} -m -p -u -c
 fi

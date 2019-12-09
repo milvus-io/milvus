@@ -145,7 +145,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
         int day = rand_r(&seed) % (days_num * 2);
-        table_file.created_on_ = ts - day * milvus::engine::meta::D_SEC * milvus::engine::meta::US_PS - 10000;
+        table_file.created_on_ = ts - day * milvus::engine::meta::DAY * milvus::engine::meta::US_PS - 10000;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         days.push_back(day);
@@ -385,7 +385,7 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     status = impl_->DropTableIndex(table_id);
     ASSERT_TRUE(status.ok());
     status = impl_->DescribeTableIndex(table_id, index_out);
-    ASSERT_NE(index_out.metric_type_, index.metric_type_);
+    ASSERT_EQ(index_out.metric_type_, index.metric_type_);
     ASSERT_NE(index_out.nlist_, index.nlist_);
     ASSERT_NE(index_out.engine_type_, index.engine_type_);
 
