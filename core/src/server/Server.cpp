@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "server/Server.h"
+
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
@@ -23,16 +25,14 @@
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
-#include "server/Server.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "src/version.h"
+#include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "wrapper/KnowhereResource.h"
-
-#include "tracing/TracerUtil.h"
 
 namespace milvus {
 namespace server {
@@ -159,7 +159,8 @@ Server::Start() {
         /* Init opentracing tracer from config */
         std::string tracing_config_path;
         s = config.GetTracingConfigJsonConfigPath(tracing_config_path);
-        tracing_config_path.empty() ? TracerUtil::InitGlobal() : TracerUtil::InitGlobal(tracing_config_path);
+        tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
+                                    : tracing::TracerUtil::InitGlobal(tracing_config_path);
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         std::string time_zone;

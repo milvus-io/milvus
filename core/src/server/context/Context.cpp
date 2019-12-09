@@ -6,13 +6,13 @@ namespace server {
 Context::Context(const std::string& request_id) : request_id_(request_id) {
 }
 
-const std::shared_ptr<TraceContext>&
+const std::shared_ptr<tracing::TraceContext>&
 Context::GetTraceContext() const {
     return trace_context_;
 }
 
 void
-Context::SetTraceContext(const std::shared_ptr<TraceContext>& trace_context) {
+Context::SetTraceContext(const std::shared_ptr<tracing::TraceContext>& trace_context) {
     trace_context_ = trace_context;
 }
 std::shared_ptr<Context>

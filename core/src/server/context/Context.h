@@ -1,6 +1,7 @@
 #pragma once
 
 #include <grpcpp/server_context.h>
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -21,14 +22,14 @@ class Context {
     Follower(const std::string& operation_name) const;
 
     void
-    SetTraceContext(const std::shared_ptr<TraceContext>& trace_context);
+    SetTraceContext(const std::shared_ptr<tracing::TraceContext>& trace_context);
 
-    const std::shared_ptr<TraceContext>&
+    const std::shared_ptr<tracing::TraceContext>&
     GetTraceContext() const;
 
  private:
     std::string request_id_;
-    std::shared_ptr<TraceContext> trace_context_;
+    std::shared_ptr<tracing::TraceContext> trace_context_;
 };
 
 }  // namespace server

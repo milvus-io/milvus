@@ -1,10 +1,13 @@
 #include "tracing/TextMapCarrier.h"
 
+namespace milvus {
+namespace tracing {
+
 TextMapCarrier::TextMapCarrier(std::unordered_map<std::string, std::string>& text_map) : text_map_(text_map) {
 }
 
-expected<void>
-TextMapCarrier::Set(string_view key, string_view value) const {
+opentracing::expected<void>
+TextMapCarrier::Set(opentracing::string_view key, opentracing::string_view value) const {
     //    text_map_[key] = value;
     //    return {};
     opentracing::expected<void> result;
@@ -46,3 +49,6 @@ TextMapCarrier::LookupKey(opentracing::string_view key) const {
     }
     return opentracing::string_view{iter->second};
 }
+
+}  // namespace tracing
+}  // namespace milvus

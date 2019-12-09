@@ -1,20 +1,19 @@
 #pragma once
 
 #include <opentracing/propagation.h>
+
 #include <string>
 #include <unordered_map>
 
-using opentracing::expected;
-using opentracing::string_view;
-using opentracing::TextMapReader;
-using opentracing::TextMapWriter;
+namespace milvus {
+namespace tracing {
 
-class TextMapCarrier : public TextMapReader, public TextMapWriter {
+class TextMapCarrier : public opentracing::TextMapReader, public opentracing::TextMapWriter {
  public:
     explicit TextMapCarrier(std::unordered_map<std::string, std::string>& text_map);
 
-    expected<void>
-    Set(string_view key, string_view value) const override;
+    opentracing::expected<void>
+    Set(opentracing::string_view key, opentracing::string_view value) const override;
 
     using F = std::function<opentracing::expected<void>(opentracing::string_view, opentracing::string_view)>;
 
@@ -28,3 +27,6 @@ class TextMapCarrier : public TextMapReader, public TextMapWriter {
  private:
     std::unordered_map<std::string, std::string>& text_map_;
 };
+
+}  // namespace tracing
+}  // namespace milvus

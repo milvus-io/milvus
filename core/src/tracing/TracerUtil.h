@@ -2,6 +2,9 @@
 
 #include <string>
 
+namespace milvus {
+namespace tracing {
+
 static const char* TRACER_LIBRARY_CONFIG_NAME = "tracer_library";
 static const char* TRACER_CONFIGURATION_CONFIG_NAME = "tracer_configuration";
 static const char* TRACE_CONTEXT_HEADER_CONFIG_NAME = "TraceContextHeaderName";
@@ -20,3 +23,6 @@ class TracerUtil {
 
     static std::string tracer_context_header_name_;
 };
+
+}  // namespace tracing
+}  // namespace milvus

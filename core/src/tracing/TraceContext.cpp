@@ -1,5 +1,8 @@
 #include "tracing/TraceContext.h"
 
+namespace milvus {
+namespace tracing {
+
 TraceContext::TraceContext(std::unique_ptr<opentracing::Span>& span) : span_(std::move(span)) {
 }
 
@@ -19,3 +22,6 @@ const std::unique_ptr<opentracing::Span>&
 TraceContext::GetSpan() const {
     return span_;
 }
+
+}  // namespace tracing
+}  // namespace milvus

@@ -1,11 +1,15 @@
 #include "tracing/TracerUtil.h"
 
-#include "thirdparty/nlohmann/json.hpp"
-
 #include <opentracing/dynamic_load.h>
 #include <opentracing/tracer.h>
+
 #include <fstream>
 #include <iostream>
+
+#include "thirdparty/nlohmann/json.hpp"
+
+namespace milvus {
+namespace tracing {
 
 std::string TracerUtil::tracer_context_header_name_;
 
@@ -54,3 +58,6 @@ const std::string&
 TracerUtil::GetTraceContextHeaderName() {
     return tracer_context_header_name_;
 }
+
+}  // namespace tracing
+}  // namespace milvus

@@ -1,7 +1,11 @@
 #pragma once
 
 #include <opentracing/tracer.h>
+
 #include <string>
+
+namespace milvus {
+namespace tracing {
 
 class TraceContext {
  public:
@@ -20,3 +24,6 @@ class TraceContext {
     //    std::unique_ptr<opentracing::SpanContext> span_context_;
     std::unique_ptr<opentracing::Span> span_;
 };
+
+}  // namespace tracing
+}  // namespace milvus

@@ -16,6 +16,11 @@
 // under the License.
 
 #include "server/grpc_impl/GrpcRequestHandler.h"
+
+#include <src/server/Config.h>
+
+#include <vector>
+
 #include "server/grpc_impl/GrpcRequestScheduler.h"
 #include "server/grpc_impl/request/CmdRequest.h"
 #include "server/grpc_impl/request/CountTableRequest.h"
@@ -34,19 +39,16 @@
 #include "server/grpc_impl/request/SearchRequest.h"
 #include "server/grpc_impl/request/ShowPartitionsRequest.h"
 #include "server/grpc_impl/request/ShowTablesRequest.h"
-#include "utils/TimeRecorder.h"
-
-#include <src/server/Config.h>
-#include <vector>
-
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace server {
 namespace grpc {
 
-GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer) : tracer_(tracer), random_num_generator_() {
+GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
+    : tracer_(tracer), random_num_generator_() {
     std::random_device random_device;
     random_num_generator_.seed(random_device());
 }
@@ -57,64 +59,42 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
     std::unordered_map<std::string, std::string> text_map;
     auto* map = interceptor_batch_methods->GetRecvInitialMetadata();
-    /* for (auto kv : *map) { */
-    /*     cout << string(kv.first.data(), kv.first.length()) << " : " */
-    /*         << string(kv.second.data(), kv.second.length()) << endl; */
-    /* } */
-
-    auto context_kv = map->find(TracerUtil::GetTraceContextHeaderName());
+    auto context_kv = map->find(tracing::TracerUtil::GetTraceContextHeaderName());
     if (context_kv != map->end()) {
         text_map[std::string(context_kv->first.data(), context_kv->first.length())] =
             std::string(context_kv->second.data(), context_kv->second.length());
     }
-    //test debug mode
-//    if (std::string(server_rpc_info->method()).find("Search") != std::string::npos) {
-//        text_map["demo-debug-id"] = "debug-id";
-//    }
+    // test debug mode
+    //    if (std::string(server_rpc_info->method()).find("Search") != std::string::npos) {
+    //        text_map["demo-debug-id"] = "debug-id";
+    //    }
 
-    TextMapCarrier carrier{text_map};
+    tracing::TextMapCarrier carrier{text_map};
     auto span_context_maybe = tracer_->Extract(carrier);
     if (!span_context_maybe) {
         std::cerr << span_context_maybe.error().message() << std::endl;
         throw std::runtime_error(span_context_maybe.error().message());
     }
     auto span = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_context_maybe->get())});
-    // TODO
     auto server_context = server_rpc_info->server_context();
     auto client_metadata = server_context->client_metadata();
+    // TODO: request id
     std::string request_id;
     auto request_id_kv = client_metadata.find("request_id");
     if (request_id_kv != client_metadata.end()) {
         request_id = request_id_kv->second.data();
-    }
-    else {
+    } else {
         request_id = std::to_string(random_id()) + std::to_string(random_id());
     }
-    //    text_map.clear();
-    //    TextMapCarrier dummy_carrier(text_map);
-    //    auto was_successful = tracer_->Inject(span->context(), dummy_carrier);
-    //    if (!was_successful) {
-    //        std::cerr << was_successful.error().message() << std::endl;
-    //        throw std::runtime_error(was_successful.error().message());
-    //    }
-    //    auto dummy_span_context_maybe = tracer_->Extract(dummy_carrier);
-    //    if (!dummy_span_context_maybe) {
-    //        std::cerr << dummy_span_context_maybe.error().message() << std::endl;
-    //        throw std::runtime_error(dummy_span_context_maybe.error().message());
-    //    }
-    auto trace_context = std::make_shared<TraceContext>(span);
+    auto trace_context = std::make_shared<tracing::TraceContext>(span);
     auto context = std::make_shared<Context>(request_id);
     context->SetTraceContext(trace_context);
     context_map_[server_rpc_info->server_context()] = context;
-    //    span_map_[server_rpc_info->server_context()] = std::move(span);
 }
 
 void
 GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
                                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
-    // TODO
-    //    auto span = std::move(span_map_[server_rpc_info->server_context()]);
-    //    span->Finish();
     context_map_[server_rpc_info->server_context()]->GetTraceContext()->GetSpan()->Finish();
     auto search = context_map_.find(server_rpc_info->server_context());
     if (search != context_map_.end()) {
