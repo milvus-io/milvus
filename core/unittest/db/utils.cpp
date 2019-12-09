@@ -24,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
