@@ -77,6 +77,14 @@ class GrpcArgsParser(object):
         return list(param.vector_data)
 
     @classmethod
+    def parse_proto_PartitionParam(cls, param):
+        _table_name = param.table_name
+        _partition_name = param.partition_name
+        _tag = param.tag
+
+        return _table_name, _partition_name, _tag
+
+    @classmethod
     @error_status
     def parse_proto_SearchParam(cls, param):
         _table_name = param.table_name

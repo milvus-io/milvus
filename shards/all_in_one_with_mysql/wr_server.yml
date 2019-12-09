@@ -1,3 +1,4 @@
+version: 0.1
 server_config:
   address: 0.0.0.0                  # milvus server ip address (IPv4)
   port: 19530                       # port range: 1025 ~ 65534
@@ -5,7 +6,7 @@ server_config:
   time_zone: UTC+8
 
 db_config:
-  primary_path: /opt/milvus    # path used to store data and meta
+  primary_path: /var/lib/milvus     # path used to store data and meta
   secondary_path:                   # path used to store data only, split by semicolon
 
   backend_url: mysql://root:milvusroot@milvus-mysql:3306/milvus        # URI format: dialect://username:password@host:port/database
