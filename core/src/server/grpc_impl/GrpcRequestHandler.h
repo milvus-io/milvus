@@ -236,6 +236,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
     mutable std::mt19937_64 random_num_generator_;
     mutable std::mutex random_mutex_;
+    mutable std::mutex context_map_mutex_;
 };
 
 }  // namespace grpc

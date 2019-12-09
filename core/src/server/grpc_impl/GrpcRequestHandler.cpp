@@ -98,6 +98,7 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
     context_map_[server_rpc_info->server_context()]->GetTraceContext()->GetSpan()->Finish();
     auto search = context_map_.find(server_rpc_info->server_context());
     if (search != context_map_.end()) {
+        std::lock_guard<std::mutex> lock(context_map_mutex_);
         context_map_.erase(search);
     }
 }
