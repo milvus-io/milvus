@@ -158,9 +158,14 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
                                            id_out_array);
 
     ConvertToProtoStatus(status, *response->mutable_status());
-    for (auto& id : id_out_array) {
-        response->add_vector_id_array(id);
-    }
+
+    response->mutable_vector_id_array()->Resize(static_cast<int>(id_out_array.size()), 0);
+    memcpy(response->mutable_vector_id_array()->mutable_data(),
+           id_out_array.data(),
+           id_out_array.size() * sizeof(int64_t));
+//    for (auto& id : id_out_array) {
+//        response->add_vector_id_array(id);
+//    }
 
     return ::grpc::Status::OK;
 }
@@ -168,40 +173,115 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 ::grpc::Status
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::TopKQueryResult* response) {
-    std::vector<std::string> file_id_array;
-    BaseRequestPtr request_ptr = SearchRequest::Create(request, file_id_array, response);
-    ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_error_code(grpc_status.error_code());
-    response->mutable_status()->set_reason(grpc_status.reason());
+    std::vector<std::vector<float>> record_array;
+    for (size_t i = 0; i < request->query_range_array_size(); i++) {
+        record_array.emplace_back(request->query_record_array(i).vector_data().begin(),
+                                  request->query_record_array(i).vector_data().end());
+        // TODO: May bug here, record is a local variable in for scope.
+//        std::vector<float> record(request->query_record_array(i).vector_data().data(),
+//                                  request->query_record_array(i).vector_data().data()
+//                                  + request->query_record_array(i).vector_data_size());
+//        record_array.push_back(record);
+    }
+    std::vector<std::pair<std::string, std::string>> ranges;
+    for (auto& range : request->query_range_array()) {
+        ranges.emplace_back(range.start_value(), range.end_value());
+    }
+
+    std::vector<std::string> partitions;
+    for (auto& partition: request->partition_tag_array()) {
+        partitions.emplace_back(partition);
+    }
+
+    std::vector<std::string> file_ids;
+    TopKQueryResult result;
+
+    Status status = RequestHandler::Search(request->table_name(),
+                                           record_array,
+                                           ranges,
+                                           request->topk(),
+                                           request->nprobe(),
+                                           partitions,
+                                           file_ids,
+                                           result);
+
+    // construct result
+    ConvertToProtoStatus(status, *response->mutable_status());
+    response->set_row_num(result.row_num_);
+
+    response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
+    memcpy(response->mutable_ids()->mutable_data(),
+           result.id_list_.data(),
+           result.id_list_.size() * sizeof(int64_t));
+
+    response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
+    memcpy(response->mutable_distances()->mutable_data(),
+           result.distance_list_.data(),
+           result.distance_list_.size() * sizeof(float));
+
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status
 GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
                                   ::milvus::grpc::TopKQueryResult* response) {
-    std::vector<std::string> file_id_array;
-    for (int i = 0; i < request->file_id_array_size(); i++) {
-        file_id_array.push_back(request->file_id_array(i));
+
+    std::vector<std::string> file_ids;
+    for (auto& file_id : request->file_id_array()) {
+        file_ids.emplace_back(file_id);
     }
-    ::milvus::grpc::SearchInFilesParam* request_mutable = const_cast<::milvus::grpc::SearchInFilesParam*>(request);
-    BaseRequestPtr request_ptr =
-        SearchRequest::Create(request_mutable->mutable_search_param(), file_id_array, response);
-    ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_error_code(grpc_status.error_code());
-    response->mutable_status()->set_reason(grpc_status.reason());
+
+    auto* search_request = &request->search_param();
+    std::vector<std::vector<float>> record_array;
+    for (size_t i = 0; i < search_request->query_range_array_size(); i++) {
+        record_array.emplace_back(search_request->query_record_array(i).vector_data().begin(),
+                                  search_request->query_record_array(i).vector_data().end());
+    }
+    std::vector<std::pair<std::string, std::string>> ranges;
+    for (auto& range : search_request->query_range_array()) {
+        ranges.emplace_back(range.start_value(), range.end_value());
+    }
+
+    std::vector<std::string> partitions;
+    for (auto& partition: search_request->partition_tag_array()) {
+        partitions.emplace_back(partition);
+    }
+
+    TopKQueryResult result;
+
+    Status status = RequestHandler::Search(search_request->table_name(),
+                                           record_array,
+                                           ranges,
+                                           search_request->topk(),
+                                           search_request->nprobe(),
+                                           partitions,
+                                           file_ids,
+                                           result);
+
+    // construct result
+    ConvertToProtoStatus(status, *response->mutable_status());
+    response->set_row_num(result.row_num_);
+
+    response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
+    memcpy(response->mutable_ids()->mutable_data(),
+           result.id_list_.data(),
+           result.id_list_.size() * sizeof(int64_t));
+
+    response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
+    memcpy(response->mutable_distances()->mutable_data(),
+           result.distance_list_.data(),
+           result.distance_list_.size() * sizeof(float));
+
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status
 GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                   ::milvus::grpc::TableSchema* response) {
-    BaseRequestPtr request_ptr = DescribeTableRequest::Create(request->table_name(), response);
-    ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_error_code(grpc_status.error_code());
-    response->mutable_status()->set_reason(grpc_status.reason());
+    TableSchema table_schema;
+    Status status = RequestHandler::DescribeTable(request->table_name(), table_schema);
+    ConvertToProtoStatus(status, *response->mutable_status());
+
     return ::grpc::Status::OK;
 }
 
@@ -209,23 +289,30 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::CountTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                ::milvus::grpc::TableRowCount* response) {
     int64_t row_count = 0;
+    Status status = RequestHandler::CountTable(request->table_name(), row_count);
     BaseRequestPtr request_ptr = CountTableRequest::Create(request->table_name(), row_count);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->set_table_row_count(row_count);
-    response->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_status()->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->set_table_row_count(row_count);
+//    response->mutable_status()->set_reason(grpc_status.reason());
+//    response->mutable_status()->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status
 GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                                ::milvus::grpc::TableNameList* response) {
-    BaseRequestPtr request_ptr = ShowTablesRequest::Create(response);
-    ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_error_code(grpc_status.error_code());
-    response->mutable_status()->set_reason(grpc_status.reason());
+    // never used
+    // const std::string cmd = request->cmd();
+    std::vector<std::string> tables;
+    Status status = RequestHandler::ShowTables(tables);
+    ConvertToProtoStatus(status, *response->mutable_status());
+    // TODO: Do not invoke set_allocated_*(), may cause SIGSEGV
+    // response->set_allocated_status(&grpc_status);
+    for (auto& table: tables) {
+        response->add_table_names(table);
+    }
+
     return ::grpc::Status::OK;
 }
 
@@ -235,10 +322,10 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
     std::string result;
     BaseRequestPtr request_ptr = CmdRequest::Create(request->cmd(), result);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->set_string_reply(result);
-    response->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_status()->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->set_string_reply(result);
+//    response->mutable_status()->set_reason(grpc_status.reason());
+//    response->mutable_status()->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 
@@ -247,9 +334,9 @@ GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus:
                                  ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DeleteByDateRequest::Create(request);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->set_error_code(grpc_status.error_code());
-    response->set_reason(grpc_status.reason());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->set_error_code(grpc_status.error_code());
+//    response->set_reason(grpc_status.reason());
     return ::grpc::Status::OK;
 }
 
@@ -258,9 +345,9 @@ GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus:
                                  ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = PreloadTableRequest::Create(request->table_name());
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->set_reason(grpc_status.reason());
-    response->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->set_reason(grpc_status.reason());
+//    response->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 
@@ -269,9 +356,9 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::IndexParam* response) {
     BaseRequestPtr request_ptr = DescribeIndexRequest::Create(request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_status()->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->mutable_status()->set_reason(grpc_status.reason());
+//    response->mutable_status()->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 
@@ -280,9 +367,9 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
                               ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DropIndexRequest::Create(request->table_name());
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->set_reason(grpc_status.reason());
-    response->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->set_reason(grpc_status.reason());
+//    response->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 
@@ -290,7 +377,7 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
 GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                     ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = CreatePartitionRequest::Create(request);
-    RequestScheduler::ExecRequest(request_ptr, response);
+//    RequestScheduler::ExecRequest(request_ptr, response);
     return ::grpc::Status::OK;
 }
 
@@ -299,9 +386,9 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
                                    ::milvus::grpc::PartitionList* response) {
     BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_status()->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->mutable_status()->set_reason(grpc_status.reason());
+//    response->mutable_status()->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 
@@ -310,9 +397,9 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DropPartitionRequest::Create(request);
     ::milvus::grpc::Status grpc_status;
-    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
-    response->set_reason(grpc_status.reason());
-    response->set_error_code(grpc_status.error_code());
+//    RequestScheduler::ExecRequest(request_ptr, &grpc_status);
+//    response->set_reason(grpc_status.reason());
+//    response->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 

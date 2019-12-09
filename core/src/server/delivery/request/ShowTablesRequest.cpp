@@ -26,12 +26,12 @@
 namespace milvus {
 namespace server {
 
-ShowTablesRequest::ShowTablesRequest(::milvus::grpc::TableNameList* table_name_list)
+ShowTablesRequest::ShowTablesRequest(std::vector<std::string>& table_name_list)
     : BaseRequest(INFO_REQUEST_GROUP), table_name_list_(table_name_list) {
 }
 
 BaseRequestPtr
-ShowTablesRequest::Create(::milvus::grpc::TableNameList* table_name_list) {
+ShowTablesRequest::Create(std::vector<std::string>& table_name_list) {
     return std::shared_ptr<BaseRequest>(new ShowTablesRequest(table_name_list));
 }
 
@@ -46,7 +46,7 @@ ShowTablesRequest::OnExecute() {
     }
 
     for (auto& schema : schema_array) {
-        table_name_list_->add_table_names(schema.table_id_);
+        table_name_list_.push_back(schema.table_id_);
     }
     return Status::OK();
 }

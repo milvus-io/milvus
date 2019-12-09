@@ -25,17 +25,17 @@ namespace server {
 constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
 Status
-ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array, std::vector<DB_DATE>& dates) {
+ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array, std::vector<DB_DATE>& dates) {
     dates.clear();
     for (auto& range : range_array) {
         time_t tt_start, tt_end;
         tm tm_start, tm_end;
-        if (!CommonUtil::TimeStrToTime(range.start_value(), tt_start, tm_start)) {
-            return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
+        if (!CommonUtil::TimeStrToTime(range.first, tt_start, tm_start)) {
+            return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.first);
         }
 
-        if (!CommonUtil::TimeStrToTime(range.end_value(), tt_end, tm_end)) {
-            return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
+        if (!CommonUtil::TimeStrToTime(range.second, tt_end, tm_end)) {
+            return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.second);
         }
 
         int64_t days = (tt_end - tt_start) / DAY_SECONDS;

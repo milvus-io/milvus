@@ -28,20 +28,40 @@ namespace server {
 class SearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
-           ::milvus::grpc::TopKQueryResult* response);
+    Create(const std::string& table_name,
+           const std::vector<std::vector<float>>& record_array,
+           const std::vector<std::pair<std::string, std::string>>& range_list,
+           int64_t topk,
+           int64_t nprobe,
+           const std::vector<std::string>& partition_list,
+           const std::vector<std::string>& file_id_list,
+           TopKQueryResult& result);
 
  protected:
-    SearchRequest(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
-                  ::milvus::grpc::TopKQueryResult* response);
+    SearchRequest(const std::string& table_name,
+                  const std::vector<std::vector<float>>& record_array,
+                  const std::vector<std::pair<std::string, std::string>>& range_list,
+                  int64_t topk,
+                  int64_t nprobe,
+                  const std::vector<std::string>& partition_list,
+                  const std::vector<std::string>& file_id_list,
+                  TopKQueryResult& result);
 
     Status
     OnExecute() override;
 
  private:
-    const ::milvus::grpc::SearchParam* search_param_;
-    std::vector<std::string> file_id_array_;
-    ::milvus::grpc::TopKQueryResult* topk_result_;
+    const std::string& table_name_;
+    const std::vector<std::vector<float>>& record_array_;
+    const std::vector<std::pair<std::string, std::string>>& range_list_;
+    int64_t topk_;
+    int64_t nprobe_;
+    const std::vector<std::string>& partition_list_;
+    const std::vector<std::string>& file_id_list_;
+    TopKQueryResult& result_;
+//    const ::milvus::grpc::SearchParam* search_param_;
+//    std::vector<std::string> file_id_array_;
+//    ::milvus::grpc::TopKQueryResult* topk_result_;
 };
 
 }  // namespace server

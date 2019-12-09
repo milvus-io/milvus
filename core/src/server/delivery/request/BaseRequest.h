@@ -22,6 +22,7 @@
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "utils/Status.h"
+#include "db/Types.h"
 
 #include <condition_variable>
 //#include <gperftools/profiler.h>
@@ -40,7 +41,20 @@ static const char* INFO_REQUEST_GROUP = "info";
 using DB_DATE = milvus::engine::meta::DateT;
 
 Status
-ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array, std::vector<DB_DATE>& dates);
+ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array, std::vector<DB_DATE>& dates);
+
+typedef struct {
+    std::string table_name_;
+    int64_t dimension_;
+    int64_t index_file_size_;
+    int32_t metric_type_;
+} TableSchema;
+
+typedef struct {
+    int64_t row_num_;
+    engine::ResultIds id_list_;
+    engine::ResultDistances distance_list_;
+} TopKQueryResult;
 
 class BaseRequest {
  protected:

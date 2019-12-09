@@ -27,17 +27,17 @@ namespace server {
 class DescribeTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, ::milvus::grpc::TableSchema* schema);
+    Create(const std::string& table_name, TableSchema& schema);
 
  protected:
-    DescribeTableRequest(const std::string& table_name, ::milvus::grpc::TableSchema* schema);
+    DescribeTableRequest(const std::string& table_name, TableSchema& schema);
 
     Status
     OnExecute() override;
 
  private:
     std::string table_name_;
-    ::milvus::grpc::TableSchema* schema_;
+    TableSchema& schema_;
 };
 
 }  // namespace server

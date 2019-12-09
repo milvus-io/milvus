@@ -25,16 +25,16 @@ namespace server {
 class ShowTablesRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(::milvus::grpc::TableNameList* table_name_list);
+    Create(std::vector<std::string>& table_name_list);
 
  protected:
-    explicit ShowTablesRequest(::milvus::grpc::TableNameList* table_name_list);
+    explicit ShowTablesRequest(std::vector<std::string>& table_name_list);
 
     Status
     OnExecute() override;
 
  private:
-    ::milvus::grpc::TableNameList* table_name_list_;
+    std::vector<std::string>& table_name_list_;
 };
 
 }  // namespace server

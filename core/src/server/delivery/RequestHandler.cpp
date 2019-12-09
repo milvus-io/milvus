@@ -77,5 +77,48 @@ RequestHandler::Insert(const std::string& table_name,
     return request_ptr->status();
 }
 
+Status
+RequestHandler::ShowTables(std::vector<std::string>& tables) {
+    BaseRequestPtr request_ptr = ShowTablesRequest::Create(tables);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::Search(const std::string& table_name,
+                       const std::vector<std::vector<float>>& record_array,
+                       const std::vector<std::pair<std::string, std::string>>& range_list,
+                       int64_t topk,
+                       int64_t nprobe,
+                       const std::vector<std::string>& partition_list,
+                       const std::vector<std::string>& file_id_list,
+                       TopKQueryResult& result) {
+    BaseRequestPtr request_ptr = SearchRequest::Create(table_name,
+                                                       record_array,
+                                                       range_list,
+                                                       topk,
+                                                       nprobe,
+                                                       partition_list,
+                                                       file_id_list,
+                                                       result);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::DescribeTable(const std::string& table_name, TableSchema& table_schema) {
+    BaseRequestPtr request_ptr = DescribeTableRequest::Create(table_name, table_schema);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::CountTable(const std::string& table_name, int64_t& count) {
+    BaseRequestPtr request_ptr = CountTableRequest::Create(table_name, count);
+}
+
 } // namespace server
 } // namespace milvus
