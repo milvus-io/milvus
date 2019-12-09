@@ -106,12 +106,12 @@ GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server
 }
 
 const std::shared_ptr<Context>&
-GrpcRequestHandler::GetContext(::grpc::ServerContext*& server_context) {
+GrpcRequestHandler::GetContext(::grpc::ServerContext* server_context) {
     return context_map_[server_context];
 }
 
 void
-GrpcRequestHandler::SetContext(::grpc::ServerContext*& server_context, const std::shared_ptr<Context>& context) {
+GrpcRequestHandler::SetContext(::grpc::ServerContext* server_context, const std::shared_ptr<Context>& context) {
     context_map_[server_context] = context;
 }
 
@@ -251,8 +251,7 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
                                  ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DeleteByDateRequest::Create(context_map_[context], request);
-    ::milvus::grpc::Status grpc_status;
-    GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
+    GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
 }
@@ -261,8 +260,7 @@ GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus:
 GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                  ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = PreloadTableRequest::Create(context_map_[context], request->table_name());
-    ::milvus::grpc::Status grpc_status;
-    GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
+    GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
 }
@@ -281,8 +279,7 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                               ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DropIndexRequest::Create(context_map_[context], request->table_name());
-    ::milvus::grpc::Status grpc_status;
-    GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
+    GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
 }
@@ -292,6 +289,7 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
                                     ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context_map_[context], request);
     GrpcRequestScheduler::ExecRequest(request_ptr, response);
+    SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
 }
 
@@ -309,8 +307,7 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
 GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                   ::milvus::grpc::Status* response) {
     BaseRequestPtr request_ptr = DropPartitionRequest::Create(context_map_[context], request);
-    ::milvus::grpc::Status grpc_status;
-    GrpcRequestScheduler::ExecRequest(request_ptr, &grpc_status);
+    GrpcRequestScheduler::ExecRequest(request_ptr, response);
     SET_TRACING_TAG(*response, context);
     return ::grpc::Status::OK;
 }

@@ -58,10 +58,10 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
 
     const std::shared_ptr<Context>&
-    GetContext(::grpc::ServerContext*& server_context);
+    GetContext(::grpc::ServerContext* server_context);
 
     void
-    SetContext(::grpc::ServerContext*& server_context, const std::shared_ptr<Context>& context);
+    SetContext(::grpc::ServerContext* server_context, const std::shared_ptr<Context>& context);
 
     uint64_t
     random_id() const;

@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <opentracing/mocktracer/tracer.h>
 
 #include <boost/filesystem.hpp>
 #include <thread>
@@ -89,13 +90,22 @@ class RpcHandlerTest : public testing::Test {
 
         // initialize handler, create table
         handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
+        dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
+        opentracing::mocktracer::MockTracerOptions tracer_options;
+        auto mock_tracer =
+            std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+        auto mock_span = mock_tracer->StartSpan("mock_span");
+        auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+        dummy_context->SetTraceContext(trace_context);
         ::grpc::ServerContext context;
+        handler->SetContext(&context, dummy_context);
         ::milvus::grpc::TableSchema request;
         ::milvus::grpc::Status status;
         request.set_table_name(TABLE_NAME);
         request.set_dimension(TABLE_DIM);
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
+        handler->SetContext(&context, dummy_context);
         ::grpc::Status grpc_status = handler->CreateTable(&context, &request, &status);
     }
 
@@ -110,6 +120,7 @@ class RpcHandlerTest : public testing::Test {
 
  protected:
     std::shared_ptr<milvus::server::grpc::GrpcRequestHandler> handler;
+    std::shared_ptr<milvus::server::Context> dummy_context;
 };
 
 void
@@ -149,6 +160,7 @@ CurrentTmDate(int64_t offset_day = 0) {
 
 TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::TableName request;
     ::milvus::grpc::BoolReply reply;
     ::grpc::Status status = handler->HasTable(&context, &request, &reply);
@@ -161,6 +173,7 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = handler->CreateIndex(&context, &request, &response);
@@ -197,6 +210,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
 
 TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::InsertParam request;
     ::milvus::grpc::Status response;
 
@@ -214,6 +228,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
 
 TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResult response;
     // test null input
@@ -277,6 +292,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
 
 TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::TableSchema tableschema;
     ::milvus::grpc::Status response;
     std::string tablename = "tbl";
@@ -379,6 +395,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
 
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::TableSchema table_schema;
     ::milvus::grpc::Status response;
     std::string str_table_name = "tbl_partition";
@@ -417,6 +434,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::Command command;
     command.set_cmd("version");
     ::milvus::grpc::StringReply reply;
@@ -431,6 +449,7 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
 
 TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
     ::milvus::grpc::DeleteByDateParam request;
     ::milvus::grpc::Status status;
     handler->DeleteByDate(&context, nullptr, &status);
