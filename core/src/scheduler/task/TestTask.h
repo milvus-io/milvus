@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "SearchTask.h"
 
 namespace milvus {

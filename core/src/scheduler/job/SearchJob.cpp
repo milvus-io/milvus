@@ -16,12 +16,14 @@
 // under the License.
 
 #include "scheduler/job/SearchJob.h"
+
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors)
+SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe,
+                     const float* vectors)
     : Job(JobType::SEARCH), context_(context), topk_(topk), nq_(nq), nprobe_(nprobe), vectors_(vectors) {
 }
 

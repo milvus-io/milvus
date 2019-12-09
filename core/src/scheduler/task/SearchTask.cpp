@@ -16,17 +16,20 @@
 // under the License.
 
 #include "scheduler/task/SearchTask.h"
+
+#include <src/scheduler/SchedInst.h>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-
-#include <src/scheduler/SchedInst.h>
-#include <algorithm>
-#include <string>
-#include <thread>
-#include <utility>
 
 namespace milvus {
 namespace scheduler {
@@ -182,7 +185,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
 void
 XSearchTask::Execute() {
-
     auto execute_ctx = context_->Follower("XSearchTask::Execute " + std::to_string(index_id_));
 
     if (index_engine_ == nullptr) {

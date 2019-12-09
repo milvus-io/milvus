@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {

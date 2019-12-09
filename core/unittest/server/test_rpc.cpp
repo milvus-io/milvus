@@ -16,22 +16,21 @@
 // under the License.
 
 #include <gtest/gtest.h>
+
 #include <boost/filesystem.hpp>
 #include <thread>
 
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "grpc/gen-status/status.pb.h"
+#include "scheduler/ResourceFactory.h"
+#include "scheduler/SchedInst.h"
+#include "server/Config.h"
+#include "server/DBWrapper.h"
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/grpc_impl/GrpcRequestScheduler.h"
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 #include "src/version.h"
-
-#include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "grpc/gen-status/status.pb.h"
-
-#include "scheduler/ResourceFactory.h"
-#include "scheduler/SchedInst.h"
-#include "server/Config.h"
-#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 
 namespace {
@@ -43,10 +42,11 @@ static constexpr int64_t VECTOR_COUNT = 1000;
 static constexpr int64_t INSERT_LOOP = 10;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
-void CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) {
+void
+CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) {
     auto vector_data = target->mutable_vector_data();
     vector_data->Resize(static_cast<int>(src.size()), 0.0);
-    memcpy(vector_data->mutable_data(), src.data(), src.size()* sizeof(float));
+    memcpy(vector_data->mutable_data(), src.data(), src.size() * sizeof(float));
 }
 
 class RpcHandlerTest : public testing::Test {
@@ -216,7 +216,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResult response;
-    //test null input
+    // test null input
     handler->Search(&context, nullptr, &response);
 
     // test invalid table name
@@ -313,7 +313,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
-    for (int64_t i = 0; i <  VECTOR_COUNT; i++) {
+    for (int64_t i = 0; i < VECTOR_COUNT; i++) {
         vector_ids.add_vector_id_array(i);
     }
     // Insert vectors
@@ -468,7 +468,8 @@ class DummyRequest : public milvus::server::grpc::GrpcBaseRequest {
     }
 
  public:
-    explicit DummyRequest(std::string& dummy) : GrpcBaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
+    explicit DummyRequest(std::string& dummy)
+        : GrpcBaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
     }
 };
 

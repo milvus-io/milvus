@@ -19,6 +19,8 @@
 
 #include <src/server/Config.h>
 
+#include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "server/grpc_impl/GrpcRequestScheduler.h"

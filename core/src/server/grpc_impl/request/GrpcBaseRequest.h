@@ -17,15 +17,14 @@
 
 #pragma once
 
+#include <condition_variable>
+
 #include "db/meta/MetaTypes.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
-#include "utils/Status.h"
-
 #include "server/context/Context.h"
-
-#include <condition_variable>
+#include "utils/Status.h"
 //#include <gperftools/profiler.h>
 #include <memory>
 #include <string>

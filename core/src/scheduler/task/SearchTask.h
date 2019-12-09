@@ -17,11 +17,12 @@
 
 #pragma once
 
+#include <memory>
+#include <vector>
+
 #include "Task.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SearchJob.h"
-
-#include <vector>
 
 namespace milvus {
 namespace scheduler {

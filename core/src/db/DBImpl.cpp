@@ -16,6 +16,18 @@
 // under the License.
 
 #include "db/DBImpl.h"
+
+#include <assert.h>
+
+#include <algorithm>
+#include <boost/filesystem.hpp>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <set>
+#include <thread>
+#include <utility>
+
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
@@ -32,16 +44,6 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
-
-#include <assert.h>
-#include <algorithm>
-#include <boost/filesystem.hpp>
-#include <chrono>
-#include <cstring>
-#include <iostream>
-#include <set>
-#include <thread>
-#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -394,22 +396,24 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-              uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+              const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result = Query(context, table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
+    Status result =
+        Query(context, table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
     return result;
 }
 
 Status
-DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-              uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+              const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
               ResultDistances& result_distances) {
-
     auto query_ctx = context->Child("Query");
 
     if (shutting_down_.load(std::memory_order_acquire)) {
@@ -455,10 +459,10 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 }
 
 Status
-DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-                      uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
+                      const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
                       ResultDistances& result_distances) {
-
     auto query_ctx = context->Child("Query by file id");
 
     if (shutting_down_.load(std::memory_order_acquire)) {
@@ -508,9 +512,9 @@ DBImpl::Size(uint64_t& result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
-                   uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
-
+DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+                   ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
     server::CollectQueryMetrics metrics(nq);
