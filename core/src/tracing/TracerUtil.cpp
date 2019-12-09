@@ -25,7 +25,7 @@ TracerUtil::LoadConfig(const std::string& config_path) {
     std::ifstream tracer_config(config_path);
     if (!tracer_config.good()) {
         std::cerr << "Failed to open tracer config file " << config_path << ": " << std::strerror(errno) << std::endl;
-        throw std::runtime_error("Failed to open tracer config file");
+        return;
     }
     using json = nlohmann::json;
     json tracer_config_json;
@@ -39,7 +39,7 @@ TracerUtil::LoadConfig(const std::string& config_path) {
     auto handle_maybe = opentracing::DynamicallyLoadTracingLibrary(tracing_shared_lib.c_str(), error_message);
     if (!handle_maybe) {
         std::cerr << "Failed to load tracer library: " << error_message << std::endl;
-        throw std::runtime_error("Failed to load tracer library: " + error_message);
+        return;
     }
 
     // Construct a tracer.
@@ -47,7 +47,7 @@ TracerUtil::LoadConfig(const std::string& config_path) {
     auto tracer_maybe = tracer_factory.MakeTracer(tracer_config_str.c_str(), error_message);
     if (!tracer_maybe) {
         std::cerr << "Failed to create tracer: " << error_message << std::endl;
-        throw std::runtime_error("Failed to create tracer: " + error_message);
+        return;
     }
     auto& tracer = *tracer_maybe;
 

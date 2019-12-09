@@ -58,9 +58,9 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     ::grpc::experimental::ServerRpcInfo* server_rpc_info,
     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
     std::unordered_map<std::string, std::string> text_map;
-    auto* map = interceptor_batch_methods->GetRecvInitialMetadata();
-    auto context_kv = map->find(tracing::TracerUtil::GetTraceContextHeaderName());
-    if (context_kv != map->end()) {
+    auto* metadata_map = interceptor_batch_methods->GetRecvInitialMetadata();
+    auto context_kv = metadata_map->find(tracing::TracerUtil::GetTraceContextHeaderName());
+    if (context_kv != metadata_map->end()) {
         text_map[std::string(context_kv->first.data(), context_kv->first.length())] =
             std::string(context_kv->second.data(), context_kv->second.length());
     }
@@ -73,7 +73,7 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     auto span_context_maybe = tracer_->Extract(carrier);
     if (!span_context_maybe) {
         std::cerr << span_context_maybe.error().message() << std::endl;
-        throw std::runtime_error(span_context_maybe.error().message());
+        return;
     }
     auto span = tracer_->StartSpan(server_rpc_info->method(), {opentracing::ChildOf(span_context_maybe->get())});
     auto server_context = server_rpc_info->server_context();
