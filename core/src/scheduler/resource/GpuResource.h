@@ -27,7 +27,7 @@ namespace scheduler {
 
 class GpuResource : public Resource {
  public:
-    explicit GpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
+    explicit GpuResource(std::string name, uint64_t device_id, bool enable_executor);
 
     friend std::ostream&
     operator<<(std::ostream& out, const GpuResource& resource);

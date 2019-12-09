@@ -103,11 +103,6 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
 
  public:
     inline bool
-    HasLoader() const {
-        return enable_loader_;
-    }
-
-    inline bool
     HasExecutor() const {
         return enable_executor_;
     }
@@ -134,7 +129,7 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     operator<<(std::ostream& out, const Resource& resource);
 
  protected:
-    Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor);
+    Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_executor);
 
     /*
      * Implementation by inherit class;
@@ -193,7 +188,6 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     std::function<void(EventPtr)> subscriber_ = nullptr;
 
     bool running_ = false;
-    bool enable_loader_ = true;
     bool enable_executor_ = true;
     std::thread loader_thread_;
     std::thread executor_thread_;
