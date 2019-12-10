@@ -27,7 +27,7 @@ namespace scheduler {
 
 class TestResource : public Resource {
  public:
-    explicit TestResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
+    explicit TestResource(std::string name, uint64_t device_id, bool enable_executor);
 
     friend std::ostream&
     operator<<(std::ostream& out, const TestResource& resource);

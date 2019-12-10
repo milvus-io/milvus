@@ -21,9 +21,11 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "server/context/Context.h"
 #include "utils/Status.h"
 #include "db/Types.h"
 
+#include <condition_variable>
 #include <condition_variable>
 //#include <gperftools/profiler.h>
 #include <memory>
@@ -41,7 +43,8 @@ static const char* INFO_REQUEST_GROUP = "info";
 using DB_DATE = milvus::engine::meta::DateT;
 
 Status
-ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array, std::vector<DB_DATE>& dates);
+ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array,
+                          std::vector<DB_DATE>& dates);
 
 struct TableSchema {
     std::string table_name_;
@@ -49,7 +52,7 @@ struct TableSchema {
     int64_t index_file_size_;
     int32_t metric_type_;
 
-    TableSchema(){
+    TableSchema() {
         dimension_ = 0;
         index_file_size_ = 0;
         metric_type_ = 0;
@@ -68,7 +71,7 @@ struct TopKQueryResult {
     engine::ResultIds id_list_;
     engine::ResultDistances distance_list_;
 
-    TopKQueryResult(){
+    TopKQueryResult() {
         row_num_ = 0;
     }
 
@@ -101,9 +104,7 @@ struct PartitionParam {
     std::string partition_name_;
     std::string tag_;
 
-    PartitionParam() {
-
-    }
+    PartitionParam() = default;
 
     PartitionParam(const std::string& table_name, const std::string& partition_name, const std::string& tag) {
         table_name_ = table_name;
@@ -114,7 +115,7 @@ struct PartitionParam {
 
 class BaseRequest {
  protected:
-    explicit BaseRequest(const std::string& request_group, bool async = false);
+    explicit BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
 
     virtual ~BaseRequest();
 
@@ -154,6 +155,8 @@ class BaseRequest {
     TableNotExistMsg(const std::string& table_name);
 
  protected:
+    const std::shared_ptr<Context>& context_;
+
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 

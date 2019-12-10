@@ -12,72 +12,70 @@
 namespace milvus {
 namespace server {
 
-
-
 class RequestHandler {
 
  public:
     Status
-    CreateTable(const std::string& table_name, int64_t dimension, int32_t index_file_size, int32_t metric_type);
+    CreateTable(const std::shared_ptr<Context>& context, const std::string& table_name,
+                int64_t dimension, int32_t index_file_size, int32_t metric_type);
 
     Status
-    HasTable(const std::string& table_name, bool& has_table);
+    HasTable(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table);
 
     Status
-    DropTable(const std::string& table_name);
+    DropTable(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
-    CreateIndex(const std::string& table_name, int32_t index_type, int32_t nlist);
+    CreateIndex(const std::shared_ptr<Context>& context, const std::string& table_name, int32_t index_type, int32_t nlist);
 
     Status
-    Insert(const std::string& table_name,
+    Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
            std::vector<std::vector<float>>& records_array,
            std::vector<int64_t>& id_array,
            const std::string& partition_tag,
            std::vector<int64_t>& id_out_array);
 
     Status
-    ShowTables(std::vector<std::string>& tables);
+    ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
 
     Status
-    Search(const std::string& table_name,
+    Search(const std::shared_ptr<Context>& context, const std::string& table_name,
            const std::vector<std::vector<float>>& record_array,
            const std::vector<std::pair<std::string, std::string>>& range_list,
-           int64_t topk,
-           int64_t nprobe,
+           int64_t topk, int64_t nprobe,
            const std::vector<std::string>& partition_list,
            const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 
     Status
-    DescribeTable(const std::string& table_name, TableSchema& table_schema);
+    DescribeTable(const std::shared_ptr<Context>& context, const std::string& table_name, TableSchema& table_schema);
 
     Status
-    CountTable(const std::string& table_name, int64_t& count);
+    CountTable(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& count);
 
     Status
-    Cmd(const std::string& cmd, std::string& reply);
+    Cmd(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& reply);
 
     Status
-    DeleteByRange(const std::string& table_name, const Range& range);
+    DeleteByRange(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
 
     Status
-    PreloadTable(const std::string& table_name);
+    PreloadTable(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
-    DescribeIndex(const std::string& table_name, IndexParam& param);
+    DescribeIndex(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& param);
 
     Status
-    DropIndex(const std::string& table_name);
+    DropIndex(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
-    CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag);
+    CreatePartition(const std::shared_ptr<Context>& context, const std::string& table_name, const std::string& partition_name, const std::string& tag);
 
     Status
-    ShowPartitions(const std::string& table_name, std::vector<PartitionParam>& partitions);
+    ShowPartitions(const std::shared_ptr<Context>& context, const std::string& table_name, std::vector<PartitionParam>& partitions);
 
     Status
-    DropPartition(const std::string& table_name, const std::string& partition_name, const std::string& tag);
+    DropPartition(const std::shared_ptr<Context>& context, const std::string& table_name, const std::string& partition_name, const std::string& tag);
 };
 
 } // namespace server

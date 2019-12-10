@@ -19,7 +19,9 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
+#include <memory>
 #include <string>
+
 
 namespace milvus {
 namespace server {
@@ -27,10 +29,10 @@ namespace server {
 class CountTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, int64_t& row_count);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& row_count);
 
  protected:
-    CountTableRequest(const std::string& table_name, int64_t& row_count);
+    CountTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& row_count);
 
     Status
     OnExecute() override;

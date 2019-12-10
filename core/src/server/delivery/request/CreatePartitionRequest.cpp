@@ -27,22 +27,19 @@
 namespace milvus {
 namespace server {
 
-CreatePartitionRequest::CreatePartitionRequest(const std::string& table_name,
+CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                                const std::string& partition_name,
                                                const std::string& tag)
-    : BaseRequest(DDL_DML_REQUEST_GROUP),
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name), partition_name_(partition_name), tag_(tag) {
 }
 
 BaseRequestPtr
-CreatePartitionRequest::Create(const std::string& table_name,
+CreatePartitionRequest::Create(const std::shared_ptr<Context>& context,
+                               const std::string& table_name,
                                const std::string& partition_name,
                                const std::string& tag) {
-//    if (partition_param == nullptr) {
-//        SERVER_LOG_ERROR << "grpc input is null!";
-//        return nullptr;
-//    }
-    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(table_name, partition_name, tag));
+    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, partition_name, tag));
 }
 
 Status

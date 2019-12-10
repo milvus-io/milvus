@@ -25,10 +25,10 @@ namespace server {
 class ShowTablesRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(std::vector<std::string>& table_name_list);
+    Create(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
 
  protected:
-    explicit ShowTablesRequest(std::vector<std::string>& table_name_list);
+    explicit ShowTablesRequest(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
 
     Status
     OnExecute() override;

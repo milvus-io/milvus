@@ -18,10 +18,10 @@ services:
     milvus_wr:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus
+        image: milvusdb/milvus:0.6.0-gpu-d120719-2b40dd
         volumes:
-            - /tmp/milvus/db:/opt/milvus/db
-            - ./wr_server.yml:/opt/milvus/conf/server_config.yaml
+            - /tmp/milvus/db:/var/lib/milvus/db
+            - ./wr_server.yml:/var/lib/milvus/conf/server_config.yaml
         depends_on:
             milvus-mysql:
               condition: service_healthy
@@ -29,10 +29,10 @@ services:
     milvus_ro:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus
+        image: milvusdb/milvus:0.6.0-gpu-d120719-2b40dd
         volumes:
-            - /tmp/milvus/db:/opt/milvus/db
-            - ./ro_server.yml:/opt/milvus/conf/server_config.yaml
+            - /tmp/milvus/db:/var/lib/milvus/db
+            - ./ro_server.yml:/var/lib/milvus/conf/server_config.yaml
         depends_on:
             - milvus-mysql
             - milvus_wr

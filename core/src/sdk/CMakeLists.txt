@@ -29,7 +29,7 @@ add_library(milvus_sdk SHARED
         )
 
 target_link_libraries(milvus_sdk
-        ${client_grpc_lib}
+        ${grpc_lib}
         zlib
         )
 

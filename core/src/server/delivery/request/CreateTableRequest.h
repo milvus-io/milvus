@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
@@ -25,13 +27,13 @@ namespace server {
 class CreateTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name,
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
            int64_t dimension,
            int32_t index_file_size,
            int32_t metric_type);
 
  protected:
-    explicit CreateTableRequest(const std::string& table_name,
+    explicit CreateTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                 int64_t dimension,
                                 int32_t index_file_size,
                                 int32_t metric_type);

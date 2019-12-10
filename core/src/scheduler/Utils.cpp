@@ -35,14 +35,5 @@ get_current_timestamp() {
     return millis;
 }
 
-uint64_t
-get_num_gpu() {
-    int n_devices = 0;
-#ifdef MILVUS_GPU_VERSION
-    cudaGetDeviceCount(&n_devices);
-#endif
-    return n_devices;
-}
-
 }  // namespace scheduler
 }  // namespace milvus

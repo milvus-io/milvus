@@ -28,29 +28,25 @@
 namespace milvus {
 namespace server {
 
-InsertRequest::InsertRequest(const std::string& table_name,
+InsertRequest::InsertRequest(const std::shared_ptr<Context>& context,
+                             const std::string& table_name,
                              std::vector<std::vector<float>>& records_array,
                              std::vector<int64_t>& id_array,
                              const std::string& partition_tag,
-                             std::vector<int64_t>& id_out_array) : BaseRequest(DDL_DML_REQUEST_GROUP),
-                                                                   table_name_(table_name),
-                                                                   records_array_(records_array),
-                                                                   id_array_(id_array),
-                                                                   partition_tag_(partition_tag),
-                                                                   response_ids_(id_out_array) {
+                             std::vector<int64_t>& id_out_array)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
+      table_name_(table_name), records_array_(records_array), id_array_(id_array),
+      partition_tag_(partition_tag), response_ids_(id_out_array) {
 }
 
 BaseRequestPtr
-InsertRequest::Create(const std::string& table_name,
+InsertRequest::Create(const std::shared_ptr<Context>& context,
+                      const std::string& table_name,
                       std::vector<std::vector<float>>& records_array,
                       std::vector<int64_t>& id_array,
                       const std::string& partition_tag,
                       std::vector<int64_t>& id_out_array) {
-//    if (insert_param == nullptr) {
-//        SERVER_LOG_ERROR << "grpc input is null!";
-//        return nullptr;
-//    }
-    return std::shared_ptr<BaseRequest>(new InsertRequest(table_name,
+    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name,
                                                           records_array,
                                                           id_array,
                                                           partition_tag,

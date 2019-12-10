@@ -58,8 +58,8 @@ ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>
     return Status::OK();
 }
 
-BaseRequest::BaseRequest(const std::string& request_group, bool async)
-    : request_group_(request_group), async_(async), done_(false) {
+BaseRequest::BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async)
+    : context_(context), request_group_(request_group), async_(async), done_(false) {
 }
 
 BaseRequest::~BaseRequest() {

@@ -27,10 +27,10 @@ namespace server {
 class DescribeTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, TableSchema& schema);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, TableSchema& schema);
 
  protected:
-    DescribeTableRequest(const std::string& table_name, TableSchema& schema);
+    DescribeTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, TableSchema& schema);
 
     Status
     OnExecute() override;

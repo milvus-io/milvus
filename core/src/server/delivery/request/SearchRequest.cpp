@@ -26,7 +26,8 @@
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::string& table_name,
+SearchRequest::SearchRequest(const std::shared_ptr<Context>& context,
+                             const std::string& table_name,
                              const std::vector<std::vector<float>>& record_array,
                              const std::vector<std::pair<std::string, std::string>>& range_list,
                              int64_t topk,
@@ -34,19 +35,15 @@ SearchRequest::SearchRequest(const std::string& table_name,
                              const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list,
                              TopKQueryResult& result)
-    : BaseRequest(DQL_REQUEST_GROUP),
-      table_name_(table_name),
-      record_array_(record_array),
-      range_list_(range_list),
-      topk_(topk),
-      nprobe_(nprobe),
-      partition_list_(partition_list),
-      file_id_list_(file_id_list),
-      result_(result) {
+    : BaseRequest(context, DQL_REQUEST_GROUP),
+      table_name_(table_name), record_array_(record_array), range_list_(range_list),
+      topk_(topk), nprobe_(nprobe), partition_list_(partition_list),
+      file_id_list_(file_id_list), result_(result) {
 }
 
 BaseRequestPtr
-SearchRequest::Create(const std::string& table_name,
+SearchRequest::Create(const std::shared_ptr<Context>& context,
+                      const std::string& table_name,
                       const std::vector<std::vector<float>>& record_array,
                       const std::vector<std::pair<std::string, std::string>>& range_list,
                       int64_t topk,
@@ -54,11 +51,8 @@ SearchRequest::Create(const std::string& table_name,
                       const std::vector<std::string>& partition_list,
                       const std::vector<std::string>& file_id_list,
                       TopKQueryResult& result) {
-//    if (search_vector_infos == nullptr) {
-//        SERVER_LOG_ERROR << "grpc input is null!";
-//        return nullptr;
-//    }
-    return std::shared_ptr<BaseRequest>(new SearchRequest(table_name,
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context,
+                                                          table_name,
                                                           record_array,
                                                           range_list,
                                                           topk,
@@ -71,10 +65,13 @@ SearchRequest::Create(const std::string& table_name,
 Status
 SearchRequest::OnExecute() {
     try {
+        auto pre_query_ctx = context_->Child("Pre query");
+
         std::string hdr = "SearchRequest(table=" + table_name_ +
                           ", nq=" + std::to_string(record_array_.size()) +
                           ", k=" + std::to_string(topk_) +
                           ", nprob=" + std::to_string(nprobe_) + ")";
+
         TimeRecorder rc(hdr);
 
         // step 1: check table name
@@ -113,11 +110,6 @@ SearchRequest::OnExecute() {
 
         // step 4: check date range, and convert to db dates
         std::vector<DB_DATE> dates;
-//        std::vector<::milvus::grpc::Range> range_array;
-//        for (size_t i = 0; i < range_list_.size(); i++) {
-//            range_array.emplace_back(range_list_.at(i));
-//        }
-
         status = ConvertTimeRangeToDBDates(range_list_, dates);
         if (!status.ok()) {
             return status;
@@ -156,18 +148,20 @@ SearchRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
 
+        pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
+
         if (file_id_list_.empty()) {
             status = ValidationUtil::ValidatePartitionTags(partition_list_);
             if (!status.ok()) {
                 return status;
             }
 
-            status = DBWrapper::DB()->Query(table_name_, partition_list_,
+            status = DBWrapper::DB()->Query(context_, table_name_, partition_list_,
                                             (size_t)topk_, record_count, nprobe_,
                                             vec_f.data(), dates,
                                             result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->QueryByFileID(table_name_, file_id_list_,
+            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_,
                                                     (size_t)topk_, record_count, nprobe_,
                                                     vec_f.data(), dates,
                                                     result_ids, result_distances);
@@ -186,16 +180,14 @@ SearchRequest::OnExecute() {
             return Status::OK();  // empty table
         }
 
+        auto post_query_ctx = context_->Child("Constructing result");
+
         // step 7: construct result array
-//        topk_result_->set_row_num(record_count);
-//        topk_result_->mutable_ids()->Resize(static_cast<int>(result_ids.size()), -1);
-//        memcpy(topk_result_->mutable_ids()->mutable_data(), result_ids.data(), result_ids.size() * sizeof(int64_t));
-//        topk_result_->mutable_distances()->Resize(static_cast<int>(result_distances.size()), 0.0);
-//        memcpy(topk_result_->mutable_distances()->mutable_data(), result_distances.data(),
-//               result_distances.size() * sizeof(float));
         result_.row_num_ = record_count;
         result_.distance_list_ = result_distances;
         result_.id_list_ = result_ids;
+
+        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

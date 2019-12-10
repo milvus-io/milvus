@@ -28,11 +28,12 @@
 namespace milvus {
 namespace server {
 
-CreateTableRequest::CreateTableRequest(const std::string& table_name,
+CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context,
+                                       const std::string& table_name,
                                        int64_t dimension,
                                        int32_t index_file_size,
                                        int32_t metric_type)
-    : BaseRequest(DDL_DML_REQUEST_GROUP),
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
       dimension_(dimension),
       index_file_size_(index_file_size),
@@ -40,15 +41,13 @@ CreateTableRequest::CreateTableRequest(const std::string& table_name,
 }
 
 BaseRequestPtr
-CreateTableRequest::Create(const std::string& table_name,
+CreateTableRequest::Create(const std::shared_ptr<Context>& context,
+                           const std::string& table_name,
                            int64_t dimension,
                            int32_t index_file_size,
                            int32_t metric_type) {
-//    if (schema == nullptr) {
-//        SERVER_LOG_ERROR << "grpc input is null!";
-//        return nullptr;
-//    }
-    return std::shared_ptr<BaseRequest>(new CreateTableRequest(table_name,
+    return std::shared_ptr<BaseRequest>(new CreateTableRequest(context,
+                                                               table_name,
                                                                dimension,
                                                                index_file_size,
                                                                metric_type));
@@ -64,25 +63,21 @@ CreateTableRequest::OnExecute() {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
-//            status_ = status;
             return status;
         }
 
         status = ValidationUtil::ValidateTableDimension(dimension_);
         if (!status.ok()) {
-//            status_ = status;
             return status;
         }
 
         status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
         if (!status.ok()) {
-//            status_ = status;
             return status;
         }
 
         status = ValidationUtil::ValidateTableIndexMetricType(metric_type_);
         if (!status.ok()) {
-//            status_ = status;
             return status;
         }
 
@@ -100,7 +95,6 @@ CreateTableRequest::OnExecute() {
             if (status.code() == DB_ALREADY_EXIST) {
                 return Status(SERVER_INVALID_TABLE_NAME, status.message());
             }
-//            status_ = status;
             return status;
         }
     } catch (std::exception& ex) {

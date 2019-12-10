@@ -26,13 +26,13 @@
 namespace milvus {
 namespace server {
 
-HasTableRequest::HasTableRequest(const std::string& table_name, bool& has_table)
-    : BaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), has_table_(has_table) {
+HasTableRequest::HasTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table)
+    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), has_table_(has_table) {
 }
 
 BaseRequestPtr
-HasTableRequest::Create(const std::string& table_name, bool& has_table) {
-    return std::shared_ptr<BaseRequest>(new HasTableRequest(table_name, has_table));
+HasTableRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table) {
+    return std::shared_ptr<BaseRequest>(new HasTableRequest(context, table_name, has_table));
 }
 
 Status

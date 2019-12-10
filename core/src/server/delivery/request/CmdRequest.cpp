@@ -25,13 +25,13 @@
 namespace milvus {
 namespace server {
 
-CmdRequest::CmdRequest(const std::string& cmd, std::string& result)
-    : BaseRequest(INFO_REQUEST_GROUP), cmd_(cmd), result_(result) {
+CmdRequest::CmdRequest(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result)
+    : BaseRequest(context, INFO_REQUEST_GROUP), cmd_(cmd), result_(result) {
 }
 
 BaseRequestPtr
-CmdRequest::Create(const std::string& cmd, std::string& result) {
-    return std::shared_ptr<BaseRequest>(new CmdRequest(cmd, result));
+CmdRequest::Create(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result) {
+    return std::shared_ptr<BaseRequest>(new CmdRequest(context, cmd, result));
 }
 
 Status

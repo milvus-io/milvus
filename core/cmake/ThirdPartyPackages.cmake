@@ -25,7 +25,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         libunwind
         gperftools
         GRPC
-        ZLIB)
+        ZLIB
+        Opentracing)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -57,6 +58,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_grpc()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
         build_zlib()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
+        build_opentracing()
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -165,9 +168,9 @@ endif ()
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
         find_package(${DEPENDENCY_NAME} MODULE)
-        if(NOT ${${DEPENDENCY_NAME}_FOUND})
-          build_dependency(${DEPENDENCY_NAME})
-        endif()
+        if (NOT ${${DEPENDENCY_NAME}_FOUND})
+            build_dependency(${DEPENDENCY_NAME})
+        endif ()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
@@ -338,6 +341,13 @@ else ()
     set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
 endif ()
 set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
+
+if (DEFINED ENV{MILVUS_OPENTRACING_URL})
+    set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
+else ()
+    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz")
+endif ()
+
 
 # ----------------------------------------------------------------------
 # Google gtest
@@ -1207,4 +1217,54 @@ if (MILVUS_WITH_ZLIB)
 
     get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
+endif ()
+
+# ----------------------------------------------------------------------
+# opentracing
+
+macro(build_opentracing)
+    message(STATUS "Building OPENTRACING-${OPENTRACING_VERSION} from source")
+    set(OPENTRACING_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/opentracing_ep-prefix/src/opentracing_ep")
+    set(OPENTRACING_STATIC_LIB "${OPENTRACING_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}opentracing${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(OPENTRACING_MOCK_TRACER_STATIC_LIB "${OPENTRACING_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}opentracing_mocktracer${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(OPENTRACING_INCLUDE_DIR "${OPENTRACING_PREFIX}/include")
+    set(OPENTRACING_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
+            "-DCMAKE_INSTALL_PREFIX=${OPENTRACING_PREFIX}"
+            -DBUILD_SHARED_LIBS=OFF)
+
+    externalproject_add(opentracing_ep
+            URL
+            ${OPENTRACING_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${OPENTRACING_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            BUILD_BYPRODUCTS
+            ${OPENTRACING_STATIC_LIB}
+            ${OPENTRACING_MOCK_TRACER_STATIC_LIB}
+            )
+
+    file(MAKE_DIRECTORY "${OPENTRACING_INCLUDE_DIR}")
+    add_library(opentracing STATIC IMPORTED)
+    set_target_properties(opentracing
+            PROPERTIES IMPORTED_LOCATION "${OPENTRACING_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OPENTRACING_INCLUDE_DIR}")
+
+    add_library(opentracing_mocktracer STATIC IMPORTED)
+    set_target_properties(opentracing_mocktracer
+            PROPERTIES IMPORTED_LOCATION "${OPENTRACING_MOCK_TRACER_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OPENTRACING_INCLUDE_DIR}")
+
+    add_dependencies(opentracing opentracing_ep)
+    add_dependencies(opentracing_mocktracer opentracing_ep)
+endmacro()
+
+if (MILVUS_WITH_OPENTRACING)
+    resolve_dependency(Opentracing)
+
+    get_target_property(OPENTRACING_INCLUDE_DIR opentracing INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${OPENTRACING_INCLUDE_DIR})
 endif ()

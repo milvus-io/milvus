@@ -19,7 +19,9 @@
 
 #include "BaseRequest.h"
 
+#include <memory>
 #include <string>
+
 
 namespace milvus {
 namespace server {
@@ -27,10 +29,10 @@ namespace server {
 class CmdRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& cmd, std::string& result);
+    Create(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result);
 
  protected:
-    CmdRequest(const std::string& cmd, std::string& result);
+    CmdRequest(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result);
 
     Status
     OnExecute() override;

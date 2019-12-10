@@ -25,10 +25,10 @@ namespace server {
 class DeleteByDateRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, const Range& range);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
 
  protected:
-    explicit DeleteByDateRequest(const std::string& table_name, const Range& range);
+    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
 
     Status
     OnExecute() override;

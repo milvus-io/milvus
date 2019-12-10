@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/CpuResource.h"
 #include "scheduler/resource/DiskResource.h"
@@ -36,69 +37,44 @@ class ResourceBaseTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        only_loader_ = std::make_shared<DiskResource>(name1, id1, true, false);
-        only_executor_ = std::make_shared<CpuResource>(name2, id2, false, true);
-        both_enable_ = std::make_shared<GpuResource>(name3, id3, true, true);
-        both_disable_ = std::make_shared<TestResource>(name4, id4, false, false);
+        enable_executor_ = std::make_shared<CpuResource>(name1, id1, true);
+        disable_executor_ = std::make_shared<GpuResource>(name2, id2, false);
     }
 
-    const std::string name1 = "only_loader_";
-    const std::string name2 = "only_executor_";
-    const std::string name3 = "both_enable_";
-    const std::string name4 = "both_disable_";
+    const std::string name1 = "enable_executor_";
+    const std::string name2 = "disable_executor_";
 
     const uint64_t id1 = 1;
     const uint64_t id2 = 2;
-    const uint64_t id3 = 3;
-    const uint64_t id4 = 4;
 
-    ResourcePtr only_loader_ = nullptr;
-    ResourcePtr only_executor_ = nullptr;
-    ResourcePtr both_enable_ = nullptr;
-    ResourcePtr both_disable_ = nullptr;
+    ResourcePtr enable_executor_ = nullptr;
+    ResourcePtr disable_executor_ = nullptr;
 };
 
 TEST_F(ResourceBaseTest, NAME) {
-    ASSERT_EQ(only_loader_->name(), name1);
-    ASSERT_EQ(only_executor_->name(), name2);
-    ASSERT_EQ(both_enable_->name(), name3);
-    ASSERT_EQ(both_disable_->name(), name4);
+    ASSERT_EQ(enable_executor_->name(), name1);
+    ASSERT_EQ(disable_executor_->name(), name2);
 }
 
 TEST_F(ResourceBaseTest, TYPE) {
-    ASSERT_EQ(only_loader_->type(), ResourceType::DISK);
-    ASSERT_EQ(only_executor_->type(), ResourceType::CPU);
-    ASSERT_EQ(both_enable_->type(), ResourceType::GPU);
-    ASSERT_EQ(both_disable_->type(), ResourceType::TEST);
+    ASSERT_EQ(enable_executor_->type(), ResourceType::CPU);
+    ASSERT_EQ(disable_executor_->type(), ResourceType::GPU);
 }
 
 TEST_F(ResourceBaseTest, DEVICE_ID) {
-    ASSERT_EQ(only_loader_->device_id(), id1);
-    ASSERT_EQ(only_executor_->device_id(), id2);
-    ASSERT_EQ(both_enable_->device_id(), id3);
-    ASSERT_EQ(both_disable_->device_id(), id4);
-}
-
-TEST_F(ResourceBaseTest, HAS_LOADER) {
-    ASSERT_TRUE(only_loader_->HasLoader());
-    ASSERT_FALSE(only_executor_->HasLoader());
-    ASSERT_TRUE(both_enable_->HasLoader());
-    ASSERT_FALSE(both_disable_->HasLoader());
+    ASSERT_EQ(enable_executor_->device_id(), id1);
+    ASSERT_EQ(disable_executor_->device_id(), id2);
 }
 
 TEST_F(ResourceBaseTest, HAS_EXECUTOR) {
-    ASSERT_FALSE(only_loader_->HasExecutor());
-    ASSERT_TRUE(only_executor_->HasExecutor());
-    ASSERT_TRUE(both_enable_->HasExecutor());
-    ASSERT_FALSE(both_disable_->HasExecutor());
+    ASSERT_TRUE(enable_executor_->HasExecutor());
+    ASSERT_FALSE(disable_executor_->HasExecutor());
 }
 
 TEST_F(ResourceBaseTest, DUMP) {
-    ASSERT_FALSE(only_loader_->Dump().empty());
-    ASSERT_FALSE(only_executor_->Dump().empty());
-    ASSERT_FALSE(both_enable_->Dump().empty());
-    ASSERT_FALSE(both_disable_->Dump().empty());
-    std::cout << *only_loader_ << *only_executor_ << *both_enable_ << *both_disable_;
+    ASSERT_FALSE(enable_executor_->Dump().empty());
+    ASSERT_FALSE(disable_executor_->Dump().empty());
+    std::cout << *enable_executor_ << *disable_executor_;
 }
 
 /************ ResourceAdvanceTest ************/
@@ -110,7 +86,7 @@ class ResourceAdvanceTest : public testing::Test {
         disk_resource_ = ResourceFactory::Create("ssd", "DISK", 0);
         cpu_resource_ = ResourceFactory::Create("cpu", "CPU", 0);
         gpu_resource_ = ResourceFactory::Create("gpu", "GPU", 0);
-        test_resource_ = std::make_shared<TestResource>("test", 0, true, true);
+        test_resource_ = std::make_shared<TestResource>("test", 0, true);
         resources_.push_back(disk_resource_);
         resources_.push_back(cpu_resource_);
         resources_.push_back(gpu_resource_);
@@ -183,7 +159,7 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(disk_resource_);
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
         std::vector<std::string> path{disk_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);
@@ -211,7 +187,7 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(cpu_resource_);
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
         std::vector<std::string> path{cpu_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);
@@ -239,7 +215,7 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(gpu_resource_);
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
         std::vector<std::string> path{gpu_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);
@@ -267,7 +243,7 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(test_resource_);
-        auto task = std::make_shared<TestTask>(dummy, label);
+        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
         std::vector<std::string> path{test_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);

@@ -48,12 +48,8 @@ ToString(ResourceType type) {
     }
 }
 
-Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : name_(std::move(name)),
-      type_(type),
-      device_id_(device_id),
-      enable_loader_(enable_loader),
-      enable_executor_(enable_executor) {
+Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_executor)
+    : name_(std::move(name)), type_(type), device_id_(device_id), enable_executor_(enable_executor) {
     // register subscriber in tasktable
     task_table_.RegisterSubscriber([&] {
         if (subscriber_) {
@@ -66,9 +62,7 @@ Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool
 void
 Resource::Start() {
     running_ = true;
-    if (enable_loader_) {
-        loader_thread_ = std::thread(&Resource::loader_function, this);
-    }
+    loader_thread_ = std::thread(&Resource::loader_function, this);
     if (enable_executor_) {
         executor_thread_ = std::thread(&Resource::executor_function, this);
     }
@@ -77,10 +71,8 @@ Resource::Start() {
 void
 Resource::Stop() {
     running_ = false;
-    if (enable_loader_) {
-        WakeupLoader();
-        loader_thread_.join();
-    }
+    WakeupLoader();
+    loader_thread_.join();
     if (enable_executor_) {
         WakeupExecutor();
         executor_thread_.join();
@@ -115,7 +107,6 @@ Resource::Dump() const {
         {"task_total_cost", total_cost_},
         {"total_tasks", total_task_},
         {"running", running_},
-        {"enable_loader", enable_loader_},
         {"enable_executor", enable_executor_},
     };
     return ret;

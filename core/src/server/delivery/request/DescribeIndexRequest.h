@@ -27,10 +27,10 @@ namespace server {
 class DescribeIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, IndexParam& index_param);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param);
 
  protected:
-    DescribeIndexRequest(const std::string& table_name, IndexParam& index_param);
+    DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param);
 
     Status
     OnExecute() override;

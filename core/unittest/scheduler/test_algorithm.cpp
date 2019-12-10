@@ -30,8 +30,8 @@ class AlgorithmTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);
-        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0, true, true);
+        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, false);
+        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0);
         ResourcePtr cpu1 = ResourceFactory::Create("cpu1", "CPU", 1);
         ResourcePtr cpu2 = ResourceFactory::Create("cpu2", "CPU", 2);
         ResourcePtr gpu0 = ResourceFactory::Create("gpu0", "GPU", 0);

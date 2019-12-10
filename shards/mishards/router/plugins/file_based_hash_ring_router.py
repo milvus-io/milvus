@@ -1,6 +1,6 @@
 import logging
 from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from mishards.models import Tables
 from mishards.router import RouterMixin
 from mishards import exceptions, db
@@ -15,23 +15,35 @@ class Factory(RouterMixin):
     def __init__(self, conn_mgr, **kwargs):
         super(Factory, self).__init__(conn_mgr)
 
-    def routing(self, table_name, metadata=None, **kwargs):
+    def routing(self, table_name, partition_tags=None, metadata=None, **kwargs):
         range_array = kwargs.pop('range_array', None)
-        return self._route(table_name, range_array, metadata, **kwargs)
+        return self._route(table_name, range_array, partition_tags, metadata, **kwargs)
 
-    def _route(self, table_name, range_array, metadata=None, **kwargs):
+    def _route(self, table_name, range_array, partition_tags=None, metadata=None, **kwargs):
         # PXU TODO: Implement Thread-local Context
         # PXU TODO: Session life mgt
+
+        if not partition_tags:
+            cond = and_(
+                        or_(Tables.table_id == table_name, Tables.owner_table == table_name),
+                        Tables.state != Tables.TO_DELETE)
+        else:
+            cond = and_(Tables.state != Tables.TO_DELETE,
+                        Tables.owner_table == table_name,
+                        Tables.partition_tag.in_(partition_tags))
         try:
-            table = db.Session.query(Tables).filter(
-                and_(Tables.table_id == table_name,
-                     Tables.state != Tables.TO_DELETE)).first()
+            tables = db.Session.query(Tables).filter(cond).all()
         except sqlalchemy_exc.SQLAlchemyError as e:
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
-        if not table:
-            raise exceptions.TableNotFoundError(table_name, metadata=metadata)
-        files = table.files_to_search(range_array)
+        if not tables:
+            raise exceptions.TableNotFoundError('{}:{}'.format(table_name, partition_tags), metadata=metadata)
+
+        total_files = []
+        for table in tables:
+            files = table.files_to_search(range_array)
+            total_files.append(files)
+
         db.remove_session()
 
         servers = self.conn_mgr.conn_names
@@ -41,12 +53,13 @@ class Factory(RouterMixin):
 
         routing = {}
 
-        for f in files:
-            target_host = ring.get_node(str(f.id))
-            sub = routing.get(target_host, None)
-            if not sub:
-                routing[target_host] = {'table_id': table_name, 'file_ids': []}
-            routing[target_host]['file_ids'].append(str(f.id))
+        for files in total_files:
+            for f in files:
+                target_host = ring.get_node(str(f.id))
+                sub = routing.get(target_host, None)
+                if not sub:
+                    routing[target_host] = {'table_id': f.table_id, 'file_ids': []}
+                routing[target_host]['file_ids'].append(str(f.id))
 
         return routing
 

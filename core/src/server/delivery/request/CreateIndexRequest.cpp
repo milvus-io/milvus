@@ -28,16 +28,16 @@
 namespace milvus {
 namespace server {
 
-CreateIndexRequest::CreateIndexRequest(const std::string& table_name, int32_t index_type, int32_t nlist)
-    : BaseRequest(DDL_DML_REQUEST_GROUP),
+CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int32_t index_type, int32_t nlist)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
       index_type_(index_type),
       nlist_(nlist) {
 }
 
 BaseRequestPtr
-CreateIndexRequest::Create(const std::string& table_name, int32_t index_type, int32_t nlist) {
-    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(table_name, index_type, nlist));
+CreateIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int32_t index_type, int32_t nlist) {
+    return std::shared_ptr<BaseRequest>(new CreateIndexRequest(context, table_name, index_type, nlist));
 }
 
 Status

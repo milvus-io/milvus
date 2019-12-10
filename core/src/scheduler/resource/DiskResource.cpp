@@ -29,8 +29,8 @@ operator<<(std::ostream& out, const DiskResource& resource) {
     return out;
 }
 
-DiskResource::DiskResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : Resource(std::move(name), ResourceType::DISK, device_id, enable_loader, enable_executor) {
+DiskResource::DiskResource(std::string name, uint64_t device_id, bool enable_executor)
+    : Resource(std::move(name), ResourceType::DISK, device_id, enable_executor) {
 }
 
 void

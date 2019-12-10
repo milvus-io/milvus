@@ -19,6 +19,7 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
+#include <memory>
 #include <string>
 
 namespace milvus {
@@ -27,10 +28,10 @@ namespace server {
 class HasTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, bool& has_table);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table);
 
  protected:
-    HasTableRequest(const std::string& table_name, bool& has_table);
+    HasTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table);
 
     Status
     OnExecute() override;
