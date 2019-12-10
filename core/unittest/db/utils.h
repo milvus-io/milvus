@@ -58,6 +58,8 @@ class BaseTest : public ::testing::Test {
     TearDown() override;
     virtual milvus::engine::DBOptions
     GetOptions();
+
+    std::shared_ptr<milvus::server::Context> dummy_context_;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

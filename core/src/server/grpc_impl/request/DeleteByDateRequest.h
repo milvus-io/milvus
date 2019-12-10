@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {
@@ -26,10 +28,11 @@ namespace grpc {
 class DeleteByDateRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
 
  protected:
-    explicit DeleteByDateRequest(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
+    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context,
+                                 const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
 
     Status
     OnExecute() override;

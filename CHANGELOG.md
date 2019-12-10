@@ -1,6 +1,18 @@
 # Changelog
 
-Please mark all change in change log and use the ticket from JIRA.
+Please mark all change in change log and use the issue from GitHub
+
+# Milvus 0.7.0 (TBD)
+
+## Bug
+
+## Feature
+- \#343 - Add Opentracing
+
+## Improvement
+
+## Task
+
 # Milvus 0.6.0 (2019-12-07)
 
 ## Bug

@@ -15,17 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/utils.h"
+
+#include <opentracing/mocktracer/tracer.h>
+
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
-#include "db/utils.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
@@ -123,6 +127,13 @@ BaseTest::InitLog() {
 void
 BaseTest::SetUp() {
     InitLog();
+    dummy_context_ = std::make_shared<milvus::server::Context>("dummy_request_id");
+    opentracing::mocktracer::MockTracerOptions tracer_options;
+    auto mock_tracer =
+        std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+    auto mock_span = mock_tracer->StartSpan("mock_span");
+    auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+    dummy_context_->SetTraceContext(trace_context);
 #ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
 #endif
