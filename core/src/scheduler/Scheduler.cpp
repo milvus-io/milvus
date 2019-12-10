@@ -78,6 +78,12 @@ Scheduler::Dump() const {
 }
 
 void
+Scheduler::process(const EventPtr& event) {
+    auto process_event = event_register_.at(static_cast<int>(event->Type()));
+    process_event(event);
+}
+
+void
 Scheduler::worker_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
@@ -88,14 +94,8 @@ Scheduler::worker_function() {
             break;
         }
 
-        Process(event);
+        process(event);
     }
-}
-
-void
-Scheduler::Process(const EventPtr& event) {
-    auto process_event = event_register_.at(static_cast<int>(event->Type()));
-    process_event(event);
 }
 
 // TODO(wxyu): refactor the function
