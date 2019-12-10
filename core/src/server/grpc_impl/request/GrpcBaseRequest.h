@@ -17,13 +17,14 @@
 
 #pragma once
 
+#include <condition_variable>
+
 #include "db/meta/MetaTypes.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "server/context/Context.h"
 #include "utils/Status.h"
-
-#include <condition_variable>
 //#include <gperftools/profiler.h>
 #include <memory>
 #include <string>
@@ -45,7 +46,8 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
 
 class GrpcBaseRequest {
  protected:
-    explicit GrpcBaseRequest(const std::string& request_group, bool async = false);
+    explicit GrpcBaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group,
+                             bool async = false);
 
     virtual ~GrpcBaseRequest();
 
@@ -85,6 +87,8 @@ class GrpcBaseRequest {
     TableNotExistMsg(const std::string& table_name);
 
  protected:
+    const std::shared_ptr<Context>& context_;
+
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 

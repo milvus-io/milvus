@@ -17,13 +17,6 @@
 
 #pragma once
 
-#include "DB.h"
-#include "db/IndexFailedChecker.h"
-#include "db/OngoingFileChecker.h"
-#include "db/Types.h"
-#include "db/insert/MemManager.h"
-#include "utils/ThreadPool.h"
-
 #include <atomic>
 #include <condition_variable>
 #include <list>
@@ -34,6 +27,13 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "DB.h"
+#include "db/IndexFailedChecker.h"
+#include "db/OngoingFileChecker.h"
+#include "db/Types.h"
+#include "db/insert/MemManager.h"
+#include "utils/ThreadPool.h"
 
 namespace milvus {
 namespace engine {
@@ -105,17 +105,20 @@ class DBImpl : public DB {
     DropIndex(const std::string& table_id) override;
 
     Status
-    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-          uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
+    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+          const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-          uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+          const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
           ResultDistances& result_distances) override;
 
     Status
-    QueryByFileID(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-                  uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
+                  const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
                   ResultDistances& result_distances) override;
 
     Status
@@ -123,8 +126,9 @@ class DBImpl : public DB {
 
  private:
     Status
-    QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
-               uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances);
+    QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+               const meta::TableFilesSchema& files, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+               ResultIds& result_ids, ResultDistances& result_distances);
 
     void
     BackgroundTimerTask();

@@ -28,17 +28,18 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-CreateTableRequest::CreateTableRequest(const ::milvus::grpc::TableSchema* schema)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), schema_(schema) {
+CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context,
+                                       const ::milvus::grpc::TableSchema* schema)
+    : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), schema_(schema) {
 }
 
 BaseRequestPtr
-CreateTableRequest::Create(const ::milvus::grpc::TableSchema* schema) {
+CreateTableRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::TableSchema* schema) {
     if (schema == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
-    return std::shared_ptr<GrpcBaseRequest>(new CreateTableRequest(schema));
+    return std::shared_ptr<GrpcBaseRequest>(new CreateTableRequest(context, schema));
 }
 
 Status

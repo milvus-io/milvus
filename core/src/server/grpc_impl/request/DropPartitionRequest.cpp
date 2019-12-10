@@ -28,13 +28,15 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-DropPartitionRequest::DropPartitionRequest(const ::milvus::grpc::PartitionParam* partition_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
+DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<Context>& context,
+                                           const ::milvus::grpc::PartitionParam* partition_param)
+    : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
 }
 
 BaseRequestPtr
-DropPartitionRequest::Create(const ::milvus::grpc::PartitionParam* partition_param) {
-    return std::shared_ptr<GrpcBaseRequest>(new DropPartitionRequest(partition_param));
+DropPartitionRequest::Create(const std::shared_ptr<Context>& context,
+                             const ::milvus::grpc::PartitionParam* partition_param) {
+    return std::shared_ptr<GrpcBaseRequest>(new DropPartitionRequest(context, partition_param));
 }
 
 Status

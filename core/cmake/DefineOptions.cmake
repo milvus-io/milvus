@@ -85,6 +85,8 @@ define_option(MILVUS_WITH_GRPC "Build with GRPC" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
+define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
+
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 

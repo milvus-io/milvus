@@ -16,14 +16,16 @@
 // under the License.
 
 #include "scheduler/task/TestTask.h"
-#include "cache/GpuCacheMgr.h"
 
 #include <utility>
+
+#include "cache/GpuCacheMgr.h"
 
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(TableFileSchemaPtr& file, TaskLabelPtr label) : XSearchTask(file, std::move(label)) {
+TestTask::TestTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr& file, TaskLabelPtr label)
+    : XSearchTask(context, file, std::move(label)) {
 }
 
 void

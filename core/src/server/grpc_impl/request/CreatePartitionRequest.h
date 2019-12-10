@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {
@@ -26,10 +28,11 @@ namespace grpc {
 class CreatePartitionRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::PartitionParam* partition_param);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::PartitionParam* partition_param);
 
  protected:
-    explicit CreatePartitionRequest(const ::milvus::grpc::PartitionParam* partition_param);
+    explicit CreatePartitionRequest(const std::shared_ptr<Context>& context,
+                                    const ::milvus::grpc::PartitionParam* partition_param);
 
     Status
     OnExecute() override;

@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+
 #include "scheduler/ResourceMgr.h"
 #include "scheduler/resource/CpuResource.h"
 #include "scheduler/resource/DiskResource.h"
@@ -186,7 +187,8 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     auto callback = [&](EventPtr event) { flag = true; };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
-    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, nullptr));
+    disk_res->task_table().Put(
+        std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, nullptr));
     sleep(1);
     ASSERT_TRUE(flag);
 }
