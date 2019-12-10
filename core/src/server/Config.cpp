@@ -17,6 +17,7 @@
 
 #include <sys/stat.h>
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
@@ -232,6 +233,13 @@ Config::ValidateConfig() {
         }
     }
 #endif
+
+    /* tracing config */
+    std::string tracing_config_path;
+    s = GetTracingConfigJsonConfigPath(tracing_config_path);
+    if (!s.ok()) {
+        return s;
+    }
 
     return Status::OK();
 }
@@ -1131,6 +1139,21 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     return Status::OK();
 }
 #endif
+
+/* tracing config */
+Status
+Config::GetTracingConfigJsonConfigPath(std::string& value) {
+    value = GetConfigStr(CONFIG_TRACING, CONFIG_TRACING_JSON_CONFIG_PATH, "");
+    if (!value.empty()) {
+        std::ifstream tracer_config(value);
+        Status s = tracer_config.good() ? Status::OK()
+                                        : Status(SERVER_INVALID_ARGUMENT, "Failed to open tracer config file " + value +
+                                                                              ": " + std::strerror(errno));
+        tracer_config.close();
+        return s;
+    }
+    return Status::OK();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 /* server config */

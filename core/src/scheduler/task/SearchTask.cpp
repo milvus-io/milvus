@@ -16,17 +16,20 @@
 // under the License.
 
 #include "scheduler/task/SearchTask.h"
+
+#include <src/scheduler/SchedInst.h>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-
-#include <src/scheduler/SchedInst.h>
-#include <algorithm>
-#include <string>
-#include <thread>
-#include <utility>
 
 namespace milvus {
 namespace scheduler {
@@ -97,8 +100,8 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label)
-    : Task(TaskType::SearchTask, std::move(label)), file_(file) {
+XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
+    : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
         if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
             metric_l2 = false;
@@ -110,6 +113,8 @@ XSearchTask::XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label)
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
+    auto load_ctx = context_->Follower("XSearchTask::Load " + std::to_string(file_->id_));
+
     TimeRecorder rc("");
     Status stat = Status::OK();
     std::string error_msg;
@@ -174,10 +179,14 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     index_id_ = file_->id_;
     index_type_ = file_->file_type_;
     //    search_contexts_.swap(search_contexts_);
+
+    load_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void
 XSearchTask::Execute() {
+    auto execute_ctx = context_->Follower("XSearchTask::Execute " + std::to_string(index_id_));
+
     if (index_engine_ == nullptr) {
         return;
     }
@@ -246,6 +255,8 @@ XSearchTask::Execute() {
 
     // release index in resource
     index_engine_ = nullptr;
+
+    execute_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void

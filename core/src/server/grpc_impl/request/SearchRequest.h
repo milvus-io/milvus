@@ -17,10 +17,12 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
-
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "server/context/Context.h"
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {
 namespace server {
@@ -29,12 +31,12 @@ namespace grpc {
 class SearchRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
-           ::milvus::grpc::TopKQueryResult* response);
+    Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_param,
+           const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response);
 
  protected:
-    SearchRequest(const ::milvus::grpc::SearchParam* search_param, const std::vector<std::string>& file_id_array,
-                  ::milvus::grpc::TopKQueryResult* response);
+    SearchRequest(const std::shared_ptr<Context>& context, const ::milvus::grpc::SearchParam* search_param,
+                  const std::vector<std::string>& file_id_array, ::milvus::grpc::TopKQueryResult* response);
 
     Status
     OnExecute() override;

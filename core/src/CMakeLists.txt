@@ -77,13 +77,18 @@ set(thirdparty_files
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
 set(grpc_server_files
         ${grpc_request_files}
         ${grpc_impl_files}
+        ${grpc_interceptor_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -103,7 +108,7 @@ if (MILVUS_WITH_PROMETHEUS)
             ${metrics_prometheus_files})
 endif ()
 
-set(client_grpc_lib
+set(grpc_lib
         grpcpp_channelz
         grpc++
         grpc
@@ -125,7 +130,7 @@ set(boost_lib
 
 set(third_party_libs
         sqlite
-        ${client_grpc_lib}
+        ${grpc_lib}
         yaml-cpp
         mysqlpp
         zlib
@@ -201,9 +206,20 @@ endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
+add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
+set(tracing_lib
+        opentracing
+        opentracing_mocktracer
+        ${grpc_lib}
+        pthread
+        z
+        )
+target_link_libraries(tracing ${tracing_lib})
+
 set(server_libs
         milvus_engine
         metrics
+        tracing
         )
 
 add_executable(milvus_server
@@ -213,7 +229,9 @@ add_executable(milvus_server
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${server_context_files}
         ${utils_files}
+        ${tracing_files}
         )
 
 target_link_libraries(milvus_server

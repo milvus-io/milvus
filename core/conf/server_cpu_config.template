@@ -44,3 +44,6 @@ gpu_resource_config:
     - gpu0
   build_index_resources:            # define the GPU devices used for index building, must be in format gpux
     - gpu0
+
+tracing_config:
+  json_config_path:                 # Absolute path to tracing config file. Creates a no-op tracer if empty

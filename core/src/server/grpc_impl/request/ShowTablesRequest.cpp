@@ -27,13 +27,14 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-ShowTablesRequest::ShowTablesRequest(::milvus::grpc::TableNameList* table_name_list)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), table_name_list_(table_name_list) {
+ShowTablesRequest::ShowTablesRequest(const std::shared_ptr<Context>& context,
+                                     ::milvus::grpc::TableNameList* table_name_list)
+    : GrpcBaseRequest(context, INFO_REQUEST_GROUP), table_name_list_(table_name_list) {
 }
 
 BaseRequestPtr
-ShowTablesRequest::Create(::milvus::grpc::TableNameList* table_name_list) {
-    return std::shared_ptr<GrpcBaseRequest>(new ShowTablesRequest(table_name_list));
+ShowTablesRequest::Create(const std::shared_ptr<Context>& context, ::milvus::grpc::TableNameList* table_name_list) {
+    return std::shared_ptr<GrpcBaseRequest>(new ShowTablesRequest(context, table_name_list));
 }
 
 Status

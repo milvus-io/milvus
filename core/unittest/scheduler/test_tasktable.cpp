@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+
 #include "scheduler/TaskTable.h"
 #include "scheduler/task/TestTask.h"
 
@@ -161,8 +162,10 @@ class TaskTableBaseTest : public ::testing::Test {
     SetUp() override {
         milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        task1_ = std::make_shared<milvus::scheduler::TestTask>(dummy, nullptr);
-        task2_ = std::make_shared<milvus::scheduler::TestTask>(dummy, nullptr);
+        task1_ = std::make_shared<milvus::scheduler::TestTask>(
+            std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
+        task2_ = std::make_shared<milvus::scheduler::TestTask>(
+            std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
     }
 
     milvus::scheduler::TaskPtr invalid_task_;
@@ -318,7 +321,8 @@ class TaskTableAdvanceTest : public ::testing::Test {
     SetUp() override {
         milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<milvus::scheduler::TestTask>(dummy, nullptr);
+            auto task = std::make_shared<milvus::scheduler::TestTask>(
+                std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
             table1_.Put(task);
         }
 

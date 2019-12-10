@@ -29,18 +29,20 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-DeleteByDateRequest::DeleteByDateRequest(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), delete_by_range_param_(delete_by_range_param) {
+DeleteByDateRequest::DeleteByDateRequest(const std::shared_ptr<Context>& context,
+                                         const ::milvus::grpc::DeleteByDateParam* delete_by_range_param)
+    : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), delete_by_range_param_(delete_by_range_param) {
 }
 
 BaseRequestPtr
-DeleteByDateRequest::Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param) {
+DeleteByDateRequest::Create(const std::shared_ptr<Context>& context,
+                            const ::milvus::grpc::DeleteByDateParam* delete_by_range_param) {
     if (delete_by_range_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
 
-    return std::shared_ptr<GrpcBaseRequest>(new DeleteByDateRequest(delete_by_range_param));
+    return std::shared_ptr<GrpcBaseRequest>(new DeleteByDateRequest(context, delete_by_range_param));
 }
 
 Status

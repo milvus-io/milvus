@@ -17,9 +17,10 @@
 
 #pragma once
 
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
-
+#include <memory>
 #include <string>
+
+#include "server/grpc_impl/request/GrpcBaseRequest.h"
 
 namespace milvus {
 namespace server {
@@ -28,10 +29,10 @@ namespace grpc {
 class HasTableRequest : public GrpcBaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, bool& has_table);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table);
 
  protected:
-    HasTableRequest(const std::string& table_name, bool& has_table);
+    HasTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, bool& has_table);
 
     Status
     OnExecute() override;

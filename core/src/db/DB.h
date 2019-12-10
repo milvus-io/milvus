@@ -17,14 +17,15 @@
 
 #pragma once
 
-#include "Options.h"
-#include "Types.h"
-#include "meta/Meta.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "Options.h"
+#include "Types.h"
+#include "meta/Meta.h"
+#include "server/context/Context.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -87,17 +88,20 @@ class DB {
                   IDNumbers& vector_ids_) = 0;
 
     virtual Status
-    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-          uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+          const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
-    Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-          uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+          const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
           ResultDistances& result_distances) = 0;
 
     virtual Status
-    QueryByFileID(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-                  uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
+                  const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
                   ResultDistances& result_distances) = 0;
 
     virtual Status

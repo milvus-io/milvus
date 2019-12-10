@@ -17,17 +17,55 @@
 
 #pragma once
 
+#include <server/context/Context.h>
+
 #include <cstdint>
+#include <memory>
+#include <random>
 #include <string>
+#include <unordered_map>
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "opentracing/tracer.h"
+#include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 
 namespace milvus {
 namespace server {
 namespace grpc {
-class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
+
+#define SET_TRACING_TAG(GRPC_STATUS, SERVER_CONTEXT)                                                                 \
+    if ((GRPC_STATUS).error_code() != ::milvus::grpc::ErrorCode::SUCCESS) {                                          \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true);                           \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (GRPC_STATUS).reason()); \
+    }
+
+#define SET_RESPONSE(RESPONSE, GRPC_STATUS, SERVER_CONTEXT)                   \
+    (RESPONSE)->mutable_status()->set_error_code((GRPC_STATUS).error_code()); \
+    (RESPONSE)->mutable_status()->set_reason((GRPC_STATUS).reason());         \
+    SET_TRACING_TAG(GRPC_STATUS, SERVER_CONTEXT)
+
+class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:
+    explicit GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer);
+
+    void
+    OnPostRecvInitialMetaData(::grpc::experimental::ServerRpcInfo* server_rpc_info,
+                              ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+
+    void
+    OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
+                     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+
+    const std::shared_ptr<Context>&
+    GetContext(::grpc::ServerContext* server_context);
+
+    void
+    SetContext(::grpc::ServerContext* server_context, const std::shared_ptr<Context>& context);
+
+    uint64_t
+    random_id() const;
+
     // *
     // @brief This method is used to create table
     //
@@ -192,6 +230,15 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
     ::grpc::Status
     PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                  ::milvus::grpc::Status* response) override;
+
+ private:
+    std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
+    std::shared_ptr<opentracing::Tracer> tracer_;
+    //    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
+
+    mutable std::mt19937_64 random_num_generator_;
+    mutable std::mutex random_mutex_;
+    mutable std::mutex context_map_mutex_;
 };
 
 }  // namespace grpc
