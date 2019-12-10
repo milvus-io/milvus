@@ -24,6 +24,7 @@
 #include <thrust/host_vector.h>
 #include <unordered_map>
 #include <numeric>
+#include <chrono>
 
 namespace faiss { namespace gpu {
 
@@ -70,12 +71,14 @@ IVFFlat::copyCodeVectorsFromCpu(const float* vecs,
     // list; the length is in sizeof(char)
     FAISS_ASSERT(deviceData_->size() + lengthInBytes <= std::numeric_limits<int64_t>::max());
 
+    std::chrono::high_resolution_clock::time_point time1 = std::chrono::high_resolution_clock::now();
     deviceData_->append((unsigned char*) vecs,
                             lengthInBytes,
                             stream,
                             true /* exact reserved size */);
+    std::chrono::high_resolution_clock::time_point time2 = std::chrono::high_resolution_clock::now();
     copyIndicesFromCpu_(indices, list_length);
-
+    std::chrono::high_resolution_clock::time_point time3 = std::chrono::high_resolution_clock::now();
     maxListLength_ = 0;
 
     size_t listId = 0;
@@ -94,6 +97,7 @@ IVFFlat::copyCodeVectorsFromCpu(const float* vecs,
         pos += size;
         ++ listId;
     }
+    std::chrono::high_resolution_clock::time_point time4 = std::chrono::high_resolution_clock::now();
 
     deviceListDataPointers_ = hostPointers;
 
@@ -102,6 +106,16 @@ IVFFlat::copyCodeVectorsFromCpu(const float* vecs,
     if (stream != 0) {
         streamWait({stream}, {0});
     }
+    std::chrono::high_resolution_clock::time_point time5 = std::chrono::high_resolution_clock::now();
+
+    double span1 = (std::chrono::duration<double, std::micro>(time2 - time1)).count();
+    double span2 = (std::chrono::duration<double, std::micro>(time3 - time2)).count();
+    double span3 = (std::chrono::duration<double, std::micro>(time4 - time3)).count();
+    double span4 = (std::chrono::duration<double, std::micro>(time5 - time4)).count();
+    std::cout << "Span1: " << span1 * 0.001 << "ms" << std::endl;
+    std::cout << "Span2: " << span2 * 0.001 << "ms" << std::endl;
+    std::cout << "Span3: " << span3 * 0.001 << "ms" << std::endl;
+    std::cout << "Span4: " << span4 * 0.001 << "ms" << std::endl;
 }
 
 void
