@@ -442,7 +442,6 @@ class Connection {
      *
      * @return Indicate if partition is delete successfully.
      */
-
     virtual Status
     DropPartition(const PartitionParam& param) = 0;
 
