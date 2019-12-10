@@ -1,7 +1,7 @@
 {
   "host": "127.0.0.1",
   "port": "5666",
-  "tracer_library": "/path/to/shared_library",
+  "tracer_library": "/path/to/shared_tracing_library",
   "tracer_configuration": {
     "service_name": "milvus_server",
     "sampler": {
