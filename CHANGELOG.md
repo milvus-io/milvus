@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#343 - Add Opentracing
 
 ## Improvement
+- \#738 - Use openblas / lapack from apt install
 
 ## Task
 
