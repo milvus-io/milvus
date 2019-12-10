@@ -94,7 +94,7 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "IVFFLAT";
         case milvus::IndexType::IVFSQ8:
             return "IVFSQ8";
-        case milvus::IndexType::NSG:
+        case milvus::IndexType::RNSG:
             return "NSG";
         case milvus::IndexType::IVFSQ8H:
             return "IVFSQ8H";

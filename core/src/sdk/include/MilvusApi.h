@@ -35,7 +35,7 @@ enum class IndexType {
     FLAT = 1,
     IVFFLAT = 2,
     IVFSQ8 = 3,
-    NSG = 4,
+    RNSG = 4,
     IVFSQ8H = 5,
     IVFPQ = 6,
     SPTAGKDT = 7,
