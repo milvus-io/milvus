@@ -32,8 +32,12 @@ const char* TracerUtil::tracer_context_header_name_;
 
 void
 TracerUtil::InitGlobal(const std::string& config_path) {
-    if (!config_path.empty())
+    if (!config_path.empty()) {
         LoadConfig(config_path);
+    }
+    else {
+        tracer_context_header_name_ = "";
+    }
 }
 
 void
