@@ -46,7 +46,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const SearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& index_file : job->index_files()) {
-        auto task = std::make_shared<XSearchTask>(index_file.second, nullptr);
+        auto task = std::make_shared<XSearchTask>(job->GetContext(), index_file.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }

@@ -29,17 +29,18 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-CreateIndexRequest::CreateIndexRequest(const ::milvus::grpc::IndexParam* index_param)
-    : GrpcBaseRequest(DDL_DML_REQUEST_GROUP), index_param_(index_param) {
+CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<Context>& context,
+                                       const ::milvus::grpc::IndexParam* index_param)
+    : GrpcBaseRequest(context, DDL_DML_REQUEST_GROUP), index_param_(index_param) {
 }
 
 BaseRequestPtr
-CreateIndexRequest::Create(const ::milvus::grpc::IndexParam* index_param) {
+CreateIndexRequest::Create(const std::shared_ptr<Context>& context, const ::milvus::grpc::IndexParam* index_param) {
     if (index_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
-    return std::shared_ptr<GrpcBaseRequest>(new CreateIndexRequest(index_param));
+    return std::shared_ptr<GrpcBaseRequest>(new CreateIndexRequest(context, index_param));
 }
 
 Status

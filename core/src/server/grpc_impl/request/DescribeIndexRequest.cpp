@@ -27,13 +27,15 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-DescribeIndexRequest::DescribeIndexRequest(const std::string& table_name, ::milvus::grpc::IndexParam* index_param)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
+DescribeIndexRequest::DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                           ::milvus::grpc::IndexParam* index_param)
+    : GrpcBaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
 }
 
 BaseRequestPtr
-DescribeIndexRequest::Create(const std::string& table_name, ::milvus::grpc::IndexParam* index_param) {
-    return std::shared_ptr<GrpcBaseRequest>(new DescribeIndexRequest(table_name, index_param));
+DescribeIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             ::milvus::grpc::IndexParam* index_param) {
+    return std::shared_ptr<GrpcBaseRequest>(new DescribeIndexRequest(context, table_name, index_param));
 }
 
 Status

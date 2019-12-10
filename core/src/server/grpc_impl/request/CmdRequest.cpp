@@ -26,13 +26,13 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-CmdRequest::CmdRequest(const std::string& cmd, std::string& result)
-    : GrpcBaseRequest(INFO_REQUEST_GROUP), cmd_(cmd), result_(result) {
+CmdRequest::CmdRequest(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result)
+    : GrpcBaseRequest(context, INFO_REQUEST_GROUP), cmd_(cmd), result_(result) {
 }
 
 BaseRequestPtr
-CmdRequest::Create(const std::string& cmd, std::string& result) {
-    return std::shared_ptr<GrpcBaseRequest>(new CmdRequest(cmd, result));
+CmdRequest::Create(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& result) {
+    return std::shared_ptr<GrpcBaseRequest>(new CmdRequest(context, cmd, result));
 }
 
 Status

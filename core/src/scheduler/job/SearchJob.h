@@ -32,6 +32,8 @@
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 
+#include "server/context/Context.h"
+
 namespace milvus {
 namespace scheduler {
 
@@ -44,7 +46,8 @@ using ResultDistances = engine::ResultDistances;
 
 class SearchJob : public Job {
  public:
-    SearchJob(uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
+    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe,
+              const float* vectors);
 
  public:
     bool
@@ -69,6 +72,9 @@ class SearchJob : public Job {
     Dump() const override;
 
  public:
+    const std::shared_ptr<server::Context>&
+    GetContext() const;
+
     uint64_t
     topk() const {
         return topk_;
@@ -100,6 +106,8 @@ class SearchJob : public Job {
     }
 
  private:
+    const std::shared_ptr<server::Context> context_;
+
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
     uint64_t nprobe_ = 0;
