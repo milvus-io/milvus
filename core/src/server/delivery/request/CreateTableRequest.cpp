@@ -64,21 +64,25 @@ CreateTableRequest::OnExecute() {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
+//            status_ = status;
             return status;
         }
 
         status = ValidationUtil::ValidateTableDimension(dimension_);
         if (!status.ok()) {
+//            status_ = status;
             return status;
         }
 
         status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
         if (!status.ok()) {
+//            status_ = status;
             return status;
         }
 
         status = ValidationUtil::ValidateTableIndexMetricType(metric_type_);
         if (!status.ok()) {
+//            status_ = status;
             return status;
         }
 
@@ -96,6 +100,7 @@ CreateTableRequest::OnExecute() {
             if (status.code() == DB_ALREADY_EXIST) {
                 return Status(SERVER_INVALID_TABLE_NAME, status.message());
             }
+//            status_ = status;
             return status;
         }
     } catch (std::exception& ex) {

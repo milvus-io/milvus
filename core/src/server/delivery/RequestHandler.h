@@ -17,29 +17,29 @@ namespace server {
 class RequestHandler {
 
  public:
-    static Status
+    Status
     CreateTable(const std::string& table_name, int64_t dimension, int32_t index_file_size, int32_t metric_type);
 
-    static Status
+    Status
     HasTable(const std::string& table_name, bool& has_table);
 
-    static Status
+    Status
     DropTable(const std::string& table_name);
 
-    static Status
+    Status
     CreateIndex(const std::string& table_name, int32_t index_type, int32_t nlist);
 
-    static Status
+    Status
     Insert(const std::string& table_name,
            std::vector<std::vector<float>>& records_array,
            std::vector<int64_t>& id_array,
            const std::string& partition_tag,
            std::vector<int64_t>& id_out_array);
 
-    static Status
+    Status
     ShowTables(std::vector<std::string>& tables);
 
-    static Status
+    Status
     Search(const std::string& table_name,
            const std::vector<std::vector<float>>& record_array,
            const std::vector<std::pair<std::string, std::string>>& range_list,
@@ -49,11 +49,35 @@ class RequestHandler {
            const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 
-    static Status
+    Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema);
 
-    static Status
+    Status
     CountTable(const std::string& table_name, int64_t& count);
+
+    Status
+    Cmd(const std::string& cmd, std::string& reply);
+
+    Status
+    DeleteByRange(const std::string& table_name, const Range& range);
+
+    Status
+    PreloadTable(const std::string& table_name);
+
+    Status
+    DescribeIndex(const std::string& table_name, IndexParam& param);
+
+    Status
+    DropIndex(const std::string& table_name);
+
+    Status
+    CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag);
+
+    Status
+    ShowPartitions(const std::string& table_name, std::vector<PartitionParam>& partitions);
+
+    Status
+    DropPartition(const std::string& table_name, const std::string& partition_name, const std::string& tag);
 };
 
 } // namespace server

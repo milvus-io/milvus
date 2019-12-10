@@ -27,17 +27,17 @@ namespace server {
 class ShowPartitionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
+    Create(const std::string& table_name, std::vector<PartitionParam>& partition_list);
 
  protected:
-    ShowPartitionsRequest(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list);
+    ShowPartitionsRequest(const std::string& table_name, std::vector<PartitionParam>& partition_list);
 
     Status
     OnExecute() override;
 
  private:
-    std::string table_name_;
-    ::milvus::grpc::PartitionList* partition_list_;
+    const std::string table_name_;
+    std::vector<PartitionParam>& partition_list_;
 };
 
 }  // namespace server

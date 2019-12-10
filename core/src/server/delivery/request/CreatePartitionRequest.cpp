@@ -27,46 +27,50 @@
 namespace milvus {
 namespace server {
 
-CreatePartitionRequest::CreatePartitionRequest(const ::milvus::grpc::PartitionParam* partition_param)
-    : BaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
+CreatePartitionRequest::CreatePartitionRequest(const std::string& table_name,
+                                               const std::string& partition_name,
+                                               const std::string& tag)
+    : BaseRequest(DDL_DML_REQUEST_GROUP),
+      table_name_(table_name), partition_name_(partition_name), tag_(tag) {
 }
 
 BaseRequestPtr
-CreatePartitionRequest::Create(const ::milvus::grpc::PartitionParam* partition_param) {
-    if (partition_param == nullptr) {
-        SERVER_LOG_ERROR << "grpc input is null!";
-        return nullptr;
-    }
-    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(partition_param));
+CreatePartitionRequest::Create(const std::string& table_name,
+                               const std::string& partition_name,
+                               const std::string& tag) {
+//    if (partition_param == nullptr) {
+//        SERVER_LOG_ERROR << "grpc input is null!";
+//        return nullptr;
+//    }
+    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(table_name, partition_name, tag));
 }
 
 Status
 CreatePartitionRequest::OnExecute() {
-    std::string hdr = "CreatePartitionRequest(table=" + partition_param_->table_name() +
-                      ", partition_name=" + partition_param_->partition_name() +
-                      ", partition_tag=" + partition_param_->tag() + ")";
+    std::string hdr = "CreatePartitionRequest(table=" + table_name_ +
+                      ", partition_name=" + partition_name_ +
+                      ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(partition_param_->table_name());
+        auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidatePartitionName(partition_param_->partition_name());
+        status = ValidationUtil::ValidatePartitionName(partition_name_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidatePartitionTags({partition_param_->tag()});
+        status = ValidationUtil::ValidatePartitionTags({tag_});
         if (!status.ok()) {
             return status;
         }
 
         // step 2: create partition
-        status = DBWrapper::DB()->CreatePartition(partition_param_->table_name(), partition_param_->partition_name(),
-                                                  partition_param_->tag());
+        status = DBWrapper::DB()->CreatePartition(table_name_, partition_name_, tag_);
         if (!status.ok()) {
             // partition could exist
             if (status.code() == DB_ALREADY_EXIST) {

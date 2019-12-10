@@ -193,6 +193,9 @@ SearchRequest::OnExecute() {
 //        topk_result_->mutable_distances()->Resize(static_cast<int>(result_distances.size()), 0.0);
 //        memcpy(topk_result_->mutable_distances()->mutable_data(), result_distances.data(),
 //               result_distances.size() * sizeof(float));
+        result_.row_num_ = record_count;
+        result_.distance_list_ = result_distances;
+        result_.id_list_ = result_ids;
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");

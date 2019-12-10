@@ -37,10 +37,6 @@ CreateIndexRequest::CreateIndexRequest(const std::string& table_name, int32_t in
 
 BaseRequestPtr
 CreateIndexRequest::Create(const std::string& table_name, int32_t index_type, int32_t nlist) {
-//    if (index_param == nullptr) {
-//        SERVER_LOG_ERROR << "grpc input is null!";
-//        return nullptr;
-//    }
     return std::shared_ptr<BaseRequest>(new CreateIndexRequest(table_name, index_type, nlist));
 }
 

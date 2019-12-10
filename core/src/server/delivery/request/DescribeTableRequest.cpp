@@ -56,7 +56,7 @@ DescribeTableRequest::OnExecute() {
         }
 
         schema_.table_name_ = table_info.table_id_;
-        schema_.dimension_ = table_info.dimension_;
+        schema_.dimension_ = static_cast<int64_t>(table_info.dimension_);
         schema_.index_file_size_ = table_info.index_file_size_;
         schema_.metric_type_ = table_info.metric_type_;
     } catch (std::exception& ex) {

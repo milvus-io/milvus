@@ -40,7 +40,6 @@ class CreateTableRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-//    const ::milvus::grpc::TableSchema* schema_;
     const std::string table_name_;
     int64_t dimension_;
     int32_t index_file_size_;

@@ -25,16 +25,17 @@ namespace server {
 class DeleteByDateRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
+    Create(const std::string& table_name, const Range& range);
 
  protected:
-    explicit DeleteByDateRequest(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param);
+    explicit DeleteByDateRequest(const std::string& table_name, const Range& range);
 
     Status
     OnExecute() override;
 
  private:
-    const ::milvus::grpc::DeleteByDateParam* delete_by_range_param_;
+    const std::string table_name_;
+    const Range& range_;
 };
 
 }  // namespace server

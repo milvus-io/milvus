@@ -28,18 +28,18 @@
 namespace milvus {
 namespace server {
 
-DeleteByDateRequest::DeleteByDateRequest(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param)
-    : BaseRequest(DDL_DML_REQUEST_GROUP), delete_by_range_param_(delete_by_range_param) {
+DeleteByDateRequest::DeleteByDateRequest(const std::string& table_name, const Range& range)
+    : BaseRequest(DDL_DML_REQUEST_GROUP), table_name_(table_name), range_(range) {
 }
 
 BaseRequestPtr
-DeleteByDateRequest::Create(const ::milvus::grpc::DeleteByDateParam* delete_by_range_param) {
-    if (delete_by_range_param == nullptr) {
-        SERVER_LOG_ERROR << "grpc input is null!";
-        return nullptr;
-    }
+DeleteByDateRequest::Create(const std::string& table_name, const Range& range) {
+//    if (delete_by_range_param == nullptr) {
+//        SERVER_LOG_ERROR << "grpc input is null!";
+//        return nullptr;
+//    }
 
-    return std::shared_ptr<BaseRequest>(new DeleteByDateRequest(delete_by_range_param));
+    return std::shared_ptr<BaseRequest>(new DeleteByDateRequest(table_name, range));
 }
 
 Status
@@ -48,19 +48,18 @@ DeleteByDateRequest::OnExecute() {
         TimeRecorderAuto rc("DeleteByDateRequest");
 
         // step 1: check arguments
-        std::string table_name = delete_by_range_param_->table_name();
-        auto status = ValidationUtil::ValidateTableName(table_name);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
         }
 
         // step 2: check table existence
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name;
+        table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
         if (!status.ok()) {
             if (status.code(), DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name));
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
@@ -73,9 +72,8 @@ DeleteByDateRequest::OnExecute() {
         ErrorCode error_code = SERVER_SUCCESS;
         std::string error_msg;
 
-        std::vector<::milvus::grpc::Range> range_array;
-        range_array.emplace_back(delete_by_range_param_->range());
-        status = ConvertTimeRangeToDBDates(range_array, dates);
+        std::vector<Range> ranges({range_});
+        status = ConvertTimeRangeToDBDates(ranges, dates);
         if (!status.ok()) {
             return status;
         }
@@ -84,7 +82,7 @@ DeleteByDateRequest::OnExecute() {
         std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
-        status = DBWrapper::DB()->DropTable(table_name, dates);
+        status = DBWrapper::DB()->DropTable(table_name_, dates);
         if (!status.ok()) {
             return status;
         }

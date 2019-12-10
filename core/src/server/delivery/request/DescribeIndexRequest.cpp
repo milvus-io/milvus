@@ -26,12 +26,12 @@
 namespace milvus {
 namespace server {
 
-DescribeIndexRequest::DescribeIndexRequest(const std::string& table_name, ::milvus::grpc::IndexParam* index_param)
+DescribeIndexRequest::DescribeIndexRequest(const std::string& table_name, IndexParam& index_param)
     : BaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
 }
 
 BaseRequestPtr
-DescribeIndexRequest::Create(const std::string& table_name, ::milvus::grpc::IndexParam* index_param) {
+DescribeIndexRequest::Create(const std::string& table_name, IndexParam& index_param) {
     return std::shared_ptr<BaseRequest>(new DescribeIndexRequest(table_name, index_param));
 }
 
@@ -54,9 +54,9 @@ DescribeIndexRequest::OnExecute() {
             return status;
         }
 
-        index_param_->set_table_name(table_name_);
-        index_param_->mutable_index()->set_index_type(index.engine_type_);
-        index_param_->mutable_index()->set_nlist(index.nlist_);
+        index_param_.table_name_ = table_name_;
+        index_param_.index_type_ = index.engine_type_;
+        index_param_.nlist_ = index.nlist_;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

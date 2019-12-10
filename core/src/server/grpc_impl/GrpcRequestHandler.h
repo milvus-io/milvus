@@ -23,6 +23,7 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "src/utils/Status.h"
+#include "server/delivery/RequestHandler.h"
 
 namespace milvus {
 namespace server {
@@ -194,8 +195,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
     PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                  ::milvus::grpc::Status* response) override;
 
-    static void
+    void
     ConvertToProtoStatus(const Status&, ::milvus::grpc::Status&);
+
+    GrpcRequestHandler&
+    RegisterRequestHandler(const RequestHandler& handler) {
+        request_handler_ = handler;
+    }
+
+ private:
+    RequestHandler request_handler_;
 };
 
 }  // namespace grpc

@@ -36,7 +36,7 @@ class CountTableRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    std::string table_name_;
+    const std::string table_name_;
     int64_t& row_count_;
 };
 

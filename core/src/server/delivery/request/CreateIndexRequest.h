@@ -34,7 +34,7 @@ class CreateIndexRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    const std::string& table_name_;
+    const std::string table_name_;
     const int32_t index_type_;
     const int32_t nlist_;
 };

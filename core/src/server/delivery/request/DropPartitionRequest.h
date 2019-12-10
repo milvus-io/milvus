@@ -25,16 +25,22 @@ namespace server {
 class DropPartitionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const ::milvus::grpc::PartitionParam* partition_param);
+    Create(const std::string& table_name,
+           const std::string& partition_name,
+           const std::string& tag);
 
  protected:
-    explicit DropPartitionRequest(const ::milvus::grpc::PartitionParam* partition_param);
+    explicit DropPartitionRequest(const std::string& table_name,
+                                  const std::string& partition_name,
+                                  const std::string& tag);
 
     Status
     OnExecute() override;
 
  private:
-    const ::milvus::grpc::PartitionParam* partition_param_;
+    const std::string table_name_;
+    const std::string partition_name_;
+    const std::string tag_;
 };
 
 }  // namespace server

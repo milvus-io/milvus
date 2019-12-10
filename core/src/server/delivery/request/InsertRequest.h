@@ -42,10 +42,10 @@ class InsertRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    const std::string& table_name_;
-    std::vector<std::vector<float>>& records_array_;
-    std::vector<int64_t>& id_array_;
-    const std::string& partition_tag_;
+    const std::string table_name_;
+    const std::vector<std::vector<float>>& records_array_;
+    const std::vector<int64_t>& id_array_;
+    const std::string partition_tag_;
 
     std::vector<int64_t>& response_ids_;
 };

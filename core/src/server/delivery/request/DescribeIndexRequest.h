@@ -27,17 +27,17 @@ namespace server {
 class DescribeIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::string& table_name, ::milvus::grpc::IndexParam* index_param);
+    Create(const std::string& table_name, IndexParam& index_param);
 
  protected:
-    DescribeIndexRequest(const std::string& table_name, ::milvus::grpc::IndexParam* index_param);
+    DescribeIndexRequest(const std::string& table_name, IndexParam& index_param);
 
     Status
     OnExecute() override;
 
  private:
-    std::string table_name_;
-    ::milvus::grpc::IndexParam* index_param_;
+    const std::string table_name_;
+    IndexParam& index_param_;
 };
 
 }  // namespace server

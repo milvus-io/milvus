@@ -51,17 +51,15 @@ class SearchRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    const std::string& table_name_;
+    const std::string table_name_;
     const std::vector<std::vector<float>>& record_array_;
-    const std::vector<std::pair<std::string, std::string>>& range_list_;
+    const std::vector<std::pair<std::string, std::string>> range_list_;
     int64_t topk_;
     int64_t nprobe_;
-    const std::vector<std::string>& partition_list_;
-    const std::vector<std::string>& file_id_list_;
+    const std::vector<std::string> partition_list_;
+    const std::vector<std::string> file_id_list_;
+
     TopKQueryResult& result_;
-//    const ::milvus::grpc::SearchParam* search_param_;
-//    std::vector<std::string> file_id_array_;
-//    ::milvus::grpc::TopKQueryResult* topk_result_;
 };
 
 }  // namespace server

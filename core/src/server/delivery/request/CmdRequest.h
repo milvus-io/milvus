@@ -36,7 +36,7 @@ class CmdRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    std::string cmd_;
+    const std::string cmd_;
     std::string& result_;
 };
 

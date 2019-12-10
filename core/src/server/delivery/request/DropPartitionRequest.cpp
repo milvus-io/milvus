@@ -27,25 +27,30 @@
 namespace milvus {
 namespace server {
 
-DropPartitionRequest::DropPartitionRequest(const ::milvus::grpc::PartitionParam* partition_param)
-    : BaseRequest(DDL_DML_REQUEST_GROUP), partition_param_(partition_param) {
+DropPartitionRequest::DropPartitionRequest(const std::string& table_name,
+                                           const std::string& partition_name,
+                                           const std::string& tag)
+    : BaseRequest(DDL_DML_REQUEST_GROUP),
+      table_name_(table_name), partition_name_(partition_name), tag_(tag) {
 }
 
 BaseRequestPtr
-DropPartitionRequest::Create(const ::milvus::grpc::PartitionParam* partition_param) {
-    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(partition_param));
+DropPartitionRequest::Create(const std::string& table_name,
+                             const std::string& partition_name,
+                             const std::string& tag) {
+    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(table_name, partition_name, tag));
 }
 
 Status
 DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(table=" + partition_param_->table_name() +
-                      ", partition_name=" + partition_param_->partition_name() +
-                      ", partition_tag=" + partition_param_->tag() + ")";
+    std::string hdr = "DropPartitionRequest(table=" + table_name_ +
+                      ", partition_name=" + partition_name_ +
+                      ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
-    std::string table_name = partition_param_->table_name();
-    std::string partition_name = partition_param_->partition_name();
-    std::string partition_tag = partition_param_->tag();
+    std::string table_name = table_name_;
+    std::string partition_name = partition_name_;
+    std::string partition_tag = tag_;
     if (!partition_name.empty()) {
         auto status = ValidationUtil::ValidateTableName(partition_name);
         if (!status.ok()) {

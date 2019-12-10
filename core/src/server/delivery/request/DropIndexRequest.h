@@ -36,7 +36,7 @@ class DropIndexRequest : public BaseRequest {
     OnExecute() override;
 
  private:
-    std::string table_name_;
+    const std::string table_name_;
 };
 
 }  // namespace server

@@ -28,12 +28,12 @@ namespace milvus {
 namespace server {
 
 ShowPartitionsRequest::ShowPartitionsRequest(const std::string& table_name,
-                                             ::milvus::grpc::PartitionList* partition_list)
+                                             std::vector<PartitionParam>& partition_list)
     : BaseRequest(INFO_REQUEST_GROUP), table_name_(table_name), partition_list_(partition_list) {
 }
 
 BaseRequestPtr
-ShowPartitionsRequest::Create(const std::string& table_name, ::milvus::grpc::PartitionList* partition_list) {
+ShowPartitionsRequest::Create(const std::string& table_name, std::vector<PartitionParam>& partition_list) {
     return std::shared_ptr<BaseRequest>(new ShowPartitionsRequest(table_name, partition_list));
 }
 
@@ -54,11 +54,9 @@ ShowPartitionsRequest::OnExecute() {
     }
 
     for (auto& schema : schema_array) {
-        ::milvus::grpc::PartitionParam* param = partition_list_->add_partition_array();
-        param->set_table_name(schema.owner_table_);
-        param->set_partition_name(schema.table_id_);
-        param->set_tag(schema.partition_tag_);
+        partition_list_.emplace_back(schema.owner_table_, schema.table_id_, schema.partition_tag_);
     }
+
     return Status::OK();
 }
 

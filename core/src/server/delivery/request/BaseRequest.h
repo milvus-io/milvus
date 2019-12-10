@@ -43,18 +43,74 @@ using DB_DATE = milvus::engine::meta::DateT;
 Status
 ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array, std::vector<DB_DATE>& dates);
 
-typedef struct {
+struct TableSchema {
     std::string table_name_;
     int64_t dimension_;
     int64_t index_file_size_;
     int32_t metric_type_;
-} TableSchema;
 
-typedef struct {
+    TableSchema(){
+        dimension_ = 0;
+        index_file_size_ = 0;
+        metric_type_ = 0;
+    }
+
+    TableSchema(const std::string& table_name, int64_t dimension, int64_t index_file_size, int32_t metric_type) {
+        table_name_ = table_name;
+        dimension_ = dimension;
+        index_file_size_ = index_file_size;
+        metric_type_ = metric_type;
+    }
+};
+
+struct TopKQueryResult {
     int64_t row_num_;
     engine::ResultIds id_list_;
     engine::ResultDistances distance_list_;
-} TopKQueryResult;
+
+    TopKQueryResult(){
+        row_num_ = 0;
+    }
+
+    TopKQueryResult(int64_t row_num, const engine::ResultIds& id_list, const engine::ResultDistances& distance_list) {
+        row_num_ = row_num;
+        id_list_ = id_list;
+        distance_list_ = distance_list;
+    }
+};
+
+struct IndexParam {
+    std::string table_name_;
+    int32_t index_type_;
+    int32_t nlist_;
+
+    IndexParam() {
+        index_type_ = 0;
+        nlist_ = 0;
+    }
+
+    IndexParam(const std::string& table_name, int32_t index_type, int32_t nlist) {
+        table_name_ = table_name;
+        index_type_ = index_type;
+        nlist_ = nlist;
+    }
+};
+
+struct PartitionParam {
+    std::string table_name_;
+    std::string partition_name_;
+    std::string tag_;
+
+    PartitionParam() {
+
+    }
+
+    PartitionParam(const std::string& table_name, const std::string& partition_name, const std::string& tag) {
+        table_name_ = table_name;
+        partition_name_ = partition_name;
+        tag_ = tag;
+    }
+};
 
 class BaseRequest {
  protected:
@@ -108,6 +164,7 @@ class BaseRequest {
 };
 
 using BaseRequestPtr = std::shared_ptr<BaseRequest>;
+using Range = std::pair<std::string, std::string>;
 
 }  // namespace server
 }  // namespace milvus

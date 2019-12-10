@@ -118,6 +118,78 @@ RequestHandler::DescribeTable(const std::string& table_name, TableSchema& table_
 Status
 RequestHandler::CountTable(const std::string& table_name, int64_t& count) {
     BaseRequestPtr request_ptr = CountTableRequest::Create(table_name, count);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::Cmd(const std::string& cmd, std::string& reply) {
+    BaseRequestPtr request_ptr = CmdRequest::Create(cmd, reply);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+
+Status
+RequestHandler::DeleteByRange(const std::string& table_name, const Range& range) {
+    BaseRequestPtr request_ptr = DeleteByDateRequest::Create(table_name, range);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::PreloadTable(const std::string& table_name) {
+    BaseRequestPtr request_ptr = PreloadTableRequest::Create(table_name);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::DescribeIndex(const std::string& table_name, IndexParam& param) {
+    BaseRequestPtr request_ptr = DescribeIndexRequest::Create(table_name, param);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::DropIndex(const std::string& table_name) {
+    BaseRequestPtr request_ptr = DropIndexRequest::Create(table_name);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::CreatePartition(const std::string& table_name,
+                                const std::string& partition_name,
+                                const std::string& tag) {
+    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(table_name, partition_name, tag);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::ShowPartitions(const std::string& table_name, std::vector<PartitionParam>& partitions) {
+    BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(table_name, partitions);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::DropPartition(const std::string& table_name,
+                              const std::string& partition_name,
+                              const std::string& tag) {
+    BaseRequestPtr request_ptr = DropPartitionRequest::Create(table_name, partition_name, tag);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
 }
 
 } // namespace server
