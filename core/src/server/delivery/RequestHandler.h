@@ -48,7 +48,7 @@ class RequestHandler {
 
     Status
     Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
-           std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+           int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
            std::vector<int64_t>& id_array);
 
     Status
@@ -56,7 +56,7 @@ class RequestHandler {
 
     Status
     Search(const std::shared_ptr<Context>& context, const std::string& table_name,
-           const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list, int64_t topk,
+           int64_t record_size, const std::vector<float>& data_list, const std::vector<Range>& range_list, int64_t topk,
            int64_t nprobe, const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 

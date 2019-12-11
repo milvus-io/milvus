@@ -29,26 +29,27 @@ namespace milvus {
 namespace server {
 
 InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+                             int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
                              std::vector<int64_t>& id_array)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
-      records_array_(records_array),
+      record_size_(record_size),
+      data_list_(data_list),
       partition_tag_(partition_tag),
       id_array_(id_array) {
 }
 
 BaseRequestPtr
 InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+                      int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
                       std::vector<int64_t>& id_array) {
-    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, records_array, partition_tag, id_array));
+    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, record_size, data_list, partition_tag, id_array));
 }
 
 Status
 InsertRequest::OnExecute() {
     try {
-        std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(records_array_.size()) +
+        std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(record_size_) +
                           ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
@@ -57,13 +58,13 @@ InsertRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        if (records_array_.empty()) {
+        if (data_list_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
         if (!id_array_.empty()) {
-            if (id_array_.size() != records_array_.size()) {
+            if (id_array_.size() != record_size_) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID,
                               "The size of vector ID array must be equal to the size of the vector.");
             }
@@ -105,30 +106,22 @@ InsertRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
 
-        // step 4: prepare float data
-        std::vector<float> vec_f(records_array_.size() * table_info.dimension_, 0);
+        // step 4: check prepared float data
+        if (data_list_.size() % record_size_ != 0) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector dimension must be equal to the table dimension.");
+        }
 
-        // TODO(yk): change to one dimension array or use multiple-thread to copy the data
-        for (size_t i = 0; i < records_array_.size(); i++) {
-            if (records_array_.at(i).empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                              "The vector dimension must be equal to the table dimension.");
-            }
-            uint64_t vec_dim = records_array_.at(i).size();
-            if (vec_dim != table_info.dimension_) {
-                ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                std::string error_msg = "The vector dimension must be equal to the table dimension.";
-                return Status(error_code, error_msg);
-            }
-            memcpy(&vec_f[i * table_info.dimension_], records_array_.at(i).data(),
-                   table_info.dimension_ * sizeof(float));
+        if (data_list_.size() / record_size_ != table_info.dimension_) {
+            return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                "The vector dimension must be equal to the table dimension.");
         }
 
         // step 5: insert vectors
-        auto vec_count = static_cast<uint64_t>(records_array_.size());
+        auto vec_count = static_cast<uint64_t>(record_size_);
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count, vec_f.data(), id_array_);
+        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count, data_list_.data(), id_array_);
         if (!status.ok()) {
             return status;
         }

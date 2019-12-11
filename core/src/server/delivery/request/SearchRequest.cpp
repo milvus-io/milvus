@@ -22,18 +22,26 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+
 #
 
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list,
-                             int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
-                             const std::vector<std::string>& file_id_list, TopKQueryResult& result)
+SearchRequest::SearchRequest(const std::shared_ptr<Context>& context,
+                             const std::string& table_name,
+                             int64_t record_size,
+                             const std::vector<float>& data_list,
+                             const std::vector<Range>& range_list,
+                             int64_t topk,
+                             int64_t nprobe,
+                             const std::vector<std::string>& partition_list,
+                             const std::vector<std::string>& file_id_list,
+                             TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
-      record_array_(record_array),
+      record_size_(record_size),
+      data_list_(data_list),
       range_list_(range_list),
       topk_(topk),
       nprobe_(nprobe),
@@ -44,11 +52,11 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std:
 
 BaseRequestPtr
 SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list,
+                      int64_t record_size, const std::vector<float>& data_list, const std::vector<Range>& range_list,
                       int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
                       const std::vector<std::string>& file_id_list, TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, record_array, range_list, topk, nprobe,
-                                                          partition_list, file_id_list, result));
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, record_size, data_list, range_list,
+                                                          topk, nprobe, partition_list, file_id_list, result));
 }
 
 Status
@@ -56,7 +64,7 @@ SearchRequest::OnExecute() {
     try {
         auto pre_query_ctx = context_->Child("Pre query");
 
-        std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(record_array_.size()) +
+        std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(record_size_) +
                           ", k=" + std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
 
         TimeRecorder rc(hdr);
@@ -90,7 +98,7 @@ SearchRequest::OnExecute() {
             return status;
         }
 
-        if (record_array_.empty()) {
+        if (data_list_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector array is empty. Make sure you have entered vector records.");
         }
@@ -104,30 +112,23 @@ SearchRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 5: prepare float data
-        auto record_array_size = record_array_.size();
-        std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
-        for (size_t i = 0; i < record_array_size; i++) {
-            if (record_array_.at(i).empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                              "The vector dimension must be equal to the table dimension.");
-            }
-            uint64_t query_vec_dim = record_array_.at(i).size();
-            if (query_vec_dim != table_info.dimension_) {
-                ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                std::string error_msg = "The vector dimension must be equal to the table dimension.";
-                return Status(error_code, error_msg);
-            }
-
-            memcpy(&vec_f[i * table_info.dimension_], record_array_.at(i).data(),
-                   table_info.dimension_ * sizeof(float));
+        // step 5: check prepared float data
+        if (data_list_.size() % record_size_ != 0) {
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector dimension must be equal to the table dimension.");
         }
+
+        if (data_list_.size() / record_size_ != table_info.dimension_) {
+            return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                          "The vector dimension must be equal to the table dimension.");
+        }
+
         rc.RecordSection("prepare vector data");
 
         // step 6: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
-        auto record_count = (uint64_t)record_array_.size();
+        auto record_count = static_cast<uint64_t>(record_size_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         std::string fname =
@@ -144,10 +145,10 @@ SearchRequest::OnExecute() {
             }
 
             status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, record_count,
-                                            nprobe_, vec_f.data(), dates, result_ids, result_distances);
+                                            nprobe_, data_list_.data(), dates, result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, record_count,
-                                                    nprobe_, vec_f.data(), dates, result_ids, result_distances);
+                                                    nprobe_, data_list_.data(), dates, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
