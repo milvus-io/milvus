@@ -43,6 +43,8 @@ CmdRequest::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
         stat = Status::OK();
+    } else if (cmd_ == "status") {
+        stat = Status::OK();
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
         stat = Status::OK();
