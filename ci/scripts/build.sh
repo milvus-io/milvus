@@ -95,6 +95,9 @@ usage:
         esac
 done
 
+echo -e "===\n=== ccache statistics before build\n==="
+ccache --show-stats
+
 if [[ ! -d ${CORE_BUILD_DIR} ]]; then
     mkdir ${CORE_BUILD_DIR}
 fi
