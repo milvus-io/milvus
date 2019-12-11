@@ -210,15 +210,17 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             request->row_record_array(i).vector_data().data() + request->row_record_array(i).vector_data_size());
     }
 
-    std::vector<int64_t> id_array(request->row_id_array().data(),
-                                  request->row_id_array().data() + request->row_id_array_size());
-    std::vector<int64_t> id_out_array;
-    Status status = request_handler_.Insert(context_map_[context], request->table_name(), record_array, id_array,
-                                            request->partition_tag(), id_out_array);
+    std::vector<int64_t> id_array;
+    if (request->row_id_array_size() > 0) {
+        id_array.resize(request->row_id_array_size());
+        memcpy(id_array.data(), request->row_id_array().data(), request->row_id_array_size() * sizeof(int64_t));
+    }
 
-    response->mutable_vector_id_array()->Resize(static_cast<int>(id_out_array.size()), 0);
-    memcpy(response->mutable_vector_id_array()->mutable_data(), id_out_array.data(),
-           id_out_array.size() * sizeof(int64_t));
+    Status status = request_handler_.Insert(context_map_[context], request->table_name(), record_array,
+                                            request->partition_tag(), id_array);
+
+    response->mutable_vector_id_array()->Resize(static_cast<int>(id_array.size()), 0);
+    memcpy(response->mutable_vector_id_array()->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;

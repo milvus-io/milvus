@@ -76,10 +76,9 @@ RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::
 
 Status
 RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
-                       std::vector<std::vector<float>>& records_array, std::vector<int64_t>& id_array,
-                       const std::string& partition_tag, std::vector<int64_t>& id_out_array) {
-    BaseRequestPtr request_ptr =
-        InsertRequest::Create(context, table_name, records_array, id_array, partition_tag, id_out_array);
+                       std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+                       std::vector<int64_t>& id_array) {
+    BaseRequestPtr request_ptr = InsertRequest::Create(context, table_name, records_array, partition_tag, id_array);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

@@ -48,8 +48,8 @@ class RequestHandler {
 
     Status
     Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
-           std::vector<std::vector<float>>& records_array, std::vector<int64_t>& id_array,
-           const std::string& partition_tag, std::vector<int64_t>& id_out_array);
+           std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+           std::vector<int64_t>& id_array);
 
     Status
     ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);

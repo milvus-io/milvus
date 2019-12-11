@@ -29,22 +29,20 @@ namespace milvus {
 namespace server {
 
 InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             std::vector<std::vector<float>>& records_array, std::vector<int64_t>& id_array,
-                             const std::string& partition_tag, std::vector<int64_t>& id_out_array)
+                             std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+                             std::vector<int64_t>& id_array)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
       records_array_(records_array),
-      id_array_(id_array),
       partition_tag_(partition_tag),
-      response_ids_(id_out_array) {
+      id_array_(id_array) {
 }
 
 BaseRequestPtr
 InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      std::vector<std::vector<float>>& records_array, std::vector<int64_t>& id_array,
-                      const std::string& partition_tag, std::vector<int64_t>& id_out_array) {
-    return std::shared_ptr<BaseRequest>(
-        new InsertRequest(context, table_name, records_array, id_array, partition_tag, id_out_array));
+                      std::vector<std::vector<float>>& records_array, const std::string& partition_tag,
+                      std::vector<int64_t>& id_array) {
+    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, records_array, partition_tag, id_array));
 }
 
 Status
@@ -128,23 +126,14 @@ InsertRequest::OnExecute() {
 
         // step 5: insert vectors
         auto vec_count = static_cast<uint64_t>(records_array_.size());
-        std::vector<int64_t> vec_ids(id_array_.size(), 0);
-        if (!id_array_.empty()) {
-            const int64_t* src_data = id_array_.data();
-            int64_t* target_data = vec_ids.data();
-            memcpy(target_data, src_data, static_cast<size_t>(sizeof(int64_t) * id_array_.size()));
-        }
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count, vec_f.data(), vec_ids);
+        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count, vec_f.data(), id_array_);
         if (!status.ok()) {
             return status;
         }
-        for (int64_t id : vec_ids) {
-            response_ids_.push_back(id);
-        }
 
-        auto ids_size = response_ids_.size();
+        auto ids_size = id_array_.size();
         if (ids_size != vec_count) {
             std::string msg =
                 "Add " + std::to_string(vec_count) + " vectors but only return " + std::to_string(ids_size) + " id";
