@@ -1,5 +1,8 @@
 version: '3.5'
 
+volumes:
+  amd64-ubuntu-18.04-cache:
+
 x-ccache: &ccache
   CCACHE_COMPILERCHECK: content
   CCACHE_COMPRESS: 1
