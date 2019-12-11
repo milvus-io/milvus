@@ -25,7 +25,7 @@ services:
     networks:
       milvus:
         aliases:
-          - mysql
+          - "mysql"
 
   ubuntu-core:
     image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
