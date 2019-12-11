@@ -221,9 +221,9 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         memcpy(id_array.data(), request->row_id_array().data(), request->row_id_array_size() * sizeof(int64_t));
     }
 
-    Status
-        status = request_handler_.Insert(context_map_[context], request->table_name(), request->row_record_array_size(),
-                                         record_array, request->partition_tag(), id_array);
+    Status status =
+        request_handler_.Insert(context_map_[context], request->table_name(), request->row_record_array_size(),
+                                record_array, request->partition_tag(), id_array);
 
     response->mutable_vector_id_array()->Resize(static_cast<int>(id_array.size()), 0);
     memcpy(response->mutable_vector_id_array()->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
@@ -262,16 +262,9 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     std::vector<std::string> file_ids;
     TopKQueryResult result;
 
-    Status status = request_handler_.Search(context_map_[context],
-                                            request->table_name(),
-                                            request->query_record_array_size(),
-                                            record_array,
-                                            ranges,
-                                            request->topk(),
-                                            request->nprobe(),
-                                            partitions,
-                                            file_ids,
-                                            result);
+    Status status =
+        request_handler_.Search(context_map_[context], request->table_name(), request->query_record_array_size(),
+                                record_array, ranges, request->topk(), request->nprobe(), partitions, file_ids, result);
 
     // construct result
     response->set_row_num(result.row_num_);
@@ -324,17 +317,9 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     TopKQueryResult result;
 
-    Status status =
-        request_handler_.Search(context_map_[context],
-                                search_request->table_name(),
-                                search_request->query_record_array_size(),
-                                record_array,
-                                ranges,
-                                search_request->topk(),
-                                search_request->nprobe(),
-                                partitions,
-                                file_ids,
-                                result);
+    Status status = request_handler_.Search(
+        context_map_[context], search_request->table_name(), search_request->query_record_array_size(), record_array,
+        ranges, search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
 
     // construct result
     response->set_row_num(result.row_num_);

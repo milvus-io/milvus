@@ -28,16 +28,11 @@
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<Context>& context,
-                             const std::string& table_name,
-                             int64_t record_size,
-                             const std::vector<float>& data_list,
-                             const std::vector<Range>& range_list,
-                             int64_t topk,
-                             int64_t nprobe,
+SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             int64_t record_size, const std::vector<float>& data_list,
+                             const std::vector<Range>& range_list, int64_t topk, int64_t nprobe,
                              const std::vector<std::string>& partition_list,
-                             const std::vector<std::string>& file_id_list,
-                             TopKQueryResult& result)
+                             const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
       record_size_(record_size),
@@ -51,12 +46,12 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context,
 }
 
 BaseRequestPtr
-SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      int64_t record_size, const std::vector<float>& data_list, const std::vector<Range>& range_list,
-                      int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
+                      const std::vector<float>& data_list, const std::vector<Range>& range_list, int64_t topk,
+                      int64_t nprobe, const std::vector<std::string>& partition_list,
                       const std::vector<std::string>& file_id_list, TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, record_size, data_list, range_list,
-                                                          topk, nprobe, partition_list, file_id_list, result));
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, record_size, data_list, range_list, topk,
+                                                          nprobe, partition_list, file_id_list, result));
 }
 
 Status
@@ -114,8 +109,7 @@ SearchRequest::OnExecute() {
 
         // step 5: check prepared float data
         if (data_list_.size() % record_size_ != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector dimension must be equal to the table dimension.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
         }
 
         if (data_list_.size() / record_size_ != table_info.dimension_) {

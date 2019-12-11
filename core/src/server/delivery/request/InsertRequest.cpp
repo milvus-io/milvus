@@ -40,10 +40,10 @@ InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std:
 }
 
 BaseRequestPtr
-InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
-                      std::vector<int64_t>& id_array) {
-    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, record_size, data_list, partition_tag, id_array));
+InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
+                      std::vector<float>& data_list, const std::string& partition_tag, std::vector<int64_t>& id_array) {
+    return std::shared_ptr<BaseRequest>(
+        new InsertRequest(context, table_name, record_size, data_list, partition_tag, id_array));
 }
 
 Status
@@ -108,13 +108,12 @@ InsertRequest::OnExecute() {
 
         // step 4: check prepared float data
         if (data_list_.size() % record_size_ != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector dimension must be equal to the table dimension.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
         }
 
         if (data_list_.size() / record_size_ != table_info.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                "The vector dimension must be equal to the table dimension.");
+                          "The vector dimension must be equal to the table dimension.");
         }
 
         // step 5: insert vectors

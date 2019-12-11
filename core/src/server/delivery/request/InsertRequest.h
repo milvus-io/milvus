@@ -29,14 +29,12 @@ namespace server {
 class InsertRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-           int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
-           std::vector<int64_t>& id_array);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
+           std::vector<float>& data_list, const std::string& partition_tag, std::vector<int64_t>& id_array);
 
  protected:
-    InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                  int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
-                  std::vector<int64_t>& id_array);
+    InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
+                  std::vector<float>& data_list, const std::string& partition_tag, std::vector<int64_t>& id_array);
 
     Status
     OnExecute() override;
