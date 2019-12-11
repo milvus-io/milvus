@@ -26,9 +26,12 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
+          docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures ubuntu-core
       - name: Docker Build
-        run: docker-compose run ubuntu-core
+        run: |
+          docker-compose run db
+          docker-compose run ubuntu-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
