@@ -334,7 +334,7 @@ ClientProxy::ServerStatus() const {
 
     try {
         std::string dummy;
-        Status status = client_ptr_->Cmd(dummy, "");
+        Status status = client_ptr_->Cmd(dummy, "status");
         return "server alive";
     } catch (std::exception& ex) {
         return "connection lost";
