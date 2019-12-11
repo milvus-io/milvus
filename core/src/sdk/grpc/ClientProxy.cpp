@@ -457,23 +457,21 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
 }
 
 Status
-ClientProxy::GetConfig(const std::string& parent_node, const std::string& child_node, std::string& value) const {
-    std::string config_node_str = parent_node + "." + child_node;
+ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
     try {
-        return client_ptr_->Cmd(value, "get " + config_node_str);
+        return client_ptr_->Cmd(value, "get " + node_name);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Fail to get config: " + config_node_str);
+        return Status(StatusCode::UnknownError, "Fail to get config: " + node_name);
     }
 }
 
 Status
-ClientProxy::SetConfig(const std::string& parent_node, const std::string& child_node, const std::string& value) const {
-    std::string config_node_str = parent_node + "." + child_node;
+ClientProxy::SetConfig(const std::string& node_name, const std::string& value) const {
     try {
         std::string dummy;
-        return client_ptr_->Cmd(dummy, "set " + config_node_str + " " + value);
+        return client_ptr_->Cmd(dummy, "set " + node_name + " " + value);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Fail to set config: " + config_node_str);
+        return Status(StatusCode::UnknownError, "Fail to set config: " + node_name);
     }
 }
 

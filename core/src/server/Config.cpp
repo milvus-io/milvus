@@ -403,7 +403,7 @@ Config::PrintAll() {
 Status
 Config::GetConfigCli(const std::string& parent_key, const std::string& child_key, std::string& value) {
     if (!ConfigNodeValid(parent_key, child_key)) {
-        std::string str = "Config node invalid: " + parent_key + "." + child_key;
+        std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
         return Status(SERVER_UNEXPECTED_ERROR, str);
     }
     return GetConfigValueInMem(parent_key, child_key, value);
@@ -412,7 +412,7 @@ Config::GetConfigCli(const std::string& parent_key, const std::string& child_key
 Status
 Config::SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value) {
     if (!ConfigNodeValid(parent_key, child_key)) {
-        std::string str = "Config node invalid: " + parent_key + "." + child_key;
+        std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
         return Status(SERVER_UNEXPECTED_ERROR, str);
     }
     if (parent_key == CONFIG_SERVER) {
@@ -453,6 +453,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             return SetGpuResourceConfigBuildIndexResources(value);
         }
 #endif
+    } else if (parent_key == CONFIG_TRACING) {
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config");
     }
 }
 
@@ -465,7 +467,7 @@ Config::HandleConfigCli(std::string& result, const std::string& cmd) {
         if (tokens.size() != 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
-        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], ".", nodes);
+        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
         if (nodes.size() != 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
@@ -474,7 +476,7 @@ Config::HandleConfigCli(std::string& result, const std::string& cmd) {
         if (tokens.size() != 3) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
-        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], ".", nodes);
+        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
         if (nodes.size() != 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
