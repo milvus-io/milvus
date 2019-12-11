@@ -450,28 +450,26 @@ class Connection {
      *
      * This method is used to set config.
      *
-     * @param parent_node, config parent node name.
-     * @param child_node, config child node name.
+     * @param node_name, config node name.
      * @param value, config value.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    GetConfig(const std::string& parent_node, const std::string& child_node, std::string& value) const = 0;
+    GetConfig(const std::string& node_name, std::string& value) const = 0;
 
     /**
      * @brief Set config method
      *
      * This method is used to set config.
      *
-     * @param parent_node, config parent node name.
-     * @param child_node, config child node name.
+     * @param node_name, config node name.
      * @param value, config value.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    SetConfig(const std::string& parent_node, const std::string& child_node, const std::string& value) const = 0;
+    SetConfig(const std::string& node_name, const std::string& value) const = 0;
 };
 
 }  // namespace milvus
