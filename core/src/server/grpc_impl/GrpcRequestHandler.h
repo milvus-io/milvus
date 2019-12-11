@@ -36,16 +36,69 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-#define SET_TRACING_TAG(GRPC_STATUS, SERVER_CONTEXT)                                                                 \
-    if ((GRPC_STATUS).error_code() != ::milvus::grpc::ErrorCode::SUCCESS) {                                          \
-        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true);                           \
-        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (GRPC_STATUS).reason()); \
+namespace {
+::milvus::grpc::ErrorCode
+ErrorMap(ErrorCode code) {
+    static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
+        {SERVER_UNEXPECTED_ERROR, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
+        {SERVER_UNSUPPORTED_ERROR, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
+        {SERVER_NULL_POINTER, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
+        {SERVER_INVALID_ARGUMENT, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+        {SERVER_FILE_NOT_FOUND, ::milvus::grpc::ErrorCode::FILE_NOT_FOUND},
+        {SERVER_NOT_IMPLEMENT, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
+        {SERVER_CANNOT_CREATE_FOLDER, ::milvus::grpc::ErrorCode::CANNOT_CREATE_FOLDER},
+        {SERVER_CANNOT_CREATE_FILE, ::milvus::grpc::ErrorCode::CANNOT_CREATE_FILE},
+        {SERVER_CANNOT_DELETE_FOLDER, ::milvus::grpc::ErrorCode::CANNOT_DELETE_FOLDER},
+        {SERVER_CANNOT_DELETE_FILE, ::milvus::grpc::ErrorCode::CANNOT_DELETE_FILE},
+        {SERVER_TABLE_NOT_EXIST, ::milvus::grpc::ErrorCode::TABLE_NOT_EXISTS},
+        {SERVER_INVALID_TABLE_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_TABLE_NAME},
+        {SERVER_INVALID_TABLE_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
+        {SERVER_INVALID_TIME_RANGE, ::milvus::grpc::ErrorCode::ILLEGAL_RANGE},
+        {SERVER_INVALID_VECTOR_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
+
+        {SERVER_INVALID_INDEX_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_INDEX_TYPE},
+        {SERVER_INVALID_ROWRECORD, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
+        {SERVER_INVALID_ROWRECORD_ARRAY, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
+        {SERVER_INVALID_TOPK, ::milvus::grpc::ErrorCode::ILLEGAL_TOPK},
+        {SERVER_INVALID_NPROBE, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_INDEX_NLIST, ::milvus::grpc::ErrorCode::ILLEGAL_NLIST},
+        {SERVER_INVALID_INDEX_METRIC_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_METRIC_TYPE},
+        {SERVER_INVALID_INDEX_FILE_SIZE, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+        {SERVER_ILLEGAL_VECTOR_ID, ::milvus::grpc::ErrorCode::ILLEGAL_VECTOR_ID},
+        {SERVER_ILLEGAL_SEARCH_RESULT, ::milvus::grpc::ErrorCode::ILLEGAL_SEARCH_RESULT},
+        {SERVER_CACHE_FULL, ::milvus::grpc::ErrorCode::CACHE_FAILED},
+        {DB_META_TRANSACTION_FAILED, ::milvus::grpc::ErrorCode::META_FAILED},
+        {SERVER_BUILD_INDEX_ERROR, ::milvus::grpc::ErrorCode::BUILD_INDEX_ERROR},
+        {SERVER_OUT_OF_MEMORY, ::milvus::grpc::ErrorCode::OUT_OF_MEMORY},
+    };
+
+    if (code_map.find(code) != code_map.end()) {
+        return code_map.at(code);
+    } else {
+        return ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR;
+    }
+}
+}  // namespace
+
+#define CHECK_NULLPTR_RETURN(PTR)       \
+    if (nullptr == request) {           \
+        return ::grpc::Status::OK;      \
     }
 
-#define SET_RESPONSE(RESPONSE, GRPC_STATUS, SERVER_CONTEXT)                   \
-    (RESPONSE)->mutable_status()->set_error_code((GRPC_STATUS).error_code()); \
-    (RESPONSE)->mutable_status()->set_reason((GRPC_STATUS).reason());         \
-    SET_TRACING_TAG(GRPC_STATUS, SERVER_CONTEXT)
+#define SET_TRACING_TAG(STATUS, SERVER_CONTEXT)                                                                     \
+    if ((STATUS).code() != ::milvus::grpc::ErrorCode::SUCCESS) {                                                    \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true);                          \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (STATUS).message());    \
+    }
+
+#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT)                  \
+    do {                                                                \
+        if (!(STATUS).ok()) {                                           \
+            (RESPONSE)->set_error_code(ErrorMap((STATUS).code()));      \
+            (RESPONSE)->set_reason((STATUS).message());                 \
+        }                                                               \
+        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);                        \
+    } while(false);
 
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:
@@ -232,9 +285,6 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                  ::milvus::grpc::Status* response) override;
-
-    void
-    ConvertToProtoStatus(const Status&, ::milvus::grpc::Status&);
 
     GrpcRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {

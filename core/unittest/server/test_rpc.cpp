@@ -21,15 +21,13 @@
 #include <boost/filesystem.hpp>
 #include <thread>
 
-<<<<<<< HEAD
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
-#include "src/server/delivery/RequestScheduler.h"
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/RequestScheduler.h"
+#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/RequestHandler.h"
 #include "src/version.h"
 
-=======
->>>>>>> main/master
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "scheduler/ResourceFactory.h"
@@ -38,8 +36,6 @@
 #include "server/DBWrapper.h"
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
-#include "server/grpc_impl/GrpcRequestScheduler.h"
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
 #include "src/version.h"
 #include "utils/CommonUtil.h"
 
@@ -170,6 +166,7 @@ CurrentTmDate(int64_t offset_day = 0) {
 TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableName request;
     ::milvus::grpc::BoolReply reply;
     ::grpc::Status status = handler->HasTable(&context, &request, &reply);
@@ -183,6 +180,7 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
 TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = handler->CreateIndex(&context, &request, &response);
@@ -220,6 +218,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
 TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::InsertParam request;
     ::milvus::grpc::Status response;
 
@@ -238,6 +237,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
 TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResult response;
     // test null input
@@ -302,6 +302,7 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
 TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableSchema tableschema;
     ::milvus::grpc::Status response;
     std::string tablename = "tbl";
@@ -405,6 +406,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableSchema table_schema;
     ::milvus::grpc::Status response;
     std::string str_table_name = "tbl_partition";
@@ -444,6 +446,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 TEST_F(RpcHandlerTest, CMD_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::Command command;
     command.set_cmd("version");
     ::milvus::grpc::StringReply reply;
@@ -459,6 +462,7 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
 TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     ::grpc::ServerContext context;
     handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::DeleteByDateParam request;
     ::milvus::grpc::Status status;
     handler->DeleteByDate(&context, nullptr, &status);
@@ -483,21 +487,21 @@ TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
 
 //////////////////////////////////////////////////////////////////////
 namespace {
-class DummyRequest : public milvus::server::grpc::GrpcBaseRequest {
+class DummyRequest : public milvus::server::BaseRequest {
  public:
     milvus::Status
     OnExecute() override {
         return milvus::Status::OK();
     }
 
-    static milvus::server::grpc::BaseRequestPtr
+    static milvus::server::BaseRequestPtr
     Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::grpc::GrpcBaseRequest>(new DummyRequest(dummy));
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
     }
 
  public:
     explicit DummyRequest(std::string& dummy)
-        : GrpcBaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
     }
 };
 
@@ -518,15 +522,14 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto status = request_ptr->Execute();
     ASSERT_TRUE(status.ok());
 
-    milvus::server::grpc::RequestScheduler::GetInstance().Start();
-    ::milvus::grpc::Status grpc_status;
+    milvus::server::RequestScheduler::GetInstance().Start();
     std::string dummy = "dql";
-    milvus::server::grpc::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
-    milvus::server::grpc::RequestScheduler::GetInstance().ExecRequest(base_task_ptr, &grpc_status);
+    milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
+    milvus::server::RequestScheduler::GetInstance().ExecRequest(base_task_ptr);
 
-    milvus::server::grpc::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
     request_ptr = nullptr;
-    milvus::server::grpc::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
 
-    milvus::server::grpc::RequestScheduler::GetInstance().Stop();
+    milvus::server::RequestScheduler::GetInstance().Stop();
 }

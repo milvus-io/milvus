@@ -74,6 +74,12 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
+set(server_delivery_files
+        ${server_delivery_impl_files}
+        ${server_delivery_request_files})
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
