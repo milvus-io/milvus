@@ -20,8 +20,6 @@ services:
     image: mysql:5.6
     ports:
       - "3306:3306"
-    expose:
-      - '3306'
     environment:
       MYSQL_ROOT_PASSWORD: 123456
     networks:
