@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "server/delivery/request/BaseRequest.h"
 
@@ -27,16 +28,12 @@ namespace server {
 class CreateTableRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-           int64_t dimension,
-           int32_t index_file_size,
-           int32_t metric_type);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t dimension,
+           int32_t index_file_size, int32_t metric_type);
 
  protected:
     explicit CreateTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                int64_t dimension,
-                                int32_t index_file_size,
-                                int32_t metric_type);
+                                int64_t dimension, int32_t index_file_size, int32_t metric_type);
 
     Status
     OnExecute() override;

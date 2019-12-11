@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "BaseRequest.h"
+#include "server/delivery/request/BaseRequest.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -25,7 +25,8 @@ namespace server {
 constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
 Status
-ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array, std::vector<DB_DATE>& dates) {
+ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array,
+                          std::vector<DB_DATE>& dates) {
     dates.clear();
     for (auto& range : range_array) {
         time_t tt_start, tt_end;

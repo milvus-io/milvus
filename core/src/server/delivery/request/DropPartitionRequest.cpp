@@ -28,23 +28,19 @@ namespace milvus {
 namespace server {
 
 DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                           const std::string& partition_name,
-                                           const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
-      table_name_(table_name), partition_name_(partition_name), tag_(tag) {
+                                           const std::string& partition_name, const std::string& tag)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), partition_name_(partition_name), tag_(tag) {
 }
 
 BaseRequestPtr
 DropPartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const std::string& partition_name,
-                             const std::string& tag) {
+                             const std::string& partition_name, const std::string& tag) {
     return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, table_name, partition_name, tag));
 }
 
 Status
 DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(table=" + table_name_ +
-                      ", partition_name=" + partition_name_ +
+    std::string hdr = "DropPartitionRequest(table=" + table_name_ + ", partition_name=" + partition_name_ +
                       ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 

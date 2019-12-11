@@ -16,8 +16,8 @@
 // under the License.
 
 #include "server/delivery/request/CreateTableRequest.h"
-#include "server/delivery/request/BaseRequest.h"
 #include "server/DBWrapper.h"
+#include "server/delivery/request/BaseRequest.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -28,11 +28,8 @@
 namespace milvus {
 namespace server {
 
-CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context,
-                                       const std::string& table_name,
-                                       int64_t dimension,
-                                       int32_t index_file_size,
-                                       int32_t metric_type)
+CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                       int64_t dimension, int32_t index_file_size, int32_t metric_type)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
       dimension_(dimension),
@@ -41,22 +38,15 @@ CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context,
 }
 
 BaseRequestPtr
-CreateTableRequest::Create(const std::shared_ptr<Context>& context,
-                           const std::string& table_name,
-                           int64_t dimension,
-                           int32_t index_file_size,
-                           int32_t metric_type) {
-    return std::shared_ptr<BaseRequest>(new CreateTableRequest(context,
-                                                               table_name,
-                                                               dimension,
-                                                               index_file_size,
-                                                               metric_type));
+CreateTableRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t dimension,
+                           int32_t index_file_size, int32_t metric_type) {
+    return std::shared_ptr<BaseRequest>(
+        new CreateTableRequest(context, table_name, dimension, index_file_size, metric_type));
 }
 
 Status
 CreateTableRequest::OnExecute() {
-    std::string hdr = "CreateTableRequest(table=" + table_name_ +
-                      ", dimension=" + std::to_string(dimension_) + ")";
+    std::string hdr = "CreateTableRequest(table=" + table_name_ + ", dimension=" + std::to_string(dimension_) + ")";
     TimeRecorderAuto rc(hdr);
 
     try {

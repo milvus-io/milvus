@@ -26,12 +26,14 @@
 namespace milvus {
 namespace server {
 
-DescribeIndexRequest::DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param)
+DescribeIndexRequest::DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                           IndexParam& index_param)
     : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), index_param_(index_param) {
 }
 
 BaseRequestPtr
-DescribeIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param) {
+DescribeIndexRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             IndexParam& index_param) {
     return std::shared_ptr<BaseRequest>(new DescribeIndexRequest(context, table_name, index_param));
 }
 

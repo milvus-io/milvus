@@ -22,44 +22,33 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#
 
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<Context>& context,
-                             const std::string& table_name,
-                             const std::vector<std::vector<float>>& record_array,
-                             const std::vector<std::pair<std::string, std::string>>& range_list,
-                             int64_t topk,
-                             int64_t nprobe,
-                             const std::vector<std::string>& partition_list,
-                             const std::vector<std::string>& file_id_list,
-                             TopKQueryResult& result)
+SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list,
+                             int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                             const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
-      table_name_(table_name), record_array_(record_array), range_list_(range_list),
-      topk_(topk), nprobe_(nprobe), partition_list_(partition_list),
-      file_id_list_(file_id_list), result_(result) {
+      table_name_(table_name),
+      record_array_(record_array),
+      range_list_(range_list),
+      topk_(topk),
+      nprobe_(nprobe),
+      partition_list_(partition_list),
+      file_id_list_(file_id_list),
+      result_(result) {
 }
 
 BaseRequestPtr
-SearchRequest::Create(const std::shared_ptr<Context>& context,
-                      const std::string& table_name,
-                      const std::vector<std::vector<float>>& record_array,
-                      const std::vector<std::pair<std::string, std::string>>& range_list,
-                      int64_t topk,
-                      int64_t nprobe,
-                      const std::vector<std::string>& partition_list,
-                      const std::vector<std::string>& file_id_list,
-                      TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context,
-                                                          table_name,
-                                                          record_array,
-                                                          range_list,
-                                                          topk,
-                                                          nprobe,
-                                                          partition_list,
-                                                          file_id_list,
-                                                          result));
+SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                      const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list,
+                      int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                      const std::vector<std::string>& file_id_list, TopKQueryResult& result) {
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, record_array, range_list, topk, nprobe,
+                                                          partition_list, file_id_list, result));
 }
 
 Status
@@ -67,10 +56,8 @@ SearchRequest::OnExecute() {
     try {
         auto pre_query_ctx = context_->Child("Pre query");
 
-        std::string hdr = "SearchRequest(table=" + table_name_ +
-                          ", nq=" + std::to_string(record_array_.size()) +
-                          ", k=" + std::to_string(topk_) +
-                          ", nprob=" + std::to_string(nprobe_) + ")";
+        std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(record_array_.size()) +
+                          ", k=" + std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
 
         TimeRecorder rc(hdr);
 
@@ -156,15 +143,11 @@ SearchRequest::OnExecute() {
                 return status;
             }
 
-            status = DBWrapper::DB()->Query(context_, table_name_, partition_list_,
-                                            (size_t)topk_, record_count, nprobe_,
-                                            vec_f.data(), dates,
-                                            result_ids, result_distances);
+            status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, record_count,
+                                            nprobe_, vec_f.data(), dates, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_,
-                                                    (size_t)topk_, record_count, nprobe_,
-                                                    vec_f.data(), dates,
-                                                    result_ids, result_distances);
+            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, record_count,
+                                                    nprobe_, vec_f.data(), dates, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING

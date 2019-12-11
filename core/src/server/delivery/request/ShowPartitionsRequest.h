@@ -19,7 +19,9 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -27,10 +29,12 @@ namespace server {
 class ShowPartitionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, std::vector<PartitionParam>& partition_list);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+           std::vector<PartitionParam>& partition_list);
 
  protected:
-    ShowPartitionsRequest(const std::shared_ptr<Context>& context, const std::string& table_name, std::vector<PartitionParam>& partition_list);
+    ShowPartitionsRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                          std::vector<PartitionParam>& partition_list);
 
     Status
     OnExecute() override;

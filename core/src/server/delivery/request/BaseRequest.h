@@ -17,20 +17,20 @@
 
 #pragma once
 
+#include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "server/context/Context.h"
 #include "utils/Status.h"
-#include "db/Types.h"
 
-#include <condition_variable>
 #include <condition_variable>
 //#include <gperftools/profiler.h>
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace milvus {

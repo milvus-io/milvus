@@ -17,8 +17,9 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
 #include <memory>
+#include <string>
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
@@ -26,14 +27,12 @@ namespace server {
 class CreatePartitionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-           const std::string& partition_name,
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, const std::string& partition_name,
            const std::string& tag);
 
  protected:
     explicit CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                    const std::string& partition_name,
-                                    const std::string& tag);
+                                    const std::string& partition_name, const std::string& tag);
 
     Status
     OnExecute() override;

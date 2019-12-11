@@ -22,7 +22,6 @@
 #include <memory>
 #include <string>
 
-
 namespace milvus {
 namespace server {
 

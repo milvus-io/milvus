@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -29,17 +30,13 @@ class InsertRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-           std::vector<std::vector<float>>& records_array,
-           std::vector<int64_t>& id_array,
-           const std::string& partition_tag,
-           std::vector<int64_t>& id_out_array);
+           std::vector<std::vector<float>>& records_array, std::vector<int64_t>& id_array,
+           const std::string& partition_tag, std::vector<int64_t>& id_out_array);
 
  protected:
     InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                  std::vector<std::vector<float>>& records_array,
-                  std::vector<int64_t>& id_array,
-                  const std::string& partition_tag,
-                  std::vector<int64_t>& id_out_array);
+                  std::vector<std::vector<float>>& records_array, std::vector<int64_t>& id_array,
+                  const std::string& partition_tag, std::vector<int64_t>& id_out_array);
 
     Status
     OnExecute() override;

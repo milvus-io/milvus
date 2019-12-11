@@ -17,9 +17,10 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-
+#include <memory>
 #include <string>
+
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {

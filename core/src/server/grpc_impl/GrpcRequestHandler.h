@@ -20,6 +20,7 @@
 #include <server/context/Context.h>
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -27,16 +28,15 @@
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
-#include "src/utils/Status.h"
-#include "server/delivery/RequestHandler.h"
 #include "opentracing/tracer.h"
+#include "server/delivery/RequestHandler.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
+#include "src/utils/Status.h"
 
 namespace milvus {
 namespace server {
 namespace grpc {
 
-namespace {
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
     static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
@@ -78,29 +78,28 @@ ErrorMap(ErrorCode code) {
         return ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR;
     }
 }
-}  // namespace
 
-#define CHECK_NULLPTR_RETURN(PTR)       \
-    if (nullptr == request) {           \
-        return ::grpc::Status::OK;      \
+#define CHECK_NULLPTR_RETURN(PTR)  \
+    if (nullptr == request) {      \
+        return ::grpc::Status::OK; \
     }
 
-#define SET_TRACING_TAG(STATUS, SERVER_CONTEXT)                                                                     \
-    if ((STATUS).code() != ::milvus::grpc::ErrorCode::SUCCESS) {                                                    \
-        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true);                          \
-        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (STATUS).message());    \
+#define SET_TRACING_TAG(STATUS, SERVER_CONTEXT)                                                                  \
+    if ((STATUS).code() != ::milvus::grpc::ErrorCode::SUCCESS) {                                                 \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true);                       \
+        GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (STATUS).message()); \
     }
 
-#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT)                          \
-    do {                                                                        \
-        if ((STATUS).ok()) {                                                    \
-            (RESPONSE)->set_error_code(::milvus::grpc::ErrorCode::SUCCESS);     \
-        }  else {                                                               \
-         (RESPONSE)->set_error_code(ErrorMap((STATUS).code()));                 \
-        }                                                                       \
-        (RESPONSE)->set_reason((STATUS).message());                             \
-        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);                                \
-    } while(false);
+#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT)                      \
+    do {                                                                    \
+        if ((STATUS).ok()) {                                                \
+            (RESPONSE)->set_error_code(::milvus::grpc::ErrorCode::SUCCESS); \
+        } else {                                                            \
+            (RESPONSE)->set_error_code(ErrorMap((STATUS).code()));          \
+        }                                                                   \
+        (RESPONSE)->set_reason((STATUS).message());                         \
+        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);                            \
+    } while (false);
 
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:

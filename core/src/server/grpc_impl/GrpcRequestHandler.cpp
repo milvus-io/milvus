@@ -15,13 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-#include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/Config.h"
+#include "server/grpc_impl/GrpcRequestHandler.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/TimeRecorder.h"
@@ -113,11 +112,8 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext* context, const ::milvus::
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreateTable(context_map_[context],
-                                                 request->table_name(),
-                                                 request->dimension(),
-                                                 request->index_file_size(),
-                                                 request->metric_type());
+    Status status = request_handler_.CreateTable(context_map_[context], request->table_name(), request->dimension(),
+                                                 request->index_file_size(), request->metric_type());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -153,10 +149,8 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreateIndex(context_map_[context],
-                                                 request->table_name(),
-                                                 request->index().index_type(),
-                                                 request->index().nlist());
+    Status status = request_handler_.CreateIndex(context_map_[context], request->table_name(),
+                                                 request->index().index_type(), request->index().nlist());
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -169,24 +163,20 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     std::vector<std::vector<float>> record_array;
     for (size_t i = 0; i < request->row_record_array_size(); i++) {
-        std::vector<float> record(request->row_record_array(i).vector_data().data(),
-                                  request->row_record_array(i).vector_data().data()
-                                  + request->row_record_array(i).vector_data_size());
+        std::vector<float> record(
+            request->row_record_array(i).vector_data().data(),
+            request->row_record_array(i).vector_data().data() + request->row_record_array(i).vector_data_size());
         record_array.push_back(record);
     }
 
     std::vector<int64_t> id_array(request->row_id_array().data(),
                                   request->row_id_array().data() + request->row_id_array_size());
     std::vector<int64_t> id_out_array;
-    Status status = request_handler_.Insert(context_map_[context], request->table_name(),
-                                            record_array,
-                                            id_array,
-                                            request->partition_tag(),
-                                            id_out_array);
+    Status status = request_handler_.Insert(context_map_[context], request->table_name(), record_array, id_array,
+                                            request->partition_tag(), id_out_array);
 
     response->mutable_vector_id_array()->Resize(static_cast<int>(id_out_array.size()), 0);
-    memcpy(response->mutable_vector_id_array()->mutable_data(),
-           id_out_array.data(),
+    memcpy(response->mutable_vector_id_array()->mutable_data(), id_out_array.data(),
            id_out_array.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -203,44 +193,35 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
         record_array.emplace_back(request->query_record_array(i).vector_data().begin(),
                                   request->query_record_array(i).vector_data().end());
         // TODO: May bug here, record is a local variable in for scope.
-//        std::vector<float> record(request->query_record_array(i).vector_data().data(),
-//                                  request->query_record_array(i).vector_data().data()
-//                                  + request->query_record_array(i).vector_data_size());
-//        record_array.push_back(record);
+        //        std::vector<float> record(request->query_record_array(i).vector_data().data(),
+        //                                  request->query_record_array(i).vector_data().data()
+        //                                  + request->query_record_array(i).vector_data_size());
+        //        record_array.push_back(record);
     }
-    std::vector<std::pair<std::string, std::string>> ranges;
+    std::vector<Range> ranges;
     for (auto& range : request->query_range_array()) {
         ranges.emplace_back(range.start_value(), range.end_value());
     }
 
     std::vector<std::string> partitions;
-    for (auto& partition: request->partition_tag_array()) {
+    for (auto& partition : request->partition_tag_array()) {
         partitions.emplace_back(partition);
     }
 
     std::vector<std::string> file_ids;
     TopKQueryResult result;
 
-    Status status = request_handler_.Search(context_map_[context], request->table_name(),
-                                            record_array,
-                                            ranges,
-                                            request->topk(),
-                                            request->nprobe(),
-                                            partitions,
-                                            file_ids,
-                                            result);
+    Status status = request_handler_.Search(context_map_[context], request->table_name(), record_array, ranges,
+                                            request->topk(), request->nprobe(), partitions, file_ids, result);
 
     // construct result
     response->set_row_num(result.row_num_);
 
     response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
-    memcpy(response->mutable_ids()->mutable_data(),
-           result.id_list_.data(),
-           result.id_list_.size() * sizeof(int64_t));
+    memcpy(response->mutable_ids()->mutable_data(), result.id_list_.data(), result.id_list_.size() * sizeof(int64_t));
 
     response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(),
-           result.distance_list_.data(),
+    memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
            result.distance_list_.size() * sizeof(float));
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -264,39 +245,30 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
         record_array.emplace_back(search_request->query_record_array(i).vector_data().begin(),
                                   search_request->query_record_array(i).vector_data().end());
     }
-    std::vector<std::pair<std::string, std::string>> ranges;
+    std::vector<Range> ranges;
     for (auto& range : search_request->query_range_array()) {
         ranges.emplace_back(range.start_value(), range.end_value());
     }
 
     std::vector<std::string> partitions;
-    for (auto& partition: search_request->partition_tag_array()) {
+    for (auto& partition : search_request->partition_tag_array()) {
         partitions.emplace_back(partition);
     }
 
     TopKQueryResult result;
 
-    Status status = request_handler_.Search(context_map_[context],
-                                            search_request->table_name(),
-                                            record_array,
-                                            ranges,
-                                            search_request->topk(),
-                                            search_request->nprobe(),
-                                            partitions,
-                                            file_ids,
-                                            result);
+    Status status =
+        request_handler_.Search(context_map_[context], search_request->table_name(), record_array, ranges,
+                                search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
 
     // construct result
     response->set_row_num(result.row_num_);
 
     response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
-    memcpy(response->mutable_ids()->mutable_data(),
-           result.id_list_.data(),
-           result.id_list_.size() * sizeof(int64_t));
+    memcpy(response->mutable_ids()->mutable_data(), result.id_list_.data(), result.id_list_.size() * sizeof(int64_t));
 
     response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(),
-           result.distance_list_.data(),
+    memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
            result.distance_list_.size() * sizeof(float));
     SET_RESPONSE(response->mutable_status(), status, context);
 
@@ -340,7 +312,7 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::g
     Status status = request_handler_.ShowTables(context_map_[context], tables);
     // TODO: Do not invoke set_allocated_*() here, may cause SIGSEGV
     // response->set_allocated_status(&grpc_status);
-    for (auto& table: tables) {
+    for (auto& table : tables) {
         response->add_table_names(table);
     }
     SET_RESPONSE(response->mutable_status(), status, context);

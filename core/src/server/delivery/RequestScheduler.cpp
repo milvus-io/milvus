@@ -15,15 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "RequestScheduler.h"
+#include "server/delivery/RequestScheduler.h"
 #include "utils/Log.h"
 
 #include <utility>
 
 namespace milvus {
 namespace server {
-
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 RequestScheduler::RequestScheduler() : stopped_(false) {

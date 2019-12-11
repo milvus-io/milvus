@@ -34,9 +34,6 @@
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
-#include "server/Server.h"
-#include "server/grpc_impl/GrpcRequestHandler.h"
-#include "src/version.h"
 #include "utils/CommonUtil.h"
 
 namespace {

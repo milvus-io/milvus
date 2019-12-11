@@ -16,18 +16,19 @@
 // under the License.
 
 #include "server/delivery/request/CountTableRequest.h"
+#include "BaseRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
-#include "BaseRequest.h"
 
 #include <memory>
 
 namespace milvus {
 namespace server {
 
-CountTableRequest::CountTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t& row_count)
+CountTableRequest::CountTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                     int64_t& row_count)
     : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), row_count_(row_count) {
 }
 

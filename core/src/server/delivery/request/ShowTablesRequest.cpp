@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace milvus {

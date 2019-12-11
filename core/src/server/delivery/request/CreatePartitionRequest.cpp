@@ -28,24 +28,19 @@ namespace milvus {
 namespace server {
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                               const std::string& partition_name,
-                                               const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP),
-      table_name_(table_name), partition_name_(partition_name), tag_(tag) {
+                                               const std::string& partition_name, const std::string& tag)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), partition_name_(partition_name), tag_(tag) {
 }
 
 BaseRequestPtr
-CreatePartitionRequest::Create(const std::shared_ptr<Context>& context,
-                               const std::string& table_name,
-                               const std::string& partition_name,
-                               const std::string& tag) {
+CreatePartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                               const std::string& partition_name, const std::string& tag) {
     return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, partition_name, tag));
 }
 
 Status
 CreatePartitionRequest::OnExecute() {
-    std::string hdr = "CreatePartitionRequest(table=" + table_name_ +
-                      ", partition_name=" + partition_name_ +
+    std::string hdr = "CreatePartitionRequest(table=" + table_name_ + ", partition_name=" + partition_name_ +
                       ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 

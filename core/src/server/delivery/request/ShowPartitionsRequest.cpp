@@ -33,8 +33,7 @@ ShowPartitionsRequest::ShowPartitionsRequest(const std::shared_ptr<Context>& con
 }
 
 BaseRequestPtr
-ShowPartitionsRequest::Create(const std::shared_ptr<Context>& context,
-                              const std::string& table_name,
+ShowPartitionsRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
                               std::vector<PartitionParam>& partition_list) {
     return std::shared_ptr<BaseRequest>(new ShowPartitionsRequest(context, table_name, partition_list));
 }

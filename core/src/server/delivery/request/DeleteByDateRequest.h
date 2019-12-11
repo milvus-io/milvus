@@ -17,6 +17,9 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
+
 #include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
@@ -28,7 +31,8 @@ class DeleteByDateRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
 
  protected:
-    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
+    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                 const Range& range);
 
     Status
     OnExecute() override;

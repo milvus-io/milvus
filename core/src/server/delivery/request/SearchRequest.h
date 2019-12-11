@@ -19,6 +19,7 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -28,24 +29,16 @@ namespace server {
 class SearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context,
-           const std::string& table_name,
-           const std::vector<std::vector<float>>& record_array,
-           const std::vector<std::pair<std::string, std::string>>& range_list,
-           int64_t topk, int64_t nprobe,
-           const std::vector<std::string>& partition_list,
-           const std::vector<std::string>& file_id_list,
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+           const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list, int64_t topk,
+           int64_t nprobe, const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 
  protected:
-    SearchRequest(const std::shared_ptr<Context>& context,
-                  const std::string& table_name,
-                  const std::vector<std::vector<float>>& record_array,
-                  const std::vector<std::pair<std::string, std::string>>& range_list,
-                  int64_t topk, int64_t nprobe,
-                  const std::vector<std::string>& partition_list,
-                  const std::vector<std::string>& file_id_list,
-                  TopKQueryResult& result);
+    SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                  const std::vector<std::vector<float>>& record_array, const std::vector<Range>& range_list,
+                  int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                  const std::vector<std::string>& file_id_list, TopKQueryResult& result);
 
     Status
     OnExecute() override;
@@ -53,7 +46,7 @@ class SearchRequest : public BaseRequest {
  private:
     const std::string table_name_;
     const std::vector<std::vector<float>>& record_array_;
-    const std::vector<std::pair<std::string, std::string>> range_list_;
+    const std::vector<Range> range_list_;
     int64_t topk_;
     int64_t nprobe_;
     const std::vector<std::string> partition_list_;

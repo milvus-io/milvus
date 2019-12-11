@@ -17,9 +17,10 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-
+#include <memory>
 #include <string>
+
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
@@ -30,7 +31,8 @@ class DescribeIndexRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param);
 
  protected:
-    DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name, IndexParam& index_param);
+    DescribeIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                         IndexParam& index_param);
 
     Status
     OnExecute() override;

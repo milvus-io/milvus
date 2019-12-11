@@ -28,12 +28,14 @@
 namespace milvus {
 namespace server {
 
-DeleteByDateRequest::DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range)
+DeleteByDateRequest::DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                         const Range& range)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), range_(range) {
 }
 
 BaseRequestPtr
-DeleteByDateRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range) {
+DeleteByDateRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                            const Range& range) {
     return std::shared_ptr<BaseRequest>(new DeleteByDateRequest(context, table_name, range));
 }
 
