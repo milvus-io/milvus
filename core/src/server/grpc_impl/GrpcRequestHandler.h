@@ -91,13 +91,15 @@ ErrorMap(ErrorCode code) {
         GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (STATUS).message());    \
     }
 
-#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT)                  \
-    do {                                                                \
-        if (!(STATUS).ok()) {                                           \
-            (RESPONSE)->set_error_code(ErrorMap((STATUS).code()));      \
-            (RESPONSE)->set_reason((STATUS).message());                 \
-        }                                                               \
-        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);                        \
+#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT)                          \
+    do {                                                                        \
+        if ((STATUS).ok()) {                                                    \
+            (RESPONSE)->set_error_code(::milvus::grpc::ErrorCode::SUCCESS);     \
+        }  else {                                                               \
+         (RESPONSE)->set_error_code(ErrorMap((STATUS).code()));                 \
+        }                                                                       \
+        (RESPONSE)->set_reason((STATUS).message());                             \
+        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);                                \
     } while(false);
 
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
