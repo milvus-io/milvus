@@ -17,7 +17,6 @@ BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="/var/lib/milvus"
 FAISS_ROOT=""
 PRIVILEGES="OFF"
-CUSTOMIZATION="OFF" # default use origin faiss
 BUILD_COVERAGE="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
@@ -25,7 +24,7 @@ GPU_VERSION="OFF"
 WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "o:t:b:f:pgxulcjmh" arg
+while getopts "o:t:b:f:pgulcjmh" arg
 do
         case $arg in
              o)
@@ -45,9 +44,6 @@ do
                 ;;
              g)
                 GPU_VERSION="ON";
-                ;;
-             x)
-                CUSTOMIZATION="ON";
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -75,7 +71,6 @@ parameter:
 -f: faiss root path
 -p: install command with elevated privileges
 -g: gpu version
--x: milvus customization (default: OFF)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
@@ -84,7 +79,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-x] [-u] [-l] [-c] [-j] [-m] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-u] [-l] [-c] [-j] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -94,6 +89,9 @@ usage:
         ;;
         esac
 done
+
+echo -e "===\n=== ccache statistics before build\n==="
+ccache --show-stats
 
 if [[ ! -d ${CORE_BUILD_DIR} ]]; then
     mkdir ${CORE_BUILD_DIR}
@@ -106,7 +104,6 @@ CMAKE_CMD="cmake \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
--DCUSTOMIZATION=${CUSTOMIZATION} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \

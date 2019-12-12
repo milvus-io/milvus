@@ -1,0 +1,42 @@
+name: Core
+
+on:
+  push:
+    paths:
+      - 'ci/**'
+      - 'core/**'
+  pull_request:
+    paths:
+      - 'ci/**'
+      - 'core/**'
+
+jobs:
+  ubuntu:
+    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [18.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures ubuntu-core
+      - name: Docker Build
+        run: |
+          docker-compose run -d db
+          docker-compose run ubuntu-core
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push ubuntu-core
