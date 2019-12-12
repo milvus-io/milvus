@@ -50,7 +50,7 @@ struct TableSchema {
     std::string table_name_;
     int64_t dimension_;
     int64_t index_file_size_;
-    int32_t metric_type_;
+    int64_t metric_type_;
 
     TableSchema() {
         dimension_ = 0;
@@ -58,7 +58,7 @@ struct TableSchema {
         metric_type_ = 0;
     }
 
-    TableSchema(const std::string& table_name, int64_t dimension, int64_t index_file_size, int32_t metric_type) {
+    TableSchema(const std::string& table_name, int64_t dimension, int64_t index_file_size, int64_t metric_type) {
         table_name_ = table_name;
         dimension_ = dimension;
         index_file_size_ = index_file_size;
@@ -84,15 +84,15 @@ struct TopKQueryResult {
 
 struct IndexParam {
     std::string table_name_;
-    int32_t index_type_;
-    int32_t nlist_;
+    int64_t index_type_;
+    int64_t nlist_;
 
     IndexParam() {
         index_type_ = 0;
         nlist_ = 0;
     }
 
-    IndexParam(const std::string& table_name, int32_t index_type, int32_t nlist) {
+    IndexParam(const std::string& table_name, int64_t index_type, int64_t nlist) {
         table_name_ = table_name;
         index_type_ = index_type;
         nlist_ = nlist;
@@ -115,7 +115,7 @@ struct PartitionParam {
 
 class BaseRequest {
  protected:
-    explicit BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
+    BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);
 
     virtual ~BaseRequest();
 

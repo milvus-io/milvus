@@ -32,7 +32,7 @@ class ShowTablesRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
 
  protected:
-    explicit ShowTablesRequest(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
+    ShowTablesRequest(const std::shared_ptr<Context>& context, std::vector<std::string>& table_name_list);
 
     Status
     OnExecute() override;

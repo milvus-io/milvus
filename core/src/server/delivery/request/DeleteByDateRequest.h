@@ -31,8 +31,7 @@ class DeleteByDateRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
 
  protected:
-    explicit DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                 const Range& range);
+    DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
 
     Status
     OnExecute() override;

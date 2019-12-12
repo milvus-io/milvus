@@ -31,7 +31,7 @@ class DropIndexRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name);
 
  protected:
-    explicit DropIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
+    DropIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
     OnExecute() override;

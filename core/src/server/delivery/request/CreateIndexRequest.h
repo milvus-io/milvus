@@ -27,19 +27,19 @@ namespace server {
 class CreateIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int32_t index_type, int32_t nlist);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type, int64_t nlist);
 
  protected:
-    explicit CreateIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                int32_t index_type, int32_t nlist);
+    CreateIndexRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
+                       int64_t nlist);
 
     Status
     OnExecute() override;
 
  private:
     const std::string table_name_;
-    const int32_t index_type_;
-    const int32_t nlist_;
+    const int64_t index_type_;
+    const int64_t nlist_;
 };
 
 }  // namespace server

@@ -29,7 +29,7 @@ namespace milvus {
 namespace server {
 
 CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                       int64_t dimension, int32_t index_file_size, int32_t metric_type)
+                                       int64_t dimension, int64_t index_file_size, int64_t metric_type)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
       dimension_(dimension),
@@ -39,7 +39,7 @@ CreateTableRequest::CreateTableRequest(const std::shared_ptr<Context>& context, 
 
 BaseRequestPtr
 CreateTableRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t dimension,
-                           int32_t index_file_size, int32_t metric_type) {
+                           int64_t index_file_size, int64_t metric_type) {
     return std::shared_ptr<BaseRequest>(
         new CreateTableRequest(context, table_name, dimension, index_file_size, metric_type));
 }

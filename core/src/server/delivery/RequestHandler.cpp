@@ -41,7 +41,7 @@ namespace server {
 
 Status
 RequestHandler::CreateTable(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t dimension,
-                            int32_t index_file_size, int32_t metric_type) {
+                            int64_t index_file_size, int64_t metric_type) {
     BaseRequestPtr request_ptr =
         CreateTableRequest::Create(context, table_name, dimension, index_file_size, metric_type);
     RequestScheduler::ExecRequest(request_ptr);
@@ -66,8 +66,8 @@ RequestHandler::DropTable(const std::shared_ptr<Context>& context, const std::st
 }
 
 Status
-RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& table_name, int32_t index_type,
-                            int32_t nlist) {
+RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
+                            int64_t nlist) {
     BaseRequestPtr request_ptr = CreateIndexRequest::Create(context, table_name, index_type, nlist);
     RequestScheduler::ExecRequest(request_ptr);
 

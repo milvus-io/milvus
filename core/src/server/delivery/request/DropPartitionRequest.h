@@ -31,8 +31,8 @@ class DropPartitionRequest : public BaseRequest {
            const std::string& tag);
 
  protected:
-    explicit DropPartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                  const std::string& partition_name, const std::string& tag);
+    DropPartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                         const std::string& partition_name, const std::string& tag);
 
     Status
     OnExecute() override;

@@ -31,7 +31,7 @@ class PreloadTableRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name);
 
  protected:
-    explicit PreloadTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
+    PreloadTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
     OnExecute() override;

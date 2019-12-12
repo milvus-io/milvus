@@ -31,8 +31,8 @@ class CreatePartitionRequest : public BaseRequest {
            const std::string& tag);
 
  protected:
-    explicit CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                    const std::string& partition_name, const std::string& tag);
+    CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                           const std::string& partition_name, const std::string& tag);
 
     Status
     OnExecute() override;

@@ -31,7 +31,7 @@ class DropTableRequest : public BaseRequest {
     Create(const std::shared_ptr<Context>& context, const std::string& table_name);
 
  protected:
-    explicit DropTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
+    DropTableRequest(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
     OnExecute() override;
