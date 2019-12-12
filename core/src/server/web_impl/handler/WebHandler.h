@@ -22,7 +22,7 @@
 #include "oatpp/core/data/mapping/type/Object.hpp"
 #include "oatpp/core/macro/codegen.hpp"
 
-#include "../dto/ResultDto.hpp"
+#include "server/web_impl/dto/ResultDto.hpp"
 
 namespace milvus {
 namespace server {

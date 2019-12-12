@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "WebHandler.h"
+#include "server/web_impl/handler/WebHandler.h"
 
 namespace milvus {
 namespace server {

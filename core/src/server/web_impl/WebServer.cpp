@@ -27,26 +27,26 @@ namespace server {
 namespace web {
 
 WebServer::WebServer() {
-    oatpp::base::Environment::init();
 }
 
 WebServer::~WebServer() {
-    oatpp::base::Environment::destroy();
 }
 
 void
 WebServer::Start() {
+//    oatpp::base::Environment::init();
     StartService();
 }
 
 void
 WebServer::Stop() {
     StopService();
+//    oatpp::base::Environment::destroy();
 }
 
 Status
 WebServer::StartService() {
-    AppComponent components; // Create scope Environment components
+    AppComponent components(8900); // Create scope Environment components
     /* create ApiControllers and add endpoints to router */
     auto router = components.httpRouter.getObject();
 

@@ -53,6 +53,7 @@ class WebServer {
     StopService();
 
  private:
+
     std::unique_ptr<oatpp::network::server::Server> server_ptr_;
 };
 

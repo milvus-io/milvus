@@ -38,15 +38,22 @@ namespace web {
 class AppComponent {
  public:
 
-    AppComponent() = default;
+    explicit AppComponent(int port) {
+//        serverConnectionProvider =
+//            oatpp::network::server::SimpleTCPConnectionProvider::createShared(static_cast<v_word16>(port));
+    }
+
     ~AppComponent() = default;
+
+ public:
 
     /**
      *  Create ConnectionProvider component which listens on the port
      */
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, serverConnectionProvider)([] {
-        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(8000);
+        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(8500);
     }());
+//    OATPP_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, serverConnectionProvider);
 
     /**
      *  Create Router component
