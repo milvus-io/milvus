@@ -1,0 +1,48 @@
+version: '3.5'
+
+volumes:
+  amd64-ubuntu-18.04-cache:
+
+x-ccache: &ccache
+  CCACHE_COMPILERCHECK: content
+  CCACHE_COMPRESS: 1
+  CCACHE_COMPRESSLEVEL: 5
+  CCACHE_MAXSIZE: 2G
+  CCACHE_DIR: /build/ccache
+
+x-command: &cpp-command >
+  /bin/bash -c "
+    /milvus/ci/scripts/build.sh -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+    /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
+
+services:
+  db:
+    image: mysql:5.6
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+    networks:
+      milvus:
+        aliases:
+          - "mysql"
+
+  ubuntu-core:
+    image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
+    build:
+      context: .
+      dockerfile: ci/docker/ubuntu-${UBUNTU}-core.dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
+    shm_size: 2G
+    environment:
+      <<: *ccache
+    volumes: &ubuntu-volumes
+      - .:/milvus:delegated
+      - ${ARCH}-ubuntu-${UBUNTU}-cache:/build:delegated
+    networks:
+      - milvus
+    command: *cpp-command
+
+networks:
+  milvus:
