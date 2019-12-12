@@ -24,6 +24,8 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
+find_package(oatpp 0.19.10 REQUIRED)
+
 add_subdirectory(index)
 if (FAISS_WITH_MKL)
     add_compile_definitions("WITH_MKL")
@@ -90,6 +92,19 @@ set(grpc_server_files
         ${grpc_request_files}
         ${grpc_impl_files}
         ${grpc_interceptor_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_impl_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -227,6 +242,7 @@ set(server_libs
         milvus_engine
         metrics
         tracing
+        oatpp::oatpp
         )
 
 add_executable(milvus_server
@@ -236,6 +252,7 @@ add_executable(milvus_server
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${web_server_files}
         ${server_context_files}
         ${utils_files}
         ${tracing_files}

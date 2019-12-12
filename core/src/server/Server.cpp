@@ -33,6 +33,7 @@
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "wrapper/KnowhereResource.h"
+#include "server/web_impl/WebServer.h"
 
 namespace milvus {
 namespace server {
@@ -263,10 +264,12 @@ Server::StartService() {
     scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcServer::GetInstance().Start();
+    web::WebServer::GetInstance().Start();
 }
 
 void
 Server::StopService() {
+    web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();
