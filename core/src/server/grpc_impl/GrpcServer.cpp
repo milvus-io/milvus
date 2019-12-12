@@ -102,7 +102,9 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
+    RequestHandler handler;
     GrpcRequestHandler service(opentracing::Tracer::Global());
+    service.RegisterRequestHandler(handler);
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

@@ -74,8 +74,15 @@ set(thirdparty_files
         ${thirdparty_nlohmann_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
+set(server_files
+        ${server_service_files}
+        ${delivery_request_files}
+        ${delivery_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
