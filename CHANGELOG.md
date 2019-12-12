@@ -104,6 +104,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#584 - Intergrate internal FAISS
 - \#611 - Remove MILVUS_CPU_VERSION
 - \#634 - FAISS GPU version is compiled with O0
+- \#737 - Refactor server module to separate Grpc from server handler and scheduler
 
 ## Task
 
