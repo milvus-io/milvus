@@ -38,12 +38,9 @@ Status
 CmdRequest::OnExecute() {
     std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
     TimeRecorderAuto rc(hdr);
-    Status stat = Status::OK();
 
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
-    } else if (cmd_ == "status") {
-        result_ = "OK";
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
     } else if (cmd_ == "mode") {
@@ -52,14 +49,11 @@ CmdRequest::OnExecute() {
 #else
         result_ = "CPU";
 #endif
-    } else if (cmd_.substr(0, 3) == "set" || cmd_.substr(0, 3) == "get") {
-        server::Config& config = server::Config::GetInstance();
-        stat = config.HandleConfigCli(result_, cmd_);
     } else {
-        result_ = "Unknown command";
+        result_ = "OK";
     }
 
-    return stat;
+    return Status::OK();
 }
 
 }  // namespace server
