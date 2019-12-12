@@ -482,7 +482,7 @@ Config::HandleConfigCli(std::string& result, const std::string& cmd) {
         }
         return SetConfigCli(nodes[0], nodes[1], tokens[2]);
     } else {
-        return Status(SERVER_UNEXPECTED_ERROR, "Invalid command");
+        return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
     }
 }
 
