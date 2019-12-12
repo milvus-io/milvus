@@ -38,26 +38,25 @@ Status
 CmdRequest::OnExecute() {
     std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
     TimeRecorderAuto rc(hdr);
-    Status stat;
+    Status stat = Status::OK();
 
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
-        stat = Status::OK();
     } else if (cmd_ == "status") {
-        stat = Status::OK();
+        result_ = "OK";
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
-        stat = Status::OK();
     } else if (cmd_ == "mode") {
 #ifdef MILVUS_GPU_VERSION
         result_ = "GPU";
 #else
         result_ = "CPU";
 #endif
-        stat = Status::OK();
-    } else {
+    } else if (cmd_.substr(0, 3) == "set" || cmd_.substr(0, 3) == "get") {
         server::Config& config = server::Config::GetInstance();
         stat = config.HandleConfigCli(result_, cmd_);
+    } else {
+        result_ = "Unknown command";
     }
 
     return stat;
