@@ -24,13 +24,33 @@
 
 #include "server/web_impl/dto/ResultDto.hpp"
 
+#include "server/delivery/RequestHandler.h"
+#include "server/context/Context.h"
+
 namespace milvus {
 namespace server {
 namespace web {
 
 class WebHandler {
  public:
-    HasTableDto::ObjectWrapper hasTable(const std::string& tableName) const;
+    WebHandler() = default;
+
+    StatusDto::ObjectWrapper
+    CreateTable(const std::string& table_name, int64_t dimension,
+                int64_t index_file_size, int64_t metric_type);
+
+    HasTableDto::ObjectWrapper
+    hasTable(const std::string& tableName);
+
+    WebHandler&
+    RegisterRequestHandler(const RequestHandler& handler) {
+        request_handler_ = handler;
+    }
+
+ private:
+    // TODO: just for coding
+    std::shared_ptr<Context> context_ptr_ = std::make_shared<Context>("CreateTable");
+    RequestHandler request_handler_;
 };
 
 } // namespace web

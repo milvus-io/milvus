@@ -46,7 +46,7 @@ WebServer::Stop() {
 
 Status
 WebServer::StartService() {
-    AppComponent components(8900); // Create scope Environment components
+    AppComponent components(9999); // Create scope Environment components
     /* create ApiControllers and add endpoints to router */
     auto router = components.httpRouter.getObject();
 

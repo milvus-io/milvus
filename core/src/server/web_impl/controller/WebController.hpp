@@ -65,7 +65,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 #include OATPP_CODEGEN_BEGIN(ApiController)
 
     /**
-     *  Insert Your endpoints here !!!
+     *  Web routing
      */
 
     ENDPOINT_INFO(root) {
@@ -98,7 +98,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     // ENDPOINT("<http-method>", "<path>", <method-name>, <optional param-mappings>)
     ENDPOINT("GET", "demo/{tableName}", hasTable,
              PATH(String, tableName)) {
-        return createDtoResponse(Status::CODE_200, handler_->hasTable(std::string(tableName->c_str())));
+        return createDtoResponse(Status::CODE_200, handler_->hasTable(tableName->std_str()));
     }
 
     ENDPOINT("GET", "/users", getUsers,

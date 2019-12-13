@@ -38,9 +38,7 @@ namespace web {
 class AppComponent {
  public:
 
-    explicit AppComponent(int port) {
-//        serverConnectionProvider =
-//            oatpp::network::server::SimpleTCPConnectionProvider::createShared(static_cast<v_word16>(port));
+    explicit AppComponent(int port) : port_(port) {
     }
 
     ~AppComponent() = default;
@@ -50,10 +48,9 @@ class AppComponent {
     /**
      *  Create ConnectionProvider component which listens on the port
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, serverConnectionProvider)([] {
-        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(8500);
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, serverConnectionProvider)([this] {
+        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(static_cast<v_word16>(this->port_));
     }());
-//    OATPP_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, serverConnectionProvider);
 
     /**
      *  Create Router component
@@ -86,9 +83,13 @@ class AppComponent {
      *  Create Demo-Database component which stores information about users
      */
     OATPP_CREATE_COMPONENT(std::shared_ptr<WebHandler>, webHandler)([] {
-        return std::make_shared<WebHandler>();
+        std::shared_ptr<WebHandler> web_handler =  std::make_shared<WebHandler>();
+        web_handler->RegisterRequestHandler(RequestHandler());
+        return web_handler;
     }());
 
+ private:
+    const int port_;
 };
 
 } //namespace web

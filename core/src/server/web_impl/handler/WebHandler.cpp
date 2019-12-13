@@ -17,20 +17,37 @@
 
 #include "server/web_impl/handler/WebHandler.h"
 
+#include "utils/Status.h"
+
 namespace milvus {
 namespace server {
 namespace web {
 
+StatusDto::ObjectWrapper
+WebHandler::CreateTable(const std::string& table_name, int64_t dimension,
+                        int64_t index_file_size, int64_t metric_type) {
+    auto status_dto = StatusDto::createShared();
+
+    Status status = request_handler_.CreateTable(context_ptr_, table_name, dimension, index_file_size, metric_type);
+    status_dto->errorCode = status.code();
+    status_dto->reason = status.message().c_str();
+
+    return status_dto;
+}
+
 HasTableDto::ObjectWrapper
-WebHandler::hasTable(const std::string& tableName) const {
-    auto status = StatusDto::createShared();
-    status->errorCode = 0;
-    status->reason = "Successfully";
+WebHandler::hasTable(const std::string& tableName) {
+    auto status_dto = StatusDto::createShared();
+    bool has_table = false;
+    Status status = request_handler_.HasTable(context_ptr_, tableName, has_table);
+
+    status_dto->errorCode = status.code();
+    status_dto->reason = status.message().c_str();
 
     auto hasTable = HasTableDto::createShared();
-    hasTable->reply = false;
+    hasTable->reply = has_table;
     hasTable->status = hasTable->status->createShared();
-    hasTable->status = status;
+    hasTable->status = status_dto;
 
     return hasTable;
 }
