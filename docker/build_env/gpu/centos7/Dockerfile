@@ -5,7 +5,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl && \
     wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     yum install -y ccache make automake git python3-pip libcurl-devel python3-devel boost-static mysql-devel \
-    devtoolset-7-gcc llvm-toolset-7.0-clang lcov \
+    devtoolset-7-gcc devtoolset-7-gcc-c++ llvm-toolset-7.0-clang lcov \
     && \
     rm -rf /var/cache/yum/*
 
