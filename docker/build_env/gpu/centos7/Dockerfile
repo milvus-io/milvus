@@ -9,7 +9,7 @@ RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget cur
     rm -rf /var/cache/yum/*
 
 RUN echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.sh
-RUN echo "source scl_source enable llvm-toolset-7" >> /etc/profile.d/llvm-toolset-7.sh
+RUN echo "source scl_source enable llvm-toolset-7.0" >> /etc/profile.d/llvm-toolset-7.sh
 
 ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-7.0/root/usr/bin"
 
