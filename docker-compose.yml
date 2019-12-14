@@ -62,6 +62,10 @@ services:
       /bin/bash -c "
         scl enable devtoolset-7 bash
         scl enable llvm-toolset-7.0 bash
+        which gcc
+        which g++
+        gcc -v
+        g++ -v
         /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
         /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
