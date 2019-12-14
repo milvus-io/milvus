@@ -68,9 +68,9 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 
     server_config.SetValue("float_test", "2.5");
     double dbl = server_config.GetDoubleValue("float_test");
-    ASSERT_LE(std:fabs(dbl - 2.5), std::numeric_limits<double>::epsilon());
+    ASSERT_LE(std::fabs(dbl - 2.5), std::numeric_limits<double>::epsilon());
     float flt = server_config.GetFloatValue("float_test");
-    ASSERT_LE(std:fabs(flt - 2.5), std::numeric_limits<float>::epsilon());
+    ASSERT_LE(std::fabs(flt - 2.5), std::numeric_limits<float>::epsilon());
 
     server_config.SetValue("bool_test", "true");
     bool blt = server_config.GetBoolValue("bool_test");
