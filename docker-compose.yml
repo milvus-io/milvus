@@ -11,11 +11,6 @@ x-ccache: &ccache
   CCACHE_MAXSIZE: 2G
   CCACHE_DIR: /build/ccache
 
-x-command: &cpp-command >
-  /bin/bash -c "
-    /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
-    /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
-
 services:
   db:
     image: mysql:5.6
@@ -43,7 +38,10 @@ services:
       - ${ARCH}-ubuntu-${UBUNTU}-cache:/build:delegated
     networks:
       - milvus
-    command: *cpp-command
+    command: &ubuntu-command >
+      /bin/bash -c "
+        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
   centos-core:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
@@ -60,7 +58,12 @@ services:
       - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
     networks:
       - milvus
-    command: *cpp-command
+    command: &centos-command >
+      /bin/bash -c "
+        scl enable devtoolset-7 bash
+        scl enable llvm-toolset-7.0 bash
+        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
 networks:
   milvus:
