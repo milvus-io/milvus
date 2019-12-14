@@ -13,7 +13,7 @@ x-ccache: &ccache
 
 x-command: &cpp-command >
   /bin/bash -c "
-    /milvus/ci/scripts/build.sh -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+    /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
     /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
 services:
