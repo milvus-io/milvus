@@ -22,7 +22,8 @@
 #include "oatpp/core/data/mapping/type/Object.hpp"
 #include "oatpp/core/macro/codegen.hpp"
 
-#include "server/web_impl/dto/ResultDto.hpp"
+#include "server/web_impl/dto/TableDto.hpp"
+#include "server/web_impl/dto/IndexDto.hpp"
 
 #include "server/delivery/RequestHandler.h"
 #include "server/context/Context.h"
@@ -36,11 +37,25 @@ class WebHandler {
     WebHandler() = default;
 
     StatusDto::ObjectWrapper
-    CreateTable(const std::string& table_name, int64_t dimension,
-                int64_t index_file_size, int64_t metric_type);
+    CreateTable(TableSchemaDto::ObjectWrapper table_schema);
 
-    HasTableDto::ObjectWrapper
+    BoolReplyDto::ObjectWrapper
     hasTable(const std::string& tableName);
+
+    TableSchemaDto::ObjectWrapper
+    DescribeTable(const std::string& table_name);
+
+    TableRowCountDto::ObjectWrapper
+    CountTable(const std::string& table_name);
+
+    TableNameListDto::ObjectWrapper
+    ShowTables();
+
+    StatusDto::ObjectWrapper
+    DropTable(const std::string& table_name);
+
+    StatusDto::ObjectWrapper
+    CreateIndex(IndexParamDto::ObjectWrapper index_param);
 
     WebHandler&
     RegisterRequestHandler(const RequestHandler& handler) {

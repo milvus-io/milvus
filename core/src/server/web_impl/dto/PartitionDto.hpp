@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include "oatpp/core/data/mapping/type/Object.hpp"
-#include "oatpp/core/macro/codegen.hpp"
+#include "server/web_impl/dto/Dto.h"
+#include "server/web_impl/dto/StatusDto.hpp"
 
 namespace milvus {
 namespace server {
@@ -26,21 +26,17 @@ namespace web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class StatusDto: public oatpp::data::mapping::type::Object {
+class PartitionParamDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(PartitionParamDto, Object)
 
-    DTO_INIT(StatusDto, Object)
-
-    DTO_FIELD(String, reason, "reason");
-    DTO_FIELD(Int32, errorCode, "error-code");
+    DTO_FIELD(String, table_name);
+    DTO_FIELD(String, partition_name);
+    DTO_FIELD(String, tag);
 };
 
-class HasTableDto : public oatpp::data::mapping::type::Object {
-
-    DTO_INIT(HasTableDto, Object)
-
-    DTO_FIELD(Boolean, reply, "reply");
-    DTO_FIELD(StatusDto::ObjectWrapper, status);
-};
+ class PartitionListDto : public oatpp::data::mapping::type::Object {
+     DTO_INIT(PartitionListDto, Object)
+ };
 
 #include OATPP_CODEGEN_END(DTO)
 

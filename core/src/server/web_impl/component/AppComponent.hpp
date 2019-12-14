@@ -36,12 +36,16 @@ namespace web {
  *  Order of components initialization is from top to bottom
  */
 class AppComponent {
+
  public:
 
     explicit AppComponent(int port) : port_(port) {
     }
 
     ~AppComponent() = default;
+
+ private:
+    const int port_;
 
  public:
 
@@ -83,13 +87,10 @@ class AppComponent {
      *  Create Demo-Database component which stores information about users
      */
     OATPP_CREATE_COMPONENT(std::shared_ptr<WebHandler>, webHandler)([] {
-        std::shared_ptr<WebHandler> web_handler =  std::make_shared<WebHandler>();
+        std::shared_ptr<WebHandler> web_handler = std::make_shared<WebHandler>();
         web_handler->RegisterRequestHandler(RequestHandler());
         return web_handler;
     }());
-
- private:
-    const int port_;
 };
 
 } //namespace web

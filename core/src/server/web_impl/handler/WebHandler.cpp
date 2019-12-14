@@ -17,6 +17,7 @@
 
 #include "server/web_impl/handler/WebHandler.h"
 
+#include "server/delivery/request/BaseRequest.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -24,32 +25,101 @@ namespace server {
 namespace web {
 
 StatusDto::ObjectWrapper
-WebHandler::CreateTable(const std::string& table_name, int64_t dimension,
-                        int64_t index_file_size, int64_t metric_type) {
+WebHandler::CreateTable(TableSchemaDto::ObjectWrapper table_schema) {
+    Status status = request_handler_.CreateTable(context_ptr_,
+                                                 table_schema->table_name->std_str(),
+                                                 table_schema->dimension,
+                                                 table_schema->index_file_size,
+                                                 table_schema->metric_type);
+
     auto status_dto = StatusDto::createShared();
 
-    Status status = request_handler_.CreateTable(context_ptr_, table_name, dimension, index_file_size, metric_type);
     status_dto->errorCode = status.code();
     status_dto->reason = status.message().c_str();
 
     return status_dto;
 }
 
-HasTableDto::ObjectWrapper
-WebHandler::hasTable(const std::string& tableName) {
+BoolReplyDto::ObjectWrapper
+WebHandler::hasTable(const std::string& table_name) {
     auto status_dto = StatusDto::createShared();
     bool has_table = false;
-    Status status = request_handler_.HasTable(context_ptr_, tableName, has_table);
+    Status status = request_handler_.HasTable(context_ptr_, table_name, has_table);
 
     status_dto->errorCode = status.code();
     status_dto->reason = status.message().c_str();
 
-    auto hasTable = HasTableDto::createShared();
+    auto hasTable = BoolReplyDto::createShared();
     hasTable->reply = has_table;
     hasTable->status = hasTable->status->createShared();
     hasTable->status = status_dto;
 
     return hasTable;
+}
+
+TableSchemaDto::ObjectWrapper
+WebHandler::DescribeTable(const std::string& table_name) {
+    TableSchema table_schema;
+    Status status = request_handler_.DescribeTable(context_ptr_, table_name, table_schema);
+
+    auto status_dto = StatusDto::createShared();
+    status_dto->errorCode = status.code();
+    status_dto->reason = status.message().c_str();
+
+    auto describeTable = TableSchemaDto::createShared();
+    describeTable->status = status_dto;
+    describeTable->table_name = table_schema.table_name_.c_str();
+    describeTable->dimension = table_schema.dimension_;
+    describeTable->index_file_size = table_schema.index_file_size_;
+    describeTable->metric_type = table_schema.metric_type_;
+
+    return describeTable;
+}
+
+TableRowCountDto::ObjectWrapper
+WebHandler::CountTable(const std::string& table_name) {
+    int64_t count;
+    Status status = request_handler_.CountTable(context_ptr_, table_name, count);
+
+    auto status_dto = StatusDto::createShared();
+    status_dto->errorCode = status.code();
+    status_dto->reason = status.message().c_str();
+
+    auto countTable = TableRowCountDto::createShared();
+    countTable->status = status_dto;
+    countTable->count = count;
+
+    return countTable;
+}
+
+TableNameListDto::ObjectWrapper
+WebHandler::ShowTables() {
+    std::vector<std::string> tables;
+    Status status = request_handler_.ShowTables(context_ptr_, tables);
+
+    auto status_dto = StatusDto::createShared();
+    status_dto->errorCode = status.code();
+    status_dto->reason = status.message().c_str();
+
+    auto showTables = TableNameListDto::createShared();
+    showTables->status = status_dto;
+
+}
+
+StatusDto::ObjectWrapper
+WebHandler::DropTable(const std::string& table_name) {
+    Status status = request_handler_.DropTable(context_ptr_, table_name);
+
+    auto status_dto = StatusDto::createShared();
+    status_dto->errorCode = status.code();
+    status_dto->reason = status.message().c_str();
+
+    return status_dto;
+}
+
+StatusDto::ObjectWrapper
+WebHandler::CreateIndex(IndexParamDto::ObjectWrapper index_param) {
+    Status status = request_handler_.CreateIndex(context_ptr_, );
 }
 
 } // namespace web
