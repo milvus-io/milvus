@@ -33,7 +33,7 @@
 namespace milvus {
 namespace server {
 
-constexpr uint64_t GB = 1UL << 30;
+constexpr int64_t GB = 1UL << 30;
 
 static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"}});
 
@@ -398,6 +398,92 @@ Config::PrintAll() {
     PrintConfigSection(CONFIG_METRIC);
     PrintConfigSection(CONFIG_ENGINE);
     PrintConfigSection(CONFIG_GPU_RESOURCE);
+}
+
+Status
+Config::GetConfigCli(const std::string& parent_key, const std::string& child_key, std::string& value) {
+    if (!ConfigNodeValid(parent_key, child_key)) {
+        std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
+        return Status(SERVER_UNEXPECTED_ERROR, str);
+    }
+    return GetConfigValueInMem(parent_key, child_key, value);
+}
+
+Status
+Config::SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value) {
+    if (!ConfigNodeValid(parent_key, child_key)) {
+        std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
+        return Status(SERVER_UNEXPECTED_ERROR, str);
+    }
+    if (parent_key == CONFIG_SERVER) {
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set server_config");
+    } else if (parent_key == CONFIG_DB) {
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set db_config");
+    } else if (parent_key == CONFIG_METRIC) {
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set metric_config");
+    } else if (parent_key == CONFIG_CACHE) {
+        if (child_key == CONFIG_CACHE_CPU_CACHE_CAPACITY) {
+            return SetCacheConfigCpuCacheCapacity(value);
+        } else if (child_key == CONFIG_CACHE_CPU_CACHE_THRESHOLD) {
+            return SetCacheConfigCpuCacheThreshold(value);
+        } else if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA) {
+            return SetCacheConfigCacheInsertData(value);
+        }
+    } else if (parent_key == CONFIG_ENGINE) {
+        if (child_key == CONFIG_ENGINE_USE_BLAS_THRESHOLD) {
+            return SetEngineConfigUseBlasThreshold(value);
+        } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
+            return SetEngineConfigOmpThreadNum(value);
+#ifdef MILVUS_GPU_VERSION
+        } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
+            return SetEngineConfigGpuSearchThreshold(value);
+#endif
+        }
+#ifdef MILVUS_GPU_VERSION
+    } else if (parent_key == CONFIG_GPU_RESOURCE) {
+        if (child_key == CONFIG_GPU_RESOURCE_ENABLE) {
+            return SetGpuResourceConfigEnable(value);
+        } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_CAPACITY) {
+            return SetGpuResourceConfigCacheCapacity(value);
+        } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_THRESHOLD) {
+            return SetGpuResourceConfigCacheThreshold(value);
+        } else if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) {
+            return SetGpuResourceConfigSearchResources(value);
+        } else if (child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
+            return SetGpuResourceConfigBuildIndexResources(value);
+        }
+#endif
+    } else if (parent_key == CONFIG_TRACING) {
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config");
+    }
+}
+
+Status
+Config::HandleConfigCli(std::string& result, const std::string& cmd) {
+    std::vector<std::string> tokens;
+    std::vector<std::string> nodes;
+    server::StringHelpFunctions::SplitStringByDelimeter(cmd, " ", tokens);
+    if (tokens[0] == "get") {
+        if (tokens.size() != 2) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+        }
+        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
+        if (nodes.size() != 2) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+        }
+        return GetConfigCli(nodes[0], nodes[1], result);
+    } else if (tokens[0] == "set") {
+        if (tokens.size() != 3) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+        }
+        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
+        if (nodes.size() != 2) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+        }
+        return SetConfigCli(nodes[0], nodes[1], tokens[2]);
+    } else {
+        return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -804,6 +890,17 @@ Config::GetConfigNode(const std::string& name) {
     return GetConfigRoot().GetChild(name);
 }
 
+bool
+Config::ConfigNodeValid(const std::string& parent_key, const std::string& child_key) {
+    if (config_map_.find(parent_key) == config_map_.end()) {
+        return false;
+    }
+    if (config_map_[parent_key].count(child_key) == 0) {
+        return false;
+    }
+    return true;
+}
+
 Status
 Config::GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -815,10 +912,11 @@ Config::GetConfigValueInMem(const std::string& parent_key, const std::string& ch
     return Status(SERVER_UNEXPECTED_ERROR, "key not exist");
 }
 
-void
+Status
 Config::SetConfigValueInMem(const std::string& parent_key, const std::string& child_key, const std::string& value) {
     std::lock_guard<std::mutex> lock(mutex_);
     config_map_[parent_key][child_key] = value;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
