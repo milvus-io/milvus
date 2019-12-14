@@ -55,7 +55,7 @@ services:
     shm_size: 2G
     environment:
       <<: *ccache
-    volumes: &ubuntu-volumes
+    volumes: &centos-volumes
       - .:/milvus:delegated
       - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
     networks:
