@@ -5,9 +5,11 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.7.0 (TBD)
 
 ## Bug
+- \#744 - Don't return partition table for show_tables
 
 ## Feature
 - \#343 - Add Opentracing
+- \#665 - Support get/set config via CLI
 
 ## Improvement
 

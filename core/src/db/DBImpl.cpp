@@ -173,7 +173,18 @@ DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->AllTables(table_schema_array);
+    std::vector<meta::TableSchema> all_tables;
+    auto status = meta_ptr_->AllTables(all_tables);
+
+    // only return real tables, dont return partition tables
+    table_schema_array.clear();
+    for (auto& schema : all_tables) {
+        if (schema.owner_table_.empty()) {
+            table_schema_array.push_back(schema);
+        }
+    }
+
+    return status;
 }
 
 Status

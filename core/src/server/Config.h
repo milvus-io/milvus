@@ -28,6 +28,7 @@
 namespace milvus {
 namespace server {
 
+static const char* CONFIG_NODE_DELIMITER = ".";
 static const char* CONFIG_VERSION = "version";
 
 /* server config */
@@ -56,6 +57,7 @@ static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "4";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
+static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -120,18 +122,26 @@ class Config {
     ResetDefaultConfig();
     void
     PrintAll();
+    Status
+    HandleConfigCli(std::string& result, const std::string& cmd);
 
  private:
     ConfigNode&
     GetConfigRoot();
     ConfigNode&
     GetConfigNode(const std::string& name);
+    bool
+    ConfigNodeValid(const std::string& parent_key, const std::string& child_key);
     Status
     GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value);
-    void
+    Status
     SetConfigValueInMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
     void
     PrintConfigSection(const std::string& config_node_name);
+    Status
+    GetConfigCli(const std::string& parent_key, const std::string& child_key, std::string& value);
+    Status
+    SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
     ///////////////////////////////////////////////////////////////////////////
     Status
