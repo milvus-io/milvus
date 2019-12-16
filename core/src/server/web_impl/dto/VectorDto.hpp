@@ -44,7 +44,6 @@ class InsertRequestDto : public oatpp::data::mapping::type::Object {
 //    DTO_FIELD(String, table_name);
     DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
     DTO_FIELD(List<Int64>::ObjectWrapper, ids);
-    DTO_FIELD(String, tag);
 };
 
 class VectorIdsDto : public oatpp::data::mapping::type::Object {

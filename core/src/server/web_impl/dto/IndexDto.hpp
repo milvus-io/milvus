@@ -43,8 +43,8 @@ class IndexParamDto : public oatpp::data::mapping::type::Object {
 class IndexRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(IndexRequestDto, Object)
 
-    DTO_FIELD(String, table_name);
-    DTO_FIELD(IndexDto::ObjectWrapper, index);
+    DTO_FIELD(Int64, index_type);
+    DTO_FIELD(Int64, nlist);
 };
 
 #include OATPP_CODEGEN_END(DTO)

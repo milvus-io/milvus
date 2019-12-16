@@ -116,19 +116,20 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("POST", "/tables", createTable,
-             BODY_DTO(TableRequestDto::ObjectWrapper, tableSchema)) {
-        auto status = handler_->CreateTable(tableSchema);
-        if (status.code() != 0) {
-            return createResponse(Status::CODE_400, String(status.message().c_str()));
+             BODY_DTO(TableRequestDto::ObjectWrapper, table_schema)) {
+        auto status_dto = StatusDto::createShared();
+        handler_->CreateTable(table_schema, status_dto);
+        if (0 != status_dto->code) {
+            return createDtoResponse(Status::CODE_400, status_dto);
+        } else {
+            return createDtoResponse(Status::CODE_201, status_dto);
         }
-
-        return createResponse(Status::CODE_201, "Created Successfully.");
     }
 
     /*
      * Get table
      *
-     * url = GET '{server address}/tables/{tableName}[?fields={fields list}]'
+     * url = GET '{server address}/tables/{tableName}?fields={fields list}'
      */
     ENDPOINT_INFO(getTable) {
         info->summary = "Get table";
@@ -141,20 +142,20 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("GET", "/tables/{tableName}", getTable,
-             PATH(String, tableName)) {
+    ENDPOINT("GET", "/tables/{table_name}", getTable,
+//             PATH(String, table_name, "table_name"), QUERY(String, fields, "fields")) {
+             PATH(String, table_name), QUERIES(const QueryParams&, query_params)) {
 
         auto fields_dto = TableFieldsDto::createShared();
-
-        String fields;
-        auto status = handler_->GetTable(tableName, fields, fields_dto);
-        // TODO: check status
-        if (milvus::DB_SUCCESS == status.code()) {
+        auto status_dto = StatusDto::createShared();
+        handler_->GetTable(table_name, query_params, status_dto, fields_dto);
+        auto code = status_dto->code->getValue();
+        if (0 == code) {
             return createDtoResponse(Status::CODE_200, fields_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + tableName + " not found.");
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -165,17 +166,18 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(showTables) {
         info->summary = "Show whole tables";
-        info->addResponse<TableNameListDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<TableListDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("GET", "/tables", showTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page size")) {
-        auto table_list_dto = TableNameListDto::createShared();
-        auto status = handler_->ShowTables(table_list_dto);
-        if (status.ok()) {
+    ENDPOINT("GET", "/tables", showTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
+        auto table_list_dto = TableListDto::createShared();
+        auto status_dto = StatusDto::createShared();
+        handler_->ShowTables(offset, page_size, status_dto, table_list_dto);
+        if (0 == status_dto->code->getValue()) {
             return createDtoResponse(Status::CODE_200, table_list_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -191,15 +193,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("DELETE", "tables/{tableName}", dropTable,
-             PATH(String, tableName)) {
-        auto status = handler_->DropTable(tableName);
-        if (status.ok()) {
-            return createResponse(Status::CODE_204, "Delete successfully.");
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + tableName + " not found.");
+    ENDPOINT("DELETE", "tables/{table_name}", dropTable,
+             PATH(String, table_name)) {
+        auto status_dto = StatusDto::createShared();
+        handler_->DropTable(table_name, status_dto);
+        auto code = status_dto->code->getValue();
+        if (0 == code) {
+            return createDtoResponse(Status::CODE_204, status_dto);
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -216,12 +220,13 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("POST", "/indexes/tables/{table_name}", createIndex,
-        PATH(String, table_name, "Table name"), BODY_DTO(IndexRequestDto::ObjectWrapper, indexParam)) {
-        auto status = handler_->CreateIndex(indexParam);
-        if (status.ok()) {
-            return createResponse(Status::CODE_201, status.message().c_str());
+             PATH(String, table_name), BODY_DTO(IndexRequestDto::ObjectWrapper, index_param)) {
+        auto status_dto = StatusDto::createShared();
+        handler_->CreateIndex(table_name, index_param, status_dto);
+        if (0 == status_dto->code->getValue()) {
+            return createDtoResponse(Status::CODE_201, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -233,21 +238,22 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(getIndex) {
         info->summary = "Describe index";
         info->addResponse<IndexDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("GET", "indexes/tables/{tableName}", getIndex,
-        PATH(String, tableName)) {
+             PATH(String, table_name)) {
         auto index_dto = IndexDto::createShared();
-        auto status = handler_->GetIndex(tableName, index_dto);
-
-        if (status.ok()) {
+        auto status_dto = StatusDto::createShared();
+        handler_->GetIndex(table_name, status_dto, index_dto);
+        auto code = status_dto->code->getValue();
+        if (0 == code) {
             return createDtoResponse(Status::CODE_200, index_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + tableName + " not found.");
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -263,14 +269,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("DELETE", "indexes/tables/{tableName}", dropIndex, PATH(String, tableName)) {
-        auto status = handler_->DropIndex(tableName);
-        if (status.ok()) {
-            return createResponse(Status::CODE_204, "Delete successfully.");
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + tableName + " not found.");
+    ENDPOINT("DELETE", "indexes/tables/{tableName}", dropIndex, PATH(String, table_name)) {
+        auto status_dto = StatusDto::createShared();
+        handler_->DropIndex(table_name, status_dto);
+        auto code = status_dto->code->getValue();
+        if (0 == code) {
+            return createDtoResponse(Status::CODE_204, status_dto);
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -281,7 +289,7 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(createPartition) {
         info->summary = "Create partition";
-        info->addConsumes<PartitionParamDto::ObjectWrapper>("application/json");
+        info->addConsumes<PartitionRequestDto::ObjectWrapper>("application/json");
 
         // Created.
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
@@ -293,15 +301,16 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("POST",
              "/partitions/tables/{tableName}",
              createPartition,
-             PATH(String, tableName),
-             BODY_DTO(PartitionParamDto::ObjectWrapper, partitionParam)) {
-        auto param = PartitionParamDto::createShared();
-        auto status = handler_->CreatePartition(param);
+             PATH(String, table_name),
+             BODY_DTO(PartitionRequestDto::ObjectWrapper, partition_param)) {
 
-        if (status.ok()) {
-            return createResponse(Status::CODE_201, "Create successfully.");
+        auto status_dto = StatusDto::createShared();
+        handler_->CreatePartition(table_name, partition_param, status_dto);
+
+        if (0 == status_dto->code->getValue()) {
+            return createDtoResponse(Status::CODE_201, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -324,18 +333,19 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("GET",
              "partitions/tables/{tableName}",
              showPartitions,
-             PATH(String, tableName),
+             PATH(String, table_name),
              QUERY(Int64, offset, "Page offset"),
              QUERY(Int64, page_size, "Page size")) {
         auto partition_list_dto = PartitionListDto::createShared();
-        auto status = handler_->ShowPartitions(tableName, partition_list_dto);
-
-        if (status.ok()) {
+        auto status_dto = StatusDto::createShared();
+        handler_->ShowPartitions(offset, page_size, table_name, status_dto, partition_list_dto);
+        int64_t code = status_dto->code->getValue();
+        if (0 == code) {
             return createDtoResponse(Status::CODE_200, partition_list_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + tableName + " not found.");
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -354,14 +364,15 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("DELETE", "/partitions/tables", dropPartition,
              QUERY(String, table_name, "table-name"), QUERY(String, tag, "partition-tag")) {
-        auto status = handler_->DropPartition(table_name, tag);
-
-        if (status.ok()) {
-            return createResponse(Status::CODE_200, "Delete successfully.");
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + table_name + "\' tag " + tag + " not found.");
+        auto status_dto = StatusDto::createShared();
+        handler_->DropPartition(table_name, tag, status_dto);
+        auto code = status_dto->code->getValue();
+        if (0 == code) {
+            return createDtoResponse(Status::CODE_200, status_dto);
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -375,24 +386,28 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         info->addConsumes<InsertRequestDto::ObjectWrapper>("application/json");
 
-        // TODO: may return ids
         info->addResponse<VectorIdsDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("POST", "/vectors/tables", insert,
-             QUERY(String, table_name, "Table name"), QUERY(String, tag, "partition-tag"), BODY_DTO(InsertRequestDto::ObjectWrapper, insertParam)) {
+    ENDPOINT("POST",
+             "/vectors/tables",
+             insert,
+//             QUERY(String, table_name),
+             QUERIES(const QueryParams&, query_params),
+             BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
         auto ids_dto = VectorIdsDto::createShared();
-        auto status = handler_->Insert(table_name, insertParam, ids_dto);
+        auto status_dto = StatusDto::createShared();
+        handler_->Insert(query_params, insert_param, status_dto, ids_dto);
 
-        if (status.ok()) {
-            return createResponse(Status::CODE_201, "Insert successfully.");
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404,
-                                  "Table " + table_name + "\' tag " + insertParam->tag + " not found.");
+        int64_t code = status_dto->code->getValue();
+        if (0 == code) {
+            return createDtoResponse(Status::CODE_201, status_dto);
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -411,19 +426,20 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("GET", "/vectors/{tableName}", search,
-             PATH(String, tableName), 
-             QUERY(Int64, topk, "top-k"), QUERY(Int64, nprobe, "num of probe"), QUERY(String, tags, "tag list"),
+    ENDPOINT("GET", "/vectors/{table_name}", search,
+             PATH(String, table_name),
+             QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(const QueryParams&, query_params),
              BODY_DTO(RecordsDto::ObjectWrapper, records)) {
         auto result_dto = ResultDto::createShared();
-        auto status = handler_->Search(tableName, topk, nprobe, tags, records, result_dto);
-        if (status.ok()) {
+        auto status_dto = StatusDto::createShared();
+        handler_->Search(table_name, topk, nprobe, query_params, records, status_dto, result_dto);
+        int64_t code = status_dto->code->getValue();
+        if (0 == code) {
             return createDtoResponse(Status::CODE_200, result_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404,
-                                  "Table " + tableName + " not found.");
+        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
 
@@ -434,18 +450,19 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(cmd) {
         info->summary = "Command";
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<CommandDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
+//        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str)) {
-        String reply;
-        auto status = handler_->Cmd(cmd_str, reply);
-        if (status.ok()) {
-            return createResponse(Status::CODE_200, reply);
+        auto cmd_dto = CommandDto::createShared();
+        auto status_dto = StatusDto::createShared();
+        handler_->Cmd(cmd_str, status_dto, cmd_dto);
+        if (0 == status_dto->code->getValue()) {
+            return createDtoResponse(Status::CODE_200, cmd_dto);
         } else {
-            return createResponse(Status::CODE_400, status.message().c_str());
+            return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
     /**

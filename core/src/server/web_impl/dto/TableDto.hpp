@@ -28,53 +28,39 @@ namespace web {
 
 
 class TableRequestDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(TableRequestDto, Object)
+ DTO_INIT(TableRequestDto, Object)
 
-    DTO_FIELD(String, table_name);
-    DTO_FIELD(Int64, dimension);
-    DTO_FIELD(Int64, index_file_size);
-    DTO_FIELD(Int64, metric_type);
+    DTO_FIELD(String, table_name, "table-name");
+    DTO_FIELD(Int64, dimension, "dimension");
+    DTO_FIELD(Int64, index_file_size, "index-file-size");
+    DTO_FIELD(Int64, metric_type, "metric-type");
 };
 
-class TableSchemaDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(TableSchemaDto, Object)
+//class TableSchemaDto : public oatpp::data::mapping::type::Object {
+//    DTO_INIT(TableSchemaDto, Object)
+//
+//    DTO_FIELD(String, table_name, "table-name");
+//    DTO_FIELD(Int64, dimension, "");
+//    DTO_FIELD(Int64, index_file_size);
+//    DTO_FIELD(Int64, metric_type);
+//};
 
-    DTO_FIELD(String, table_name);
-    DTO_FIELD(Int64, dimension);
-    DTO_FIELD(Int64, index_file_size);
-    DTO_FIELD(Int64, metric_type);
+class TableFieldsDto : public oatpp::data::mapping::type::Object {
+ DTO_INIT(TableFieldsDto, Object)
+
+    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
 };
 
- class TableFieldsDto : public oatpp::data::mapping::type::Object {
-     DTO_INIT(TableFieldsDto, Object)
 
-     DTO_FIELD(Fields<String>::ObjectWrapper, schema);
- };
-
-class BoolReplyDto : public oatpp::data::mapping::type::Object {
-
-    DTO_INIT(BoolReplyDto, Object)
-
-    DTO_FIELD(Boolean, reply, "reply");
-    DTO_FIELD(StatusDto::ObjectWrapper, status);
-};
-
-class TableRowCountDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(TableRowCountDto, Object)
-
-    DTO_FIELD(StatusDto::ObjectWrapper, status);
-    DTO_FIELD(Int64, count);
-};
-
-class TableNameListDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(TableNameListDto, Object)
+class TableListDto : public oatpp::data::mapping::type::Object {
+ DTO_INIT(TableListDto, Object)
 
     DTO_FIELD(List<String>::ObjectWrapper, tables);
 };
 
- class RangeDto : public oatpp::data::mapping::type::Object {
-     DTO_INIT(RangeDto, Object)
- };
+class RangeDto : public oatpp::data::mapping::type::Object {
+ DTO_INIT(RangeDto, Object)
+};
 
 #include OATPP_CODEGEN_END(DTO)
 

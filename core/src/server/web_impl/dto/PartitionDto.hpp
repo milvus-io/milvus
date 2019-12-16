@@ -34,6 +34,13 @@ class PartitionParamDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, tag);
 };
 
+class PartitionRequestDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(PartitionRequestDto, Object)
+
+    DTO_FIELD(String, partition_name);
+    DTO_FIELD(String, tag);
+};
+
  class PartitionListDto : public oatpp::data::mapping::type::Object {
      DTO_INIT(PartitionListDto, Object)
 

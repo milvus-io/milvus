@@ -27,6 +27,8 @@ using OString = oatpp::data::mapping::type::String;
 using OInt64 = oatpp::data::mapping::type::Int64;
 using OFloat32 = oatpp::data::mapping::type::Float32;
 
+using OQueryParams = oatpp::web::protocol::http::QueryParams;
+
 } // namespace web
 } // namespace server
 } // namespace milvus
