@@ -14,6 +14,8 @@ spec:
       valueFrom:
         fieldRef:
           fieldPath: status.podIP
+    - name: OS_NAME
+      value: "ubuntu18.04"
     - name: BUILD_ENV_IMAGE_ID
       value: "da9023b0f858f072672f86483a869aa87e90a5140864f89e5a012ec766d96dea"
     command:
