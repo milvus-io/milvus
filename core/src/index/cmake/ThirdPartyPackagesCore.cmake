@@ -270,10 +270,10 @@ set(ARROW_PREFIX "${INDEX_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
 macro(build_arrow)
     message(STATUS "Building Apache ARROW-${ARROW_VERSION} from source")
     set(ARROW_STATIC_LIB_NAME arrow)
-    set(ARROW_STATIC_LIB
-            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-            )
     set(ARROW_LIB_DIR "${ARROW_PREFIX}/lib")
+    set(ARROW_STATIC_LIB
+            "${ARROW_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            )
     set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
 
     set(ARROW_CMAKE_ARGS
@@ -282,6 +282,7 @@ macro(build_arrow)
             -DARROW_BUILD_SHARED=OFF
             -DARROW_USE_GLOG=OFF
             -DCMAKE_INSTALL_PREFIX=${ARROW_PREFIX}
+            -DCMAKE_INSTALL_LIBDIR=${ARROW_LIB_DIR}
             -DARROW_CUDA=OFF
             -DARROW_FLIGHT=OFF
             -DARROW_GANDIVA=OFF
