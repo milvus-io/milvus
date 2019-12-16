@@ -121,9 +121,9 @@ class Config {
     Status
     ResetDefaultConfig();
     void
-    PrintAll();
+    GetConfigJsonStr(std::string& result);
     Status
-    HandleConfigCli(std::string& result, const std::string& cmd);
+    ProcessConfigCli(std::string& result, const std::string& cmd);
 
  private:
     ConfigNode&
@@ -136,10 +136,8 @@ class Config {
     GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value);
     Status
     SetConfigValueInMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
-    void
-    PrintConfigSection(const std::string& config_node_name);
     Status
-    GetConfigCli(const std::string& parent_key, const std::string& child_key, std::string& value);
+    GetConfigCli(std::string& value, const std::string& parent_key, const std::string& child_key);
     Status
     SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
