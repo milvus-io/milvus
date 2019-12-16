@@ -134,7 +134,8 @@ pipeline {
                             stage('Deploy to Development') {
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-")
-                                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${OS_NAME}-${BINRARY_VERSION}".toLowerCase()
+                                    FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-")
+                                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINRARY_VERSION}".toLowerCase()
                                 }
 
                                 agent {
