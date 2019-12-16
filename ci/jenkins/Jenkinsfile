@@ -54,7 +54,7 @@ pipeline {
                 }
 
                 stages {
-                    stage("Milvus ${OS_NAME} ${CPU_ARCH} ${BINRARY_VERSION}") {
+                    stage("Milvus CI") {
                         environment {
                             PACKAGE_VERSION = VersionNumber([
                                 versionNumberString : '${SEMVER}-${BINRARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
