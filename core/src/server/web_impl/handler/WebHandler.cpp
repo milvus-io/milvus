@@ -28,7 +28,7 @@ namespace server {
 namespace web {
 
 Status
-WebHandler::CreateTable(TableSchemaDto::ObjectWrapper table_schema) {
+WebHandler::CreateTable(TableRequestDto::ObjectWrapper table_schema) {
     return request_handler_.CreateTable(context_ptr_,
                                         table_schema->table_name->std_str(),
                                         table_schema->dimension,
@@ -82,8 +82,8 @@ WebHandler::hasTable(const std::string& table_name) {
     bool has_table = false;
     Status status = request_handler_.HasTable(context_ptr_, table_name, has_table);
 
-    status_dto->errorCode = status.code();
-    status_dto->reason = status.message().c_str();
+    status_dto->code = status.code();
+    status_dto->message = status.message().c_str();
 
     auto hasTable = BoolReplyDto::createShared();
     hasTable->reply = has_table;
@@ -99,8 +99,8 @@ WebHandler::DescribeTable(const std::string& table_name) {
     Status status = request_handler_.DescribeTable(context_ptr_, table_name, table_schema);
 
     auto status_dto = StatusDto::createShared();
-    status_dto->errorCode = status.code();
-    status_dto->reason = status.message().c_str();
+    status_dto->code = status.code();
+    status_dto->message = status.message().c_str();
 
     auto describeTable = TableSchemaDto::createShared();
     describeTable->table_name = table_schema.table_name_.c_str();
@@ -117,8 +117,8 @@ WebHandler::CountTable(const std::string& table_name) {
     Status status = request_handler_.CountTable(context_ptr_, table_name, count);
 
     auto status_dto = StatusDto::createShared();
-    status_dto->errorCode = status.code();
-    status_dto->reason = status.message().c_str();
+    status_dto->code = status.code();
+    status_dto->message = status.message().c_str();
 
     auto countTable = TableRowCountDto::createShared();
     countTable->status = status_dto;
@@ -150,7 +150,7 @@ WebHandler::DropTable(const OString& table_name) {
 }
 
 Status
-WebHandler::CreateIndex(IndexParamDto::ObjectWrapper index_param) {
+WebHandler::CreateIndex(IndexRequestDto::ObjectWrapper index_param) {
 //    Status status = request_handler_.CreateIndex(context_ptr_, );
 }
 
@@ -243,30 +243,36 @@ WebHandler::Insert(const OString& table_name,
 
 Status
 WebHandler::Search(const OString& table_name,
-                   const ::oatpp::web::server::api::ApiController::QueryParams& query_params,
+                   OInt64 topk, OInt64 nprobe, OString tags,
                    const RecordsDto::ObjectWrapper& records,
                    ResultDto::ObjectWrapper& results_dto) {
 
-    int64_t topk = -1;
-    int64_t nprobe = -1;
-    std::vector<std::string> tags;
+    int64_t topk_t = topk->getValue();
+    int64_t nprobe_t = nprobe->getValue();
+    std::vector<std::string> tags_t;
     std::vector<std::string> file_ids;
 
-    for (auto& param : query_params.getAll()) {
-        const std::string key = param.first.std_str();
-        const std::string value = param.second.std_str();
-        if (key == "topk") {
-            topk = std::stol(value);
-        } else if (key == "nprobe") {
-            nprobe = std::stol(value);
-        } else if ("tags" == key) {
-            boost::split(tags, value, boost::is_any_of(","), boost::token_compress_on);
-        } else if ("file_ids" == key) {
-            boost::split(file_ids, value, boost::is_any_of(","), boost::token_compress_on);
-        } else {
-            return Status(SERVER_UNEXPECTED_ERROR, "Unsupported query key");
-        }
-    }
+//    for (auto& param : query_params.getAll()) {
+//        const std::string key = param.first.std_str();
+//        const std::string value = param.second.std_str();
+//        if (key == "topk") {
+//            topk = std::stol(value);
+//        } else if (key == "nprobe") {
+//            nprobe = std::stol(value);
+//        } else if ("tags" == key) {
+//            boost::split(tags, value, boost::is_any_of(","), boost::token_compress_on);
+//        } else if ("file_ids" == key) {
+//            boost::split(file_ids, value, boost::is_any_of(","), boost::token_compress_on);
+//        } else {
+//            return Status(SERVER_UNEXPECTED_ERROR, "Unsupported query key");
+//        }
+//    }
+
+    auto tags_value = tags->std_str();
+    boost::split(tags_t, tags_value, boost::is_any_of(","), boost::token_compress_on);
+
+
+    boost::split(file_ids, tags_value, boost::is_any_of(","), boost::token_compress_on);
 
     if (-1 == topk) {
         // TODO: topk not passed. use default or return error status
@@ -293,7 +299,7 @@ WebHandler::Search(const OString& table_name,
                                           range_list,
                                           topk,
                                           nprobe,
-                                          tags,
+                                          tags_t,
                                           file_ids,
                                           result);
 

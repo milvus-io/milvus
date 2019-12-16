@@ -18,5 +18,15 @@
 #pragma once
 
 #include "oatpp/core/data/mapping/type/Object.hpp"
-#include "oatpp/core/macro/codegen.hpp"
 
+namespace milvus {
+namespace server {
+namespace web {
+
+using OString = oatpp::data::mapping::type::String;
+using OInt64 = oatpp::data::mapping::type::Int64;
+using OFloat32 = oatpp::data::mapping::type::Float32;
+
+} // namespace web
+} // namespace server
+} // namespace milvus

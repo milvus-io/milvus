@@ -80,6 +80,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->summary = "Index.html page";
         info->addResponse<String>(Status::CODE_200, "text/html");
     }
+
     ENDPOINT("GET", "/", root) {
         const char* html =
             "<html lang='en'>"
@@ -87,7 +88,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             "<meta charset=utf-8/>"
             "</head>"
             "<body>"
-            "<p>Hello CRUD example project!</p>"
+            "<p>Hello milvus project!</p>"
             "<a href='swagger/ui'>Checkout Swagger-UI page</a>"
             "</body>"
             "</html>";
@@ -106,16 +107,16 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(createTable) {
         info->summary = "Create table";
-        info->addConsumes<TableSchemaDto::ObjectWrapper>("application/json");
+        info->addConsumes<TableRequestDto::ObjectWrapper>("application/json");
 
         // Created.
-        info->addResponse<String>(Status::CODE_201, "text/plain");
+        info->addResponse<TableFieldsDto::ObjectWrapper>(Status::CODE_201, "application/json");
         // Error occurred.
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
     ENDPOINT("POST", "/tables", createTable,
-             BODY_DTO(TableSchemaDto::ObjectWrapper, tableSchema)) {
+             BODY_DTO(TableRequestDto::ObjectWrapper, tableSchema)) {
         auto status = handler_->CreateTable(tableSchema);
         if (status.code() != 0) {
             return createResponse(Status::CODE_400, String(status.message().c_str()));
@@ -127,7 +128,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     /*
      * Get table
      *
-     * url = GET '{server address}/tables/{tableName}?fields={field list}'
+     * url = GET '{server address}/tables/{tableName}[?fields={fields list}]'
      */
     ENDPOINT_INFO(getTable) {
         info->summary = "Get table";
@@ -135,16 +136,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         // OK.
         info->addResponse<TableFieldsDto::ObjectWrapper>(Status::CODE_200, "application/json");
         // Error occurred.
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
         // Table not exists.
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("GET", "/tables/{tableName}", getTable,
-             PATH(String, tableName), QUERY(String, fields, "field-list")) {
+             PATH(String, tableName)) {
 
         auto fields_dto = TableFieldsDto::createShared();
 
+        String fields;
         auto status = handler_->GetTable(tableName, fields, fields_dto);
         // TODO: check status
         if (milvus::DB_SUCCESS == status.code()) {
@@ -159,16 +161,15 @@ class WebController : public oatpp::web::server::api::ApiController {
     /*
      * Show tables
      *
-     * url = GET '<server address>/tables?pageId=<id>'
+     * url = GET '<server address>/tables?offset={offset}&page_size={size}'
      */
     ENDPOINT_INFO(showTables) {
         info->summary = "Show whole tables";
         info->addResponse<TableNameListDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("GET", "/tables", showTables) {
-//        ENDPOINT("GET", "/tables", showTables, QUERY(Int64, pageId, "page-id")) {
+    ENDPOINT("GET", "/tables", showTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page size")) {
         auto table_list_dto = TableNameListDto::createShared();
         auto status = handler_->ShowTables(table_list_dto);
         if (status.ok()) {
@@ -185,9 +186,9 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(dropTable) {
         info->summary = "Drop table";
-        info->addResponse<String>(Status::CODE_204, "text/plain");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("DELETE", "tables/{tableName}", dropTable,
@@ -210,11 +211,12 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(createIndex) {
         info->summary = "Create index";
         info->addConsumes<IndexRequestDto::ObjectWrapper>("application/json");
-        info->addResponse<String>(Status::CODE_201, "text/plain");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("POST", "indexes", createIndex, BODY_DTO(IndexParamDto::ObjectWrapper, indexParam)) {
+    ENDPOINT("POST", "/indexes/tables/{table_name}", createIndex,
+        PATH(String, table_name, "Table name"), BODY_DTO(IndexRequestDto::ObjectWrapper, indexParam)) {
         auto status = handler_->CreateIndex(indexParam);
         if (status.ok()) {
             return createResponse(Status::CODE_201, status.message().c_str());
@@ -231,11 +233,12 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(getIndex) {
         info->summary = "Describe index";
         info->addResponse<IndexDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("GET", "indexes/{tableName}", getIndex, PATH(String, tableName)) {
+    ENDPOINT("GET", "indexes/tables/{tableName}", getIndex,
+        PATH(String, tableName)) {
         auto index_dto = IndexDto::createShared();
         auto status = handler_->GetIndex(tableName, index_dto);
 
@@ -255,12 +258,12 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(dropIndex) {
         info->summary = "Drop index";
-        info->addResponse<String>(Status::CODE_204, "text/plain");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("DELETE", "indexes/{tableName}", dropIndex, PATH(String, tableName)) {
+    ENDPOINT("DELETE", "indexes/tables/{tableName}", dropIndex, PATH(String, tableName)) {
         auto status = handler_->DropIndex(tableName);
         if (status.ok()) {
             return createResponse(Status::CODE_204, "Delete successfully.");
@@ -281,13 +284,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addConsumes<PartitionParamDto::ObjectWrapper>("application/json");
 
         // Created.
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
         // Error occurred.
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
 //        info->addResponse<String>(Status::CODE_404, "text/plain");
     }
 
-    ENDPOINT("POST", "/partitions", createPartition, BODY_DTO(PartitionParamDto::ObjectWrapper, partitionParam)) {
+    ENDPOINT("POST",
+             "/partitions/tables/{tableName}",
+             createPartition,
+             PATH(String, tableName),
+             BODY_DTO(PartitionParamDto::ObjectWrapper, partitionParam)) {
         auto param = PartitionParamDto::createShared();
         auto status = handler_->CreatePartition(param);
 
@@ -301,7 +308,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     /*
      * Show partitions
      *
-     * url = GET '<server address>/partitions/tables/{tableName}?pageId={id}'
+     * url = GET '<server address>/partitions/tables/{tableName}?offset={}&page_size={}'
      */
     ENDPOINT_INFO(showPartitions) {
         info->summary = "Show partitions";
@@ -309,12 +316,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         //
         info->addResponse<PartitionListDto::ObjectWrapper>(Status::CODE_200, "application/json");
         // Error occurred.
-        info->addResponse<String>(Status::CODE_400, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
         //
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("GET", "partitions/{tableName}", showPartitions, PATH(String, tableName)) {
+    ENDPOINT("GET",
+             "partitions/tables/{tableName}",
+             showPartitions,
+             PATH(String, tableName),
+             QUERY(Int64, offset, "Page offset"),
+             QUERY(Int64, page_size, "Page size")) {
         auto partition_list_dto = PartitionListDto::createShared();
         auto status = handler_->ShowPartitions(tableName, partition_list_dto);
 
@@ -330,24 +342,24 @@ class WebController : public oatpp::web::server::api::ApiController {
     /*
      * Drop partition
      *
-     * url = DELETE '<server address>/partitions/tables?table_name={tableName}&tag={tag list}'
+     * url = DELETE '<server address>/partitions/tables?table_name={tableName}&tag={tag}'
      */
     ENDPOINT_INFO(dropPartition) {
         info->summary = "Drop partition";
 
-        info->addResponse<String>(Status::CODE_204, "text/plain");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("DELETE", "partitions/{tableName}", dropPartition,
-             PATH(String, tableName), QUERY(String, tag, "partition-tag")) {
-        auto status = handler_->DropPartition(tableName, tag);
+    ENDPOINT("DELETE", "/partitions/tables", dropPartition,
+             QUERY(String, table_name, "table-name"), QUERY(String, tag, "partition-tag")) {
+        auto status = handler_->DropPartition(table_name, tag);
 
         if (status.ok()) {
             return createResponse(Status::CODE_200, "Delete successfully.");
         } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
-            return createResponse(Status::CODE_404, "Table " + tableName + "\' tag " + tag + " not found.");
+            return createResponse(Status::CODE_404, "Table " + table_name + "\' tag " + tag + " not found.");
         } else {
             return createResponse(Status::CODE_400, status.message().c_str());
         }
@@ -356,7 +368,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     /*
      * Insert vectors
      *
-     * url POST '<server addr>/vectors/tables/{tableName}'
+     * url POST '<server addr>/vectors/tables?table_name={}&tag={}'
      */
     ENDPOINT_INFO(insert) {
         info->summary = "Insert vectors";
@@ -369,16 +381,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<String>(Status::CODE_404, "text/plain");
     }
 
-    ENDPOINT("POST", "/vectors/{tableName}", insert,
-             PATH(String, tableName), BODY_DTO(InsertRequestDto::ObjectWrapper, insertParam)) {
+    ENDPOINT("POST", "/vectors/tables", insert,
+             QUERY(String, table_name, "Table name"), QUERY(String, tag, "partition-tag"), BODY_DTO(InsertRequestDto::ObjectWrapper, insertParam)) {
         auto ids_dto = VectorIdsDto::createShared();
-        auto status = handler_->Insert(tableName, insertParam, ids_dto);
+        auto status = handler_->Insert(table_name, insertParam, ids_dto);
 
         if (status.ok()) {
             return createResponse(Status::CODE_201, "Insert successfully.");
         } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
             return createResponse(Status::CODE_404,
-                                  "Table " + tableName + "\' tag " + insertParam->tag + " not found.");
+                                  "Table " + table_name + "\' tag " + insertParam->tag + " not found.");
         } else {
             return createResponse(Status::CODE_400, status.message().c_str());
         }
@@ -395,15 +407,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addConsumes<RecordsDto::ObjectWrapper>("application/json");
 
         info->addResponse<ResultDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("GET", "/vectors/{tableName}", search,
-             PATH(String, tableName), QUERIES(
-                 const QueryParams&, queryParams), BODY_DTO(RecordsDto::ObjectWrapper, records)) {
+             PATH(String, tableName), 
+             QUERY(Int64, topk, "top-k"), QUERY(Int64, nprobe, "num of probe"), QUERY(String, tags, "tag list"),
+             BODY_DTO(RecordsDto::ObjectWrapper, records)) {
         auto result_dto = ResultDto::createShared();
-        auto status = handler_->Search(tableName, queryParams, records, result_dto);
+        auto status = handler_->Search(tableName, topk, nprobe, tags, records, result_dto);
         if (status.ok()) {
             return createDtoResponse(Status::CODE_200, result_dto);
         } else if (milvus::SERVER_TABLE_NOT_EXIST == status.code() || milvus::DB_NOT_FOUND == status.code()) {
@@ -421,9 +434,9 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
     ENDPOINT_INFO(cmd) {
         info->summary = "Command";
-        info->addResponse<String>(Status::CODE_200, "text/plain");
-        info->addResponse<String>(Status::CODE_400, "text/plain");
-        info->addResponse<String>(Status::CODE_404, "text/plain");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str)) {

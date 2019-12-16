@@ -27,6 +27,7 @@
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
+#include "server/web_impl/Types.h"
 
 #include "server/delivery/RequestHandler.h"
 #include "server/context/Context.h"
@@ -41,7 +42,7 @@ class WebHandler {
     WebHandler() = default;
 
     Status
-    CreateTable(TableSchemaDto::ObjectWrapper table_schema);
+    CreateTable(TableRequestDto::ObjectWrapper table_schema);
 
     Status
     GetTable(const OString& table_name, const OString& fields, TableFieldsDto::ObjectWrapper& schema_dto);
@@ -62,7 +63,7 @@ class WebHandler {
     DropTable(const OString& table_name);
 
     Status
-    CreateIndex(IndexParamDto::ObjectWrapper index_param);
+    CreateIndex(IndexRequestDto::ObjectWrapper index_param);
 
     Status
     GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto);
@@ -86,7 +87,7 @@ class WebHandler {
 
     Status
     Search(const OString& table_name,
-           const ::oatpp::web::server::api::ApiController::QueryParams& query_params,
+           OInt64 topk, OInt64 nprobe, OString tags,
            const RecordsDto::ObjectWrapper& records,
            ResultDto::ObjectWrapper& results_dto);
 

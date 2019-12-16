@@ -26,16 +26,19 @@ namespace web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class TableNameDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(TableNameDto, Object)
+
+class TableRequestDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(TableRequestDto, Object)
 
     DTO_FIELD(String, table_name);
+    DTO_FIELD(Int64, dimension);
+    DTO_FIELD(Int64, index_file_size);
+    DTO_FIELD(Int64, metric_type);
 };
 
 class TableSchemaDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(TableSchemaDto, Object)
 
-    // TODO: Define fields here
     DTO_FIELD(String, table_name);
     DTO_FIELD(Int64, dimension);
     DTO_FIELD(Int64, index_file_size);
