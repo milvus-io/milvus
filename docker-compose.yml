@@ -2,6 +2,7 @@ version: '3.5'
 
 volumes:
   amd64-ubuntu-18.04-cache:
+  amd64-centos-7-cache:
 
 x-ccache: &ccache
   CCACHE_COMPILERCHECK: content
@@ -9,11 +10,6 @@ x-ccache: &ccache
   CCACHE_COMPRESSLEVEL: 5
   CCACHE_MAXSIZE: 2G
   CCACHE_DIR: /build/ccache
-
-x-command: &cpp-command >
-  /bin/bash -c "
-    /milvus/ci/scripts/build.sh -o ${MILVUS_INSTALL_PREFIX} -l -u -c
-    /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
 services:
   db:
@@ -42,7 +38,32 @@ services:
       - ${ARCH}-ubuntu-${UBUNTU}-cache:/build:delegated
     networks:
       - milvus
-    command: *cpp-command
+    command: &ubuntu-command >
+      /bin/bash -c "
+        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
+
+  centos-core:
+    image: ${REPO}:${ARCH}-centos-${CENTOS}-core
+    build:
+      context: .
+      dockerfile: ci/docker/centos-${CENTOS}-core.dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-centos-${CENTOS}-core
+    shm_size: 2G
+    environment:
+      <<: *ccache
+    volumes: &centos-volumes
+      - .:/milvus:delegated
+      - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
+    networks:
+      - milvus
+    command: &centos-command >
+      /bin/bash -c "
+        source scl_source enable devtoolset-7
+        source scl_source enable llvm-toolset-7.0
+        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
 networks:
   milvus:
