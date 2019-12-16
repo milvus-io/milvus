@@ -14,8 +14,10 @@ spec:
       valueFrom:
         fieldRef:
           fieldPath: status.podIP
+    - name: OS_NAME
+      value: "centos7"
     - name: BUILD_ENV_IMAGE_ID
-      value: "23476391bec80c64f10d44a6370c73c71f011a6b95114b10ff82a60e771e11c7"
+      value: "225b4d9c26d67b70b476964b4dd6e216de4b464d7a973a8c0c7ed1313c4d81ad"
     command:
     - cat
     tty: true
