@@ -24,7 +24,8 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-find_package(oatpp 0.19.10 REQUIRED)
+find_package(oatpp          0.19.10 REQUIRED)
+find_package(oatpp-swagger  0.19.10 REQUIRED)
 
 add_subdirectory(index)
 if (FAISS_WITH_MKL)
@@ -243,7 +244,11 @@ set(server_libs
         metrics
         tracing
         oatpp::oatpp
+        oatpp::oatpp-swagger
         )
+
+## define path to swagger-ui res folder
+add_definitions(-DOATPP_SWAGGER_RES_PATH="${oatpp-swagger_INCLUDE_DIRS}/../bin/oatpp-swagger/res")
 
 add_executable(milvus_server
         ${config_files}

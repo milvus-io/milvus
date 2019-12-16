@@ -36,12 +36,17 @@ class TableSchemaDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(TableSchemaDto, Object)
 
     // TODO: Define fields here
-    DTO_FIELD(StatusDto::ObjectWrapper, status);
     DTO_FIELD(String, table_name);
     DTO_FIELD(Int64, dimension);
     DTO_FIELD(Int64, index_file_size);
     DTO_FIELD(Int64, metric_type);
 };
+
+ class TableFieldsDto : public oatpp::data::mapping::type::Object {
+     DTO_INIT(TableFieldsDto, Object)
+
+     DTO_FIELD(Fields<String>::ObjectWrapper, schema);
+ };
 
 class BoolReplyDto : public oatpp::data::mapping::type::Object {
 
@@ -61,8 +66,6 @@ class TableRowCountDto : public oatpp::data::mapping::type::Object {
 class TableNameListDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableNameListDto, Object)
 
-    // TODO: Define fields here
-    DTO_FIELD(StatusDto::ObjectWrapper, status);
     DTO_FIELD(List<String>::ObjectWrapper, tables);
 };
 

@@ -16,6 +16,7 @@
 // under the License.
 
 #include <oatpp/network/server/Server.hpp>
+#include <oatpp-swagger/Controller.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/AppComponent.hpp"
@@ -47,11 +48,20 @@ WebServer::Stop() {
 Status
 WebServer::StartService() {
     AppComponent components(9999); // Create scope Environment components
+
     /* create ApiControllers and add endpoints to router */
     auto router = components.httpRouter.getObject();
 
+    auto docEndpoints = oatpp::swagger::Controller::Endpoints::createShared();
+
     auto userController = WebController::createShared();
     userController->addEndpointsToRouter(router);
+
+    docEndpoints->pushBackAll(userController->getEndpoints());
+
+    auto swaggerController = oatpp::swagger::Controller::createShared(docEndpoints);
+    swaggerController->addEndpointsToRouter(router);
+    
     /* create server */
     server_ptr_ = std::make_unique<oatpp::network::server::Server>(
         components.serverConnectionProvider.getObject(),

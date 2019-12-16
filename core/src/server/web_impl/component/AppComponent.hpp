@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include "../handler/WebHandler.h"
-
 #include <oatpp/core/macro/component.hpp>
 #include <oatpp/parser/json/mapping/ObjectMapper.hpp>
 #include <oatpp/parser/json/mapping/Serializer.hpp>
@@ -27,6 +25,13 @@
 #include <oatpp/web/server/HttpRouter.hpp>
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>
 
+#include "server/web_impl/handler/WebHandler.h"
+#include "server/web_impl/component/SwaggerComponent.hpp"
+
+/**
+ *  Class which creates and holds Application components and registers components in oatpp::base::Environment
+ *  Order of components initialization is from top to bottom
+ */
 namespace milvus {
 namespace server {
 namespace web {
@@ -48,6 +53,10 @@ class AppComponent {
     const int port_;
 
  public:
+   /**
+    *  Swagger component
+    */
+    SwaggerComponent swaggerComponent;
 
     /**
      *  Create ConnectionProvider component which listens on the port

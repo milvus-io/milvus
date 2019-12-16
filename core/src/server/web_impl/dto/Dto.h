@@ -19,3 +19,13 @@
 
 #include "oatpp/core/data/mapping/type/Object.hpp"
 #include "oatpp/core/macro/codegen.hpp"
+
+namespace milvus {
+namespace server {
+namespace web {
+
+using OString = oatpp::data::mapping::type::String;
+
+} // namespace web
+} // namespace server
+} // namespace milvus

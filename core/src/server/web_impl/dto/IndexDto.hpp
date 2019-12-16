@@ -28,12 +28,14 @@ namespace web {
 
 class IndexDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(IndexDto, Object)
+
+    DTO_FIELD(Int64, index_type);
+    DTO_FIELD(Int64, nlist);
 };
 
 class IndexParamDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(IndexParamDto, Object)
 
-    DTO_FIELD(StatusDto::ObjectWrapper, status);
     DTO_FIELD(String, table_name);
     DTO_FIELD(IndexDto::ObjectWrapper, index);
 };

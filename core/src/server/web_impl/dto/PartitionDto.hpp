@@ -36,6 +36,8 @@ class PartitionParamDto : public oatpp::data::mapping::type::Object {
 
  class PartitionListDto : public oatpp::data::mapping::type::Object {
      DTO_INIT(PartitionListDto, Object)
+
+     DTO_FIELD(List<PartitionParamDto::ObjectWrapper>::ObjectWrapper, partitions);
  };
 
 #include OATPP_CODEGEN_END(DTO)

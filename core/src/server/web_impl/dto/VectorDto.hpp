@@ -27,14 +27,38 @@ namespace web {
 
 class RowRecordDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(RowRecordDto, Object)
+
+    DTO_FIELD(List<Float32>::ObjectWrapper, record);
 };
 
-class InsertParamDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(InsertParamDto, Object)
+class RecordsDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(RecordsDto, Object)
+
+    DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
+};
+
+
+class InsertRequestDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(InsertRequestDto, Object)
+
+//    DTO_FIELD(String, table_name);
+    DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
+    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
+    DTO_FIELD(String, tag);
 };
 
 class VectorIdsDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(VectorIdsDto, Object)
+
+    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
+};
+
+class ResultDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(ResultDto, Object)
+
+    DTO_FIELD(Int64, num);
+    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
+    DTO_FIELD(List<Float32>::ObjectWrapper, dits);
 };
 
 #include OATPP_CODEGEN_END(DTO)
