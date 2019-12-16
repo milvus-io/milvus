@@ -41,7 +41,7 @@ services:
     command: &ubuntu-command >
       /bin/bash -c "
         /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
-        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql -c ${CODECOV_TOKEN}"
+        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
   centos-core:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
@@ -63,7 +63,7 @@ services:
         source scl_source enable devtoolset-7
         source scl_source enable llvm-toolset-7.0
         /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
-        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql -c ${CODECOV_TOKEN}"
+        /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
 networks:
   milvus:
