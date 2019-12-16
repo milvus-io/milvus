@@ -334,7 +334,7 @@ ClientProxy::ServerStatus() const {
 
     try {
         std::string dummy;
-        Status status = client_ptr_->Cmd(dummy, "");
+        Status status = client_ptr_->Cmd(dummy, "status");
         return "server alive";
     } catch (std::exception& ex) {
         return "connection lost";
@@ -453,6 +453,25 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "fail to drop partition: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
+    try {
+        return client_ptr_->Cmd(value, "get " + node_name);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Fail to get config: " + node_name);
+    }
+}
+
+Status
+ClientProxy::SetConfig(const std::string& node_name, const std::string& value) const {
+    try {
+        std::string dummy;
+        return client_ptr_->Cmd(dummy, "set " + node_name + " " + value);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Fail to set config: " + node_name);
     }
 }
 

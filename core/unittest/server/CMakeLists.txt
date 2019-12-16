@@ -47,6 +47,7 @@ set(server_test_files
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${server_delivery_files}
         ${util_files}
         ${entry_file}
         ${test_files}
