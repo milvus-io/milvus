@@ -66,7 +66,7 @@ pipeline {
                             stage('Run Build') {
                                 agent {
                                     kubernetes {
-                                        label "${BINRARY_VERSION}-build"
+                                        label "${OS_NAME}-${BINRARY_VERSION}-build"
                                         defaultContainer 'jnlp'
                                         yamlFile "ci/jenkins/pod/milvus-${BINRARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
                                     }
@@ -87,7 +87,11 @@ pipeline {
                                         steps {
                                             container("milvus-${BINRARY_VERSION}-build-env") {
                                                 script {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                                    if ("${BINRARY_VERSION}" == "gpu") {
+                                                        load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                                    } else {
+                                                        echo "Skip Code Coverage"
+                                                    }
                                                 }
                                             }
                                         }
@@ -108,7 +112,7 @@ pipeline {
                             stage('Publish docker images') {
                                 agent {
                                     kubernetes {
-                                        label "${BINRARY_VERSION}-publish"
+                                        label "${OS_NAME}-${BINRARY_VERSION}-publish"
                                         defaultContainer 'jnlp'
                                         yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                     }
@@ -130,12 +134,12 @@ pipeline {
                             stage('Deploy to Development') {
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-")
-                                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${BINRARY_VERSION}".toLowerCase()
+                                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${OS_NAME}-${BINRARY_VERSION}".toLowerCase()
                                 }
 
                                 agent {
                                     kubernetes {
-                                        label "${BINRARY_VERSION}-dev-test"
+                                        label "${OS_NAME}-${BINRARY_VERSION}-dev-test"
                                         defaultContainer 'jnlp'
                                         yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                     }
