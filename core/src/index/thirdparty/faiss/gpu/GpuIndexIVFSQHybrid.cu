@@ -85,11 +85,7 @@ GpuIndexIVFSQHybrid::copyFrom(
     index_ = nullptr;
 
     // Copy what we need from the CPU index
-    printf("CYD - %s:%d, before GpuIndexIVF::copyFrom()\n", __FUNCTION__, __LINE__);
-    fflush(stdout);
     GpuIndexIVF::copyFrom(index);
-    printf("CYD - %s:%d, GpuIndexIVF::copyFrom() done \n", __FUNCTION__, __LINE__);
-    fflush(stdout);
     sq = index->sq;
     by_residual = index->by_residual;
 

@@ -109,6 +109,8 @@ IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
         bool flag = (ivf_index->quantizer == nullptr);
         KNOWHERE_THROW_MSG("quantizer_backup null: " + std::to_string(flag));
     }
+    printf("%s:%d, index(%p)->quantizer(%p)\n", __FILE__, __LINE__, ivf_index, ivf_index->quantizer);
+    fflush(stdout);
     gpu_mode = 0;
 }
 
