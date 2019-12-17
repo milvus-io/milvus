@@ -1,15 +1,11 @@
 ### Build C++ SDK
 
-The C++ SDK source code is under milvus/core/src/sdk. Build entire milvus project will also build the C++ SDK project. 
-If you don't want to build the entire milvus project, follow below steps:
+The C++ SDK source code is under milvus/sdk.
+If you want to build sdk project, follow below steps:
 ```shell
- # generate make files
- $ cd [Milvus root path]/core
- $ ./build.sh -l
- 
- # build C++ SDK project
- $ cd [Milvus root path]/core/cmake_build
- $ make -C src/sdk
+ # build project
+ $ cd [Milvus root path]/sdk
+ $ ./build.sh
 ```
 
 ### Try C++ example
@@ -32,7 +28,7 @@ Run C++ example:
 
 ```shell
  # run milvus C++ example
- $ cd [Milvus root path]/core/cmake_build/src/sdk/examples/simple
+ $ cd [Milvus root path]/sdk/cmake_build/examples/simple
  $ ./sdk_simple
 ```
 
@@ -45,9 +41,9 @@ Create a folder for the project, and copy C++ SDK header and library files into 
  $ cd MyMilvusClient
  
  # copy necessary files
- $ cp [Milvus root path]/core/cmake_build/src/sdk/libmilvus_sdk.so .
- $ cp [Milvus root path]/core/src/sdk/include/MilvusApi.h .
- $ cp [Milvus root path]/core/src/sdk/include/Status.h .
+ $ cp [Milvus root path]/sdk/cmake_build/libmilvus_sdk.so .
+ $ cp [Milvus root path]/sdk/include/MilvusApi.h .
+ $ cp [Milvus root path]/sdk/include/Status.h .
 ```
 
 Create file main.cpp in the project folder, and copy the following code into it:
