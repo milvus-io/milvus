@@ -446,30 +446,18 @@ class Connection {
     DropPartition(const PartitionParam& param) = 0;
 
     /**
-     * @brief Get config method
+     * @brief Process command
      *
-     * This method is used to set config.
+     * This method is used to process pre-defined commands.
      *
-     * @param node_name, config node name.
-     * @param value, config value.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    GetConfig(const std::string& node_name, std::string& value) const = 0;
-
-    /**
-     * @brief Set config method
-     *
-     * This method is used to set config.
-     *
-     * @param node_name, config node name.
-     * @param value, config value.
+     * @param result, result string.
+     * @param cmd, command string.
+     * @param params, command parameters.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    SetConfig(const std::string& node_name, const std::string& value) const = 0;
+    ProcessCommand(std::string& result, const std::string& cmd, const std::vector<std::string>& params) const = 0;
 };
 
 }  // namespace milvus
