@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ClientProxy.h"
-#include "milvus.grpc.pb.h"
+#include "grpc/ClientProxy.h"
+#include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
 #include <memory>
 #include <string>

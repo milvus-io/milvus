@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ConnectionImpl.h"
+#include "interface/ConnectionImpl.h"
 
 namespace milvus {
 

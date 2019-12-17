@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Utils.h"
-#include "TimeRecorder.h"
+#include "examples/utils/Utils.h"
+#include "examples/utils/TimeRecorder.h"
 
 #include <time.h>
 #include <unistd.h>

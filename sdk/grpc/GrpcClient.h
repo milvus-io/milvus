@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include "MilvusApi.h"
-#include "milvus.grpc.pb.h"
+#include "include/MilvusApi.h"
+#include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 //#include "grpc/gen-status/status.grpc.pb.h"
 
 #include <chrono>

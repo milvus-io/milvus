@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ClientTest.h"
-#include "MilvusApi.h"
-#include "../../utils/TimeRecorder.h"
-#include "../../utils/Utils.h"
+#include "examples/partition/src/ClientTest.h"
+#include "include/MilvusApi.h"
+#include "examples/utils/TimeRecorder.h"
+#include "examples/utils/Utils.h"
 
 #include <chrono>
 #include <iostream>

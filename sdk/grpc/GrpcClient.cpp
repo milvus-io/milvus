@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "GrpcClient.h"
+#include "grpc/GrpcClient.h"
 
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>

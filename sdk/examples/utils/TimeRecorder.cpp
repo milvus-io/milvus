@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "TimeRecorder.h"
+#include "examples/utils/TimeRecorder.h"
 
 #include <iostream>
 
