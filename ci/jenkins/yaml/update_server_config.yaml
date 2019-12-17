@@ -1,2 +1,0 @@
-db_config:
-  primary_path: /var/lib/milvus
