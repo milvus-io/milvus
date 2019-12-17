@@ -96,6 +96,9 @@ GpuIndexIVF::copyFrom(const faiss::IndexIVF* index) {
   delete quantizer;
   quantizer = nullptr;
 
+  printf("CYD - %s:%d, Check Point 1\n", __FUNCTION__, __LINE__);
+  fflush(stdout);
+
   // Construct an empty quantizer
   GpuIndexFlatConfig config = ivfConfig_.flatConfig;
   // FIXME: inherit our same device
@@ -134,7 +137,12 @@ GpuIndexIVF::copyFrom(const faiss::IndexIVF* index) {
                          "Only IndexFlat is supported for the coarse quantizer "
                          "for copying from an IndexIVF into a GpuIndexIVF");
 
+  printf("CYD - %s:%d, index->quantizer %p\n", __FUNCTION__, __LINE__, index->quantizer);
+  printf("CYD - %s:%d, before quantizer->copyFrom()\n", __FUNCTION__, __LINE__);
+  fflush(stdout);
   quantizer->copyFrom(qFlat);
+  printf("CYD - %s:%d, quantizer->copyFrom() done\n", __FUNCTION__, __LINE__);
+  fflush(stdout);
 }
 
 void
