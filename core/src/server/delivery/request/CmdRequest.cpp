@@ -52,9 +52,11 @@ CmdRequest::OnExecute() {
 #else
         result_ = "CPU";
 #endif
-    } else if (cmd_.substr(0, 3) == "set" || cmd_.substr(0, 3) == "get") {
+    } else if (cmd_ == "build_commit_id") {
+        result_ = LAST_COMMIT_ID;
+    } else if (cmd_.substr(0, 10) == "set_config" || cmd_.substr(0, 10) == "get_config") {
         server::Config& config = server::Config::GetInstance();
-        stat = config.HandleConfigCli(result_, cmd_);
+        stat = config.ProcessConfigCli(result_, cmd_);
     } else {
         result_ = "Unknown command";
     }
