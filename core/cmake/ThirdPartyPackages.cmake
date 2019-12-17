@@ -1284,7 +1284,7 @@ endif ()
 macro(build_fiu)
     message(STATUS "Building FIU-${FIU_VERSION} from source")
     set(FIU_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep")
-    set(FIU_STATIC_LIB "${FIU_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}fiu${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(FIU_SHARED_LIB "${FIU_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(FIU_INCLUDE_DIR "${FIU_PREFIX}/include")
 
     externalproject_add(fiu_ep
@@ -1303,13 +1303,13 @@ macro(build_fiu)
             "PREFIX=${FIU_PREFIX}"
             install
             BUILD_BYPRODUCTS
-            ${FIU_STATIC_LIB}
+            ${FIU_SHARED_LIB}
             )
 
         file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
-    add_library(fiu STATIC IMPORTED)
+        add_library(fiu SHARED IMPORTED)
     set_target_properties(fiu
-        PROPERTIES IMPORTED_LOCATION "${FIU_STATIC_LIB}"
+        PROPERTIES IMPORTED_LOCATION "${FIU_SHARED_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${FIU_INCLUDE_DIR}")
 
     add_dependencies(fiu fiu_ep)
