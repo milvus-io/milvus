@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#343 - Add Opentracing
 - \#665 - Support get/set config via CLI
 - \#771 - Add server build commit info interface
+- \#759 - Put C++ sdk out of milvus/core
 
 ## Improvement
 
