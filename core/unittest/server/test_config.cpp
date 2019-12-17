@@ -311,12 +311,12 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 }
 
 std::string gen_get_command(const std::string& parent_node, const std::string& child_node) {
-    std::string cmd = "get " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
+    std::string cmd = "get_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
     return cmd;
 }
 
 std::string gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
-    std::string cmd = "set " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
+    std::string cmd = "set_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
     return cmd;
 }
 
@@ -328,75 +328,78 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string get_cmd, set_cmd;
     std::string result, dummy;
 
+    s = config.ProcessConfigCli(result, "get_config *");
+    ASSERT_TRUE(s.ok());
+
     /* server config */
     std::string server_addr = "192.168.1.155";
     get_cmd = gen_get_command(ms::CONFIG_SERVER, ms::CONFIG_SERVER_ADDRESS);
     set_cmd = gen_set_command(ms::CONFIG_SERVER, ms::CONFIG_SERVER_ADDRESS, server_addr);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_FALSE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
     /* db config */
     std::string db_primary_path = "/home/zilliz";
     get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_PRIMARY_PATH);
     set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_PRIMARY_PATH, db_primary_path);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_FALSE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
     /* metric config */
     std::string metric_enable_monitor = "false";
     get_cmd = gen_get_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR);
     set_cmd = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, metric_enable_monitor);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_FALSE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
     /* cache config */
     std::string cache_cpu_cache_capacity = "5";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_CAPACITY);
     set_cmd = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_CAPACITY, cache_cpu_cache_capacity);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == cache_cpu_cache_capacity);
 
     std::string cache_cpu_cache_threshold = "0.1";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_THRESHOLD);
     set_cmd = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_THRESHOLD, cache_cpu_cache_threshold);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(result == cache_cpu_cache_threshold);
 
     std::string cache_insert_data = "true";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CACHE_INSERT_DATA);
     set_cmd = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CACHE_INSERT_DATA, cache_insert_data);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(result == cache_insert_data);
 
     /* engine config */
     std::string engine_use_blas_threshold = "50";
     get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_USE_BLAS_THRESHOLD);
     set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_USE_BLAS_THRESHOLD, engine_use_blas_threshold);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_use_blas_threshold);
 
     std::string engine_omp_thread_num = "8";
     get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_OMP_THREAD_NUM);
     set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_OMP_THREAD_NUM, engine_omp_thread_num);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_omp_thread_num);
 
@@ -404,9 +407,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string engine_gpu_search_threshold = "800";
     get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
     set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, engine_gpu_search_threshold);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_gpu_search_threshold);
 
@@ -414,35 +417,35 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string resource_enable_gpu = "true";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_ENABLE);
     set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_ENABLE, resource_enable_gpu);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == resource_enable_gpu);
 
     std::string gpu_cache_capacity = "1";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
     set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_CACHE_CAPACITY, gpu_cache_capacity);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == gpu_cache_capacity);
 
     std::string gpu_cache_threshold = "0.2";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_CACHE_THRESHOLD);
     set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_CACHE_THRESHOLD, gpu_cache_threshold);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(result == gpu_cache_threshold);
 
     std::string search_resources = "gpu0";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
     set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, search_resources);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == search_resources);
 
@@ -450,9 +453,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
     set_cmd =
         gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources);
-    s = config.HandleConfigCli(dummy, set_cmd);
+    s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
-    s = config.HandleConfigCli(result, get_cmd);
+    s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == build_index_resources);
 #endif
@@ -591,7 +594,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     s = config.ValidateConfig();
     ASSERT_TRUE(s.ok());
 
-    config.PrintAll();
+    std::string config_json_str;
+    config.GetConfigJsonStr(config_json_str);
+    std::cout << config_json_str << std::endl;
 
     s = config.ResetDefaultConfig();
     ASSERT_TRUE(s.ok());

@@ -457,21 +457,15 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
 }
 
 Status
-ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
+ClientProxy::ProcessCommand(std::string& result, const std::string& cmd, const std::vector<std::string>& params) const {
     try {
-        return client_ptr_->Cmd(value, "get " + node_name);
+        std::string cmd_line = cmd;
+        for (const std::string& param : params) {
+            cmd_line += " " + param;
+        }
+        return client_ptr_->Cmd(result, cmd_line);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Fail to get config: " + node_name);
-    }
-}
-
-Status
-ClientProxy::SetConfig(const std::string& node_name, const std::string& value) const {
-    try {
-        std::string dummy;
-        return client_ptr_->Cmd(dummy, "set " + node_name + " " + value);
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Fail to set config: " + node_name);
+        return Status(StatusCode::UnknownError, "Fail to process command: " + cmd);
     }
 }
 

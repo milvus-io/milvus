@@ -107,10 +107,7 @@ class ConnectionImpl : public Connection {
     DropPartition(const PartitionParam& param) override;
 
     Status
-    GetConfig(const std::string& node_name, std::string& value) const override;
-
-    Status
-    SetConfig(const std::string& node_name, const std::string& value) const override;
+    ProcessCommand(std::string& result, const std::string& cmd, const std::vector<std::string>& params) const override;
 
  private:
     std::shared_ptr<ClientProxy> client_proxy_;
