@@ -47,7 +47,6 @@ jobs:
           file: ./ci/scripts/output_new.info
           flags: unittests
           yml: ./codecov.yaml
-          fail_ci_if_error: true
 
   centos:
     name: AMD64 CentOS ${{ matrix.centos }}
@@ -85,4 +84,3 @@ jobs:
           file: ./ci/scripts/output_new.info
           flags: unittests
           yml: ./codecov.yaml
-          fail_ci_if_error: true
