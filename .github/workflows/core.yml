@@ -31,7 +31,7 @@ jobs:
       - name: Docker Build
         run: |
           docker-compose run --use-aliases -d db
-          docker-compose run ubuntu-core
+          docker-compose run -e MILVUS_CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }} ubuntu-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -61,7 +61,7 @@ jobs:
       - name: Docker Build
         run: |
           docker-compose run --use-aliases -d db
-          docker-compose run centos-core
+          docker-compose run -e MILVUS_CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }} centos-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
