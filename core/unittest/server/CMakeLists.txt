@@ -21,6 +21,7 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_cache.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_config.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_rpc.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_util.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
@@ -29,6 +30,8 @@ link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
+
+add_definitions(-DOATPP_SWAGGER_RES_PATH="${oatpp-swagger_INCLUDE_DIRS}/../bin/oatpp-swagger/res")
 
 set(util_files
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
@@ -48,6 +51,7 @@ set(server_test_files
         ${grpc_server_files}
         ${grpc_service_files}
         ${server_delivery_files}
+        ${web_server_files}
         ${util_files}
         ${entry_file}
         ${test_files}
@@ -67,6 +71,8 @@ target_link_libraries(test_server
         stdc++
         ${grpc_lib}
         ${unittest_libs}
+        oatpp::oatpp
+        oatpp::oatpp-swagger
         )
 
 install(TARGETS test_server DESTINATION unittest)

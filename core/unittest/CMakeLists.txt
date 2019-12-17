@@ -17,6 +17,9 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
+find_package(oatpp          0.19.10 REQUIRED)
+find_package(oatpp-swagger  0.19.10 REQUIRED)
+
 foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
@@ -72,6 +75,19 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
 set(grpc_server_files
         ${grpc_impl_files}
         ${grpc_interceptor_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_impl_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)

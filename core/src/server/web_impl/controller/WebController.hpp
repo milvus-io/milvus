@@ -143,8 +143,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("GET", "/tables/{table_name}", getTable,
-//             PATH(String, table_name, "table_name"), QUERY(String, fields, "fields")) {
-             PATH(String, table_name), QUERIES(const QueryParams&, query_params)) {
+             PATH(String, table_name), QUERIES(
+                 const QueryParams&, query_params)) {
 
         auto fields_dto = TableFieldsDto::createShared();
         auto status_dto = StatusDto::createShared();
@@ -395,7 +395,8 @@ class WebController : public oatpp::web::server::api::ApiController {
              "/vectors/tables",
              insert,
 //             QUERY(String, table_name),
-             QUERIES(const QueryParams&, query_params),
+             QUERIES(
+                 const QueryParams&, query_params),
              BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
         auto ids_dto = VectorIdsDto::createShared();
         auto status_dto = StatusDto::createShared();
@@ -428,7 +429,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("GET", "/vectors/{table_name}", search,
              PATH(String, table_name),
-             QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(const QueryParams&, query_params),
+             QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(
+                 const QueryParams&, query_params),
              BODY_DTO(RecordsDto::ObjectWrapper, records)) {
         auto result_dto = ResultDto::createShared();
         auto status_dto = StatusDto::createShared();
@@ -452,7 +454,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->summary = "Command";
         info->addResponse<CommandDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-//        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str)) {

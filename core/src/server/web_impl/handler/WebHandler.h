@@ -52,16 +52,24 @@ class WebHandler {
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto);
 
     void
-    GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto, TableFieldsDto::ObjectWrapper& schema_dto);
+    GetTable(const OString& table_name,
+             const OQueryParams& query_params,
+             StatusDto::ObjectWrapper& status_dto,
+             TableFieldsDto::ObjectWrapper& schema_dto);
 
     void
-    ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto, TableListDto::ObjectWrapper& table_list_dto);
+    ShowTables(const OInt64& offset,
+               const OInt64& page_size,
+               StatusDto::ObjectWrapper& status_dto,
+               TableListDto::ObjectWrapper& table_list_dto);
 
     void
     DropTable(const OString& table_name, StatusDto::ObjectWrapper& status_dto);
 
     void
-    CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param, StatusDto::ObjectWrapper& status_dto);
+    CreateIndex(const OString& table_name,
+                const IndexRequestDto::ObjectWrapper& index_param,
+                StatusDto::ObjectWrapper& status_dto);
 
     void
     GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto, IndexDto::ObjectWrapper& index_dto);
@@ -70,10 +78,16 @@ class WebHandler {
     DropIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto);
 
     void
-    CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto);
+    CreatePartition(const OString& table_name,
+                    const PartitionRequestDto::ObjectWrapper& param,
+                    StatusDto::ObjectWrapper& status_dto);
 
     void
-    ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name, StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto);
+    ShowPartitions(const OInt64& offset,
+                   const OInt64& page_size,
+                   const OString& table_name,
+                   StatusDto::ObjectWrapper& status_dto,
+                   PartitionListDto::ObjectWrapper& partition_list_dto);
 
     void
     DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto);

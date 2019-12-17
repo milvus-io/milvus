@@ -97,15 +97,21 @@ WebHandler::ShowTables(const OInt64& offset,
                        StatusDto::ObjectWrapper& status_dto,
                        TableListDto::ObjectWrapper& table_list_dto) {
     std::vector<std::string> tables;
-    Status status = request_handler_.ShowTables(context_ptr_, tables);
+    Status status = Status::OK();
 
-    if (status.ok()) {
-        table_list_dto->tables = table_list_dto->tables->createShared();
-        if (offset + 1 < tables.size()) {
-            int64_t size =
-                (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() : page_size->getValue();
-            for (int64_t i = 0; i < size; i++) {
-                table_list_dto->tables->pushBack(tables.at(i).c_str());
+    if (offset < 0 || page_size < 0) {
+        status = Status(SERVER_UNEXPECTED_ERROR, " Query param offset or page_size should bigger than 0");
+    } else {
+        status = request_handler_.ShowTables(context_ptr_, tables);
+        if (status.ok()) {
+            table_list_dto->tables = table_list_dto->tables->createShared();
+            if (offset + 1 < tables.size()) {
+                int64_t size =
+                    (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size()
+                                                                                 : page_size->getValue();
+                for (int64_t i = 0; i < size; i++) {
+                    table_list_dto->tables->pushBack(tables.at(i).c_str());
+                }
             }
         }
     }
