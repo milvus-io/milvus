@@ -105,6 +105,10 @@ IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
     FaissBaseIndex::LoadImpl(index_binary);  // load on cpu
     auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->backup_quantizer();
+    if (ivf_index->quantizer_backup == nullptr) {
+        bool flag = (ivf_index->quantizer == nullptr);
+        KNOWHERE_THROW_MSG("quantizer_backup null: " + std::to_string(flag));
+    }
     gpu_mode = 0;
 }
 
