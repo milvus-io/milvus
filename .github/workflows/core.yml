@@ -31,7 +31,7 @@ jobs:
       - name: Docker Build
         run: |
           docker-compose run --use-aliases -d db
-          docker-compose run -e MILVUS_CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }} ubuntu-core
+          docker-compose run ubuntu-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -40,6 +40,14 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker-compose push ubuntu-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          flags: unittests
+          yml: ./codecov.yaml
+          fail_ci_if_error: true
 
   centos:
     name: AMD64 CentOS ${{ matrix.centos }}
@@ -61,7 +69,7 @@ jobs:
       - name: Docker Build
         run: |
           docker-compose run --use-aliases -d db
-          docker-compose run -e MILVUS_CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }} centos-core
+          docker-compose run centos-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -70,3 +78,11 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker-compose push centos-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          flags: unittests
+          yml: ./codecov.yaml
+          fail_ci_if_error: true
