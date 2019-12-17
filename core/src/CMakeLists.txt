@@ -141,6 +141,7 @@ set(third_party_libs
         yaml-cpp
         mysqlpp
         zlib
+        fiu
         ${boost_lib}
         )
 
