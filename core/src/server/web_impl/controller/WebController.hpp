@@ -242,7 +242,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("GET", "indexes/tables/{tableName}", getIndex,
+    ENDPOINT("GET", "indexes/tables/{table_name}", getIndex,
              PATH(String, table_name)) {
         auto index_dto = IndexDto::createShared();
         auto status_dto = StatusDto::createShared();
@@ -269,7 +269,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("DELETE", "indexes/tables/{tableName}", dropIndex, PATH(String, table_name)) {
+    ENDPOINT("DELETE", "indexes/tables/{table_name}", dropIndex, PATH(String, table_name)) {
         auto status_dto = StatusDto::createShared();
         handler_->DropIndex(table_name, status_dto);
         auto code = status_dto->code->getValue();
@@ -299,7 +299,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("POST",
-             "/partitions/tables/{tableName}",
+             "/partitions/tables/{table_name}",
              createPartition,
              PATH(String, table_name),
              BODY_DTO(PartitionRequestDto::ObjectWrapper, partition_param)) {
@@ -363,7 +363,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("DELETE", "/partitions/tables", dropPartition,
-             QUERY(String, table_name, "table-name"), QUERY(String, tag, "partition-tag")) {
+             QUERY(String, table_name), QUERY(String, tag)) {
         auto status_dto = StatusDto::createShared();
         handler_->DropPartition(table_name, tag, status_dto);
         auto code = status_dto->code->getValue();

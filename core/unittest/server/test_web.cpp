@@ -83,25 +83,16 @@ class WebHandlerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
+        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_web_handler_test");
         milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
-        //
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
-
         milvus::server::DBWrapper::GetInstance().StartService();
 
         // initialize handler, create table
-//        handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
         handler = std::make_shared<milvus::server::web::WebHandler>();
 //        dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 //        opentracing::mocktracer::MockTracerOptions tracer_options;
@@ -130,7 +121,7 @@ class WebHandlerTest : public testing::Test {
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
-        boost::filesystem::remove_all("/tmp/milvus_test");
+        boost::filesystem::remove_all("/tmp/milvus_web_handler_test");
     }
 
  protected:
@@ -150,6 +141,30 @@ RandomRowRecordDto(int64_t dim) {
     }
 
     return record_dto;
+}
+
+std::string
+RandomName() {
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::default_random_engine e(seed);
+    std::uniform_int_distribution<unsigned> u(0, 1000000);
+
+    size_t name_len = u(e) % 16 + 3;
+
+    char * name = new char[name_len + 1];
+    name[name_len] = '\0';
+
+    for (size_t i = 0; i < name_len; i++) {
+        unsigned random_i = u(e);
+        char remainder = static_cast<char>(random_i % 26);
+        name[i] = (random_i % 2 == 0) ? 'A' + remainder : 'a' + remainder;
+    }
+
+    std::string random_name(name);
+
+    delete[] name;
+
+    return random_name;
 }
 
 } // namespace
@@ -351,20 +366,12 @@ class WebControllerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
+        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_web_controller_test");
         milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
-
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
-        //
-        //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
-        //        DBWrapper::GetInstance().GetInstance().StartService();
-        //        DBWrapper::GetInstance().GetInstance().StopService();
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
@@ -389,12 +396,11 @@ class WebControllerTest : public testing::Test {
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
-        boost::filesystem::remove_all("/tmp/milvus_test");
+        boost::filesystem::remove_all("/tmp/milvus_web_controller_test");
     }
 
  protected:
     std::shared_ptr<milvus::server::web::WebController> controller;
-    std::shared_ptr<milvus::server::Context> dummy_context;
 
  protected:
 
@@ -623,12 +629,14 @@ TEST_F(WebControllerTest, SEARCH) {
     auto response = controller->insert(query_params, insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
+    sleep(10);
+
     //Create partition and insert 200 vectors into it
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
-    par_param->partition_name = "partition02";
-    par_param->tag = "tag02";
+    par_param->partition_name = "partition" + OString(RandomName().c_str());
+    par_param->tag = "tag" + OString(RandomName().c_str());
     response = controller->createPartition(SEARCH_TEST_TABLE_NAME.c_str(), par_param);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code) << "Error: " << response->getStatus().description;
 
     // Test search
     OQueryParams query_params2;

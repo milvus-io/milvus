@@ -77,6 +77,7 @@ RequestScheduler::Stop() {
 
         iter->join();
     }
+    request_groups_.clear();
     stopped_ = true;
     SERVER_LOG_INFO << "Scheduler stopped";
 }

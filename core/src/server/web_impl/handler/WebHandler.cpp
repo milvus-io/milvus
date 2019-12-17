@@ -293,7 +293,8 @@ WebHandler::Search(const OString& table_name,
     std::vector<Range> range_list;
 
     TopKQueryResult result;
-    auto status = request_handler_.Search(context_ptr_,
+    auto context_ptr = MockContextPtr("Search");
+    auto status = request_handler_.Search(context_ptr,
                                           table_name->std_str(),
                                           records->records->count(),
                                           datas,

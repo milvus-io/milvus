@@ -18,6 +18,10 @@
 # pragma once
 
 #include <string>
+#include <map>
+//#include <umap>
+
+#include <opentracing/mocktracer/tracer.h>
 #include <src/server/web_impl/dto/VectorDto.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
 
@@ -45,8 +49,24 @@ namespace web {
     } while (false);
 
 class WebHandler {
+ private:
+    std::shared_ptr<Context>
+    MockContextPtr(const std::string& context_str) {
+        auto context_ptr = std::make_shared<Context>("dummy_request_id");
+        opentracing::mocktracer::MockTracerOptions tracer_options;
+        auto mock_tracer =
+            std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+        auto mock_span = mock_tracer->StartSpan("mock_span");
+        auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+        context_ptr->SetTraceContext(trace_context);
+
+        return context_ptr;
+    }
+
  public:
-    WebHandler() = default;
+    WebHandler() {
+        context_ptr_ = MockContextPtr("Web Handler");
+    }
 
     void
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto);
@@ -115,7 +135,8 @@ class WebHandler {
 
  private:
     // TODO: just for coding
-    std::shared_ptr<Context> context_ptr_ = std::make_shared<Context>("Web handler");
+
+    std::shared_ptr<Context> context_ptr_;
     RequestHandler request_handler_;
 };
 
