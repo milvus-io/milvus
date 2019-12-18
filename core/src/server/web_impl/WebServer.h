@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include "../../utils/Status.h"
-
-#include <oatpp/network/server/Server.hpp>
-
 #include <memory>
 #include <string>
 #include <thread>
+
+#include <oatpp/network/server/Server.hpp>
+
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {

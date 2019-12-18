@@ -551,6 +551,22 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 }
 
 Status
+Config::CheckServerConfigWebPort(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int32_t port = std::stoi(value);
+        if (!(port > 1024 && port < 65535)) {
+            std::string msg = "Invalid web server port: " + value +
+                              ". Possible reason: server_config.web_port is not in range [1025, 65534].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+    return Status::OK();
+}
+
+Status
 Config::CheckDBConfigPrimaryPath(const std::string& value) {
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "db_config.db_path is empty.");
@@ -977,6 +993,12 @@ Config::GetServerConfigTimeZone(std::string& value) {
 }
 
 Status
+Config::GetServerConfigWebPort(std::string& value) {
+    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, CONFIG_SERVER_WEB_PORT_DEFAULT);
+    return CheckServerConfigWebPort(value);
+}
+
+Status
 Config::GetDBConfigPrimaryPath(std::string& value) {
     value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRIMARY_PATH, CONFIG_DB_PRIMARY_PATH_DEFAULT);
     return CheckDBConfigPrimaryPath(value);
@@ -1292,6 +1314,16 @@ Config::SetServerConfigTimeZone(const std::string& value) {
         return s;
     }
     SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
+    return Status::OK();
+}
+
+Status
+Config::SetServerConfigWebPort(const std::string& value) {
+    Status s = CheckServerConfigWebPort(value);
+    if (!s.ok()) {
+        return s;
+    }
+    SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
     return Status::OK();
 }
 
