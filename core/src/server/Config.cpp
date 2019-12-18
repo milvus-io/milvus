@@ -26,6 +26,7 @@
 
 #include "config/YamlConfigMgr.h"
 #include "server/Config.h"
+#include "thirdparty/nlohmann/json.hpp"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
@@ -380,28 +381,13 @@ Config::ResetDefaultConfig() {
 }
 
 void
-Config::PrintConfigSection(const std::string& config_node_name) {
-    std::cout << std::endl;
-    std::cout << config_node_name << ":" << std::endl;
-    if (config_map_.find(config_node_name) != config_map_.end()) {
-        for (auto item : config_map_[config_node_name]) {
-            std::cout << item.first << ": " << item.second << std::endl;
-        }
-    }
-}
-
-void
-Config::PrintAll() {
-    PrintConfigSection(CONFIG_SERVER);
-    PrintConfigSection(CONFIG_DB);
-    PrintConfigSection(CONFIG_CACHE);
-    PrintConfigSection(CONFIG_METRIC);
-    PrintConfigSection(CONFIG_ENGINE);
-    PrintConfigSection(CONFIG_GPU_RESOURCE);
+Config::GetConfigJsonStr(std::string& result) {
+    nlohmann::json config_json(config_map_);
+    result = config_json.dump();
 }
 
 Status
-Config::GetConfigCli(const std::string& parent_key, const std::string& child_key, std::string& value) {
+Config::GetConfigCli(std::string& value, const std::string& parent_key, const std::string& child_key) {
     if (!ConfigNodeValid(parent_key, child_key)) {
         std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -459,20 +445,25 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
 }
 
 Status
-Config::HandleConfigCli(std::string& result, const std::string& cmd) {
+Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
     std::vector<std::string> tokens;
     std::vector<std::string> nodes;
     server::StringHelpFunctions::SplitStringByDelimeter(cmd, " ", tokens);
-    if (tokens[0] == "get") {
+    if (tokens[0] == "get_config") {
         if (tokens.size() != 2) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }
-        server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
-        if (nodes.size() != 2) {
-            return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+        if (tokens[1] == "*") {
+            GetConfigJsonStr(result);
+            return Status::OK();
+        } else {
+            server::StringHelpFunctions::SplitStringByDelimeter(tokens[1], CONFIG_NODE_DELIMITER, nodes);
+            if (nodes.size() != 2) {
+                return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
+            }
+            return GetConfigCli(result, nodes[0], nodes[1]);
         }
-        return GetConfigCli(nodes[0], nodes[1], result);
-    } else if (tokens[0] == "set") {
+    } else if (tokens[0] == "set_config") {
         if (tokens.size() != 3) {
             return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
         }

@@ -178,6 +178,10 @@ if (MILVUS_WITH_PROMETHEUS)
     add_compile_definitions("MILVUS_WITH_PROMETHEUS")
 endif ()
 
+if (MILVUS_WITH_FIU)
+    add_compile_definitions("FIU_ENABLE")
+endif ()
+
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
     if (MILVUS_GPU_VERSION)

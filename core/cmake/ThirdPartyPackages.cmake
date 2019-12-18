@@ -27,6 +27,7 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         GRPC
         ZLIB
         Opentracing
+        fiu
         oatpp
         oatpp-swagger)
 
@@ -62,6 +63,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_zlib()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
         build_opentracing()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
+        build_fiu()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "oatpp")
         build_oatpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "oatpp-swagger")
@@ -337,7 +340,7 @@ if (DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else ()
     set(GRPC_SOURCE_URL
-            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip")
+            "https://github.com/ZhifengZhang-CN/grpc-milvus/archive/${GRPC_VERSION}.zip")
 endif ()
 set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
@@ -352,6 +355,12 @@ if (DEFINED ENV{MILVUS_OPENTRACING_URL})
     set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
 else ()
     set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz")
+endif ()
+
+if (DEFINED ENV{MILVUS_FIU_URL})
+    set(MILVUS_FIU_URL "$ENV{MILVUS_FIU_URL}")
+else ()
+    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz")
 endif ()
 
 if (DEFINED ENV{MILVUS_OATPP_URL})
@@ -1287,6 +1296,47 @@ if (MILVUS_WITH_OPENTRACING)
 endif ()
 
 # ----------------------------------------------------------------------
+# fiu
+macro(build_fiu)
+    message(STATUS "Building FIU-${FIU_VERSION} from source")
+    set(FIU_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep")
+    set(FIU_SHARED_LIB "${FIU_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(FIU_INCLUDE_DIR "${FIU_PREFIX}/include")
+
+    externalproject_add(fiu_ep
+            URL
+            ${FIU_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CONFIGURE_COMMAND
+            ""
+            BUILD_IN_SOURCE
+            1
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND
+            ${MAKE}
+            "PREFIX=${FIU_PREFIX}"
+            install
+            BUILD_BYPRODUCTS
+            ${FIU_SHARED_LIB}
+            )
+
+        file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
+        add_library(fiu SHARED IMPORTED)
+    set_target_properties(fiu
+        PROPERTIES IMPORTED_LOCATION "${FIU_SHARED_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${FIU_INCLUDE_DIR}")
+
+    add_dependencies(fiu fiu_ep)
+endmacro()
+
+resolve_dependency(fiu)
+
+get_target_property(FIU_INCLUDE_DIR fiu INTERFACE_INCLUDE_DIRECTORIES)
+include_directories(SYSTEM ${FIU_INCLUDE_DIR})
+
+# ----------------------------------------------------------------------
 # oatpp
 
 macro(build_oatpp)
@@ -1376,3 +1426,4 @@ if (MILVUS_WITH_OATPP_SWAGGER)
     get_target_property(OATPP_SWAGGER_INCLUDE_DIR oatpp-swagger INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${OATPP_SWAGGER_INCLUDE_DIR})
 endif ()
+
