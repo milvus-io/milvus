@@ -17,8 +17,9 @@ WITH_MKL="OFF"
 FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
+FIU_ENABLE="OFF"
 
-while getopts "p:d:t:f:ulrcgjhxzme" arg; do
+while getopts "p:d:t:f:ulrcgjhxzmei" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -67,6 +68,9 @@ while getopts "p:d:t:f:ulrcgjhxzme" arg; do
   e)
     WITH_PROMETHEUS="OFF"
     ;;
+  i)
+    FIU_ENABLE="ON"
+    ;;
   h) # help
     echo "
 
@@ -86,6 +90,7 @@ parameter:
 -g: build GPU version(default: OFF)
 -m: build with MKL(default: OFF)
 -e: build without prometheus(default: OFF)
+-i: build FIU_ENABLE(default: OFF)
 -h: help
 
 usage:
@@ -125,6 +130,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
+-DMILVUS_WITH_FIU=${FIU_ENABLE}
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
