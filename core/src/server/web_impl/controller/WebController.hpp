@@ -395,12 +395,10 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("POST",
              "/vectors/tables",
              Insert,
-             QUERIES(
-                 const QueryParams&, query_params),
-             BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
+            BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
         auto ids_dto = VectorIdsDto::createShared();
         auto status_dto = StatusDto::createShared();
-        handler_->Insert(query_params, insert_param, status_dto, ids_dto);
+        handler_->Insert(insert_param, status_dto, ids_dto);
 
         int64_t code = status_dto->code->getValue();
         if (0 == code) {

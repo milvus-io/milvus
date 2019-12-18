@@ -248,9 +248,8 @@ TEST_F(WebHandlerTest, GET_TABLE) {
 TEST_F(WebHandlerTest, INSERT_COUNT) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    milvus::server::web::OQueryParams query_params;
-    query_params.put("table_name", milvus::server::web::OString(TABLE_NAME));
     auto insert_request_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_request_dto->table_name = milvus::server::web::OString(TABLE_NAME);
     insert_request_dto->records = insert_request_dto->records->createShared();
     for (size_t i = 0; i < 1000; i++) {
         insert_request_dto->records->pushBack(RandomRowRecordDto(TABLE_DIM));
@@ -260,7 +259,7 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
     auto status_dto = milvus::server::web::StatusDto::createShared();
     auto ids_dto = milvus::server::web::VectorIdsDto::createShared();
 
-    handler->Insert(query_params, insert_request_dto, status_dto, ids_dto);
+    handler->Insert(insert_request_dto, status_dto, ids_dto);
 
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ(1000, ids_dto->ids->count());
@@ -268,7 +267,7 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
     sleep(8);
 
     milvus::server::web::OString table_name(TABLE_NAME);
-    milvus::server::web::OQueryParams query_params2;
+    milvus::server::web::OQueryParams query_params;
     query_params.put("fields", "num");
     auto status_dto2 = milvus::server::web::StatusDto::createShared();
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
@@ -397,7 +396,7 @@ class WebControllerTest : public testing::Test {
         milvus::server::DBWrapper::GetInstance().StartService();
 
         milvus::server::web::AppComponent component(29999);
-        auto router = component.httpRouter.getObject();
+        auto router = component.http_router_.getObject();
 
         controller = milvus::server::web::WebController::createShared();
         controller->addEndpointsToRouter(router);
@@ -528,17 +527,15 @@ TEST_F(WebControllerTest, INSERT) {
     table_dto->metric_type = 1;
     auto response = controller->CreateTable(table_dto);
 
-    OQueryParams query_params;
-    query_params.put("table_name", OString(INSERT_TABLE_NAME));
-
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->table_name = OString(INSERT_TABLE_NAME);
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = insert_dto->records->createShared();
     for (size_t i = 0; i < 20; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(dim));
     }
 
-    response = controller->Insert(query_params, insert_dto);
+    response = controller->Insert(insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     response = controller->DropTable(OString(INSERT_TABLE_NAME));
@@ -577,16 +574,14 @@ TEST_F(WebControllerTest, INDEX) {
     response = controller->DropIndex(INDEX_TEST_TABLE_NAME);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatus().code);
 
-    OQueryParams query_params;
-    query_params.put("table_name", OString(INDEX_TEST_TABLE_NAME));
-
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->table_name = OString(INDEX_TEST_TABLE_NAME);
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = insert_dto->records->createShared();
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    response = controller->Insert(query_params, insert_dto);
+    response = controller->Insert(insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     index_dto->index_type = static_cast<int>(milvus::engine::IndexType::FAISS_IDMAP);
@@ -617,16 +612,17 @@ TEST_F(WebControllerTest, PARTITION) {
 
     // insert 200 vectors into table with tag = 'tag01'
     OQueryParams query_params;
-    query_params.put("table_name", PARTITION_TEST_TABLE_NAME);
     // add partition tag
-    query_params.put("tag", OString("tag01"));
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->table_name = PARTITION_TEST_TABLE_NAME;
+    // add partition tag
+    insert_dto->tag = OString("tag01");
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = insert_dto->records->createShared();
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    response = controller->Insert(query_params, insert_dto);
+    response = controller->Insert(insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 }
 
@@ -637,15 +633,14 @@ TEST_F(WebControllerTest, SEARCH) {
 
     // Insert 200 vectors into table
     OQueryParams query_params;
-    query_params.put("table_name", OString(SEARCH_TEST_TABLE_NAME.c_str()));
-//    query_params.put("tag", OString("tag01"));
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->table_name = OString(SEARCH_TEST_TABLE_NAME.c_str());
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = insert_dto->records->createShared();
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    auto response = controller->Insert(query_params, insert_dto);
+    auto response = controller->Insert(insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     sleep(10);
@@ -656,6 +651,11 @@ TEST_F(WebControllerTest, SEARCH) {
     par_param->tag = "tag" + OString(RandomName().c_str());
     response = controller->CreatePartition(SEARCH_TEST_TABLE_NAME.c_str(), par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code) << "Error: " << response->getStatus().description;
+
+    insert_dto->tag = par_param->tag;
+    response = controller->Insert(insert_dto);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
+    sleep(10);
 
     // Test search
     OQueryParams query_params2;

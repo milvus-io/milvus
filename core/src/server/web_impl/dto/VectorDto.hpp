@@ -41,7 +41,8 @@ class RecordsDto : public oatpp::data::mapping::type::Object {
 class InsertRequestDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(InsertRequestDto, Object)
 
-//    DTO_FIELD(String, table_name);
+    DTO_FIELD(String, table_name);
+    DTO_FIELD(String, tag) = "";
     DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
     DTO_FIELD(List<Int64>::ObjectWrapper, ids);
 };

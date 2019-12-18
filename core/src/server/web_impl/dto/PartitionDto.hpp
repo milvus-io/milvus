@@ -26,12 +26,10 @@ namespace web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class PartitionParamDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(PartitionParamDto, Object)
+class PartitionFieldsDto : public oatpp::data::mapping::type::Object {
+    DTO_INIT(PartitionFieldsDto, Object)
 
-    DTO_FIELD(String, table_name);
-    DTO_FIELD(String, partition_name);
-    DTO_FIELD(String, tag);
+    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
 };
 
 class PartitionRequestDto : public oatpp::data::mapping::type::Object {
@@ -44,7 +42,7 @@ class PartitionRequestDto : public oatpp::data::mapping::type::Object {
  class PartitionListDto : public oatpp::data::mapping::type::Object {
      DTO_INIT(PartitionListDto, Object)
 
-     DTO_FIELD(List<PartitionParamDto::ObjectWrapper>::ObjectWrapper, partitions);
+     DTO_FIELD(List<PartitionFieldsDto::ObjectWrapper>::ObjectWrapper, partitions);
  };
 
 #include OATPP_CODEGEN_END(DTO)
