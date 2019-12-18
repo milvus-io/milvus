@@ -24,7 +24,7 @@ GPU_VERSION="OFF"
 WITH_MKL="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "o:t:b:f:pgulcjmh" arg
+while getopts "o:t:b:f:pgxulcjmh" arg
 do
         case $arg in
              o)
@@ -49,6 +49,9 @@ do
                 echo "Build and run unittest cases" ;
                 BUILD_UNITTEST="ON";
                 ;;
+             x)
+                CUSTOMIZATION="ON";
+                ;;
              l)
                 RUN_CPPLINT="ON"
                 ;;
@@ -71,6 +74,7 @@ parameter:
 -f: faiss root path
 -p: install command with elevated privileges
 -g: gpu version
+-x: milvus customization (default: OFF)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
@@ -79,7 +83,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-u] [-l] [-c] [-j] [-m] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-x] [-u] [-l] [-c] [-j] [-m] [-h]
                 "
                 exit 0
                 ;;
@@ -104,6 +108,7 @@ CMAKE_CMD="cmake \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DCUSTOMIZATION=${CUSTOMIZATION} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
