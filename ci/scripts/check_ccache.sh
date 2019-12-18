@@ -1,7 +1,6 @@
 #!/bin/bash
 
 OS_NAME="${OS_NAME}"
-BINARY_VERSION="${BINARY_VERSION}"
 BUILD_ENV_DOCKER_IMAGE_ID="${BUILD_ENV_IMAGE_ID}"
 BRANCH_NAMES=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's=[a-zA-Z]*\/==g' | awk -F", " '{$1=""; print $0}')
 ARTIFACTORY_URL=""
@@ -43,7 +42,7 @@ fi
 
 check_ccache() {
     BRANCH=$1
-    PACKAGE_FILE="ccache-${OS_NAME}-${BINARY_VERSION}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    PACKAGE_FILE="ccache-${OS_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
     echo "fetching ${BRANCH}/${PACKAGE_FILE}"
     wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
     if [[ $? == 0 ]];then

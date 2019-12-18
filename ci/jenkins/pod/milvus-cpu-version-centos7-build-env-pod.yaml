@@ -16,8 +16,6 @@ spec:
           fieldPath: status.podIP
     - name: OS_NAME
       value: "centos7"
-    - name: BINARY_VERSION
-      value: "cpu"
     - name: BUILD_ENV_IMAGE_ID
       value: "225b4d9c26d67b70b476964b4dd6e216de4b464d7a973a8c0c7ed1313c4d81ad"
     command:

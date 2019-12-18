@@ -16,8 +16,6 @@ spec:
           fieldPath: status.podIP
     - name: OS_NAME
       value: "ubuntu18.04"
-    - name: BINARY_VERSION
-      value: "cpu"
     - name: BUILD_ENV_IMAGE_ID
       value: "23476391bec80c64f10d44a6370c73c71f011a6b95114b10ff82a60e771e11c7"
     command:
