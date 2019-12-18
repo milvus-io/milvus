@@ -17,9 +17,6 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-find_package(oatpp          0.19.10 REQUIRED)
-find_package(oatpp-swagger  0.19.10 REQUIRED)
-
 foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()

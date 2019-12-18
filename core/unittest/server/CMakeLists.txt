@@ -71,8 +71,8 @@ target_link_libraries(test_server
         stdc++
         ${grpc_lib}
         ${unittest_libs}
-        oatpp::oatpp
-        oatpp::oatpp-swagger
+        oatpp-swagger
+        oatpp
         )
 
 install(TARGETS test_server DESTINATION unittest)
