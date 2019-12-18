@@ -107,6 +107,12 @@ pipeline {
                                         }
                                     }
                                 }
+
+                                post {
+                                    cleanup {
+                                        deleteDir() /* clean up our workspace */
+                                    }
+                                }
                             }
 
                             stage('Publish docker images') {
@@ -127,6 +133,12 @@ pipeline {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+
+                                post {
+                                    cleanup {
+                                        deleteDir() /* clean up our workspace */
                                     }
                                 }
                             }
@@ -182,6 +194,7 @@ pipeline {
                                         }
                                     }
                                 }
+
                                 post {
                                     unsuccessful {
                                         container('milvus-test-env') {
@@ -189,6 +202,9 @@ pipeline {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                             }
                                         }
+                                    }
+                                    cleanup {
+                                        deleteDir() /* clean up our workspace */
                                     }
                                 }
                             }
