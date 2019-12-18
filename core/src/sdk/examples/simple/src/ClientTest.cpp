@@ -76,6 +76,23 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "SDK version: " << version << std::endl;
     }
 
+    {  // build commit
+        std::string build_commit_str;
+        std::vector<std::string> params;
+        stat = conn->ProcessCommand(build_commit_str, "build_commit_id", params);
+        std::cout << "ProcessCommand status: " << stat.message() << std::endl;
+        std::cout << "Milvus build commit id: " << build_commit_str << std::endl;
+    }
+
+    {  // build commit
+        std::string config_str;
+        std::vector<std::string> params;
+        params.push_back("*");
+        stat = conn->ProcessCommand(config_str, "get_config", params);
+        std::cout << "ProcessCommand status: " << stat.message() << std::endl;
+        std::cout << "Milvus config json: " << config_str << std::endl;
+    }
+
     {  // show tables
         std::vector<std::string> tables;
         stat = conn->ShowTables(tables);
