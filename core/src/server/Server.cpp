@@ -26,6 +26,7 @@
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "server/web_impl/WebServer.h"
 #include "src/version.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
@@ -263,10 +264,12 @@ Server::StartService() {
     scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcServer::GetInstance().Start();
+    web::WebServer::GetInstance().Start();
 }
 
 void
 Server::StopService() {
+    web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();

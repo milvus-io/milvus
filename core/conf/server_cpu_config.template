@@ -5,6 +5,7 @@ version: 0.1                        # config version
 server_config:
   address: 0.0.0.0                  # milvus server ip address (IPv4)
   port: 19530                       # milvus server port, must in range [1025, 65534]
+  web_port: 19121                   # milvus web server port, must in range [1025, 65534]
   deploy_mode: single               # deployment type: single, cluster_readonly, cluster_writable
   time_zone: UTC+8                  # time zone, must be in format: UTC+X
 

@@ -17,30 +17,24 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-#include "utils/BlockingQueue.h"
-#include "utils/Status.h"
-
-#include <map>
 #include <memory>
 #include <string>
 #include <thread>
-#include <vector>
+
+#include <oatpp/network/server/Server.hpp>
+
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
+namespace web {
 
-using RequestQueue = BlockingQueue<BaseRequestPtr>;
-using RequestQueuePtr = std::shared_ptr<RequestQueue>;
-using ThreadPtr = std::shared_ptr<std::thread>;
-
-class RequestScheduler {
+class WebServer {
  public:
-    static RequestScheduler&
+    static WebServer&
     GetInstance() {
-        static RequestScheduler scheduler;
-
-        return scheduler;
+        static WebServer web_server;
+        return web_server;
     }
 
     void
@@ -49,32 +43,19 @@ class RequestScheduler {
     void
     Stop();
 
-    Status
-    ExecuteRequest(const BaseRequestPtr& request_ptr);
-
-    static void
-    ExecRequest(BaseRequestPtr& request_ptr);
-
- protected:
-    RequestScheduler();
-
-    virtual ~RequestScheduler();
-
-    void
-    TakeToExecute(RequestQueuePtr request_queue);
+ private:
+    WebServer();
+    ~WebServer();
 
     Status
-    PutToQueue(const BaseRequestPtr& request_ptr);
+    StartService();
+    Status
+    StopService();
 
  private:
-    mutable std::mutex queue_mtx_;
-
-    std::map<std::string, RequestQueuePtr> request_groups_;
-
-    std::vector<ThreadPtr> execute_threads_;
-
-    bool stopped_;
+    std::unique_ptr<oatpp::network::server::Server> server_ptr_;
 };
 
+}  // namespace web
 }  // namespace server
 }  // namespace milvus
