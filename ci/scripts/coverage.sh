@@ -13,10 +13,11 @@ MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
 CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=123456
-MYSQL_HOST='127.0.0.1'
-MYSQL_PORT='3306'
+MYSQL_HOST="127.0.0.1"
+MYSQL_PORT="3306"
+CODECOV_TOKEN=""
 
-while getopts "o:b:u:p:t:h" arg
+while getopts "o:b:u:p:t:c:h" arg
 do
         case $arg in
              o)
@@ -34,6 +35,9 @@ do
              t)
                 MYSQL_HOST=$OPTARG
                 ;;
+             c)
+                CODECOV_TOKEN=$OPTARG
+                ;;
              h) # help
                 echo "
 
@@ -43,10 +47,11 @@ parameter:
 -u: mysql account
 -p: mysql password
 -t: mysql host
+-c: codecov token
 -h: help
 
 usage:
-./coverage.sh -o \${INSTALL_PREFIX} -b \${CORE_BUILD_DIR} -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} [-h]
+./coverage.sh -o \${INSTALL_PREFIX} -b \${CORE_BUILD_DIR} -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} -c \${CODECOV_TOKEN} [-h]
                 "
                 exit 0
                 ;;
@@ -146,5 +151,7 @@ if [ $? -ne 0 ]; then
     exit 2
 fi
 
-# gen html report
-# ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
+if [[ ! -z ${CODECOV_TOKEN} ]];then
+    export CODECOV_TOKEN="${CODECOV_TOKEN}"
+    curl -s https://codecov.io/bash | bash -s - -f output_new.info || echo "Codecov did not collect coverage reports"
+fi
