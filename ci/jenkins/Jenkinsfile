@@ -66,7 +66,7 @@ pipeline {
                             stage('Run Build') {
                                 agent {
                                     kubernetes {
-                                        label "${OS_NAME}-${BINRARY_VERSION}-build"
+                                        label "${OS_NAME}-${BINRARY_VERSION}-build-${env.BUILD_NUMBER}"
                                         defaultContainer 'jnlp'
                                         yamlFile "ci/jenkins/pod/milvus-${BINRARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
                                     }
@@ -118,7 +118,7 @@ pipeline {
                             stage('Publish docker images') {
                                 agent {
                                     kubernetes {
-                                        label "${OS_NAME}-${BINRARY_VERSION}-publish"
+                                        label "${OS_NAME}-${BINRARY_VERSION}-publish-${env.BUILD_NUMBER}"
                                         defaultContainer 'jnlp'
                                         yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                                     }
@@ -152,7 +152,7 @@ pipeline {
 
                                 agent {
                                     kubernetes {
-                                        label "${OS_NAME}-${BINRARY_VERSION}-dev-test"
+                                        label "${OS_NAME}-${BINRARY_VERSION}-dev-test-${env.BUILD_NUMBER}"
                                         defaultContainer 'jnlp'
                                         yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                                     }
