@@ -44,7 +44,7 @@ check_ccache() {
     BRANCH=$1
     PACKAGE_FILE="ccache-${OS_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
     echo "fetching ${BRANCH}/${PACKAGE_FILE}"
-    wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
+    wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
     if [[ $? == 0 ]];then
         wget -q "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}" && \
         mkdir -p ${CCACHE_DIRECTORY} && \
