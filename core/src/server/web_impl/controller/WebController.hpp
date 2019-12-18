@@ -81,29 +81,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    /*
-     * Create table
-     *
-     * > POST '/tables'
-     * > accept: application/json
-     *      {
-     *          "table-name": "demo",
-     *          "dimension": 128,
-     *          "index-file-size": 1024,
-     *          "metric-type": 1
-     *      }
-     *
-     * > Content-Type: application/json
-     *   code: 201
-     *      {
-     *          "message": "OK",
-     *          "code": 0
-     *      }
-     *   code: 400
-     *      {
-     *      }
-     *
-     */
     ENDPOINT_INFO(CreateTable) {
         info->summary = "Create table";
 
