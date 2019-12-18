@@ -328,6 +328,10 @@ TEST_F(WebHandlerTest, PARTITION) {
 
     handler->DropPartition(table_name, "test", status_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
+
+    // Show all partitions
+    auto partitions_dto = milvus::server::web::PartitionListDto::createShared();
+    handler->ShowPartitions(0, 10, TABLE_NAME, status_dto, partitions_dto);
 }
 
 TEST_F(WebHandlerTest, SEARCH) {
@@ -594,7 +598,7 @@ TEST_F(WebControllerTest, INDEX) {
 }
 
 TEST_F(WebControllerTest, PARTITION) {
-    const OString PARTITION_TEST_TABLE_NAME = "test_partition_table_test";
+    const OString PARTITION_TEST_TABLE_NAME = "test_partition_" + OString(RandomName().c_str());
     auto table_dto = milvus::server::web::TableRequestDto::createShared();
     table_dto->table_name = PARTITION_TEST_TABLE_NAME;
     table_dto->dimension = 64;
@@ -605,7 +609,7 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
-    par_param->partition_name = "partition01";
+    par_param->partition_name = "partition01" + OString(RandomName().c_str());
     par_param->tag = "tag01";
     response = controller->CreatePartition(PARTITION_TEST_TABLE_NAME, par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
@@ -624,6 +628,13 @@ TEST_F(WebControllerTest, PARTITION) {
     }
     response = controller->Insert(insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
+
+    // Show all partitins
+    response = controller->ShowPartitions(PARTITION_TEST_TABLE_NAME, 0, 10);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
+
+    response = controller->ShowPartitions(OString("ran33253") + RandomName().c_str(), 0, 10);
+//    ASSERT_EQ(OStatus::CODE_404.code, response->getStatus().code);
 }
 
 TEST_F(WebControllerTest, SEARCH) {

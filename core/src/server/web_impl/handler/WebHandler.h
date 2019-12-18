@@ -52,7 +52,7 @@ namespace web {
 class WebHandler {
  private:
     std::shared_ptr<Context>
-    MockContextPtr(const std::string& context_str) {
+    GenContextPtr(const std::string& context_str) {
         auto context_ptr = std::make_shared<Context>("dummy_request_id");
         opentracing::mocktracer::MockTracerOptions tracer_options;
         auto mock_tracer =
@@ -66,7 +66,7 @@ class WebHandler {
 
  public:
     WebHandler() {
-        context_ptr_ = MockContextPtr("Web Handler");
+        context_ptr_ = GenContextPtr("Web Handler");
     }
 
     void
@@ -105,8 +105,8 @@ class WebHandler {
     DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto);
 
     void
-    Insert(const OQueryParams& query_params, const InsertRequestDto::ObjectWrapper& param,
-           StatusDto::ObjectWrapper& status_dto, VectorIdsDto::ObjectWrapper& ids_dto);
+    Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto,
+           VectorIdsDto::ObjectWrapper& ids_dto);
 
     void
     Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe, const OQueryParams& query_params,
@@ -122,6 +122,7 @@ class WebHandler {
     }
 
  private:
+    //    std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<Context> context_ptr_;
     RequestHandler request_handler_;
 };

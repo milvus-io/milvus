@@ -40,7 +40,6 @@ WebHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, Stat
 /**
  * fields:
  *  - ALL: request all fields
- *  - NULL: Just check whether table exists
  *  - COUNT: request number of vectors
  *  - *,*,*...:
  */
@@ -165,10 +164,10 @@ WebHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const 
                                                                                             : page_size->getValue();
 
             for (int64_t i = 0; i < size; i++) {
-                auto partition_dto = PartitionParamDto::createShared();
-                partition_dto->table_name = partitions.at(i + offset).table_name_.c_str();
-                partition_dto->partition_name = partitions.at(i + offset).partition_name_.c_str();
-                partition_dto->tag = partitions.at(i + offset).tag_.c_str();
+                auto partition_dto = PartitionFieldsDto::createShared();
+                partition_dto->schema = partition_dto->schema->createShared();
+                partition_dto->schema->put("partitin_name", partitions.at(i + offset).partition_name_.c_str());
+                partition_dto->schema->put("tag", partitions.at(i + offset).tag_.c_str());
 
                 partition_list_dto->partitions->pushBack(partition_dto);
             }
@@ -186,8 +185,8 @@ WebHandler::DropPartition(const OString& table_name, const OString& tag, StatusD
 }
 
 void
-WebHandler::Insert(const OQueryParams& query_params, const InsertRequestDto::ObjectWrapper& param,
-                   StatusDto::ObjectWrapper& status_dto, VectorIdsDto::ObjectWrapper& ids_dto) {
+WebHandler::Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto,
+                   VectorIdsDto::ObjectWrapper& ids_dto) {
     std::vector<int64_t> ids;
     if (param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
@@ -202,20 +201,8 @@ WebHandler::Insert(const OQueryParams& query_params, const InsertRequestDto::Obj
         }
     }
 
-    std::string table_name;
-    std::string tag;
-    for (auto& query_param : query_params.getAll()) {
-        std::string key = query_param.first.std_str();
-        std::string value = query_param.second.std_str();
-
-        if ("table_name" == key) {
-            table_name = value;
-        } else if ("tag" == key) {
-            tag = value;
-        }
-    }
-
-    auto status = request_handler_.Insert(context_ptr_, table_name, param->records->count(), datas, tag, ids);
+    auto status = request_handler_.Insert(context_ptr_, param->table_name->std_str(), param->records->count(), datas,
+                                          param->tag->std_str(), ids);
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
@@ -258,7 +245,7 @@ WebHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& 
     std::vector<Range> range_list;
 
     TopKQueryResult result;
-    auto context_ptr = MockContextPtr("Search");
+    auto context_ptr = GenContextPtr("Web Handler");
     auto status = request_handler_.Search(context_ptr, table_name->std_str(), records->records->count(), datas,
                                           range_list, topk_t, nprobe_t, tag_list, file_id_list, result);
 

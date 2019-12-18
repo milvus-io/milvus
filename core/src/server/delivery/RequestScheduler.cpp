@@ -64,14 +64,14 @@ RequestScheduler::Stop() {
     SERVER_LOG_INFO << "Scheduler gonna stop...";
     {
         std::lock_guard<std::mutex> lock(queue_mtx_);
-        for (auto &iter : request_groups_) {
+        for (auto& iter : request_groups_) {
             if (iter.second != nullptr) {
                 iter.second->Put(nullptr);
             }
         }
     }
 
-    for (auto &iter : execute_threads_) {
+    for (auto& iter : execute_threads_) {
         if (iter == nullptr)
             continue;
 
