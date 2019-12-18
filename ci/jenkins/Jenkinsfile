@@ -183,27 +183,15 @@ pipeline {
                                             }
                                         }
                                     }
-
-                                    stage('Cleanup Dev') {
-                                        steps {
-                                            container('milvus-test-env') {
-                                                script {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
-                                                }
-                                            }
-                                        }
-                                    }
                                 }
 
                                 post {
-                                    unsuccessful {
+                                    cleanup {
                                         container('milvus-test-env') {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                             }
                                         }
-                                    }
-                                    cleanup {
                                         deleteDir() /* clean up our workspace */
                                     }
                                 }
