@@ -17,11 +17,12 @@
 
 #include "server/web_impl/handler/WebHandler.h"
 
-#include <string>
 #include <boost/algorithm/string.hpp>
+#include <string>
+#include <vector>
 
-#include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/delivery/request/BaseRequest.h"
+#include "server/web_impl/dto/PartitionDto.hpp"
 
 namespace milvus {
 namespace server {
@@ -29,11 +30,9 @@ namespace web {
 
 void
 WebHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto) {
-    auto status = request_handler_.CreateTable(context_ptr_,
-                                               table_schema->table_name->std_str(),
-                                               table_schema->dimension,
-                                               table_schema->index_file_size,
-                                               table_schema->metric_type);
+    auto status =
+        request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(), table_schema->dimension,
+                                     table_schema->index_file_size, table_schema->metric_type);
 
     ASSIGN_STATUS_DTO(status_dto, status);
 }
@@ -46,11 +45,8 @@ WebHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, Stat
  *  - *,*,*...:
  */
 void
-WebHandler::GetTable(const OString& table_name,
-                     const OQueryParams& query_params,
-                     StatusDto::ObjectWrapper& status_dto,
+WebHandler::GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto,
                      TableFieldsDto::ObjectWrapper& fields_dto) {
-
     Status status = Status::OK();
 
     fields_dto->schema = fields_dto->schema->createShared();
@@ -85,9 +81,7 @@ WebHandler::GetTable(const OString& table_name,
 }
 
 void
-WebHandler::ShowTables(const OInt64& offset,
-                       const OInt64& page_size,
-                       StatusDto::ObjectWrapper& status_dto,
+WebHandler::ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto,
                        TableListDto::ObjectWrapper& table_list_dto) {
     std::vector<std::string> tables;
     Status status = Status::OK();
@@ -99,9 +93,8 @@ WebHandler::ShowTables(const OInt64& offset,
         if (status.ok()) {
             table_list_dto->tables = table_list_dto->tables->createShared();
             if (offset + 1 < tables.size()) {
-                int64_t size =
-                    (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size()
-                                                                                 : page_size->getValue();
+                int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size()
+                                                                                            : page_size->getValue();
                 for (int64_t i = 0; i < size; i++) {
                     table_list_dto->tables->pushBack(tables.at(i).c_str());
                 }
@@ -120,20 +113,16 @@ WebHandler::DropTable(const OString& table_name, StatusDto::ObjectWrapper& statu
 }
 
 void
-WebHandler::CreateIndex(const OString& table_name,
-                        const IndexRequestDto::ObjectWrapper& index_param,
+WebHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param,
                         StatusDto::ObjectWrapper& status_dto) {
-    auto status = request_handler_.CreateIndex(context_ptr_,
-                                               table_name->std_str(),
-                                               index_param->index_type->getValue(),
+    auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index_param->index_type->getValue(),
                                                index_param->nlist->getValue());
 
     ASSIGN_STATUS_DTO(status_dto, status)
 }
 
 void
-WebHandler::GetIndex(const OString& table_name,
-                     StatusDto::ObjectWrapper& status_dto,
+WebHandler::GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto,
                      IndexDto::ObjectWrapper& index_dto) {
     IndexParam param;
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
@@ -154,23 +143,17 @@ WebHandler::DropIndex(const OString& table_name, StatusDto::ObjectWrapper& statu
 }
 
 void
-WebHandler::CreatePartition(const OString& table_name,
-                            const PartitionRequestDto::ObjectWrapper& param,
+WebHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param,
                             StatusDto::ObjectWrapper& status_dto) {
-    auto status = request_handler_.CreatePartition(context_ptr_,
-                                                   table_name->std_str(),
-                                                   param->partition_name->std_str(),
-                                                   param->tag->std_str());
+    auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
+                                                   param->partition_name->std_str(), param->tag->std_str());
 
     ASSIGN_STATUS_DTO(status_dto, status)
 }
 
 void
-WebHandler::ShowPartitions(const OInt64& offset,
-                           const OInt64& page_size,
-                           const OString& table_name,
-                           StatusDto::ObjectWrapper& status_dto,
-                           PartitionListDto::ObjectWrapper& partition_list_dto) {
+WebHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+                           StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto) {
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
 
@@ -203,11 +186,8 @@ WebHandler::DropPartition(const OString& table_name, const OString& tag, StatusD
 }
 
 void
-WebHandler::Insert(const OQueryParams& query_params,
-                   const InsertRequestDto::ObjectWrapper& param,
-                   StatusDto::ObjectWrapper& status_dto,
-                   VectorIdsDto::ObjectWrapper& ids_dto) {
-
+WebHandler::Insert(const OQueryParams& query_params, const InsertRequestDto::ObjectWrapper& param,
+                   StatusDto::ObjectWrapper& status_dto, VectorIdsDto::ObjectWrapper& ids_dto) {
     std::vector<int64_t> ids;
     if (param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
@@ -235,12 +215,7 @@ WebHandler::Insert(const OQueryParams& query_params,
         }
     }
 
-    auto status = request_handler_.Insert(context_ptr_,
-                                          table_name,
-                                          param->records->count(),
-                                          datas,
-                                          tag,
-                                          ids);
+    auto status = request_handler_.Insert(context_ptr_, table_name, param->records->count(), datas, tag, ids);
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
@@ -253,12 +228,9 @@ WebHandler::Insert(const OQueryParams& query_params,
 }
 
 void
-WebHandler::Search(const OString& table_name,
-                   const OInt64& topk, const OInt64& nprobe, const OQueryParams& query_params,
-                   const RecordsDto::ObjectWrapper& records,
-                   StatusDto::ObjectWrapper& status_dto,
-                   ResultDto::ObjectWrapper& results_dto) {
-
+WebHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe,
+                   const OQueryParams& query_params, const RecordsDto::ObjectWrapper& records,
+                   StatusDto::ObjectWrapper& status_dto, ResultDto::ObjectWrapper& results_dto) {
     int64_t topk_t = topk->getValue();
     int64_t nprobe_t = nprobe->getValue();
 
@@ -287,16 +259,8 @@ WebHandler::Search(const OString& table_name,
 
     TopKQueryResult result;
     auto context_ptr = MockContextPtr("Search");
-    auto status = request_handler_.Search(context_ptr,
-                                          table_name->std_str(),
-                                          records->records->count(),
-                                          datas,
-                                          range_list,
-                                          topk_t,
-                                          nprobe_t,
-                                          tag_list,
-                                          file_id_list,
-                                          result);
+    auto status = request_handler_.Search(context_ptr, table_name->std_str(), records->records->count(), datas,
+                                          range_list, topk_t, nprobe_t, tag_list, file_id_list, result);
 
     if (status.ok()) {
         results_dto->ids = results_dto->ids->createShared();
@@ -325,6 +289,6 @@ WebHandler::Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto, Comman
     ASSIGN_STATUS_DTO(status_dto, status)
 }
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace web
+}  // namespace server
+}  // namespace milvus

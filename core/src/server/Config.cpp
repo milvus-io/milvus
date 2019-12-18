@@ -553,7 +553,8 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 Status
 Config::CheckServerConfigWebPort(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
+        std::string msg =
+            "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int32_t port = std::stoi(value);

@@ -15,37 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# pragma once
+#pragma once
 
-#include <string>
 #include <map>
-//#include <umap>
+#include <memory>
+#include <string>
+#include <utility>
 
 #include <opentracing/mocktracer/tracer.h>
-#include <src/server/web_impl/dto/VectorDto.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
 
-#include "oatpp/core/data/mapping/type/Object.hpp"
-#include "oatpp/core/macro/codegen.hpp"
+#include <oatpp/core/data/mapping/type/Object.hpp>
+#include <oatpp/core/macro/codegen.hpp>
 
-#include "server/web_impl/dto/TableDto.hpp"
+#include "server/web_impl/Types.h"
+#include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
-#include "server/web_impl/dto/CmdDto.hpp"
-#include "server/web_impl/Types.h"
+#include "server/web_impl/dto/TableDto.hpp"
+#include "server/web_impl/dto/VectorDto.hpp"
 
-#include "server/delivery/RequestHandler.h"
 #include "server/context/Context.h"
+#include "server/delivery/RequestHandler.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace server {
 namespace web {
 
-# define ASSIGN_STATUS_DTO(STATUS_DTO, STATUS)                          \
-    do {                                                                \
-        (STATUS_DTO)->code = static_cast<OInt64>((STATUS).code());      \
-        (STATUS_DTO)->message = (STATUS).message().c_str();             \
+#define ASSIGN_STATUS_DTO(STATUS_DTO, STATUS)                      \
+    do {                                                           \
+        (STATUS_DTO)->code = static_cast<OInt64>((STATUS).code()); \
+        (STATUS_DTO)->message = (STATUS).message().c_str();        \
     } while (false);
 
 class WebHandler {
@@ -72,23 +73,18 @@ class WebHandler {
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto);
 
     void
-    GetTable(const OString& table_name,
-             const OQueryParams& query_params,
-             StatusDto::ObjectWrapper& status_dto,
+    GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto,
              TableFieldsDto::ObjectWrapper& schema_dto);
 
     void
-    ShowTables(const OInt64& offset,
-               const OInt64& page_size,
-               StatusDto::ObjectWrapper& status_dto,
+    ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto,
                TableListDto::ObjectWrapper& table_list_dto);
 
     void
     DropTable(const OString& table_name, StatusDto::ObjectWrapper& status_dto);
 
     void
-    CreateIndex(const OString& table_name,
-                const IndexRequestDto::ObjectWrapper& index_param,
+    CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param,
                 StatusDto::ObjectWrapper& status_dto);
 
     void
@@ -98,31 +94,23 @@ class WebHandler {
     DropIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto);
 
     void
-    CreatePartition(const OString& table_name,
-                    const PartitionRequestDto::ObjectWrapper& param,
+    CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param,
                     StatusDto::ObjectWrapper& status_dto);
 
     void
-    ShowPartitions(const OInt64& offset,
-                   const OInt64& page_size,
-                   const OString& table_name,
-                   StatusDto::ObjectWrapper& status_dto,
-                   PartitionListDto::ObjectWrapper& partition_list_dto);
+    ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+                   StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto);
 
     void
     DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto);
 
     void
-    Insert(const OQueryParams& query_params,
-           const InsertRequestDto::ObjectWrapper& param,
-           StatusDto::ObjectWrapper& status_dto,
-           VectorIdsDto::ObjectWrapper& ids_dto);
+    Insert(const OQueryParams& query_params, const InsertRequestDto::ObjectWrapper& param,
+           StatusDto::ObjectWrapper& status_dto, VectorIdsDto::ObjectWrapper& ids_dto);
 
     void
-    Search(const OString& table_name,
-           const OInt64& topk, const OInt64& nprobe, const OQueryParams& query_params,
-           const RecordsDto::ObjectWrapper& records,
-           StatusDto::ObjectWrapper& status_dto,
+    Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe, const OQueryParams& query_params,
+           const RecordsDto::ObjectWrapper& records, StatusDto::ObjectWrapper& status_dto,
            ResultDto::ObjectWrapper& results_dto);
 
     void
@@ -138,7 +126,6 @@ class WebHandler {
     RequestHandler request_handler_;
 };
 
-} // namespace web
-} // namespace server
-} // namespace milvus
-
+}  // namespace web
+}  // namespace server
+}  // namespace milvus

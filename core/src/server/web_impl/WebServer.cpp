@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <oatpp/network/server/Server.hpp>
 #include <oatpp-swagger/Controller.hpp>
+#include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/AppComponent.hpp"
@@ -36,14 +36,14 @@ WebServer::~WebServer() {
 
 void
 WebServer::Start() {
-//    oatpp::base::Environment::init();
+    //    oatpp::base::Environment::init();
     StartService();
 }
 
 void
 WebServer::Stop() {
     StopService();
-//    oatpp::base::Environment::destroy();
+    //    oatpp::base::Environment::destroy();
 }
 
 Status
@@ -69,10 +69,8 @@ WebServer::StartService() {
     swaggerController->addEndpointsToRouter(router);
 
     /* create server */
-    server_ptr_ = std::make_unique<oatpp::network::server::Server>(
-        components.serverConnectionProvider.getObject(),
-        components.serverConnectionHandler.getObject()
-    );
+    server_ptr_ = std::make_unique<oatpp::network::server::Server>(components.serverConnectionProvider.getObject(),
+                                                                   components.serverConnectionHandler.getObject());
 
     // start asynchronously
     server_ptr_->run();
@@ -88,6 +86,6 @@ WebServer::StopService() {
     return Status::OK();
 }
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace web
+}  // namespace server
+}  // namespace milvus

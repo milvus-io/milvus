@@ -143,6 +143,18 @@ RandomRowRecordDto(int64_t dim) {
     return record_dto;
 }
 
+milvus::server::web::RecordsDto::ObjectWrapper
+RandomRecordsDto(int64_t dim, int64_t num) {
+    auto records_dto = milvus::server::web::RecordsDto::createShared();
+    records_dto->records = records_dto->records->createShared();
+
+    for (size_t i = 0; i < num; i ++) {
+        records_dto->records->pushBack(RandomRowRecordDto(dim));
+    }
+
+    return records_dto;
+}
+
 std::string
 RandomName() {
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
@@ -182,33 +194,33 @@ TEST_F(WebHandlerTest, TABLE) {
 
     // invalid dimension
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_TRUE(milvus::SERVER_INVALID_VECTOR_DIMENSION == status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_INVALID_VECTOR_DIMENSION, status_dto->code->getValue());
 
     // invalid index file size
     table_dto->dimension = TABLE_DIM;
     table_dto->index_file_size = -1;
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_TRUE(milvus::SERVER_INVALID_INDEX_FILE_SIZE == status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_FILE_SIZE, status_dto->code->getValue());
 
     // invalid metric type
     table_dto->index_file_size = INDEX_FILE_SIZE;
     table_dto->metric_type = 100;
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_TRUE(milvus::SERVER_INVALID_INDEX_METRIC_TYPE == status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_METRIC_TYPE, status_dto->code->getValue());
 
     // create table successfully
     table_dto->metric_type = 1;
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 
     sleep(3);
 
     handler->DropTable(table_name, status_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 
     // drop table which not exists.
     handler->DropTable(table_name + "57575yfhfdhfhdh436gdsgpppdgsgv3233", status_dto);
-    ASSERT_TRUE(milvus::SERVER_TABLE_NOT_EXIST == status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_TABLE_NOT_EXIST, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
@@ -219,7 +231,7 @@ TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
     auto status_dto = milvus::server::web::StatusDto::createShared();
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
     handler->GetTable(table_name, query_params, status_dto, tables_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, GET_TABLE) {
@@ -229,8 +241,8 @@ TEST_F(WebHandlerTest, GET_TABLE) {
     auto status_dto = milvus::server::web::StatusDto::createShared();
     auto table_dto = milvus::server::web::TableFieldsDto::createShared();
     handler->GetTable(table_name, query_params, status_dto, table_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
-    ASSERT_TRUE(std::to_string(TABLE_DIM) == table_dto->schema->get("dimension", "")->std_str());
+    ASSERT_EQ(0, status_dto->code->getValue());
+    ASSERT_EQ(std::to_string(TABLE_DIM), table_dto->schema->get("dimension", "")->std_str());
 }
 
 TEST_F(WebHandlerTest, INSERT_COUNT) {
@@ -250,8 +262,8 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
 
     handler->Insert(query_params, insert_request_dto, status_dto, ids_dto);
 
-    ASSERT_TRUE(0 == status_dto->code->getValue());
-    ASSERT_TRUE(1000 == ids_dto->ids->count());
+    ASSERT_EQ(0, status_dto->code->getValue());
+    ASSERT_EQ(1000, ids_dto->ids->count());
 
     sleep(8);
 
@@ -261,8 +273,8 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
     auto status_dto2 = milvus::server::web::StatusDto::createShared();
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
     handler->GetTable(table_name, query_params, status_dto, tables_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
-    ASSERT_TRUE(1000 == std::stol(tables_dto->schema->get("num", -1)->std_str()));
+    ASSERT_EQ(0, status_dto->code->getValue());
+    ASSERT_EQ(1000, std::stol(tables_dto->schema->get("num", -1)->std_str()));
 }
 
 TEST_F(WebHandlerTest, INDEX) {
@@ -276,23 +288,23 @@ TEST_F(WebHandlerTest, INDEX) {
     auto status_dto = milvus::server::web::StatusDto::createShared();
 
     handler->CreateIndex(table_name, index_request_dto, status_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 
     handler->DropIndex(table_name, status_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 
     // invalid index_type
     index_request_dto->index_type = 10;
     handler->CreateIndex(table_name, index_request_dto, status_dto);
-    ASSERT_TRUE(0 != status_dto->code->getValue());
-    ASSERT_TRUE(milvus::SERVER_INVALID_INDEX_TYPE == status_dto->code->getValue());
+    ASSERT_NE(0, status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_TYPE, status_dto->code->getValue());
 
     // invalid nlist
     index_request_dto->index_type = 1;
     index_request_dto->nlist = -1;
     handler->CreateIndex(table_name, index_request_dto, status_dto);
-    ASSERT_TRUE(0 != status_dto->code->getValue());
-    ASSERT_TRUE(milvus::SERVER_INVALID_INDEX_NLIST == status_dto->code->getValue());
+    ASSERT_NE(0, status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_NLIST, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, PARTITION) {
@@ -306,21 +318,30 @@ TEST_F(WebHandlerTest, PARTITION) {
     auto status_dto = milvus::server::web::StatusDto::createShared();
 
     handler->CreatePartition(table_name, partition_dto, status_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 
     // test partition name equal to table name
     partition_dto->partition_name = TABLE_NAME;
     partition_dto->tag = "test02";
     handler->CreatePartition(table_name, partition_dto, status_dto);
-    ASSERT_TRUE(0 != status_dto->code->getValue());
-    ASSERT_TRUE(milvus::SERVER_INVALID_TABLE_NAME == status_dto->code->getValue());
+    ASSERT_NE(0, status_dto->code->getValue());
+    ASSERT_EQ(milvus::SERVER_INVALID_TABLE_NAME, status_dto->code->getValue());
 
     handler->DropPartition(table_name, "test", status_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
+    ASSERT_EQ(0, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, SEARCH) {
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
+    milvus::server::web::OString table_name(TABLE_NAME);
+    milvus::server::web::OQueryParams query_params;
+    auto records_dto = RandomRecordsDto(TABLE_DIM, 10);
+    auto status_dto = milvus::server::web::StatusDto::createShared();
+    auto result_dto = milvus::server::web::ResultDto::createShared();
+
+    handler->Search(table_name, 1, 1, query_params, records_dto, status_dto, result_dto);
+    ASSERT_EQ(0, status_dto->code->getValue()) << status_dto->message->std_str();
 }
 
 TEST_F(WebHandlerTest, CMD) {
@@ -331,13 +352,13 @@ TEST_F(WebHandlerTest, CMD) {
 
     cmd = "OK";
     handler->Cmd(cmd, status_dto, cmd_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
-    ASSERT_TRUE("OK" == cmd_dto->reply->std_str());
+    ASSERT_EQ(0, status_dto->code->getValue());
+    ASSERT_EQ("OK", cmd_dto->reply->std_str());
 
     cmd = "version";
     handler->Cmd(cmd, status_dto, cmd_dto);
-    ASSERT_TRUE(0 == status_dto->code->getValue());
-    ASSERT_TRUE("0.6.0" == cmd_dto->reply->std_str());
+    ASSERT_EQ(0, status_dto->code->getValue());
+    ASSERT_EQ("0.6.0", cmd_dto->reply->std_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -387,7 +408,6 @@ class WebControllerTest : public testing::Test {
         table_dto->index_file_size = 100;
         table_dto->metric_type = 1;
         controller->CreateTable(table_dto);
-
     }
 
     void
@@ -403,7 +423,6 @@ class WebControllerTest : public testing::Test {
     std::shared_ptr<milvus::server::web::WebController> controller;
 
  protected:
-
     void GenTable(const std::string& table_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
         auto table_dto = milvus::server::web::TableRequestDto::createShared();
         table_dto->table_name = OString(table_name.c_str());
@@ -425,12 +444,12 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
     table_dto->metric_type = 1;
 
     auto response = controller->CreateTable(table_dto);
-    ASSERT_TRUE(OStatus::CODE_201.code == response->getStatus().code);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     // invalid table name
     table_dto->table_name = "9090&*&()";
     response = controller->CreateTable(table_dto);
-    ASSERT_TRUE(OStatus::CODE_400.code == response->getStatus().code);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatus().code);
 }
 
 TEST_F(WebControllerTest, GET_TABLE) {
@@ -645,7 +664,12 @@ TEST_F(WebControllerTest, SEARCH) {
     for (size_t j = 0; j < 5; j++) {
         query_records_dto->records->pushBack(RandomRowRecordDto(64));
     }
+    response =
+        controller->Search(SEARCH_TEST_TABLE_NAME.c_str(), 10, 10, query_params2, query_records_dto);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
+    // Test search with tags
+    query_params2.put("tags", par_param->tag);
     response =
         controller->Search(SEARCH_TEST_TABLE_NAME.c_str(), 10, 10, query_params2, query_records_dto);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);

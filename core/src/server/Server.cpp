@@ -26,6 +26,7 @@
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "server/web_impl/WebServer.h"
 #include "src/version.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
@@ -33,7 +34,6 @@
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "wrapper/KnowhereResource.h"
-#include "server/web_impl/WebServer.h"
 
 namespace milvus {
 namespace server {
