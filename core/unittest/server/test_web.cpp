@@ -353,7 +353,7 @@ TEST_F(WebHandlerTest, CMD) {
     auto cmd_dto = milvus::server::web::CommandDto::createShared();
     auto status_dto = milvus::server::web::StatusDto::createShared();
 
-    cmd = "OK";
+    cmd = "status";
     handler->Cmd(cmd, status_dto, cmd_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ("OK", cmd_dto->reply->std_str());
@@ -687,7 +687,7 @@ TEST_F(WebControllerTest, SEARCH) {
 }
 
 TEST_F(WebControllerTest, CMD) {
-    auto response = controller->Cmd("OK");
+    auto response = controller->Cmd("status");
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
     response = controller->Cmd("version");
