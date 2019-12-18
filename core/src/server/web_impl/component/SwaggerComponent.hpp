@@ -31,7 +31,7 @@ class SwaggerComponent {
     /**
      *  General API docs info
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::DocumentInfo>, swaggerDocumentInfo)([] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::DocumentInfo>, swagger_document_info_)([] {
 
         oatpp::swagger::DocumentInfo::Builder builder;
 
@@ -51,14 +51,8 @@ class SwaggerComponent {
 
     }());
 
-
-    /**
-     *  Swagger-Ui Resources (<oatpp-examples>/lib/oatpp-swagger/res)
-     */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::Resources>, swaggerResources)([] {
-        // Make sure to specify correct full path to oatpp-swagger/res folder !!!
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::Resources>, swagger_resources_)([] {
         return oatpp::swagger::Resources::loadResources(OATPP_SWAGGER_RES_PATH);
     }());
-
 };
 

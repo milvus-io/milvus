@@ -56,7 +56,7 @@ WebServer::StartService() {
     AppComponent components(atoi(port.c_str()));
 
     /* create ApiControllers and add endpoints to router */
-    auto router = components.httpRouter.getObject();
+    auto router = components.http_router_.getObject();
 
     auto doc_endpoints = oatpp::swagger::Controller::Endpoints::createShared();
 
@@ -69,8 +69,8 @@ WebServer::StartService() {
     swaggerController->addEndpointsToRouter(router);
 
     /* create server */
-    server_ptr_ = std::make_unique<oatpp::network::server::Server>(components.serverConnectionProvider.getObject(),
-                                                                   components.serverConnectionHandler.getObject());
+    server_ptr_ = std::make_unique<oatpp::network::server::Server>(components.server_connection_provider_.getObject(),
+                                                                   components.server_connection_handler_.getObject());
 
     // start asynchronously
     server_ptr_->run();

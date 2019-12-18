@@ -56,26 +56,26 @@ class AppComponent {
    /**
     *  Swagger component
     */
-    SwaggerComponent swaggerComponent;
+    SwaggerComponent swagger_component_;
 
     /**
      *  Create ConnectionProvider component which listens on the port
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, serverConnectionProvider)([this] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)([this] {
         return oatpp::network::server::SimpleTCPConnectionProvider::createShared(static_cast<v_word16>(this->port_));
     }());
 
     /**
      *  Create Router component
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, httpRouter)([] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, http_router_)([] {
         return oatpp::web::server::HttpRouter::createShared();
     }());
 
     /**
      *  Create ConnectionHandler component which uses Router component to route requests
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, serverConnectionHandler)([] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, server_connection_handler_)([] {
         OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router); // get Router component
         return oatpp::web::server::HttpConnectionHandler::createShared(router);
     }());
@@ -83,7 +83,7 @@ class AppComponent {
     /**
      *  Create ObjectMapper component to serialize/deserialize DTOs in Contoller's API
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, apiObjectMapper)([] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, api_object_mapper_)([] {
         auto serializerConfig = oatpp::parser::json::mapping::Serializer::Config::createShared();
         auto deserializerConfig = oatpp::parser::json::mapping::Deserializer::Config::createShared();
         deserializerConfig->allowUnknownFields = false;
@@ -95,7 +95,7 @@ class AppComponent {
     /**
      *  Create Demo-Database component which stores information about users
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<WebHandler>, webHandler)([] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<WebHandler>, web_handler_)([] {
         std::shared_ptr<WebHandler> web_handler = std::make_shared<WebHandler>();
         web_handler->RegisterRequestHandler(RequestHandler());
         return web_handler;
