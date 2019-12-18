@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "oatpp/core/data/mapping/type/Object.hpp"
+#include <oatpp/core/data/mapping/type/Object.hpp>
 
 namespace milvus {
 namespace server {

@@ -386,7 +386,7 @@ class WebControllerTest : public testing::Test {
         table_dto->dimension = 128;
         table_dto->index_file_size = 100;
         table_dto->metric_type = 1;
-        controller->createTable(table_dto);
+        controller->CreateTable(table_dto);
 
     }
 
@@ -411,7 +411,7 @@ class WebControllerTest : public testing::Test {
         table_dto->index_file_size = index_file_size;
         table_dto->metric_type = metric_type;
 
-        auto response = controller->createTable(table_dto);
+        auto response = controller->CreateTable(table_dto);
     }
 };
 
@@ -424,12 +424,12 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
     table_dto->index_file_size = 100;
     table_dto->metric_type = 1;
 
-    auto response = controller->createTable(table_dto);
+    auto response = controller->CreateTable(table_dto);
     ASSERT_TRUE(OStatus::CODE_201.code == response->getStatus().code);
 
     // invalid table name
     table_dto->table_name = "9090&*&()";
-    response = controller->createTable(table_dto);
+    response = controller->CreateTable(table_dto);
     ASSERT_TRUE(OStatus::CODE_400.code == response->getStatus().code);
 }
 
@@ -439,13 +439,13 @@ TEST_F(WebControllerTest, GET_TABLE) {
 
     // fields value is 'NULL'
     params.put("fields", "NULL");
-    auto response = controller->getTable(table_name, params);
+    auto response = controller->GetTable(table_name, params);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
     // fields value is 'num', test count table
     params = OQueryParams();
     params.put("fields", "num");
-    response = controller->getTable(table_name, params);
+    response = controller->GetTable(table_name, params);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
 //    OChunkedBuffer stream;
@@ -455,32 +455,32 @@ TEST_F(WebControllerTest, GET_TABLE) {
 
     // query param is empty
     params = OQueryParams();
-    response = controller->getTable(table_name, params);
+    response = controller->GetTable(table_name, params);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
     // invalid table name
     table_name = "57474dgdfhdfhdh  dgd";
-    response = controller->getTable(table_name, params);
+    response = controller->GetTable(table_name, params);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatus().code);
 
     table_name = "test_table_not_found_0000000001110101010020202030203030435";
-    response = controller->getTable(table_name, params);
+    response = controller->GetTable(table_name, params);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatus().code);
 }
 
 TEST_F(WebControllerTest, SHOW_TABLES) {
     // test query table limit 1
-    auto response = controller->showTables(0, 1);
+    auto response = controller->ShowTables(0, 1);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
     // test query table empty
-    response = controller->showTables(0, 0);
+    response = controller->ShowTables(0, 0);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
-    response = controller->showTables(-1, 0);
+    response = controller->ShowTables(-1, 0);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatus().code);
 
-    response = controller->showTables(0, -10);
+    response = controller->ShowTables(0, -10);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatus().code);
 }
 
@@ -490,11 +490,11 @@ TEST_F(WebControllerTest, DROP_TABLE) {
     table_dto->dimension = 128;
     table_dto->index_file_size = 100;
     table_dto->metric_type = 1;
-    auto response = controller->createTable(table_dto);
+    auto response = controller->CreateTable(table_dto);
 
     sleep(1);
 
-    response = controller->dropTable(table_dto->table_name);
+    response = controller->DropTable(table_dto->table_name);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatus().code);
 }
 
@@ -507,7 +507,7 @@ TEST_F(WebControllerTest, INSERT) {
     table_dto->dimension = 64;
     table_dto->index_file_size = 100;
     table_dto->metric_type = 1;
-    auto response = controller->createTable(table_dto);
+    auto response = controller->CreateTable(table_dto);
 
     OQueryParams query_params;
     query_params.put("table_name", OString(INSERT_TABLE_NAME));
@@ -519,10 +519,10 @@ TEST_F(WebControllerTest, INSERT) {
         insert_dto->records->pushBack(RandomRowRecordDto(dim));
     }
 
-    response = controller->insert(query_params, insert_dto);
+    response = controller->Insert(query_params, insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
-    response = controller->dropTable(OString(INSERT_TABLE_NAME));
+    response = controller->DropTable(OString(INSERT_TABLE_NAME));
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatus().code);
 }
 
@@ -534,28 +534,28 @@ TEST_F(WebControllerTest, INDEX) {
     table_dto->index_file_size = 100;
     table_dto->metric_type = 1;
 
-    auto response = controller->createTable(table_dto);
+    auto response = controller->CreateTable(table_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     auto index_dto = milvus::server::web::IndexRequestDto::createShared();
     index_dto->index_type = static_cast<int>(milvus::engine::IndexType::FAISS_IDMAP);
     index_dto->nlist = 10;
 
-    response = controller->createIndex(INDEX_TEST_TABLE_NAME, index_dto);
+    response = controller->CreateIndex(INDEX_TEST_TABLE_NAME, index_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     // drop index
-    response = controller->dropIndex(INDEX_TEST_TABLE_NAME);
+    response = controller->DropIndex(INDEX_TEST_TABLE_NAME);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatus().code);
 
     // invalid index type
     index_dto->index_type = 100;
-    response = controller->createIndex(INDEX_TEST_TABLE_NAME, index_dto);
+    response = controller->CreateIndex(INDEX_TEST_TABLE_NAME, index_dto);
     ASSERT_NE(OStatus::CODE_201.code, response->getStatus().code);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatus().code);
 
     // insert data and create index
-    response = controller->dropIndex(INDEX_TEST_TABLE_NAME);
+    response = controller->DropIndex(INDEX_TEST_TABLE_NAME);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatus().code);
 
     OQueryParams query_params;
@@ -567,15 +567,15 @@ TEST_F(WebControllerTest, INDEX) {
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    response = controller->insert(query_params, insert_dto);
+    response = controller->Insert(query_params, insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     index_dto->index_type = static_cast<int>(milvus::engine::IndexType::FAISS_IDMAP);
-    response = controller->createIndex(INDEX_TEST_TABLE_NAME, index_dto);
+    response = controller->CreateIndex(INDEX_TEST_TABLE_NAME, index_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     // get index
-    response = controller->getIndex(INDEX_TEST_TABLE_NAME);
+    response = controller->GetIndex(INDEX_TEST_TABLE_NAME);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 }
 
@@ -587,13 +587,13 @@ TEST_F(WebControllerTest, PARTITION) {
     table_dto->index_file_size = 100;
     table_dto->metric_type = 1;
 
-    auto response = controller->createTable(table_dto);
+    auto response = controller->CreateTable(table_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     par_param->partition_name = "partition01";
     par_param->tag = "tag01";
-    response = controller->createPartition(PARTITION_TEST_TABLE_NAME, par_param);
+    response = controller->CreatePartition(PARTITION_TEST_TABLE_NAME, par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     // insert 200 vectors into table with tag = 'tag01'
@@ -607,7 +607,7 @@ TEST_F(WebControllerTest, PARTITION) {
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    response = controller->insert(query_params, insert_dto);
+    response = controller->Insert(query_params, insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 }
 
@@ -626,7 +626,7 @@ TEST_F(WebControllerTest, SEARCH) {
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    auto response = controller->insert(query_params, insert_dto);
+    auto response = controller->Insert(query_params, insert_dto);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
 
     sleep(10);
@@ -635,7 +635,7 @@ TEST_F(WebControllerTest, SEARCH) {
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     par_param->partition_name = "partition" + OString(RandomName().c_str());
     par_param->tag = "tag" + OString(RandomName().c_str());
-    response = controller->createPartition(SEARCH_TEST_TABLE_NAME.c_str(), par_param);
+    response = controller->CreatePartition(SEARCH_TEST_TABLE_NAME.c_str(), par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code) << "Error: " << response->getStatus().description;
 
     // Test search
@@ -647,14 +647,14 @@ TEST_F(WebControllerTest, SEARCH) {
     }
 
     response =
-        controller->search(SEARCH_TEST_TABLE_NAME.c_str(), 10, 10, query_params2, query_records_dto);
+        controller->Search(SEARCH_TEST_TABLE_NAME.c_str(), 10, 10, query_params2, query_records_dto);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 }
 
 TEST_F(WebControllerTest, CMD) {
-    auto response = controller->cmd("OK");
+    auto response = controller->Cmd("OK");
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 
-    response = controller->cmd("version");
+    response = controller->Cmd("version");
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatus().code);
 }

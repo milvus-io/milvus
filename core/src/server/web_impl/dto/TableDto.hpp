@@ -36,21 +36,11 @@ class TableRequestDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(Int64, metric_type, "metric-type");
 };
 
-//class TableSchemaDto : public oatpp::data::mapping::type::Object {
-//    DTO_INIT(TableSchemaDto, Object)
-//
-//    DTO_FIELD(String, table_name, "table-name");
-//    DTO_FIELD(Int64, dimension, "");
-//    DTO_FIELD(Int64, index_file_size);
-//    DTO_FIELD(Int64, metric_type);
-//};
-
 class TableFieldsDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableFieldsDto, Object)
 
     DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
 };
-
 
 class TableListDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableListDto, Object)

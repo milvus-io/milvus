@@ -29,8 +29,8 @@ class StatusDto: public oatpp::data::mapping::type::Object {
 
     DTO_INIT(StatusDto, Object)
 
-    DTO_FIELD(String, message, "message");
-    DTO_FIELD(Int64, code, "error-code");
+    DTO_FIELD(String, message);
+    DTO_FIELD(Int64, code);
 };
 
 #include OATPP_CODEGEN_END(DTO)

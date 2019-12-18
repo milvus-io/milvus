@@ -30,9 +30,6 @@ class CommandDto: public oatpp::data::mapping::type::Object {
     DTO_INIT(CommandDto, Object)
 
     DTO_FIELD(String, reply, "reply");
-
-//    DTO_FIELD(String, reason, "reason");
-//    DTO_FIELD(Int32, errorCode, "error-code");
 };
 
 #include OATPP_CODEGEN_END(DTO)

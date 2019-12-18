@@ -19,8 +19,8 @@
 
 #include <string>
 #include <boost/algorithm/string.hpp>
-#include <src/server/web_impl/dto/PartitionDto.hpp>
 
+#include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
@@ -70,14 +70,7 @@ WebHandler::GetTable(const OString& table_name,
             std::string value = param.second.std_str();
 
             if ("fields" == key) {
-                if ("NULL" == value) {
-                    bool ok;
-                    status = request_handler_.HasTable(context_ptr_, table_name->std_str(), ok);
-                    if (status.ok() && (!ok)) {
-                        status = Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name->std_str() + " not exists.");
-                    }
-                    break;
-                } else if ("num" == value) {
+                if ("num" == value) {
                     int64_t count;
                     status = request_handler_.CountTable(context_ptr_, table_name->std_str(), count);
                     if (status.ok()) {

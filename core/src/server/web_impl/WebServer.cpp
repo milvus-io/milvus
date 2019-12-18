@@ -53,19 +53,19 @@ WebServer::StartService() {
     Status status;
 
     status = config.GetServerConfigWebPort(port);
-    AppComponent components(atoi(port.c_str())); // Create scope Environment components
+    AppComponent components(atoi(port.c_str()));
 
     /* create ApiControllers and add endpoints to router */
     auto router = components.httpRouter.getObject();
 
-    auto docEndpoints = oatpp::swagger::Controller::Endpoints::createShared();
+    auto doc_endpoints = oatpp::swagger::Controller::Endpoints::createShared();
 
-    auto userController = WebController::createShared();
-    userController->addEndpointsToRouter(router);
+    auto user_controller = WebController::createShared();
+    user_controller->addEndpointsToRouter(router);
 
-    docEndpoints->pushBackAll(userController->getEndpoints());
+    doc_endpoints->pushBackAll(user_controller->getEndpoints());
 
-    auto swaggerController = oatpp::swagger::Controller::createShared(docEndpoints);
+    auto swaggerController = oatpp::swagger::Controller::createShared(doc_endpoints);
     swaggerController->addEndpointsToRouter(router);
 
     /* create server */

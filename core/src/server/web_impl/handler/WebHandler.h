@@ -134,8 +134,6 @@ class WebHandler {
     }
 
  private:
-    // TODO: just for coding
-
     std::shared_ptr<Context> context_ptr_;
     RequestHandler request_handler_;
 };
