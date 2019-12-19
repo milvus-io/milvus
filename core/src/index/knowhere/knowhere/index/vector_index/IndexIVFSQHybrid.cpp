@@ -25,6 +25,7 @@
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
 
@@ -77,6 +78,13 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
     faiss::Index* device_index = index_.get();
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
+    if (auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(host_index)) {
+        if (ivf_index != nullptr) {
+            ivf_index->to_readonly();
+        }
+        ivf_index->backup_quantizer();
+    }
+
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
     return std::make_shared<IVFSQHybrid>(new_index);
@@ -105,12 +113,6 @@ IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
     FaissBaseIndex::LoadImpl(index_binary);  // load on cpu
     auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->backup_quantizer();
-    if (ivf_index->quantizer_backup == nullptr) {
-        bool flag = (ivf_index->quantizer == nullptr);
-        KNOWHERE_THROW_MSG("quantizer_backup null: " + std::to_string(flag));
-    }
-    printf("%s:%d, index(%p)->quantizer(%p)\n", __FILE__, __LINE__, ivf_index, ivf_index->quantizer);
-    fflush(stdout);
     gpu_mode = 0;
 }
 
@@ -290,6 +292,28 @@ IVFSQHybrid::set_index_model(IndexModelPtr model) {
         gpu_mode = 2;
     } else {
         KNOWHERE_THROW_MSG("load index model error, can't get gpu_resource");
+    }
+}
+
+BinarySet
+IVFSQHybrid::SerializeImpl() {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    if (gpu_mode == 0) {
+        MemoryIOWriter writer;
+        faiss::write_index(index_.get(), &writer);
+
+        auto data = std::make_shared<uint8_t>();
+        data.reset(writer.data_);
+
+        BinarySet res_set;
+        res_set.Append("IVF", data, writer.rp);
+
+        return res_set;
+    } else {
+        KNOWHERE_THROW_MSG("Can't serialize IVFSQ8Hybrid");
     }
 }
 
