@@ -266,7 +266,7 @@ Config::ResetDefaultConfig() {
         return s;
     }
 
-    s= SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT);
+    s = SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT);
     if (!s.ok()) {
         return s;
     }
