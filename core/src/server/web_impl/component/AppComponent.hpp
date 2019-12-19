@@ -56,7 +56,9 @@ class AppComponent {
    /**
     *  Swagger component
     */
-    SwaggerComponent swagger_component_;
+    OATPP_CREATE_COMPONENT(std::shared_ptr<SwaggerComponent>, swagger_component_)([this] {
+        return std::make_shared<SwaggerComponent>(this->port_);
+    }());
 
     /**
      *  Create ConnectionProvider component which listens on the port

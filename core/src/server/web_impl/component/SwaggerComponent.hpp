@@ -26,12 +26,20 @@
  *  http://host:port/swagger/ui
  */
 class SwaggerComponent {
+ private:
+    const int port_;
+
+ public:
+    explicit SwaggerComponent(int port) : port_(port) {
+
+    }
+
  public:
 
     /**
      *  General API docs info
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::DocumentInfo>, swagger_document_info_)([] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::DocumentInfo>, swagger_document_info_)([this] {
 
         oatpp::swagger::DocumentInfo::Builder builder;
 
@@ -39,13 +47,11 @@ class SwaggerComponent {
             .setTitle("Milvus web service")
             .setDescription("Milvus API Example project with swagger docs")
             .setVersion("0.1")
-            .setContactName("Ivan Ovsyanochka")
-            .setContactUrl("https://oatpp.io/")
-
+            .setContactName("milvus.io")
+            .setContactUrl("https://milvus.io/")
             .setLicenseName("Apache License, Version 2.0")
             .setLicenseUrl("http://www.apache.org/licenses/LICENSE-2.0")
-
-            .addServer("http://0.0.0.0:9999", "server on all client");
+            .addServer("http://localhost:" + oatpp::String(std::to_string(this->port_).c_str()), "server on localhost");
 
         return builder.build();
 

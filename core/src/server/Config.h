@@ -42,7 +42,7 @@ static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 static const char* CONFIG_SERVER_WEB_PORT = "web_port";
-static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "20480";
+static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";

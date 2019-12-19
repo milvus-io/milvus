@@ -93,6 +93,12 @@ Config::ValidateConfig() {
         return s;
     }
 
+    std::string web_port;
+    s = GetServerConfigWebPort(web_port);
+    if (!s.ok()) {
+        return s;
+    }
+
     std::string server_mode;
     s = GetServerConfigDeployMode(server_mode);
     if (!s.ok()) {
@@ -256,6 +262,11 @@ Config::ResetDefaultConfig() {
     }
 
     s = SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s= SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT);
     if (!s.ok()) {
         return s;
     }
