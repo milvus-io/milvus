@@ -312,6 +312,8 @@ IVFSQHybrid::SerializeImpl() {
         res_set.Append("IVF", data, writer.rp);
 
         return res_set;
+    } else if (gpu_mode == 2) {
+        return GPUIVF::SerializeImpl();
     } else {
         KNOWHERE_THROW_MSG("Can't serialize IVFSQ8Hybrid");
     }
