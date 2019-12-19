@@ -107,12 +107,6 @@ pipeline {
                                         }
                                     }
                                 }
-
-                                post {
-                                    cleanup {
-                                        deleteDir() /* clean up our workspace */
-                                    }
-                                }
                             }
 
                             stage('Publish docker images') {
@@ -133,12 +127,6 @@ pipeline {
                                                 }
                                             }
                                         }
-                                    }
-                                }
-
-                                post {
-                                    cleanup {
-                                        deleteDir() /* clean up our workspace */
                                     }
                                 }
                             }
@@ -192,7 +180,6 @@ pipeline {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                             }
                                         }
-                                        deleteDir() /* clean up our workspace */
                                     }
                                 }
                             }
