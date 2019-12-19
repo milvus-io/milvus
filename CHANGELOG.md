@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.7.0 (TBD)
 
 ## Bug
+- \#715 - Milvus crash when searching and building index simultaneously using SQ8H
 - \#744 - Don't return partition table for show_tables
 
 ## Feature
