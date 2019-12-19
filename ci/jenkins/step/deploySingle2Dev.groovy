@@ -1,3 +1,4 @@
+sh 'helm version'
 sh 'helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts'
 sh 'helm repo update'
 dir ('milvus-helm') {
