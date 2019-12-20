@@ -219,7 +219,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(str_val == metric_prometheus_port);
 
     /* cache config */
-    int64_t cache_cpu_cache_capacity = 5;
+    int64_t cache_cpu_cache_capacity = 1;
     s = config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_capacity));
     ASSERT_TRUE(s.ok());
     s = config.GetCacheConfigCpuCacheCapacity(int64_val);
@@ -246,7 +246,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(int64_val == engine_use_blas_threshold);
 
-    int64_t engine_omp_thread_num = 8;
+    int64_t engine_omp_thread_num = 1;
     s = config.SetEngineConfigOmpThreadNum(std::to_string(engine_omp_thread_num));
     ASSERT_TRUE(s.ok());
     s = config.GetEngineConfigOmpThreadNum(int64_val);
@@ -359,7 +359,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
 
     /* cache config */
-    std::string cache_cpu_cache_capacity = "5";
+    std::string cache_cpu_cache_capacity = "1";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_CAPACITY);
     set_cmd = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CPU_CACHE_CAPACITY, cache_cpu_cache_capacity);
     s = config.ProcessConfigCli(dummy, set_cmd);
@@ -394,7 +394,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_use_blas_threshold);
 
-    std::string engine_omp_thread_num = "8";
+    std::string engine_omp_thread_num = "1";
     get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_OMP_THREAD_NUM);
     set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_OMP_THREAD_NUM, engine_omp_thread_num);
     s = config.ProcessConfigCli(dummy, set_cmd);
