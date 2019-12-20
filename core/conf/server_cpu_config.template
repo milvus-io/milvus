@@ -39,7 +39,7 @@ engine_config:
 
 gpu_resource_config:
   enable: false                     # whether to enable GPU resources
-  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer
+  cache_capacity: 1                 # GB, size of GPU memory per card used for cache, must be a positive integer
   search_resources:                 # define the GPU devices used for search computation, must be in format gpux
     - gpu0
   build_index_resources:            # define the GPU devices used for index building, must be in format gpux
