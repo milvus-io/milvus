@@ -81,6 +81,9 @@ class IVFSQHybrid : public GPUIVFSQ {
     VectorIndexPtr
     CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
 
+    BinarySet
+    SerializeImpl();
+
  protected:
     void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
