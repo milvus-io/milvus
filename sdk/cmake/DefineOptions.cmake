@@ -43,10 +43,6 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Milvus Build Option")
 
-define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
-
-define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
-
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
@@ -59,50 +55,16 @@ define_option_string(MILVUS_DEPENDENCY_SOURCE
         "BUNDLED"
         "SYSTEM")
 
-define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
-
-define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
-        "Show output from ExternalProjects rather than just logging to files" ON)
-
-define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
-
-define_option(MILVUS_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
-
-define_option(MILVUS_WITH_SQLITE "Build with SQLite library" ON)
-
-define_option(MILVUS_WITH_SQLITE_ORM "Build with SQLite ORM library" ON)
-
-define_option(MILVUS_WITH_MYSQLPP "Build with MySQL++" ON)
-
-define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
-
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
-    define_option(MILVUS_WITH_LIBUNWIND "Build with libunwind" ON)
-    define_option(MILVUS_WITH_GPERFTOOLS "Build with gperftools" ON)
-endif ()
-
 define_option(MILVUS_WITH_GRPC "Build with GRPC" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
-define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
-
-define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
-
-#----------------------------------------------------------------------
-set_option_category("Test and benchmark")
-
-unset(MILVUS_BUILD_TESTS CACHE)
-if (BUILD_UNIT_TEST)
-    define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" ON)
-else ()
-    define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" OFF)
-endif (BUILD_UNIT_TEST)
+define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
+        "Show output from ExternalProjects rather than just logging to files" ON)
 
 #----------------------------------------------------------------------
 macro(config_summary)
     message(STATUS "---------------------------------------------------------------------")
-    message(STATUS "MILVUS version:                                 ${MILVUS_VERSION}")
     message(STATUS)
     message(STATUS "Build configuration summary:")
 
