@@ -26,7 +26,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         gperftools
         GRPC
         ZLIB
-        Opentracing)
+        Opentracing
+        fiu)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -60,6 +61,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_zlib()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
         build_opentracing()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
+        build_fiu()
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -346,6 +349,12 @@ if (DEFINED ENV{MILVUS_OPENTRACING_URL})
     set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
 else ()
     set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz")
+endif ()
+
+if (DEFINED ENV{MILVUS_FIU_URL})
+    set(MILVUS_FIU_URL "$ENV{MILVUS_FIU_URL}")
+else ()
+    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz")
 endif ()
 
 
@@ -1268,3 +1277,45 @@ if (MILVUS_WITH_OPENTRACING)
     get_target_property(OPENTRACING_INCLUDE_DIR opentracing INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${OPENTRACING_INCLUDE_DIR})
 endif ()
+
+# ----------------------------------------------------------------------
+# fiu
+
+macro(build_fiu)
+    message(STATUS "Building FIU-${FIU_VERSION} from source")
+    set(FIU_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep")
+    set(FIU_SHARED_LIB "${FIU_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(FIU_INCLUDE_DIR "${FIU_PREFIX}/include")
+
+    externalproject_add(fiu_ep
+            URL
+            ${FIU_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CONFIGURE_COMMAND
+            ""
+            BUILD_IN_SOURCE
+            1
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND
+            ${MAKE}
+            "PREFIX=${FIU_PREFIX}"
+            install
+            BUILD_BYPRODUCTS
+            ${FIU_SHARED_LIB}
+            )
+
+        file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
+        add_library(fiu SHARED IMPORTED)
+    set_target_properties(fiu
+        PROPERTIES IMPORTED_LOCATION "${FIU_SHARED_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${FIU_INCLUDE_DIR}")
+
+    add_dependencies(fiu fiu_ep)
+endmacro()
+
+resolve_dependency(fiu)
+
+get_target_property(FIU_INCLUDE_DIR fiu INTERFACE_INCLUDE_DIRECTORIES)
+include_directories(SYSTEM ${FIU_INCLUDE_DIR})
