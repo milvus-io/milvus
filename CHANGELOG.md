@@ -11,8 +11,8 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 - \#343 - Add Opentracing
 - \#665 - Support get/set config via CLI
-- \#771 - Add server build commit info interface
 - \#766 - If partition tag is similar,wrong partition is searched
+- \#771 - Add server build commit info interface
 
 ## Improvement
 
