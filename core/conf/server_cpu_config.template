@@ -16,7 +16,7 @@ db_config:
                                     # Keep 'dialect://:@:/', and replace other texts with real values
                                     # Replace 'dialect' with 'mysql' or 'sqlite'
 
-  insert_buffer_size: 4             # GB, maximum insert buffer size allowed, must be a positive integer
+  insert_buffer_size: 1             # GB, maximum insert buffer size allowed, must be a positive integer
                                     # sum of insert_buffer_size and cpu_cache_capacity cannot exceed total memory
 
   preload_table:                    # preload data at startup, '*' means load all tables, empty value means no preload
@@ -29,7 +29,7 @@ metric_config:
     port: 8080                      # port prometheus uses to fetch metrics, must in range [1025, 65534]
 
 cache_config:
-  cpu_cache_capacity: 16            # GB, size of CPU memory used for cache, must be a positive integer
+  cpu_cache_capacity: 4             # GB, size of CPU memory used for cache, must be a positive integer
   cache_insert_data: false          # whether to load inserted data into cache, must be a boolean
 
 engine_config:
@@ -39,7 +39,7 @@ engine_config:
 
 gpu_resource_config:
   enable: false                     # whether to enable GPU resources
-  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer
+  cache_capacity: 1                 # GB, size of GPU memory per card used for cache, must be a positive integer
   search_resources:                 # define the GPU devices used for search computation, must be in format gpux
     - gpu0
   build_index_resources:            # define the GPU devices used for index building, must be in format gpux
