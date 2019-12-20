@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 - \#744 - Don't return partition table for show_tables
+- \#770 - Server unittest run failed on low-end server
 
 ## Feature
 - \#343 - Add Opentracing
