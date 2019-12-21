@@ -33,7 +33,7 @@
 #include "server/delivery/RequestHandler.h"
 #include "src/version.h"
 
-#include "server/web_impl/handler/WebHandler.h"
+#include "server/web_impl/handler/WebRequestHandler.h"
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/StatusDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
@@ -93,7 +93,7 @@ class WebHandlerTest : public testing::Test {
         milvus::server::DBWrapper::GetInstance().StartService();
 
         // initialize handler, create table
-        handler = std::make_shared<milvus::server::web::WebHandler>();
+        handler = std::make_shared<milvus::server::web::WebRequestHandler>();
 //        dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 //        opentracing::mocktracer::MockTracerOptions tracer_options;
 //        auto mock_tracer =
@@ -125,7 +125,7 @@ class WebHandlerTest : public testing::Test {
     }
 
  protected:
-    std::shared_ptr<milvus::server::web::WebHandler> handler;
+    std::shared_ptr<milvus::server::web::WebRequestHandler> handler;
     std::shared_ptr<milvus::server::Context> dummy_context;
 };
 

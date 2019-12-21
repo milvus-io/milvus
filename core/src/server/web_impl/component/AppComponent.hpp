@@ -25,7 +25,7 @@
 #include <oatpp/web/server/HttpRouter.hpp>
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>
 
-#include "server/web_impl/handler/WebHandler.h"
+#include "server/web_impl/handler/WebRequestHandler.h"
 #include "server/web_impl/component/SwaggerComponent.hpp"
 
 /**
@@ -97,8 +97,8 @@ class AppComponent {
     /**
      *  Create Demo-Database component which stores information about users
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<WebHandler>, web_handler_)([] {
-        std::shared_ptr<WebHandler> web_handler = std::make_shared<WebHandler>();
+    OATPP_CREATE_COMPONENT(std::shared_ptr<WebRequestHandler>, web_handler_)([] {
+        std::shared_ptr<WebRequestHandler> web_handler = std::make_shared<WebRequestHandler>();
         web_handler->RegisterRequestHandler(RequestHandler());
         return web_handler;
     }());

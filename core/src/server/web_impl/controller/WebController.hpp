@@ -31,7 +31,7 @@
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 
-#include "server/web_impl/handler/WebHandler.h"
+#include "server/web_impl/handler/WebRequestHandler.h"
 
 namespace milvus {
 namespace server {
@@ -47,7 +47,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     /**
      *  Inject web handler
      */
-    OATPP_COMPONENT(std::shared_ptr<WebHandler>, handler_);
+    OATPP_COMPONENT(std::shared_ptr<WebRequestHandler>, handler_);
  public:
 
     static std::shared_ptr<WebController> createShared(OATPP_COMPONENT(std::shared_ptr<ObjectMapper>,
@@ -134,7 +134,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_200, fields_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -184,7 +184,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_204, status_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -236,7 +236,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_200, index_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -262,7 +262,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_204, status_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -331,7 +331,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         int64_t code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_200, partition_list_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -359,7 +359,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_200, status_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -393,7 +393,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         int64_t code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_201, status_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);
@@ -427,7 +427,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         int64_t code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_200, result_dto);
-        } else if (milvus::SERVER_TABLE_NOT_EXIST == code || milvus::DB_NOT_FOUND == code) {
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
             return createDtoResponse(Status::CODE_404, status_dto);
         } else {
             return createDtoResponse(Status::CODE_400, status_dto);

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/web_impl/handler/WebHandler.h"
+#include "server/web_impl/handler/WebRequestHandler.h"
 
 #include <boost/algorithm/string.hpp>
 #include <string>
@@ -23,13 +23,56 @@
 
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
+#include "server/web_impl/Types.h"
 
 namespace milvus {
 namespace server {
 namespace web {
 
+StatusCode
+WebErrorMap(ErrorCode code) {
+    static const std::map<ErrorCode, StatusCode> code_map = {
+        {SERVER_UNEXPECTED_ERROR, StatusCode::UNEXPECTED_ERROR},
+        {SERVER_UNSUPPORTED_ERROR, StatusCode::UNEXPECTED_ERROR},
+        {SERVER_NULL_POINTER, StatusCode::UNEXPECTED_ERROR},
+        {SERVER_INVALID_ARGUMENT, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_FILE_NOT_FOUND, StatusCode::FILE_NOT_FOUND},
+        {SERVER_NOT_IMPLEMENT, StatusCode::UNEXPECTED_ERROR},
+        {SERVER_CANNOT_CREATE_FOLDER, StatusCode::CANNOT_CREATE_FOLDER},
+        {SERVER_CANNOT_CREATE_FILE, StatusCode::CANNOT_CREATE_FILE},
+        {SERVER_CANNOT_DELETE_FOLDER, StatusCode::CANNOT_DELETE_FOLDER},
+        {SERVER_CANNOT_DELETE_FILE, StatusCode::CANNOT_DELETE_FILE},
+        {SERVER_TABLE_NOT_EXIST, StatusCode::TABLE_NOT_EXISTS},
+        {SERVER_INVALID_TABLE_NAME, StatusCode::ILLEGAL_TABLE_NAME},
+        {SERVER_INVALID_TABLE_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
+        {SERVER_INVALID_TIME_RANGE, StatusCode::ILLEGAL_RANGE},
+        {SERVER_INVALID_VECTOR_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
+
+        {SERVER_INVALID_INDEX_TYPE, StatusCode::ILLEGAL_INDEX_TYPE},
+        {SERVER_INVALID_ROWRECORD, StatusCode::ILLEGAL_ROWRECORD},
+        {SERVER_INVALID_ROWRECORD_ARRAY, StatusCode::ILLEGAL_ROWRECORD},
+        {SERVER_INVALID_TOPK, StatusCode::ILLEGAL_TOPK},
+        {SERVER_INVALID_NPROBE, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_INDEX_NLIST, StatusCode::ILLEGAL_NLIST},
+        {SERVER_INVALID_INDEX_METRIC_TYPE, StatusCode::ILLEGAL_METRIC_TYPE},
+        {SERVER_INVALID_INDEX_FILE_SIZE, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_ILLEGAL_VECTOR_ID, StatusCode::ILLEGAL_VECTOR_ID},
+        {SERVER_ILLEGAL_SEARCH_RESULT, StatusCode::ILLEGAL_SEARCH_RESULT},
+        {SERVER_CACHE_FULL, StatusCode::CACHE_FAILED},
+        {DB_META_TRANSACTION_FAILED, StatusCode::META_FAILED},
+        {SERVER_BUILD_INDEX_ERROR, StatusCode::BUILD_INDEX_ERROR},
+        {SERVER_OUT_OF_MEMORY, StatusCode::OUT_OF_MEMORY},
+    };
+
+    if (code_map.find(code) != code_map.end()) {
+        return code_map.at(code);
+    } else {
+        return StatusCode::UNEXPECTED_ERROR;
+    }
+}
+
 void
-WebHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto) {
+WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto) {
     auto status =
         request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(), table_schema->dimension,
                                      table_schema->index_file_size, table_schema->metric_type);
@@ -44,8 +87,8 @@ WebHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, Stat
  *  - *,*,*...:
  */
 void
-WebHandler::GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto,
-                     TableFieldsDto::ObjectWrapper& fields_dto) {
+WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto,
+                            TableFieldsDto::ObjectWrapper& fields_dto) {
     Status status = Status::OK();
 
     fields_dto->schema = fields_dto->schema->createShared();
@@ -80,8 +123,8 @@ WebHandler::GetTable(const OString& table_name, const OQueryParams& query_params
 }
 
 void
-WebHandler::ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto,
-                       TableListDto::ObjectWrapper& table_list_dto) {
+WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto,
+                              TableListDto::ObjectWrapper& table_list_dto) {
     std::vector<std::string> tables;
     Status status = Status::OK();
 
@@ -105,15 +148,15 @@ WebHandler::ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto:
 }
 
 void
-WebHandler::DropTable(const OString& table_name, StatusDto::ObjectWrapper& status_dto) {
+WebRequestHandler::DropTable(const OString& table_name, StatusDto::ObjectWrapper& status_dto) {
     auto status = request_handler_.DropTable(context_ptr_, table_name->std_str());
 
     ASSIGN_STATUS_DTO(status_dto, status)
 }
 
 void
-WebHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param,
-                        StatusDto::ObjectWrapper& status_dto) {
+WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param,
+                               StatusDto::ObjectWrapper& status_dto) {
     auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index_param->index_type->getValue(),
                                                index_param->nlist->getValue());
 
@@ -121,8 +164,8 @@ WebHandler::CreateIndex(const OString& table_name, const IndexRequestDto::Object
 }
 
 void
-WebHandler::GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto,
-                     IndexDto::ObjectWrapper& index_dto) {
+WebRequestHandler::GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto,
+                            IndexDto::ObjectWrapper& index_dto) {
     IndexParam param;
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
 
@@ -135,15 +178,15 @@ WebHandler::GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status
 }
 
 void
-WebHandler::DropIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto) {
+WebRequestHandler::DropIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto) {
     auto status = request_handler_.DropIndex(context_ptr_, table_name->std_str());
 
     ASSIGN_STATUS_DTO(status_dto, status)
 }
 
 void
-WebHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param,
-                            StatusDto::ObjectWrapper& status_dto) {
+WebRequestHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param,
+                                   StatusDto::ObjectWrapper& status_dto) {
     auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
                                                    param->partition_name->std_str(), param->tag->std_str());
 
@@ -151,8 +194,8 @@ WebHandler::CreatePartition(const OString& table_name, const PartitionRequestDto
 }
 
 void
-WebHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
-                           StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto) {
+WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+                                  StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto) {
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
 
@@ -178,15 +221,15 @@ WebHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const 
 }
 
 void
-WebHandler::DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto) {
+WebRequestHandler::DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto) {
     auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), "", tag->std_str());
 
     ASSIGN_STATUS_DTO(status_dto, status)
 }
 
 void
-WebHandler::Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto,
-                   VectorIdsDto::ObjectWrapper& ids_dto) {
+WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto,
+                          VectorIdsDto::ObjectWrapper& ids_dto) {
     std::vector<int64_t> ids;
     if (param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
@@ -215,9 +258,9 @@ WebHandler::Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::Obje
 }
 
 void
-WebHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe,
-                   const OQueryParams& query_params, const RecordsDto::ObjectWrapper& records,
-                   StatusDto::ObjectWrapper& status_dto, ResultDto::ObjectWrapper& results_dto) {
+WebRequestHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe,
+                          const OQueryParams& query_params, const RecordsDto::ObjectWrapper& records,
+                          StatusDto::ObjectWrapper& status_dto, ResultDto::ObjectWrapper& results_dto) {
     int64_t topk_t = topk->getValue();
     int64_t nprobe_t = nprobe->getValue();
 
@@ -265,7 +308,7 @@ WebHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& 
 }
 
 void
-WebHandler::Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto, CommandDto::ObjectWrapper& cmd_dto) {
+WebRequestHandler::Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto, CommandDto::ObjectWrapper& cmd_dto) {
     std::string reply_str;
     auto status = request_handler_.Cmd(context_ptr_, cmd->std_str(), reply_str);
 

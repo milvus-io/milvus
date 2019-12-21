@@ -30,7 +30,7 @@ class StatusDto: public oatpp::data::mapping::type::Object {
     DTO_INIT(StatusDto, Object)
 
     DTO_FIELD(String, message);
-    DTO_FIELD(Int64, code);
+    DTO_FIELD(Int64, code) = 0;
 };
 
 #include OATPP_CODEGEN_END(DTO)

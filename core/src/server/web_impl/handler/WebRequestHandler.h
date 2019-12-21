@@ -43,13 +43,18 @@ namespace milvus {
 namespace server {
 namespace web {
 
-#define ASSIGN_STATUS_DTO(STATUS_DTO, STATUS)                      \
-    do {                                                           \
-        (STATUS_DTO)->code = static_cast<OInt64>((STATUS).code()); \
-        (STATUS_DTO)->message = (STATUS).message().c_str();        \
+#define ASSIGN_STATUS_DTO(STATUS_DTO, STATUS)                   \
+    do {                                                        \
+        if (0 != (STATUS).code()) {                             \
+        (STATUS_DTO)->code = WebErrorMap((STATUS).code());      \
+	}                                                           \
+        (STATUS_DTO)->message = (STATUS).message().c_str();     \
     } while (false);
 
-class WebHandler {
+StatusCode
+WebErrorMap(ErrorCode code);
+
+class WebRequestHandler {
  private:
     std::shared_ptr<Context>
     GenContextPtr(const std::string& context_str) {
@@ -65,7 +70,7 @@ class WebHandler {
     }
 
  public:
-    WebHandler() {
+    WebRequestHandler() {
         context_ptr_ = GenContextPtr("Web Handler");
     }
 
@@ -116,7 +121,7 @@ class WebHandler {
     void
     Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto, CommandDto::ObjectWrapper& cmd_dto);
 
-    WebHandler&
+    WebRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;
     }
