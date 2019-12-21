@@ -16,6 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#759 - Put C++ sdk out of milvus/core
 
 ## Improvement
+- \#738 - Use Openblas / lapack from apt install
 - \#758 - Enhance config description
 
 ## Task
