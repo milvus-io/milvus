@@ -76,8 +76,10 @@ class WebController : public oatpp::web::server::api::ApiController {
             "<a href='swagger/ui'>Checkout Swagger-UI page</a>"
             "</body>"
             "</html>";
-        auto response = createResponse(Status::CODE_200, html);
+        auto response = createResponse(Status::CODE_302, html);
         response->putHeader(Header::CONTENT_TYPE, "text/html");
+        // redirect to swagger ui
+        response->putHeader("location", "/swagger/ui");
         return response;
     }
 
@@ -92,6 +94,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+    ADD_CORS(CreateTable)
     ENDPOINT("POST", "/tables", CreateTable,
              BODY_DTO(TableRequestDto::ObjectWrapper, table_schema)) {
         auto status_dto = StatusDto::createShared();
@@ -120,6 +123,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(GetTable)
     ENDPOINT("GET", "/tables/{table_name}", GetTable,
              PATH(String, table_name), QUERIES(
                  const QueryParams&, query_params)) {
@@ -148,6 +152,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+    ADD_CORS(ShowTables)
     ENDPOINT("GET", "/tables", ShowTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
         auto table_list_dto = TableListDto::createShared();
         auto status_dto = StatusDto::createShared();
@@ -171,6 +176,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(DropTable)
     ENDPOINT("DELETE", "tables/{table_name}", DropTable,
              PATH(String, table_name)) {
         auto status_dto = StatusDto::createShared();
@@ -197,6 +203,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+    ADD_CORS(CreateIndex)
     ENDPOINT("POST", "/indexes/tables/{table_name}", CreateIndex,
              PATH(String, table_name), BODY_DTO(IndexRequestDto::ObjectWrapper, index_param)) {
         auto status_dto = StatusDto::createShared();
@@ -220,6 +227,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(GetIndex)
     ENDPOINT("GET", "indexes/tables/{table_name}", GetIndex,
              PATH(String, table_name)) {
         auto index_dto = IndexDto::createShared();
@@ -247,6 +255,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+    ADD_CORS(DropIndex)
     ENDPOINT("DELETE", "indexes/tables/{table_name}", DropIndex, PATH(String, table_name)) {
         auto status_dto = StatusDto::createShared();
         handler_->DropIndex(table_name, status_dto);
@@ -276,6 +285,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 //        info->addResponse<String>(Status::CODE_404, "text/plain");
     }
 
+    ADD_CORS(CreatePartition)
     ENDPOINT("POST",
              "/partitions/tables/{table_name}",
              CreatePartition,
@@ -308,6 +318,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(ShowPartitions)
     ENDPOINT("GET",
              "partitions/tables/{tableName}",
              ShowPartitions,
@@ -340,6 +351,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(DropPartition)
     ENDPOINT("DELETE", "/partitions/tables", DropPartition,
              QUERY(String, table_name), QUERY(String, tag)) {
         auto status_dto = StatusDto::createShared();
@@ -369,6 +381,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(Insert)
     ENDPOINT("POST",
              "/vectors/tables",
              Insert,
@@ -402,6 +415,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(Search)
     ENDPOINT("GET", "/vectors/{table_name}", Search,
              PATH(String, table_name),
              QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(
@@ -427,6 +441,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(Cmd)
     ENDPOINT("GET", "/cmd/{cmd_str}", Cmd, PATH(String, cmd_str)) {
         auto cmd_dto = CommandDto::createShared();
         auto status_dto = StatusDto::createShared();
@@ -437,6 +452,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             return createDtoResponse(Status::CODE_400, status_dto);
         }
     }
+
     /**
      *  Finish ENDPOINTs generation ('ApiController' codegen)
      */
