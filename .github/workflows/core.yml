@@ -29,6 +29,8 @@ jobs:
           docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures ubuntu-core
       - name: Docker Build
+        shell: bash
+        run: |
           docker-compose build ubuntu-core
       - name: Docker Run
         run: |
@@ -68,6 +70,8 @@ jobs:
           docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures centos-core
       - name: Docker Build
+        shell: bash
+        run: |
           docker-compose build centos-core
       - name: Docker Run
         run: |
