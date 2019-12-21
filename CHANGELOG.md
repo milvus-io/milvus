@@ -17,6 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
+- \#758 - Enhance config description
 
 ## Task
 
