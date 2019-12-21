@@ -38,7 +38,7 @@ if (FAISS_FOUND)
             set_target_properties(
                     faiss
                     PROPERTIES
-                    INTERFACE_LINK_LIBRARIES "openblas;lapack")
+                    INTERFACE_LINK_LIBRARIES ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
         endif ()
     endif ()
 endif ()
