@@ -1,7 +1,7 @@
 FROM centos:centos7
 
 RUN yum install -y epel-release && \
-    yum install -y libgomp libgfortran4 mysql-devel && \
+    yum install -y libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
     rm -rf /var/cache/yum/*
 
 COPY ./milvus /var/lib/milvus
