@@ -24,7 +24,7 @@ spec:
     resources:
       limits:
         memory: "12Gi"
-        cpu: "8.0"
+        cpu: "4.0"
       requests:
         memory: "8Gi"
         cpu: "4.0"
