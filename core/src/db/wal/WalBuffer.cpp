@@ -146,6 +146,17 @@ bool MXLogBuffer::Append(const std::string &table_id,
     return true;
 }
 
+/**
+ * wal thread invoke this interface get record from writer buffer or load from
+ * wal log, then invoke memory table's interface
+ * @param table_id
+ * @param n
+ * @param dim
+ * @param vectors
+ * @param vector_ids
+ * @param lsn
+ * @return
+ */
 bool MXLogBuffer::Next(std::string &table_id,
                        size_t &n,
                        size_t &dim,
@@ -153,12 +164,13 @@ bool MXLogBuffer::Next(std::string &table_id,
                        milvus::engine::IDNumbers &vector_ids,
                        uint64_t &lsn) {
 
+    //reader catch up to writer, no next record, read fail
     if (mxlog_buffer_reader_.buf_idx == mxlog_buffer_writer_.buf_idx
       && mxlog_buffer_reader_.lsn == mxlog_buffer_writer_.lsn) {
         return false;
     }
-    //test 4 mac dev env
-    //test again
+    //otherwise, it means there must be next record, in buffer or wal log
+    if ()
 }
 
 } // wal
