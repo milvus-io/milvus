@@ -38,8 +38,8 @@ enum class MXLogType {
 struct MXLogRecord{
     uint32_t mxl_crc;//crc 4 this record
     uint32_t mxl_size;//data length
-    uint32_t vector_num;
     uint64_t mxl_lsn;//log sequence number, self-increment by 1
+    uint32_t vector_num;
     uint16_t table_id_size;//
     uint16_t dim;//one record contains the same dimension vectors
     uint8_t mxl_type;//record type, insert/delete/update/...

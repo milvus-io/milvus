@@ -119,10 +119,11 @@ bool MXLogBuffer::Append(const std::string &table_id,
     uint64_t current_write_offset = mxlog_buffer_writer_.buf_offset;
     if (!current_write_offset)
         mxlog_buffer_writer_.min_lsn = lsn;
-    memcpy(current_write_buf + current_write_offset, (char*)&lsn, 8);
-    current_write_offset += 8;
+    current_write_offset += 4;//skip crc field
     memcpy(current_write_buf + current_write_offset, (char*)&record_size, 4);
     current_write_offset += 4;
+    memcpy(current_write_buf + current_write_offset, (char*)&lsn, 8);
+    current_write_offset += 8;
     memcpy(current_write_buf + current_write_offset, (char*)&n, 4);
     current_write_offset += 4;
     auto table_id_size = (uint16_t)table_id.size();
@@ -169,8 +170,11 @@ bool MXLogBuffer::Next(std::string &table_id,
       && mxlog_buffer_reader_.lsn == mxlog_buffer_writer_.lsn) {
         return false;
     }
-    //otherwise, it means there must be next record, in buffer or wal log
-    if ()
+    //otherwise, it means there must exists next record, in buffer or wal log
+    char* current_read_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
+    uint64_t current_read_offset = mxlog_buffer_reader_.buf_offset;
+    uint32_t crc;
+    memcpy(&crc, )
 }
 
 } // wal
