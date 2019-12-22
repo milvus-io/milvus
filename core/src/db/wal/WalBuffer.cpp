@@ -158,6 +158,7 @@ bool MXLogBuffer::Next(std::string &table_id,
         return false;
     }
     //test 4 mac dev env
+    //test again
 }
 
 } // wal
