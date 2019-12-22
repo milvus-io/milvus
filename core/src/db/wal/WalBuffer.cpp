@@ -157,7 +157,7 @@ bool MXLogBuffer::Next(std::string &table_id,
       && mxlog_buffer_reader_.lsn == mxlog_buffer_writer_.lsn) {
         return false;
     }
-
+    //test 4 mac dev env
 }
 
 } // wal
