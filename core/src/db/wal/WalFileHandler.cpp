@@ -21,6 +21,10 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
+MXLogFileHandler::MXLogFileHandler(const std::string &mxlog_path,
+                                   const std::string &file_number):{
+
+}
 
 } // wal
 } // engine

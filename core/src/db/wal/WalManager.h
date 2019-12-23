@@ -18,14 +18,20 @@
 #pragma once
 
 #include <atomic>
+#include <unordered_map>
+#include <src/db/meta/MetaTypes.h>
+#include <thread>
+//#include <src/sdk/include/MilvusApi.h>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
+#include "WalBuffer.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
+using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 class WalManager {
  public:
     WalManager* GetInstance();
@@ -35,9 +41,19 @@ class WalManager {
 
     void Init();
     //todo: return error code
-    void Insert();
-    void Delete();
-    void Update();
+    bool
+    CreateTable();
+    bool
+    DropTable();
+    bool
+    Insert(const std::string &table_id,
+                       size_t n,
+                       const float *vectors,
+                       milvus::engine::IDNumbers &vector_ids);
+    void DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);
+    //not support right now
+    void UpdateById(const std::string& table_id, const float* vectors, const milvus::engine::IDNumbers& vector_ids);
+    void Flush();
 
     void Recovery();
 
@@ -49,6 +65,12 @@ class WalManager {
 
     MXLogConfiguration mxlog_config_;
     std::atomic<uint64_t > current_lsn_;
+    uint64_t last_applied_lsn_;
+    std::unordered_map<std::string, TableSchemaPtr> table_meta_;
+    MXLogBuffer buffer_;
+
+    std::thread auto_flush_;
+    std::thread reader_;
 
 };
 } // wal

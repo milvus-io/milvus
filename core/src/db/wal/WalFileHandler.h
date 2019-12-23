@@ -29,6 +29,8 @@ class MXLogFileHandler {
     MXLogFileHandler(const std::string &mxlog_path, const std::string &file_number);
     ~MXLogFileHandler();
 
+    bool IsOpen();
+    std::string GetFilePath();
     std::string GetFileName();
     void SetFileName(const std::string &file_name);
     void Read(char *buf);
@@ -39,7 +41,7 @@ class MXLogFileHandler {
 
  private:
     std::string file_name_;
-    FILE* file_handler_;
+    FILE* p_file_;
 };
 
 } // wal

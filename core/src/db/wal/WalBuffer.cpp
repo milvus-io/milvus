@@ -102,6 +102,7 @@ bool MXLogBuffer::Append(const std::string &table_id,
                          const size_t dim,
                          const float *vectors,
                          const milvus::engine::IDNumbers& vector_ids,
+                         const size_t vector_ids_offset,
                          const uint64_t lsn) {
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
@@ -133,7 +134,7 @@ bool MXLogBuffer::Append(const std::string &table_id,
     current_write_offset += 2;
     auto op_type = (uint8_t)MXLogType::Insert;
     memcpy(current_write_buf + current_write_offset, (char*)&op_type, 1);
-    for (auto i = 0; i < n; ++ i) {
+    for (auto i = vector_ids_offset; i < vector_ids.size(); ++ i) {
         memcpy(current_write_buf + current_write_offset, (char*)&vector_ids[i], 8);
         current_write_offset += 8;
     }
@@ -174,7 +175,63 @@ bool MXLogBuffer::Next(std::string &table_id,
     char* current_read_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
     uint64_t current_read_offset = mxlog_buffer_reader_.buf_offset;
     uint32_t crc;
-    memcpy(&crc, )
+    memcpy(&crc, current_read_buf + current_read_offset, 4);
+    current_read_offset += 4;
+    uint32_t record_size = 0;
+    memcpy(&record_size, current_read_buf + current_read_offset, 4);
+    current_read_offset += 4;
+    memcpy(&lsn, current_read_buf + current_read_offset, 8);
+    current_read_offset += 8;
+    memcpy(&n, current_read_buf + current_read_offset, 4);
+    current_read_offset += 4;
+    uint16_t table_id_size, d;
+    memcpy(&table_id_size, current_read_buf + current_read_offset, 2);
+    current_read_offset += 2;
+    memcpy(&d, current_read_buf + current_read_offset, 2);
+    current_read_offset += 2;
+    uint8_t mxl_type;
+    memcpy(&mxl_type, current_read_buf + current_read_offset, 1);
+    current_read_offset += 1;
+    //todo: check record_size (0, max_record_size), then check crc
+    //...
+    int64_t tmp_id;
+    for (auto i = 0; i < n; ++ i) {
+        memcpy(&tmp_id, current_read_buf + current_read_offset, 8);
+        vector_ids.emplace_back((int64_t)tmp_id);
+        current_read_offset += 8;
+    }
+    table_id.resize(table_id_size);
+    for (auto i = 0; i < table_id_size; ++ i) {
+        table_id[i] = *(current_read_buf + current_read_offset);
+        ++ current_read_offset;
+    }
+    memcpy(vectors, current_read_buf + current_read_offset, (n * dim) << 2);
+    current_read_offset += (n * dim) << 2;
+    mxlog_buffer_reader_.lsn = lsn;
+    if (lsn == mxlog_buffer_reader_.max_lsn) {
+        if (lsn + 1 == mxlog_buffer_writer_.min_lsn) {
+            //todo: lock
+            mxlog_buffer_reader_.buf_idx ^= 1;
+            mxlog_buffer_reader_.buf_offset = 0;
+        } else {
+            //todo: load wal log from disk
+            MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath(), std::to_string(++ mxlog_buffer_reader_.file_no));
+            if (mxlog_reader.IsOpen()) {
+                std::string next_file_name = mxlog_reader.GetFileName();
+                //todo:init maxlsn and minlsn of mxlog_buffer_reader_
+                mxlog_reader.Read(buf_[mxlog_buffer_reader_.buf_idx].get());
+                mxlog_buffer_reader_.buf_offset = 0;
+            } else {
+                //todo: log error: wal log open fail
+            }
+        }
+    }
+    //todo: switch(mxl_type), invoke relative interface to memory table, or do it outside buffer
+    return true;
+}
+
+bool Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids) {
+
 }
 
 } // wal

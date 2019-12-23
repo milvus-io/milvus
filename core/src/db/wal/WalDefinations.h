@@ -17,6 +17,7 @@
 
 #pragma once
 #include <stdint-gcc.h>
+#include <src/db/Types.h>
 
 
 namespace milvus {
@@ -44,8 +45,8 @@ struct MXLogRecord{
     uint16_t dim;//one record contains the same dimension vectors
     uint8_t mxl_type;//record type, insert/delete/update/...
     //mxl_data include vecter_ids[vector_num], table_id and float* vectors
-//    char mxl_data[];//data address
-    char* mxl_data;
+    char mxl_data[];//data address
+//    char* mxl_data;
 };
 
 #pragma pack(pop)
@@ -54,7 +55,8 @@ struct MXLogRecord{
 #define SizeOfMXLogRecordHeader (sizeof(MXLogRecord))
 
 struct MXLogConfiguration {
-
+    uint32_t record_size;
+    uint64_t buffer_size;
 };
 
 struct MXLogBufferHandler {

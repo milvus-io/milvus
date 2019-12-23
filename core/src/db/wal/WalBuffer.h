@@ -21,7 +21,6 @@
 #include <mutex>
 #include <memory>
 #include <bits/shared_ptr.h>
-#include <src/db/Types.h>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 
@@ -42,6 +41,7 @@ class MXLogBuffer {
                 const size_t dim,
                 const float *vectors,
                 const milvus::engine::IDNumbers& vector_ids,
+                const size_t vector_ids_offset,
                 const uint64_t lsn);
 
     bool Next(std::string &table_id,
@@ -50,6 +50,8 @@ class MXLogBuffer {
               float *vectors,
               milvus::engine::IDNumbers &vector_ids,
               uint64_t &lsn);
+    void Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);//TBD
+    void Flush(const uint64_t up_to_lsn);
     void SwitchBuffer(MXLogBufferHandler &handler);//switch buffer
 
  private:
