@@ -511,9 +511,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     auto conf = adapter->Match(temp_conf);
 
-    const float* raw_vec = from_index->GetRawVectors();
-    const int64_t* raw_ids = from_index->GetRawIds();
-    auto status = to_index->BuildAll(Count(), raw_vec, raw_ids, conf);
+    auto status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
     if (!status.ok()) {
         throw Exception(DB_ERROR, status.message());
     }

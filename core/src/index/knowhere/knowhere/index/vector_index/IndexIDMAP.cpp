@@ -128,8 +128,7 @@ IDMAP::Dimension() {
     return index_->d;
 }
 
-// TODO(linxj): return const pointer
-float*
+const float*
 IDMAP::GetRawVectors() {
     try {
         auto file_index = dynamic_cast<faiss::IndexIDMap*>(index_.get());
@@ -140,8 +139,7 @@ IDMAP::GetRawVectors() {
     }
 }
 
-// TODO(linxj): return const pointer
-int64_t*
+const int64_t*
 IDMAP::GetRawIds() {
     try {
         auto file_index = dynamic_cast<faiss::IndexIDMap*>(index_.get());

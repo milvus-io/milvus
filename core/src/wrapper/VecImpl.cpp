@@ -200,7 +200,7 @@ VecIndexImpl::GetDeviceId() {
 #endif
 }
 
-float*
+const float*
 BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
     if (raw_index) {
@@ -209,7 +209,7 @@ BFIndex::GetRawVectors() {
     return nullptr;
 }
 
-int64_t*
+const int64_t*
 BFIndex::GetRawIds() {
     return std::static_pointer_cast<knowhere::IDMAP>(index_)->GetRawIds();
 }
