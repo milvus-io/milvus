@@ -9,6 +9,7 @@ spec:
   containers:
   - name: milvus-gpu-build-env
     image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.7.0-centos7
+    imagePullPolicy: Always
     env:
     - name: POD_IP
       valueFrom:
@@ -24,7 +25,7 @@ spec:
     resources:
       limits:
         memory: "12Gi"
-        cpu: "8.0"
+        cpu: "4.0"
         nvidia.com/gpu: 1
       requests:
         memory: "8Gi"

@@ -19,6 +19,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 #include <utility>
 
@@ -76,6 +77,13 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
 
     faiss::Index* device_index = index_.get();
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+
+    if (auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(host_index)) {
+        if (ivf_index != nullptr) {
+            ivf_index->to_readonly();
+        }
+        ivf_index->backup_quantizer();
+    }
 
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
@@ -284,6 +292,30 @@ IVFSQHybrid::set_index_model(IndexModelPtr model) {
         gpu_mode = 2;
     } else {
         KNOWHERE_THROW_MSG("load index model error, can't get gpu_resource");
+    }
+}
+
+BinarySet
+IVFSQHybrid::SerializeImpl() {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    if (gpu_mode == 0) {
+        MemoryIOWriter writer;
+        faiss::write_index(index_.get(), &writer);
+
+        auto data = std::make_shared<uint8_t>();
+        data.reset(writer.data_);
+
+        BinarySet res_set;
+        res_set.Append("IVF", data, writer.rp);
+
+        return res_set;
+    } else if (gpu_mode == 2) {
+        return GPUIVF::SerializeImpl();
+    } else {
+        KNOWHERE_THROW_MSG("Can't serialize IVFSQ8Hybrid");
     }
 }
 

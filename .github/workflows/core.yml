@@ -29,6 +29,10 @@ jobs:
           docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures ubuntu-core
       - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build ubuntu-core
+      - name: Docker Run
         run: |
           docker-compose run --use-aliases -d db
           docker-compose run ubuntu-core
@@ -40,6 +44,13 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker-compose push ubuntu-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          flags: unittests
+          yml: ./codecov.yaml
 
   centos:
     name: AMD64 CentOS ${{ matrix.centos }}
@@ -59,6 +70,10 @@ jobs:
           docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures centos-core
       - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build centos-core
+      - name: Docker Run
         run: |
           docker-compose run --use-aliases -d db
           docker-compose run centos-core
@@ -70,3 +85,10 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker-compose push centos-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          flags: unittests
+          yml: ./codecov.yaml

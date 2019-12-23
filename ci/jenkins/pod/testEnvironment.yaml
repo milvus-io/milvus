@@ -7,10 +7,17 @@ metadata:
 spec:
   containers:
   - name: milvus-test-env
-    image: registry.zilliz.com/milvus/milvus-test-env:v0.1
+    image: registry.zilliz.com/milvus/milvus-test-env:v0.2
     command:
     - cat
     tty: true
+    resources:
+      limits:
+        memory: "8Gi"
+        cpu: "4.0"
+      requests:
+        memory: "4Gi"
+        cpu: "2.0"
     volumeMounts:
     - name: kubeconf
       mountPath: /root/.kube/
