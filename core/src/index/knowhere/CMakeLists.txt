@@ -22,6 +22,7 @@ endif ()
 
 set(external_srcs
         knowhere/adapter/SptagAdapter.cpp
+        knowhere/adapter/VectorAdapter.cpp
         knowhere/common/Exception.cpp
         knowhere/common/Timer.cpp
         )

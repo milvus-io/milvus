@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string>
 #include <typeindex>
+#include <utility>
 
 namespace knowhere {
 
@@ -41,7 +42,7 @@ struct AnyValue : public BaseValue {
     T data_;
 
     template <typename U>
-    AnyValue(U&& value) : data_(std::forward<U>(value)) {
+    explicit AnyValue(U&& value) : data_(std::forward<U>(value)) {
     }
 
     //    BasePtr
@@ -56,7 +57,7 @@ struct Value {
 
     template <typename U,
               class = typename std::enable_if<!std::is_same<typename std::decay<U>::type, Value>::value, U>::type>
-    Value(U&& value)
+    explicit Value(U&& value)
         : data_(new AnyValue<typename std::decay<U>::type>(std::forward<U>(value))),
           type_(std::type_index(typeid(typename std::decay<U>::type))) {
     }

@@ -15,24 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include <string>
-#include "knowhere/common/Dataset.h"
+#include "knowhere/adapter/VectorAdapter.h"
 
 namespace knowhere {
 
 namespace meta {
-extern const char* DIM;
-extern const char* TENSOR;
-extern const char* ROWS;
-extern const char* IDS;
-extern const char* DISTANCE;
+const char* DIM = "dim";
+const char* TENSOR = "tensor";
+const char* ROWS = "rows";
+const char* IDS = "ids";
+const char* DISTANCE = "distance";
 };  // namespace meta
-
-#define GETTENSOR(dataset)                         \
-    auto dim = dataset->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
 }  // namespace knowhere
