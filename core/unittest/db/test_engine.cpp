@@ -114,7 +114,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 //    auto new_engine = engine_ptr->Clone();
 //    ASSERT_EQ(new_engine->Dimension(), dimension);
 //    ASSERT_EQ(new_engine->Count(), ids.size());
-//    status = engine_ptr->CopyToCpu();
+    status = engine_ptr->CopyToCpu();
     // ASSERT_TRUE(status.ok());
 
     auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
