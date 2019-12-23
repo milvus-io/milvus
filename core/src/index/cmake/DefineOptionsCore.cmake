@@ -75,8 +75,6 @@ define_option(KNOWHERE_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
 
 define_option(KNOWHERE_WITH_ARROW "Build with ARROW" ON)
 
-define_option(KNOWHERE_WITH_LAPACK "Build with LAPACK library" ON)
-
 define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
