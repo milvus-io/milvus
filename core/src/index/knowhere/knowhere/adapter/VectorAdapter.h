@@ -30,9 +30,9 @@ static std::string IDS = "ids";
 static std::string DISTANCE = "distance";
 }  // namespace meta
 
-#define GETTENSOR(dataset)                                                         \
-    auto dim = dataset->Get<int64_t>(meta::DIM);                                   \
-    auto rows = dataset->Get<int64_t>(meta::ROWS);                                 \
+#define GETTENSOR(dataset)                         \
+    auto dim = dataset->Get<int64_t>(meta::DIM);   \
+    auto rows = dataset->Get<int64_t>(meta::ROWS); \
     auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
 }  // namespace knowhere

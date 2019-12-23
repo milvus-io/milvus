@@ -19,8 +19,8 @@
 
 #include <iostream>
 #include <sstream>
-#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/adapter/SptagAdapter.h"
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"

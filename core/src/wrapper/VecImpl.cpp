@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "knowhere/adapter/VectorAdapter.h"
 #include "wrapper/VecImpl.h"
 #include "DataTransfer.h"
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/Log.h"

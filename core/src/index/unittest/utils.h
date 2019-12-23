@@ -23,8 +23,8 @@
 #include <string>
 #include <vector>
 
-#include "knowhere/common/Log.h"
 #include "knowhere/common/Dataset.h"
+#include "knowhere/common/Log.h"
 
 class DataGen {
  protected:

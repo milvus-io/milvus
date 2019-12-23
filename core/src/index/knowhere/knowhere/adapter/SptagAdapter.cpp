@@ -22,7 +22,7 @@ namespace knowhere {
 
 std::shared_ptr<SPTAG::MetadataSet>
 ConvertToMetadataSet(const DatasetPtr& dataset) {
-    auto elems = dataset->Get<int64_t>(meta::ROWS);                                 \
+    auto elems = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<int64_t*>(meta::IDS);
 
     auto p_offset = (int64_t*)malloc(sizeof(int64_t) * elems);
@@ -41,8 +41,7 @@ ConvertToVectorSet(const DatasetPtr& dataset) {
     size_t num_bytes = rows * dim * sizeof(float);
     SPTAG::ByteArray byte_array((uint8_t*)p_data, num_bytes, false);
 
-    auto vectorset =
-        std::make_shared<SPTAG::BasicVectorSet>(byte_array, SPTAG::VectorValueType::Float, dim, rows);
+    auto vectorset = std::make_shared<SPTAG::BasicVectorSet>(byte_array, SPTAG::VectorValueType::Float, dim, rows);
     return vectorset;
 }
 

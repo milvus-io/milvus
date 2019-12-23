@@ -24,9 +24,9 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #endif
 
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/adapter/VectorAdapter.h"
 
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"

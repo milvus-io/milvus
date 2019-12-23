@@ -36,11 +36,11 @@ struct BaseValue {
     //    Clone() const = 0;
 };
 
-template<typename T>
+template <typename T>
 struct AnyValue : public BaseValue {
     T data_;
 
-    template<typename U>
+    template <typename U>
     AnyValue(U&& value) : data_(std::forward<U>(value)) {
     }
 
@@ -54,20 +54,20 @@ struct Value {
     std::type_index type_;
     BasePtr data_;
 
-    template<typename U,
-        class = typename std::enable_if<!std::is_same<typename std::decay<U>::type, Value>::value, U>::type>
+    template <typename U,
+              class = typename std::enable_if<!std::is_same<typename std::decay<U>::type, Value>::value, U>::type>
     Value(U&& value)
         : data_(new AnyValue<typename std::decay<U>::type>(std::forward<U>(value))),
           type_(std::type_index(typeid(typename std::decay<U>::type))) {
     }
 
-    template<typename U>
+    template <typename U>
     bool
     Is() const {
         return type_ == std::type_index(typeid(U));
     }
 
-    template<typename U>
+    template <typename U>
     U&
     AnyCast() {
         if (!Is<U>()) {
@@ -86,7 +86,7 @@ class Dataset {
  public:
     Dataset() = default;
 
-    template<typename T>
+    template <typename T>
     void
     Set(const std::string& k, T&& v) {
         std::lock_guard<std::mutex> lk(mutex_);
@@ -94,7 +94,7 @@ class Dataset {
         data_[k] = value;
     }
 
-    template<typename T>
+    template <typename T>
     T
     Get(const std::string& k) {
         std::lock_guard<std::mutex> lk(mutex_);
