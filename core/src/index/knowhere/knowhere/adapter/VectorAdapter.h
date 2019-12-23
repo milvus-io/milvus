@@ -17,12 +17,22 @@
 
 #pragma once
 
+#include <string>
+#include "knowhere/common/Dataset.h"
+
 namespace knowhere {
 
-#define GETTENSOR(dataset)              \
-    auto tensor = dataset->tensor()[0]; \
-    auto p_data = tensor->raw_data();   \
-    auto dim = tensor->shape()[1];      \
-    auto rows = tensor->shape()[0];
+namespace meta {
+static std::string DIM = "dim";
+static std::string TENSOR = "tensor";
+static std::string ROWS = "rows";
+static std::string IDS = "ids";
+static std::string DISTANCE = "distance";
+}  // namespace meta
+
+#define GETTENSOR(dataset)                                                         \
+    auto dim = dataset->Get<int64_t>(meta::DIM);                                   \
+    auto rows = dataset->Get<int64_t>(meta::ROWS);                                 \
+    auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
 }  // namespace knowhere

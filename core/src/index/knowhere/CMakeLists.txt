@@ -22,8 +22,6 @@ endif ()
 
 set(external_srcs
         knowhere/adapter/SptagAdapter.cpp
-        knowhere/adapter/Structure.cpp
-        knowhere/adapter/ArrowAdapter.cpp
         knowhere/common/Exception.cpp
         knowhere/common/Timer.cpp
         )
@@ -49,8 +47,6 @@ set(index_srcs
 set(depend_libs
         SPTAGLibStatic
         faiss
-        arrow
-        ${ARROW_LIB_DIR}/libjemalloc_pic.a
         gomp
         gfortran
         pthread

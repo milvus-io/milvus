@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "knowhere/common/Dataset.h"
+#include "knowhere/common/Config.h"
 
 namespace knowhere {
 

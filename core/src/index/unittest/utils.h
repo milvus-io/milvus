@@ -23,8 +23,8 @@
 #include <string>
 #include <vector>
 
-#include "knowhere/adapter/Structure.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/common/Dataset.h"
 
 class DataGen {
  protected:
@@ -63,10 +63,10 @@ extern void
 InitLog();
 
 knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids);
+generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids);
 
 knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, float* xb);
+generate_query_dataset(int64_t nb, int64_t dim, const float* xb);
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
