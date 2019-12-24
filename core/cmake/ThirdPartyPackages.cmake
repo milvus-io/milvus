@@ -300,10 +300,10 @@ endif ()
 set(SQLITE_MD5 "3c68eb400f8354605736cd55400e1572")
 
 if (DEFINED ENV{MILVUS_SQLITE_ORM_URL})
-    set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
+    set(SQLITE_ORM_SOURCE_URLS "$ENV{MILVUS_SQLITE_ORM_URL}")
 else ()
-    set(SQLITE_ORM_SOURCE_URL
-            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
+    set(SQLITE_ORM_SOURCE_URLS
+            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip https://gitee.com/quicksilver/sqlite_orm/repository/archive/${SQLITE_ORM_VERSION}.zip")
 endif ()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
@@ -780,10 +780,44 @@ macro(build_sqlite_orm)
     set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix")
     set(SQLITE_ORM_TAR_NAME "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz")
     set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}/include/sqlite_orm")
+
     if (NOT EXISTS ${SQLITE_ORM_INCLUDE_DIR})
         file(MAKE_DIRECTORY ${SQLITE_ORM_PREFIX})
-        file(DOWNLOAD ${SQLITE_ORM_SOURCE_URL}
-                ${SQLITE_ORM_TAR_NAME})
+
+        set(IS_EXIST_FILE FALSE)
+        foreach(url SQLITE_ORM_SOURCE_URLS)
+            file(DOWNLOAD ${url}
+                    ${SQLITE_ORM_TAR_NAME}
+                    TIMEOUT 60
+                    STATUS status
+                    LOG log
+                    SHOW_PROGRESS)
+            list(GET status 0 status_code)
+            list(GET status 1 status_string)
+
+            if(status_code EQUAL 0)
+                message(STATUS "Downloading ... done")
+                set(IS_EXIST_FILE TRUE)
+                break()
+            else()
+                string(APPEND logFailedURLs "error: downloading '${url}' failed
+                   status_code: ${status_code}
+                   status_string: ${status_string}
+                   log:
+                   --- LOG BEGIN ---
+                   ${log}
+                   --- LOG END ---
+                   "
+                  )
+            endif()
+        endforeach()
+
+        if(IS_EXIST_FILE STREQUAL "FALSE")
+            message(FATAL_ERROR "Each download failed!
+              ${logFailedURLs}
+              "
+            )
+        endif()
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${SQLITE_ORM_TAR_NAME}
                 WORKING_DIRECTORY ${SQLITE_ORM_PREFIX})
 
