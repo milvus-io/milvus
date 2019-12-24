@@ -68,7 +68,12 @@ static const char* VALID_CONFIG_STR =
     "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
     "    - gpu0\n"
 #endif
-    "\n";
+    "\n"
+    "sequence_config:\n"
+    "  - seq1\n"
+    "  - seq2\n"
+    "\n"
+    ;
 
 static const char* INVALID_CONFIG_STR = "*INVALID*";
 

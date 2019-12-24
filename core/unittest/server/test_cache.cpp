@@ -16,10 +16,12 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <fiu-control.h>
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
+
 
 namespace {
 
@@ -42,8 +44,8 @@ class MockVecIndex : public milvus::engine::VecIndex {
     }
 
     virtual milvus::Status
-    BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const milvus::engine::Config& cfg,
-             const int64_t& nt = 0, const float* xt = nullptr) {
+    BuildAll(const int64_t &nb, const float *xb, const int64_t *ids, const milvus::engine::Config &cfg,
+             const int64_t &nt = 0, const float *xt = nullptr) {
         return milvus::Status();
     }
 
@@ -63,24 +65,24 @@ class MockVecIndex : public milvus::engine::VecIndex {
     }
 
     virtual milvus::Status
-    Add(const int64_t& nb, const float* xb, const int64_t* ids,
-        const milvus::engine::Config& cfg = milvus::engine::Config()) {
+    Add(const int64_t &nb, const float *xb, const int64_t *ids,
+        const milvus::engine::Config &cfg = milvus::engine::Config()) {
         return milvus::Status();
     }
 
     virtual milvus::Status
-    Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids,
-           const milvus::engine::Config& cfg = milvus::engine::Config()) {
+    Search(const int64_t &nq, const float *xq, float *dist, int64_t *ids,
+           const milvus::engine::Config &cfg = milvus::engine::Config()) {
         return milvus::Status();
     }
 
     milvus::engine::VecIndexPtr
-    CopyToGpu(const int64_t& device_id, const milvus::engine::Config& cfg) override {
+    CopyToGpu(const int64_t &device_id, const milvus::engine::Config &cfg) override {
         return nullptr;
     }
 
     milvus::engine::VecIndexPtr
-    CopyToCpu(const milvus::engine::Config& cfg) override {
+    CopyToCpu(const milvus::engine::Config &cfg) override {
         return nullptr;
     }
 
@@ -101,7 +103,7 @@ class MockVecIndex : public milvus::engine::VecIndex {
     }
 
     virtual milvus::Status
-    Load(const knowhere::BinarySet& index_binary) {
+    Load(const knowhere::BinarySet &index_binary) {
         return milvus::Status();
     }
 
