@@ -115,6 +115,10 @@ if (MILVUS_WITH_PROMETHEUS)
             ${metrics_prometheus_files})
 endif ()
 
+set(s3_client_files
+        storage/s3/S3ClientWrapper.cpp
+        storage/s3/S3ClientWrapper.h)
+
 set(grpc_lib
         grpcpp_channelz
         grpc++

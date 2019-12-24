@@ -89,6 +89,8 @@ define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
 
 define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
 
+define_option(MILVUS_WITH_AWS "Build with aws" ON)
+
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 
