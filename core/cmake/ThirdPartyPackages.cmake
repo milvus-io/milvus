@@ -303,7 +303,7 @@ if (DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URLS "$ENV{MILVUS_SQLITE_ORM_URL}")
 else ()
     set(SQLITE_ORM_SOURCE_URLS
-            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip"
+            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip" \
             "https://gitee.com/quicksilver/sqlite_orm/repository/archive/${SQLITE_ORM_VERSION}.zip")
 endif ()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
@@ -349,7 +349,8 @@ set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 if (DEFINED ENV{MILVUS_OPENTRACING_URL})
     set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
 else ()
-    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz")
+    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz" \
+          "https://gitee.com/quicksilver/opentracing-cpp/repository/archive/${OPENTRACING_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_FIU_URL})
