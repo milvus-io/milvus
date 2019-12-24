@@ -29,7 +29,7 @@ class StatusDto: public oatpp::data::mapping::type::Object {
 
     DTO_INIT(StatusDto, Object)
 
-    DTO_FIELD(String, message);
+    DTO_FIELD(String, message) = "Success";
     DTO_FIELD(Int64, code) = 0;
 };
 

@@ -30,22 +30,43 @@ namespace web {
 class TableRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableRequestDto, Object)
 
-    DTO_FIELD(String, table_name, "table-name");
+    DTO_FIELD(String, table_name, "table_name");
     DTO_FIELD(Int64, dimension, "dimension");
-    DTO_FIELD(Int64, index_file_size, "index-file-size");
-    DTO_FIELD(Int64, metric_type, "metric-type");
+    DTO_FIELD(Int64, index_file_size, "index_file_size");
+    DTO_FIELD(Int64, metric_type, "metric_type");
 };
 
 class TableFieldsDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableFieldsDto, Object)
 
-    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
+//    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
+    DTO_FIELD(String, table_name);
+    DTO_FIELD(Int64, dimension);
+    DTO_FIELD(Int64, index_file_size);
+    DTO_FIELD(String, metric_type);
+    DTO_FIELD(Int64, num);
+    DTO_FIELD(String, index);
+    DTO_FIELD(Int64, nlist);
 };
 
-class TableListDto : public oatpp::data::mapping::type::Object {
+class TableListDto : public OObject {
  DTO_INIT(TableListDto, Object)
 
-    DTO_FIELD(List<String>::ObjectWrapper, tables);
+    DTO_FIELD(List<String>::ObjectWrapper, table_names);
+};
+
+class TableListFieldsDto : public OObject {
+    DTO_INIT(TableListFieldsDto, Object)
+
+    DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, tables);
+    DTO_FIELD(Int64, count);
+};
+
+class TablesResponseDto : public OObject {
+    DTO_INIT(TablesResponseDto, Object)
+
+    DTO_FIELD(TableListFieldsDto::ObjectWrapper, tables_fields);
+    DTO_FIELD(Int64, page_num);
 };
 
 class RangeDto : public oatpp::data::mapping::type::Object {

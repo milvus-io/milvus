@@ -28,9 +28,10 @@
 class SwaggerComponent {
  private:
     const int port_;
+    const std::string host_;
 
  public:
-    explicit SwaggerComponent(int port) : port_(port) {
+    explicit SwaggerComponent(const std::string& host, int port) : host_(host),port_(port) {
 
     }
 
@@ -51,7 +52,7 @@ class SwaggerComponent {
             .setContactUrl("https://milvus.io/")
             .setLicenseName("Apache License, Version 2.0")
             .setLicenseUrl("http://www.apache.org/licenses/LICENSE-2.0")
-            .addServer("http://localhost:" + oatpp::String(std::to_string(this->port_).c_str()), "server on localhost");
+            .addServer("http://" + oatpp::String(host_.c_str()) + ":" + oatpp::String(std::to_string(this->port_).c_str()), "server on localhost");
 
         return builder.build();
 

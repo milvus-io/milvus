@@ -20,10 +20,11 @@
 #include <boost/algorithm/string.hpp>
 #include <string>
 #include <vector>
+#include <cmath>
 
 #include "server/delivery/request/BaseRequest.h"
-#include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/Types.h"
+#include "server/web_impl/dto/PartitionDto.hpp"
 
 namespace milvus {
 namespace server {
@@ -59,9 +60,11 @@ WebErrorMap(ErrorCode code) {
         {SERVER_ILLEGAL_VECTOR_ID, StatusCode::ILLEGAL_VECTOR_ID},
         {SERVER_ILLEGAL_SEARCH_RESULT, StatusCode::ILLEGAL_SEARCH_RESULT},
         {SERVER_CACHE_FULL, StatusCode::CACHE_FAILED},
-        {DB_META_TRANSACTION_FAILED, StatusCode::META_FAILED},
         {SERVER_BUILD_INDEX_ERROR, StatusCode::BUILD_INDEX_ERROR},
         {SERVER_OUT_OF_MEMORY, StatusCode::OUT_OF_MEMORY},
+
+        {DB_NOT_FOUND, StatusCode::TABLE_NOT_EXISTS},
+        {DB_META_TRANSACTION_FAILED, StatusCode::META_FAILED},
     };
 
     if (code_map.find(code) != code_map.end()) {
@@ -71,13 +74,48 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
-void
-WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto) {
+///////////////////////// WebRequestHandler methods ///////////////////////////////////////
+
+Status
+WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context,
+                               const std::string& table_name,
+                               std::map<std::string, std::string>& table_info) {
+    TableSchema schema;
+    auto status = request_handler_.DescribeTable(context_ptr_, table_name, schema);
+    if (!status.ok()) {
+        return status;
+    }
+
+    int64_t count;
+    status = request_handler_.CountTable(context_ptr_, table_name, count);
+    if (!status.ok()) {
+        return status;
+    }
+
+    IndexParam index_param;
+    status = request_handler_.DescribeIndex(context_ptr_, table_name, index_param);
+    if (!status.ok()) {
+        return status;
+    }
+
+    table_info["table_name"] = schema.table_name_;
+    table_info["dimension"] = std::to_string(schema.dimension_);
+    table_info["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
+    table_info["index_file_size"] = schema.index_file_size_;
+
+    table_info["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
+    table_info["nlist"] = std::to_string(index_param.nlist_);
+
+    table_info["count"] = std::to_string(count);
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema) {
     auto status =
         request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(), table_schema->dimension,
                                      table_schema->index_file_size, table_schema->metric_type);
 
-    ASSIGN_STATUS_DTO(status_dto, status);
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
 /**
@@ -86,86 +124,111 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
  *  - COUNT: request number of vectors
  *  - *,*,*...:
  */
-void
-WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto,
+StatusDto::ObjectWrapper
+WebRequestHandler::GetTable(const OString& table_name,
+                            const OQueryParams& query_params,
                             TableFieldsDto::ObjectWrapper& fields_dto) {
     Status status = Status::OK();
 
-    fields_dto->schema = fields_dto->schema->createShared();
+    // TODO: query string field `fields` npt used here
 
-    if (query_params.getSize() == 0) {
-        TableSchema schema;
-        status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
-        if (status.ok()) {
-            fields_dto->schema->put("table_name", schema.table_name_.c_str());
-            fields_dto->schema->put("dimension", OString(std::to_string(schema.dimension_).c_str()));
-            fields_dto->schema->put("index_file_size", OString(std::to_string(schema.index_file_size_).c_str()));
-            fields_dto->schema->put("metric_type", OString(std::to_string(schema.metric_type_).c_str()));
-        }
-    } else {
-        for (auto& param : query_params.getAll()) {
-            std::string key = param.first.std_str();
-            std::string value = param.second.std_str();
+    std::map<std::string, std::string> table_info;
+    getTaleInfo(context_ptr_, table_name->std_str(), table_info);
 
-            if ("fields" == key) {
-                if ("num" == value) {
-                    int64_t count;
-                    status = request_handler_.CountTable(context_ptr_, table_name->std_str(), count);
-                    if (status.ok()) {
-                        fields_dto->schema->put("num", OString(std::to_string(count).c_str()));
-                    }
-                }
-            }
-        }
-    }
+    fields_dto->table_name = table_info["table_name"].c_str();
+    fields_dto->dimension = atol(table_info["dimension"].c_str());
+    fields_dto->index = table_info["index"].c_str();
+    fields_dto->nlist = atol(table_info["nlist"].c_str());
+    fields_dto->metric_type = table_info["metric_type"].c_str();
+    fields_dto->num = atol(table_info["count"].c_str());
+//    if (query_params.getSize() == 0) {
+//        TableSchema schema;
+//        status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
+//        if (status.ok()) {
+//            fields_dto->schema->put("table_name", schema.table_name_.c_str());
+//            fields_dto->schema->put("dimension", OString(std::to_string(schema.dimension_).c_str()));
+//            fields_dto->schema->put("index_file_size", OString(std::to_string(schema.index_file_size_).c_str()));
+//            fields_dto->schema->put("metric_type", OString(std::to_string(schema.metric_type_).c_str()));
+//        }
+//    } else {
+//        for (auto& param : query_params.getAll()) {
+//            std::string key = param.first.std_str();
+//            std::string value = param.second.std_str();
+//
+//            if ("fields" == key) {
+//                if ("num" == value) {
+//                    int64_t count;
+//                    status = request_handler_.CountTable(context_ptr_, table_name->std_str(), count);
+//                    if (status.ok()) {
+//                        fields_dto->schema->put("num", OString(std::to_string(count).c_str()));
+//                    }
+//                }
+//            }
+//        }
+//    }
 
-    ASSIGN_STATUS_DTO(status_dto, status);
+    ASSIGN_RETURN_STATUS_DTO(status);
 }
 
-void
-WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto,
-                              TableListDto::ObjectWrapper& table_list_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
+                              TableListFieldsDto::ObjectWrapper& response_dto) {
     std::vector<std::string> tables;
     Status status = Status::OK();
 
+    response_dto->tables = response_dto->tables->createShared();
+
     if (offset < 0 || page_size < 0) {
-        status = Status(SERVER_UNEXPECTED_ERROR, " Query param offset or page_size should bigger than 0");
+        status = Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should bigger than 0");
     } else {
         status = request_handler_.ShowTables(context_ptr_, tables);
-        if (status.ok()) {
-            table_list_dto->tables = table_list_dto->tables->createShared();
-            if (offset + 1 < tables.size()) {
-                int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size()
-                                                                                            : page_size->getValue();
-                for (int64_t i = 0; i < size; i++) {
-                    table_list_dto->tables->pushBack(tables.at(i).c_str());
+        if (status.ok() && offset < tables.size()) {
+            int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
+                                                                                        : page_size->getValue();
+            for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
+                std::map<std::string, std::string> table_info;
+
+                status = getTaleInfo(context_ptr_, tables.at(i), table_info);
+                if (!status.ok()) {
+                    break;
                 }
+
+                auto table_fields_dto = TableFieldsDto::createShared();
+                table_fields_dto->table_name = table_info["table_name"].c_str();
+                table_fields_dto->dimension = atol(table_info["dimension"].c_str());
+                table_fields_dto->index_file_size = atol(table_info["index_file_size"].c_str());
+                table_fields_dto->index = table_info["index"].c_str();
+                table_fields_dto->nlist = atol(table_info["nlist"].c_str());
+                table_fields_dto->metric_type = table_info["metric_type"].c_str();
+                table_fields_dto->num = atol(table_info["count"].c_str());
+
+                response_dto->tables->pushBack(table_fields_dto);
             }
+
+            response_dto->count = tables.size();
         }
     }
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::DropTable(const OString& table_name, StatusDto::ObjectWrapper& status_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::DropTable(const OString& table_name) {
     auto status = request_handler_.DropTable(context_ptr_, table_name->std_str());
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param,
-                               StatusDto::ObjectWrapper& status_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param) {
     auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index_param->index_type->getValue(),
                                                index_param->nlist->getValue());
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto,
-                            IndexDto::ObjectWrapper& index_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto) {
     IndexParam param;
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
 
@@ -174,28 +237,27 @@ WebRequestHandler::GetIndex(const OString& table_name, StatusDto::ObjectWrapper&
         index_dto->nlist = param.nlist_;
     }
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::DropIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::DropIndex(const OString& table_name) {
     auto status = request_handler_.DropIndex(context_ptr_, table_name->std_str());
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param,
-                                   StatusDto::ObjectWrapper& status_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param) {
     auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
                                                    param->partition_name->std_str(), param->tag->std_str());
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
+StatusDto::ObjectWrapper
 WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
-                                  StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto) {
+                                  PartitionListDto::ObjectWrapper& partition_list_dto) {
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
 
@@ -217,19 +279,18 @@ WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size,
         }
     }
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) {
     auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), "", tag->std_str());
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto,
-                          VectorIdsDto::ObjectWrapper& ids_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, VectorIdsDto::ObjectWrapper& ids_dto) {
     std::vector<int64_t> ids;
     if (param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
@@ -254,13 +315,13 @@ WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, StatusDt
         }
     }
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
+StatusDto::ObjectWrapper
 WebRequestHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe,
                           const OQueryParams& query_params, const RecordsDto::ObjectWrapper& records,
-                          StatusDto::ObjectWrapper& status_dto, ResultDto::ObjectWrapper& results_dto) {
+                          ResultDto::ObjectWrapper& results_dto) {
     int64_t topk_t = topk->getValue();
     int64_t nprobe_t = nprobe->getValue();
 
@@ -304,11 +365,11 @@ WebRequestHandler::Search(const OString& table_name, const OInt64& topk, const O
         results_dto->num = result.row_num_;
     }
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-void
-WebRequestHandler::Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto, CommandDto::ObjectWrapper& cmd_dto) {
+StatusDto::ObjectWrapper
+WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
     std::string reply_str;
     auto status = request_handler_.Cmd(context_ptr_, cmd->std_str(), reply_str);
 
@@ -316,7 +377,7 @@ WebRequestHandler::Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto,
         cmd_dto->reply = reply_str.c_str();
     }
 
-    ASSIGN_STATUS_DTO(status_dto, status)
+    ASSIGN_RETURN_STATUS_DTO(status);
 }
 
 }  // namespace web

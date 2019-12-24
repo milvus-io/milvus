@@ -19,6 +19,8 @@
 
 #include <oatpp/core/data/mapping/type/Object.hpp>
 
+#include "db/engine/ExecutionEngine.h"
+
 namespace milvus {
 namespace server {
 namespace web {
@@ -32,9 +34,9 @@ using OQueryParams = oatpp::web::protocol::http::QueryParams;
 enum StatusCode : int {
     SUCCESS = 0,
     UNEXPECTED_ERROR = 1,
-    CONNECT_FAILED = 2,     // reserved.
+    CONNECT_FAILED = 2,  // reserved.
     PERMISSION_DENIED = 3,
-    TABLE_NOT_EXISTS = 4,
+    TABLE_NOT_EXISTS = 4, // DB_NOT_FOUND || TABLE_NOT_EXISTS
     ILLEGAL_ARGUMENT = 5,
     ILLEGAL_RANGE = 6,
     ILLEGAL_DIMENSION = 7,
@@ -55,6 +57,20 @@ enum StatusCode : int {
     ILLEGAL_NLIST = 22,
     ILLEGAL_METRIC_TYPE = 23,
     OUT_OF_MEMORY = 24,
+};
+
+static const std::map<engine::EngineType, std::string> IndexMap = {
+    {engine::EngineType::FAISS_IDMAP, "FLAT"},
+    {engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
+    {engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
+    {engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
+    {engine::EngineType::NSG_MIX, "RNSG"},
+    {engine::EngineType::FAISS_IVFSQ8H, "IVFPQ"},
+};
+
+static const std::map<engine::MetricType, std::string> MetricMap = {
+    {engine::MetricType::L2, "L2"},
+    {engine::MetricType::IP, "IP"},
 };
 
 }  // namespace web

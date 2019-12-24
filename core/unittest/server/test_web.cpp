@@ -60,6 +60,8 @@ using OQueryParams = milvus::server::web::OQueryParams;
 using OChunkedBuffer = oatpp::data::stream::ChunkedBuffer;
 using OOutputStream = oatpp::data::stream::BufferOutputStream;
 
+using StatusCode = milvus::server::web::StatusCode;
+
 namespace {
 
 class WebHandlerTest : public testing::Test {
@@ -83,6 +85,7 @@ class WebHandlerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
+        boost::filesystem::remove_all("/tmp/milvus_web_handler_test");
         milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_web_handler_test");
         milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
@@ -94,15 +97,6 @@ class WebHandlerTest : public testing::Test {
 
         // initialize handler, create table
         handler = std::make_shared<milvus::server::web::WebRequestHandler>();
-//        dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
-//        opentracing::mocktracer::MockTracerOptions tracer_options;
-//        auto mock_tracer =
-//            std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
-//        auto mock_span = mock_tracer->StartSpan("mock_span");
-//        auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
-//        dummy_context->SetTraceContext(trace_context);
-//        ::grpc::ServerContext context;
-//        handler->SetContext(&context, dummy_context);
 
         auto table_dto = milvus::server::web::TableRequestDto::createShared();
         table_dto->table_name = TABLE_NAME;
@@ -194,19 +188,19 @@ TEST_F(WebHandlerTest, TABLE) {
 
     // invalid dimension
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_EQ(milvus::SERVER_INVALID_VECTOR_DIMENSION, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_DIMENSION, status_dto->code->getValue());
 
     // invalid index file size
     table_dto->dimension = TABLE_DIM;
     table_dto->index_file_size = -1;
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_FILE_SIZE, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_ARGUMENT, status_dto->code->getValue());
 
     // invalid metric type
     table_dto->index_file_size = INDEX_FILE_SIZE;
     table_dto->metric_type = 100;
     handler->CreateTable(table_dto, status_dto);
-    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_METRIC_TYPE, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_METRIC_TYPE, status_dto->code->getValue());
 
     // create table successfully
     table_dto->metric_type = 1;
@@ -220,7 +214,7 @@ TEST_F(WebHandlerTest, TABLE) {
 
     // drop table which not exists.
     handler->DropTable(table_name + "57575yfhfdhfhdh436gdsgpppdgsgv3233", status_dto);
-    ASSERT_EQ(milvus::SERVER_TABLE_NOT_EXIST, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::TABLE_NOT_EXISTS, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
@@ -296,14 +290,14 @@ TEST_F(WebHandlerTest, INDEX) {
     index_request_dto->index_type = 10;
     handler->CreateIndex(table_name, index_request_dto, status_dto);
     ASSERT_NE(0, status_dto->code->getValue());
-    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_TYPE, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_INDEX_TYPE, status_dto->code->getValue());
 
     // invalid nlist
     index_request_dto->index_type = 1;
     index_request_dto->nlist = -1;
     handler->CreateIndex(table_name, index_request_dto, status_dto);
     ASSERT_NE(0, status_dto->code->getValue());
-    ASSERT_EQ(milvus::SERVER_INVALID_INDEX_NLIST, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_NLIST, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, PARTITION) {
@@ -324,7 +318,7 @@ TEST_F(WebHandlerTest, PARTITION) {
     partition_dto->tag = "test02";
     handler->CreatePartition(table_name, partition_dto, status_dto);
     ASSERT_NE(0, status_dto->code->getValue());
-    ASSERT_EQ(milvus::SERVER_INVALID_TABLE_NAME, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_TABLE_NAME, status_dto->code->getValue());
 
     handler->DropPartition(table_name, "test", status_dto);
     ASSERT_EQ(0, status_dto->code->getValue());

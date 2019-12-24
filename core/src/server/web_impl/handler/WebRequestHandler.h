@@ -43,12 +43,16 @@ namespace milvus {
 namespace server {
 namespace web {
 
-#define ASSIGN_STATUS_DTO(STATUS_DTO, STATUS)                   \
+#define ASSIGN_RETURN_STATUS_DTO(STATUS)                        \
     do {                                                        \
+        auto status_dto = StatusDto::createShared();            \
         if (0 != (STATUS).code()) {                             \
-        (STATUS_DTO)->code = WebErrorMap((STATUS).code());      \
-	}                                                           \
-        (STATUS_DTO)->message = (STATUS).message().c_str();     \
+            status_dto->code = WebErrorMap((STATUS).code());    \
+        } else {                                                \
+            status_dto->code = 0;                               \
+        }                                                       \
+        status_dto->message = (STATUS).message().c_str();       \
+        return status_dto;                                      \
     } while (false);
 
 StatusCode
@@ -74,52 +78,53 @@ class WebRequestHandler {
         context_ptr_ = GenContextPtr("Web Handler");
     }
 
-    void
-    CreateTable(const TableRequestDto::ObjectWrapper& table_schema, StatusDto::ObjectWrapper& status_dto);
+    Status
+    getTaleInfo(const std::shared_ptr<Context>& context,
+                const std::string& table_name,
+                std::map<std::string, std::string>& table_info);
 
-    void
-    GetTable(const OString& table_name, const OQueryParams& query_params, StatusDto::ObjectWrapper& status_dto,
-             TableFieldsDto::ObjectWrapper& schema_dto);
+    StatusDto::ObjectWrapper
+    CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
 
-    void
-    ShowTables(const OInt64& offset, const OInt64& page_size, StatusDto::ObjectWrapper& status_dto,
-               TableListDto::ObjectWrapper& table_list_dto);
+    StatusDto::ObjectWrapper
+    GetTable(const OString& table_name, const OQueryParams& query_params, TableFieldsDto::ObjectWrapper& schema_dto);
 
-    void
-    DropTable(const OString& table_name, StatusDto::ObjectWrapper& status_dto);
+    StatusDto::ObjectWrapper
+    ShowTables(const OInt64& offset, const OInt64& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
 
-    void
-    CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param,
-                StatusDto::ObjectWrapper& status_dto);
+    StatusDto::ObjectWrapper
+    DropTable(const OString& table_name);
 
-    void
-    GetIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto, IndexDto::ObjectWrapper& index_dto);
+    StatusDto::ObjectWrapper
+    CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param);
 
-    void
-    DropIndex(const OString& table_name, StatusDto::ObjectWrapper& status_dto);
+    StatusDto::ObjectWrapper
+    GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto);
 
-    void
-    CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param,
-                    StatusDto::ObjectWrapper& status_dto);
+    StatusDto::ObjectWrapper
+    DropIndex(const OString& table_name);
 
-    void
-    ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
-                   StatusDto::ObjectWrapper& status_dto, PartitionListDto::ObjectWrapper& partition_list_dto);
+    StatusDto::ObjectWrapper
+    CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
-    void
-    DropPartition(const OString& table_name, const OString& tag, StatusDto::ObjectWrapper& status_dto);
+    StatusDto::ObjectWrapper
+    ShowPartitions(const OInt64& offset,
+                   const OInt64& page_size,
+                   const OString& table_name,
+                   PartitionListDto::ObjectWrapper& partition_list_dto);
 
-    void
-    Insert(const InsertRequestDto::ObjectWrapper& param, StatusDto::ObjectWrapper& status_dto,
-           VectorIdsDto::ObjectWrapper& ids_dto);
+    StatusDto::ObjectWrapper
+    DropPartition(const OString& table_name, const OString& tag);
 
-    void
+    StatusDto::ObjectWrapper
+    Insert(const InsertRequestDto::ObjectWrapper& param, VectorIdsDto::ObjectWrapper& ids_dto);
+
+    StatusDto::ObjectWrapper
     Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe, const OQueryParams& query_params,
-           const RecordsDto::ObjectWrapper& records, StatusDto::ObjectWrapper& status_dto,
-           ResultDto::ObjectWrapper& results_dto);
+           const RecordsDto::ObjectWrapper& records, ResultDto::ObjectWrapper& results_dto);
 
-    void
-    Cmd(const OString& cmd, StatusDto::ObjectWrapper& status_dto, CommandDto::ObjectWrapper& cmd_dto);
+    StatusDto::ObjectWrapper
+    Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);
 
     WebRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {
