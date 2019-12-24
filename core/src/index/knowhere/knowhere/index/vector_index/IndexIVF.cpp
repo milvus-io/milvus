@@ -184,7 +184,7 @@ IVF::Dimension() {
 }
 
 void
-IVF::GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config) {
+IVF::GenGraph(const float* data, const int64_t& k, Graph& graph, const Config& config) {
     int64_t K = k + 1;
     auto ntotal = Count();
 

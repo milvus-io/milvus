@@ -23,7 +23,7 @@ namespace knowhere {
 std::shared_ptr<SPTAG::MetadataSet>
 ConvertToMetadataSet(const DatasetPtr& dataset) {
     auto elems = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<int64_t*>(meta::IDS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     auto p_offset = (int64_t*)malloc(sizeof(int64_t) * elems);
     for (auto i = 0; i <= elems; ++i) p_offset[i] = i * 8;

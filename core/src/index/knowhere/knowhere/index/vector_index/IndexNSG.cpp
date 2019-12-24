@@ -111,7 +111,7 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     idmap->Train(config);
     idmap->AddWithoutId(dataset, config);
     Graph knng;
-    float* raw_data = idmap->GetRawVectors();
+    const float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
     if (build_cfg->gpu_id == knowhere::INVALID_VALUE) {
         auto preprocess_index = std::make_shared<IVF>();
