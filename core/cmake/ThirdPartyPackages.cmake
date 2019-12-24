@@ -273,7 +273,8 @@ if (DEFINED ENV{MILVUS_GTEST_URL})
     set(GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}")
 else ()
     set(GTEST_SOURCE_URL
-            "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
+            "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz"
+            "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip")
 endif ()
 set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
 
@@ -311,7 +312,8 @@ set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 if (DEFINED ENV{MILVUS_YAMLCPP_URL})
     set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
 else ()
-    set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz")
+    set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz"
+                           "https://gitee.com/quicksilver/yaml-cpp/repository/archive/yaml-cpp-${YAMLCPP_VERSION}.zip")
 endif ()
 set(YAMLCPP_MD5 "5b943e9af0060d0811148b037449ef82")
 
@@ -335,14 +337,16 @@ if (DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else ()
     set(GRPC_SOURCE_URL
-            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip")
+            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
+            "https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip")
 endif ()
 set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
 if (DEFINED ENV{MILVUS_ZLIB_URL})
     set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
 else ()
-    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
+    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz"
+                        "https://gitee.com/quicksilver/zlib/repository/archive/${ZLIB_VERSION}.zip")
 endif ()
 set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
@@ -356,7 +360,8 @@ endif ()
 if (DEFINED ENV{MILVUS_FIU_URL})
     set(MILVUS_FIU_URL "$ENV{MILVUS_FIU_URL}")
 else ()
-    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz")
+    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz"
+                       "https://gitee.com/quicksilver/libfiu/repository/archive/${FIU_VERSION}.zip")
 endif ()
 
 
