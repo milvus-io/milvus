@@ -785,7 +785,7 @@ macro(build_sqlite_orm)
         file(MAKE_DIRECTORY ${SQLITE_ORM_PREFIX})
 
         set(IS_EXIST_FILE FALSE)
-        foreach(url SQLITE_ORM_SOURCE_URLS)
+        foreach(url ${SQLITE_ORM_SOURCE_URLS})
             file(DOWNLOAD ${url}
                     ${SQLITE_ORM_TAR_NAME}
                     TIMEOUT 60
