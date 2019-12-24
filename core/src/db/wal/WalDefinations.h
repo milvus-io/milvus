@@ -62,7 +62,7 @@ struct MXLogConfiguration {
 struct MXLogBufferHandler {
     uint64_t lsn;
     uint64_t min_lsn;
-    uint64_t max_lsn;
+    uint64_t max_offset;
     uint64_t file_no;
     uint64_t buf_offset;
     int buf_idx;

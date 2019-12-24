@@ -26,21 +26,24 @@ namespace wal {
 
 class MXLogFileHandler {
  public:
-    MXLogFileHandler(const std::string &mxlog_path, const std::string &file_number);
+    MXLogFileHandler(const std::string& mxlog_path, const std::string& file_number, const std::string& mode);
     ~MXLogFileHandler();
 
     bool IsOpen();
     std::string GetFilePath();
     std::string GetFileName();
-    void SetFileName(const std::string &file_name);
-    void Read(char *buf);
-    void Write(const MXLogBufferHandler &buf_handler, const uint64_t &data_size, bool is_sync = false);
-    void DeleteFile();
-    void CreateFile();
-    void ReBorn();
+    bool OpenFile();
+    bool CloseFile();
+    bool Load(char *buf);
+    bool Write(char *buf, const uint64_t& data_size, bool is_sync = false);
+    void ReBorn(const uint64_t& new_file_no);
+    uint64_t GetFileSize();
 
  private:
+    std::string file_path_;
     std::string file_name_;
+    std::string file_mode_;
+    uint64_t file_size_;
     FILE* p_file_;
 };
 

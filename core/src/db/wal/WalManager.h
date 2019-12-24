@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <src/db/meta/MetaTypes.h>
 #include <thread>
+#include <condition_variable>
 //#include <src/sdk/include/MilvusApi.h>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
@@ -57,20 +58,23 @@ class WalManager {
 
     void Recovery();
 
-    void BC_Thread();//unknown
-
-    char* GetRecords();//unknown
+    void UpdateFlushedLsn(const uint64_t& flushed_lsn);
+    void UpdateappliedLsn(const uint64_t& flushed_lsn);
+    uint64_t GenerateNextLsn();
 
  private:
 
     MXLogConfiguration mxlog_config_;
     std::atomic<uint64_t > current_lsn_;
     uint64_t last_applied_lsn_;
+    uint64_t last_flushed_lsn_;
     std::unordered_map<std::string, TableSchemaPtr> table_meta_;
     MXLogBuffer buffer_;
 
     std::thread auto_flush_;
     std::thread reader_;
+    std::condition_variable reader_cv_;
+    bool reader_is_waiting_;
 
 };
 } // wal

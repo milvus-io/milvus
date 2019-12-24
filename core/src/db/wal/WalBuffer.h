@@ -32,7 +32,7 @@ using BufferPtr = std::shared_ptr<char>;
 
 class MXLogBuffer {
  public:
-    MXLogBuffer(uint64_t &buffer_size, const std::string &mxlog_path, const std::string &file_no);
+    MXLogBuffer(uint64_t &buffer_size, const std::string& mxlog_path, const std::string& file_no, const std::string& mode);
     ~MXLogBuffer();
 
 

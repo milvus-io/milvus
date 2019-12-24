@@ -109,7 +109,8 @@ bool MXLogBuffer::Append(const std::string &table_id,
     if (SurplusSpace() < record_size) {
         if (mxlog_buffer_writer_.buf_idx ^ mxlog_buffer_reader_.buf_idx) {//no need to switch buffer
             mxlog_buffer_writer_.buf_offset = 0;
-            mxlog_writer_.ReBorn();
+            //todo:important! get atomic increase file no from WalManager and update mxlog_buffer_wrter_.file_no
+            mxlog_writer_.ReBorn(mxlog_buffer_writer_.file_no);
         } else { // swith writer buffer
             mxlog_buffer_writer_.buf_idx ^= 1;
             mxlog_buffer_writer_.buf_offset = 0;
@@ -144,7 +145,8 @@ bool MXLogBuffer::Append(const std::string &table_id,
     current_write_offset += (n * dim) << 2;
     mxlog_buffer_writer_.buf_offset = current_write_offset;
     mxlog_buffer_writer_.lsn = lsn;
-    mxlog_writer_.Write(mxlog_buffer_writer_, record_size);//default async flush
+    mxlog_writer_.Write(buf_[mxlog_buffer_writer_.buf_idx].get(), record_size);//default async flush
+    if ()
     return true;
 }
 
@@ -208,18 +210,18 @@ bool MXLogBuffer::Next(std::string &table_id,
     memcpy(vectors, current_read_buf + current_read_offset, (n * dim) << 2);
     current_read_offset += (n * dim) << 2;
     mxlog_buffer_reader_.lsn = lsn;
-    if (lsn == mxlog_buffer_reader_.max_lsn) {
+    if (lsn == mxlog_buffer_reader_.max_offset) {
         if (lsn + 1 == mxlog_buffer_writer_.min_lsn) {
             //todo: lock
             mxlog_buffer_reader_.buf_idx ^= 1;
             mxlog_buffer_reader_.buf_offset = 0;
         } else {
             //todo: load wal log from disk
-            MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath(), std::to_string(++ mxlog_buffer_reader_.file_no));
+            MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath(), std::to_string(++ mxlog_buffer_reader_.file_no), "r");
             if (mxlog_reader.IsOpen()) {
-                std::string next_file_name = mxlog_reader.GetFileName();
+                mxlog_buffer_reader_.max_offset = mxlog_reader.GetFileSize();
                 //todo:init maxlsn and minlsn of mxlog_buffer_reader_
-                mxlog_reader.Read(buf_[mxlog_buffer_reader_.buf_idx].get());
+                mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get());
                 mxlog_buffer_reader_.buf_offset = 0;
             } else {
                 //todo: log error: wal log open fail

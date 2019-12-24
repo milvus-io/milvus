@@ -34,7 +34,7 @@ WalManager::WalManager() {
 
 void
 WalManager::Init() {
-
+    //todo: init buffer_ and other vars
 }
 
 //no consideration about multi-thread insert
@@ -79,6 +79,11 @@ WalManager::DeleteById(const std::string& table_id, const milvus::engine::IDNumb
 void
 WalManager::Flush() {
     buffer_.Flush(current_lsn_);
+}
+
+void
+WalManager::Recovery() {
+    //todo: fetch meta
 }
 
 } // wal
