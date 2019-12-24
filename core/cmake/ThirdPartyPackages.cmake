@@ -303,7 +303,8 @@ if (DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URLS "$ENV{MILVUS_SQLITE_ORM_URL}")
 else ()
     set(SQLITE_ORM_SOURCE_URLS
-            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip https://gitee.com/quicksilver/sqlite_orm/repository/archive/${SQLITE_ORM_VERSION}.zip")
+            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip"
+            "https://gitee.com/quicksilver/sqlite_orm/repository/archive/${SQLITE_ORM_VERSION}.zip")
 endif ()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
@@ -790,8 +791,7 @@ macro(build_sqlite_orm)
                     ${SQLITE_ORM_TAR_NAME}
                     TIMEOUT 60
                     STATUS status
-                    LOG log
-                    SHOW_PROGRESS)
+                    LOG log)
             list(GET status 0 status_code)
             list(GET status 1 status_string)
 
