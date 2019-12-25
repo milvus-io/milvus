@@ -71,8 +71,7 @@ Scheduler::PostEvent(const EventPtr& event) {
 json
 Scheduler::Dump() const {
     json ret{
-        {"running", running_},
-        {"event_queue_length", event_queue_.size()},
+        {"running", running_}, {"event_queue_length", event_queue_.size()},
     };
     return ret;
 }

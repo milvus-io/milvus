@@ -76,9 +76,7 @@ SearchJob::GetStatus() {
 json
 SearchJob::Dump() const {
     json ret{
-        {"topk", topk_},
-        {"nq", nq_},
-        {"nprobe", nprobe_},
+        {"topk", topk_}, {"nq", nq_}, {"nprobe", nprobe_},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());

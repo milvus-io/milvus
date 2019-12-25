@@ -27,7 +27,6 @@
 
 #include <limits>
 
-
 namespace {
 
 static constexpr uint64_t KB = 1024;
@@ -39,7 +38,7 @@ static constexpr uint64_t GB = MB * 1024;
 namespace ms = milvus::server;
 
 TEST_F(ConfigTest, CONFIG_TEST) {
-    milvus::server::ConfigMgr *config_mgr = milvus::server::YamlConfigMgr::GetInstance();
+    milvus::server::ConfigMgr* config_mgr = milvus::server::YamlConfigMgr::GetInstance();
 
     milvus::Status s = config_mgr->LoadConfigFile("");
     ASSERT_FALSE(s.ok());
@@ -54,32 +53,31 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     config_mgr->Print();
     config_mgr->DumpString();
 
-    milvus::server::ConfigNode &root_config = config_mgr->GetRootNode();
-    milvus::server::ConfigNode &server_config = root_config.GetChild("server_config");
-    milvus::server::ConfigNode &db_config = root_config.GetChild("db_config");
-    milvus::server::ConfigNode &metric_config = root_config.GetChild("metric_config");
-    milvus::server::ConfigNode &cache_config = root_config.GetChild("cache_config");
+    milvus::server::ConfigNode& root_config = config_mgr->GetRootNode();
+    milvus::server::ConfigNode& server_config = root_config.GetChild("server_config");
+    milvus::server::ConfigNode& db_config = root_config.GetChild("db_config");
+    milvus::server::ConfigNode& metric_config = root_config.GetChild("metric_config");
+    milvus::server::ConfigNode& cache_config = root_config.GetChild("cache_config");
     milvus::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
 
-
-    const auto &im_config_mgr = *static_cast<milvus::server::YamlConfigMgr *>(config_mgr);
-    const milvus::server::ConfigNode &im_root_config = im_config_mgr.GetRootNode();
-    const milvus::server::ConfigNode &im_invalid_config = im_root_config.GetChild("invalid_config");
-    const milvus::server::ConfigNode &im_not_exit_config = im_root_config.GetChild("not_exit_config");
-    ASSERT_EQ(im_not_exit_config.GetConfig().size(),0);
+    const auto& im_config_mgr = *static_cast<milvus::server::YamlConfigMgr*>(config_mgr);
+    const milvus::server::ConfigNode& im_root_config = im_config_mgr.GetRootNode();
+    const milvus::server::ConfigNode& im_invalid_config = im_root_config.GetChild("invalid_config");
+    const milvus::server::ConfigNode& im_not_exit_config = im_root_config.GetChild("not_exit_config");
+    ASSERT_EQ(im_not_exit_config.GetConfig().size(), 0);
     ASSERT_EQ(im_root_config.DumpString(), root_config.DumpString());
     ASSERT_EQ(im_invalid_config.DumpString(), invalid_config.DumpString());
 
     auto valus = invalid_config.GetSequence("not_exist");
     float ff = invalid_config.GetFloatValue("not_exist", 3.0);
     ASSERT_EQ(ff, 3.0);
-    double not_exit_double = server_config.GetDoubleValue("not_exit",3.0);
-    ASSERT_EQ(not_exit_double,3.0);
-    int64_t not_exit_int64 = server_config.GetInt64Value("not_exit",3);
+    double not_exit_double = server_config.GetDoubleValue("not_exit", 3.0);
+    ASSERT_EQ(not_exit_double, 3.0);
+    int64_t not_exit_int64 = server_config.GetInt64Value("not_exit", 3);
     ASSERT_EQ(not_exit_int64, 3);
-    int64_t not_exit_int32 = server_config.GetInt32Value("not_exit",3);
+    int64_t not_exit_int32 = server_config.GetInt32Value("not_exit", 3);
     ASSERT_EQ(not_exit_int32, 3);
-    bool not_exit_bool = server_config.GetBoolValue("not_exit",false);
+    bool not_exit_bool = server_config.GetBoolValue("not_exit", false);
     ASSERT_FALSE(not_exit_bool);
 
     std::string address = server_config.GetValue("address");
@@ -124,7 +122,7 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     ASSERT_EQ(seq.size(), 2UL);
 
     server_config.SetValue("fake", "fake");
-    server_config.AddChild("fake",fake);
+    server_config.AddChild("fake", fake);
     milvus::server::ConfigNode combine;
     combine.Combine(server_config);
 
@@ -139,7 +137,7 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 
 TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s;
     std::string str_val;
     int64_t int64_val;
@@ -331,19 +329,21 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 #endif
 }
 
-std::string gen_get_command(const std::string &parent_node, const std::string &child_node) {
+std::string
+gen_get_command(const std::string& parent_node, const std::string& child_node) {
     std::string cmd = "get_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
     return cmd;
 }
 
-std::string gen_set_command(const std::string &parent_node, const std::string &child_node, const std::string &value) {
+std::string
+gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
     std::string cmd = "set_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
     return cmd;
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s;
 
     std::string get_cmd, set_cmd;
@@ -484,7 +484,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
 
 TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s;
 
     s = config.LoadConfigFile("");
@@ -608,7 +608,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 

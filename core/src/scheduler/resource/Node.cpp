@@ -49,8 +49,7 @@ Node::Dump() const {
     }
 
     json ret{
-        {"id", id_},
-        {"neighbours", neighbours},
+        {"id", id_}, {"neighbours", neighbours},
     };
     return ret;
 }
