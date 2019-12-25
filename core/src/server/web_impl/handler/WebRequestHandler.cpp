@@ -221,7 +221,9 @@ WebRequestHandler::DropTable(const OString& table_name) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param) {
-    auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index_param->index_type->getValue(),
+    std::string index_type = index_param->index_type->std_str();
+    auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
+                                               static_cast<int64_t>(IndexNameMap.at(index_type)),
                                                index_param->nlist->getValue());
 
     ASSIGN_RETURN_STATUS_DTO(status)

@@ -18,8 +18,9 @@ if (FAISS_WITH_MKL)
             )
 else ()
     set(depend_libs ${depend_libs}
-            lapack
-            openblas)
+            ${BLAS_LIBRARIES}
+            ${LAPACK_LIBRARIES}
+            )
 endif ()
 
 set(basic_libs

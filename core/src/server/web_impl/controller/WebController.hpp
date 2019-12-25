@@ -85,6 +85,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
+    ENDPOINT_INFO(State) {
+        info->summary = "Server state";
+        info->description = "Check web server whether is ready.";
+
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
+    }
+
     ENDPOINT("GET", "/state", State) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
         CORS_SUPPORT(response)

@@ -68,6 +68,15 @@ static const std::map<engine::EngineType, std::string> IndexMap = {
     {engine::EngineType::FAISS_IVFSQ8H, "IVFPQ"},
 };
 
+static const std::map<std::string, engine::EngineType> IndexNameMap = {
+    {"FLAT", engine::EngineType::FAISS_IDMAP},
+    {"IVFFLAT", engine::EngineType::FAISS_IVFFLAT},
+    {"IVFSQ8", engine::EngineType::FAISS_IVFSQ8},
+    {"IVFSQ8H", engine::EngineType::FAISS_IVFSQ8H},
+    {"RNSG", engine::EngineType::NSG_MIX},
+    {"IVFPQ", engine::EngineType::FAISS_IVFSQ8H},
+};
+
 static const std::map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::L2, "L2"},
     {engine::MetricType::IP, "IP"},
