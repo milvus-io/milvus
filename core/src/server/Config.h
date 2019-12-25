@@ -28,6 +28,7 @@
 namespace milvus {
 namespace server {
 
+static const char* CONFIG_NODE_DELIMITER = ".";
 static const char* CONFIG_VERSION = "version";
 
 /* server config */
@@ -54,13 +55,14 @@ static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "4";
+static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
+static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
-static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "16";
+static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
@@ -119,19 +121,25 @@ class Config {
     Status
     ResetDefaultConfig();
     void
-    PrintAll();
+    GetConfigJsonStr(std::string& result);
+    Status
+    ProcessConfigCli(std::string& result, const std::string& cmd);
 
  private:
     ConfigNode&
     GetConfigRoot();
     ConfigNode&
     GetConfigNode(const std::string& name);
+    bool
+    ConfigNodeValid(const std::string& parent_key, const std::string& child_key);
     Status
     GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value);
-    void
+    Status
     SetConfigValueInMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
-    void
-    PrintConfigSection(const std::string& config_node_name);
+    Status
+    GetConfigCli(std::string& value, const std::string& parent_key, const std::string& child_key);
+    Status
+    SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
     ///////////////////////////////////////////////////////////////////////////
     Status
