@@ -64,10 +64,10 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
     void
     Seal() override;
 
-    virtual float*
+    virtual const float*
     GetRawVectors();
 
-    virtual int64_t*
+    virtual const int64_t*
     GetRawIds();
 
  protected:

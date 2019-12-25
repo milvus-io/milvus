@@ -16,42 +16,30 @@
 // under the License.
 
 #include "wrapper/DataTransfer.h"
+#include "knowhere/adapter/VectorAdapter.h"
 
 #include <memory>
-#include <utility>
-#include <vector>
 
 namespace milvus {
 namespace engine {
 
 knowhere::DatasetPtr
 GenDatasetWithIds(const int64_t& nb, const int64_t& dim, const float* xb, const int64_t* ids) {
-    std::vector<int64_t> shape{nb, dim};
-    auto tensor = knowhere::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
-    std::vector<knowhere::TensorPtr> tensors{tensor};
-    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
-
-    auto id_array = knowhere::ConstructInt64Array((uint8_t*)ids, nb * sizeof(int64_t));
-    std::vector<knowhere::ArrayPtr> arrays{id_array};
-    std::vector<knowhere::FieldPtr> array_fields{knowhere::ConstructInt64Field("id")};
-    auto array_schema = std::make_shared<knowhere::Schema>(tensor_fields);
-
-    auto dataset =
-        std::make_shared<knowhere::Dataset>(std::move(arrays), array_schema, std::move(tensors), tensor_schema);
-    return dataset;
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
+    return ret_ds;
 }
 
 knowhere::DatasetPtr
 GenDataset(const int64_t& nb, const int64_t& dim, const float* xb) {
-    std::vector<int64_t> shape{nb, dim};
-    auto tensor = knowhere::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
-    std::vector<knowhere::TensorPtr> tensors{tensor};
-    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
-
-    auto dataset = std::make_shared<knowhere::Dataset>(std::move(tensors), tensor_schema);
-    return dataset;
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    return ret_ds;
 }
 
 }  // namespace engine

@@ -66,38 +66,21 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-
     config->CheckValid();
-    // auto metric_type = config["metric_type"].as_string() == "L2" ?
-    //                   faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
-    // index_->metric_type = metric_type;
-
     GETTENSOR(dataset)
 
     auto elems = rows * config->k;
-    auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
-    auto res_dis = (float*)malloc(sizeof(float) * elems);
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
 
-    search_impl(rows, (float*)p_data, config->k, res_dis, res_ids, Config());
+    search_impl(rows, (float*)p_data, config->k, p_dist, p_id, Config());
 
-    //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
-    //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
-    //
-    //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
-    //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
-    //
-    //    auto int64_type = std::make_shared<arrow::Int64Type>();
-    //    auto float_type = std::make_shared<arrow::FloatType>();
-    //
-    //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
-    //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
-    //
-    //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
-    //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
-    //    std::vector<ArrayPtr> array{ids, dists};
-    //
-    //    return std::make_shared<Dataset>(array, nullptr);
-    return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
+    return ret_ds;
 }
 
 void
@@ -114,10 +97,7 @@ IDMAP::Add(const DatasetPtr& dataset, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset)
 
-    // TODO: magic here.
-    auto array = dataset->array()[0];
-    auto p_ids = array->data()->GetValues<int64_t>(1, 0);
-
+    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -129,9 +109,6 @@ IDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset)
-
-    // TODO: magic here.
-    auto array = dataset->array()[0];
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {
@@ -151,8 +128,7 @@ IDMAP::Dimension() {
     return index_->d;
 }
 
-// TODO(linxj): return const pointer
-float*
+const float*
 IDMAP::GetRawVectors() {
     try {
         auto file_index = dynamic_cast<faiss::IndexIDMap*>(index_.get());
@@ -163,8 +139,7 @@ IDMAP::GetRawVectors() {
     }
 }
 
-// TODO(linxj): return const pointer
-int64_t*
+const int64_t*
 IDMAP::GetRawIds() {
     try {
         auto file_index = dynamic_cast<faiss::IndexIDMap*>(index_.get());
