@@ -17,6 +17,7 @@
 
 #include "wrapper/VecImpl.h"
 #include "DataTransfer.h"
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/Log.h"
@@ -86,9 +87,6 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         Config search_cfg = cfg;
 
         auto res = index_->Search(dataset, search_cfg);
-        //        auto ids_array = res->array()[0];
-        //        auto dis_array = res->array()[1];
-
         //{
         //    auto& ids = ids_array;
         //    auto& dists = dis_array;
@@ -110,10 +108,12 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         //        auto p_dist = dis_array->data()->GetValues<float>(1, 0);
 
         // TODO(linxj): avoid copy here.
-        memcpy(ids, res->ids(), sizeof(int64_t) * nq * k);
-        memcpy(dist, res->dist(), sizeof(float) * nq * k);
-        free(res->ids());
-        free(res->dist());
+        auto res_ids = res->Get<int64_t*>(knowhere::meta::IDS);
+        auto res_dist = res->Get<float*>(knowhere::meta::DISTANCE);
+        memcpy(ids, res_ids, sizeof(int64_t) * nq * k);
+        memcpy(dist, res_dist, sizeof(float) * nq * k);
+        free(res_ids);
+        free(res_dist);
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
@@ -200,7 +200,7 @@ VecIndexImpl::GetDeviceId() {
 #endif
 }
 
-float*
+const float*
 BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
     if (raw_index) {
@@ -209,7 +209,7 @@ BFIndex::GetRawVectors() {
     return nullptr;
 }
 
-int64_t*
+const int64_t*
 BFIndex::GetRawIds() {
     return std::static_pointer_cast<knowhere::IDMAP>(index_)->GetRawIds();
 }
