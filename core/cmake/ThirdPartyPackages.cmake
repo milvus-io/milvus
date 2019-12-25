@@ -273,7 +273,8 @@ if (DEFINED ENV{MILVUS_GTEST_URL})
     set(GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}")
 else ()
     set(GTEST_SOURCE_URL
-            "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
+            "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz"
+            "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip")
 endif ()
 set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
 
@@ -300,17 +301,19 @@ endif ()
 set(SQLITE_MD5 "3c68eb400f8354605736cd55400e1572")
 
 if (DEFINED ENV{MILVUS_SQLITE_ORM_URL})
-    set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
+    set(SQLITE_ORM_SOURCE_URLS "$ENV{MILVUS_SQLITE_ORM_URL}")
 else ()
-    set(SQLITE_ORM_SOURCE_URL
-            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
+    set(SQLITE_ORM_SOURCE_URLS
+            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip"
+            "https://gitee.com/quicksilver/sqlite_orm/repository/archive/${SQLITE_ORM_VERSION}.zip")
 endif ()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
 if (DEFINED ENV{MILVUS_YAMLCPP_URL})
     set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
 else ()
-    set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz")
+    set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz"
+                           "https://gitee.com/quicksilver/yaml-cpp/repository/archive/yaml-cpp-${YAMLCPP_VERSION}.zip")
 endif ()
 set(YAMLCPP_MD5 "5b943e9af0060d0811148b037449ef82")
 
@@ -334,27 +337,31 @@ if (DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else ()
     set(GRPC_SOURCE_URL
-            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip")
+            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
+            "https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip")
 endif ()
 set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
 if (DEFINED ENV{MILVUS_ZLIB_URL})
     set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
 else ()
-    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
+    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz"
+                        "https://gitee.com/quicksilver/zlib/repository/archive/${ZLIB_VERSION}.zip")
 endif ()
 set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
 if (DEFINED ENV{MILVUS_OPENTRACING_URL})
     set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
 else ()
-    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz")
+    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz"
+          "https://gitee.com/quicksilver/opentracing-cpp/repository/archive/${OPENTRACING_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_FIU_URL})
     set(MILVUS_FIU_URL "$ENV{MILVUS_FIU_URL}")
 else ()
-    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz")
+    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz"
+                       "https://gitee.com/quicksilver/libfiu/repository/archive/${FIU_VERSION}.zip")
 endif ()
 
 
@@ -780,10 +787,43 @@ macro(build_sqlite_orm)
     set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix")
     set(SQLITE_ORM_TAR_NAME "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz")
     set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}/include/sqlite_orm")
+
     if (NOT EXISTS ${SQLITE_ORM_INCLUDE_DIR})
         file(MAKE_DIRECTORY ${SQLITE_ORM_PREFIX})
-        file(DOWNLOAD ${SQLITE_ORM_SOURCE_URL}
-                ${SQLITE_ORM_TAR_NAME})
+
+        set(IS_EXIST_FILE FALSE)
+        foreach(url ${SQLITE_ORM_SOURCE_URLS})
+            file(DOWNLOAD ${url}
+                    ${SQLITE_ORM_TAR_NAME}
+                    TIMEOUT 60
+                    STATUS status
+                    LOG log)
+            list(GET status 0 status_code)
+            list(GET status 1 status_string)
+
+            if(status_code EQUAL 0)
+                message(STATUS "Downloading ... done")
+                set(IS_EXIST_FILE TRUE)
+                break()
+            else()
+                string(APPEND logFailedURLs "error: downloading '${url}' failed
+                   status_code: ${status_code}
+                   status_string: ${status_string}
+                   log:
+                   --- LOG BEGIN ---
+                   ${log}
+                   --- LOG END ---
+                   "
+                  )
+            endif()
+        endforeach()
+
+        if(IS_EXIST_FILE STREQUAL "FALSE")
+            message(FATAL_ERROR "Each download failed!
+              ${logFailedURLs}
+              "
+            )
+        endif()
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${SQLITE_ORM_TAR_NAME}
                 WORKING_DIRECTORY ${SQLITE_ORM_PREFIX})
 
