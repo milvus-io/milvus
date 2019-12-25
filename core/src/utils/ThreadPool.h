@@ -27,6 +27,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "fiu-local.h"
 
 #define MAX_THREADS_NUM 32
 
@@ -89,7 +90,7 @@ ThreadPool::enqueue(F&& f, Args&&... args) -> std::future<typename std::result_o
 
     auto task = std::make_shared<std::packaged_task<return_type()> >(
         std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
+    fiu_do_on("ThreadPool.enqueue.stop_is_true", stop = true);
     std::future<return_type> res = task->get_future();
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);

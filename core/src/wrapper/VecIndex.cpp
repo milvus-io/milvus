@@ -38,6 +38,8 @@
 #include "wrapper/gpu/GPUVecImpl.h"
 #endif
 
+#include "fiu-local.h"
+
 namespace milvus {
 namespace engine {
 
@@ -204,6 +206,8 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 
 VecIndexPtr
 read_index(const std::string& location) {
+    fiu_return_on("read_null_index",nullptr);
+    fiu_do_on("vecIndex.throw_read_exception", throw std::exception());
     knowhere::BinarySet load_data_list;
     FileIOReader reader(location);
     reader.fs.seekg(0, reader.fs.end);

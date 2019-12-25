@@ -27,6 +27,9 @@
 #include "utils/ValidationUtil.h"
 
 #include <limits>
+#include <fiu-local.h>
+#include <fiu-control.h>
+
 
 namespace {
 
@@ -600,4 +603,423 @@ TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
 
     s = config.ResetDefaultConfig();
     ASSERT_TRUE(s.ok());
+}
+
+TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
+    fiu_init(0);
+
+    std::string config_path(CONFIG_PATH);
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
+    ASSERT_TRUE(s.ok());
+
+    fiu_enable("check_config_version_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_version_fail");
+
+    /* server config */
+    fiu_enable("check_config_address_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_address_fail");
+
+    fiu_enable("check_config_port_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_port_fail");
+
+    fiu_enable("check_config_deploy_mode_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_deploy_mode_fail");
+
+    fiu_enable("check_config_time_zone_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_time_zone_fail");
+
+    /* db config */
+    fiu_enable("check_config_primary_path_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_primary_path_fail");
+
+    fiu_enable("check_config_secondary_path_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_secondary_path_fail");
+
+    fiu_enable("check_config_backend_url_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_backend_url_fail");
+
+    fiu_enable("check_config_archive_disk_threshold_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_archive_disk_threshold_fail");
+
+    fiu_enable("check_config_archive_days_threshold_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_archive_days_threshold_fail");
+
+    fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_insert_buffer_size_fail");
+
+    /* metric config */
+
+    fiu_enable("check_config_enable_monitor_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_enable_monitor_fail");
+
+    fiu_enable("check_config_collector_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_collector_fail");
+
+    fiu_enable("check_config_promethus_port_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_promethus_port_fail");
+
+    /* cache config */
+    fiu_enable("check_config_cpu_cache_capacity_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_cpu_cache_capacity_fail");
+
+    fiu_enable("check_config_cpu_cache_threshold_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_cpu_cache_threshold_fail");
+
+    fiu_enable("check_config_cache_insert_data_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_cache_insert_data_fail");
+
+    /* engine config */
+    fiu_enable("check_config_use_blas_threshold_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_use_blas_threshold_fail");
+
+    fiu_enable("check_config_omp_thread_num_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_omp_thread_num_fail");
+
+
+#ifdef MILVUS_GPU_VERSION
+    fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_search_threshold_fail");
+
+    fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_enable_fail");
+
+    fiu_enable("check_gpu_resource_config_cache_capacity_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_gpu_resource_config_cache_capacity_fail");
+
+    fiu_enable("check_config_gpu_resource_cache_threshold_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_cache_threshold_fail");
+
+    fiu_enable("check_gpu_resource_config_search_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_gpu_resource_config_search_fail");
+
+    fiu_enable("check_gpu_resource_config_build_index_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_gpu_resource_config_build_index_fail");
+#endif
+
+    fiu_enable("get_config_json_config_path_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("get_config_json_config_path_fail");
+
+    s = config.ValidateConfig();
+    ASSERT_TRUE(s.ok());
+
+    fiu_enable("get_config_build_index_resources_empty_value_fail", 1, NULL, 0);
+    std::vector<int64_t> empty_value;
+    s =config.GetGpuResourceConfigBuildIndexResources(empty_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("get_config_build_index_resources_empty_value_fail");
+
+    fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
+    empty_value.clear();
+    s =config.GetGpuResourceConfigBuildIndexResources(empty_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_enable_fail");
+
+    fiu_enable("get_gpu_config_build_index_resources.disable_gpu_resource_fail", 1, NULL, 0);
+    empty_value.clear();
+    s =config.GetGpuResourceConfigBuildIndexResources(empty_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("get_gpu_config_build_index_resources.disable_gpu_resource_fail");
+
+    fiu_enable("get_gpu_config_search_resources.disable_gpu_resource_fail", 1, NULL, 0);
+    empty_value.clear();
+    s = config.GetGpuResourceConfigSearchResources(empty_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("get_gpu_config_search_resources.disable_gpu_resource_fail");
+
+    fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
+    empty_value.clear();
+    s = config.GetGpuResourceConfigSearchResources(empty_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_enable_fail");
+
+    fiu_enable("get_gpu_config_search_resources_empty_value_fail", 1, NULL, 0);
+    empty_value.clear();
+    s = config.GetGpuResourceConfigSearchResources(empty_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("get_gpu_config_search_resources_empty_value_fail");
+
+    int64_t value;
+    fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
+    s = config.GetGpuResourceConfigCacheCapacity(value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_enable_fail");
+
+    fiu_enable("Config.GetGpuResourceConfigCacheCapacity.diable_gpu_resource", 1, NULL, 0);
+    s = config.GetGpuResourceConfigCacheCapacity(value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("Config.GetGpuResourceConfigCacheCapacity.diable_gpu_resource");
+
+    fiu_enable("ValidationUtil.GetGpuMemory.return_error", 1, NULL, 0);
+    s = config.GetGpuResourceConfigCacheCapacity(value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("ValidationUtil.GetGpuMemory.return_error");
+
+    fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
+    s = config.GetCacheConfigCpuCacheCapacity(value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_insert_buffer_size_fail");
+
+    fiu_enable("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", 1, NULL, 0);
+    s = config.GetCacheConfigCpuCacheCapacity(value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer");
+
+
+    float  f_value;
+    fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
+    s = config.GetGpuResourceConfigCacheThreshold(f_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_enable_fail");
+
+    fiu_enable("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource", 1, NULL, 0);
+    s = config.GetGpuResourceConfigCacheThreshold(f_value);
+    ASSERT_FALSE(s.ok());
+    fiu_disable("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource");
+
+
+}
+
+TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
+    fiu_init(0);
+
+    std::string config_path(CONFIG_PATH);
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
+    ASSERT_TRUE(s.ok());
+
+    s = config.ValidateConfig();
+    ASSERT_TRUE(s.ok());
+
+    /* server config */
+    fiu_enable("check_config_address_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_address_fail");
+
+    fiu_enable("check_config_port_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_port_fail");
+
+    fiu_enable("check_config_deploy_mode_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_deploy_mode_fail");
+
+    fiu_enable("check_config_time_zone_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_time_zone_fail");
+
+    /* db config */
+    fiu_enable("check_config_primary_path_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_primary_path_fail");
+
+    fiu_enable("check_config_secondary_path_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_secondary_path_fail");
+
+    fiu_enable("check_config_backend_url_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_backend_url_fail");
+
+    fiu_enable("check_config_archive_disk_threshold_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_archive_disk_threshold_fail");
+
+    fiu_enable("check_config_archive_days_threshold_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_archive_days_threshold_fail");
+
+    fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_insert_buffer_size_fail");
+
+    /* metric config */
+
+    fiu_enable("check_config_enable_monitor_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_enable_monitor_fail");
+
+    fiu_enable("check_config_collector_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_collector_fail");
+
+    fiu_enable("check_config_promethus_port_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_promethus_port_fail");
+
+    /* cache config */
+    fiu_enable("check_config_cpu_cache_capacity_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_cpu_cache_capacity_fail");
+
+    fiu_enable("check_config_cpu_cache_threshold_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_cpu_cache_threshold_fail");
+
+    fiu_enable("check_config_cache_insert_data_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_cache_insert_data_fail");
+
+    /* engine config */
+    fiu_enable("check_config_use_blas_threshold_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_use_blas_threshold_fail");
+
+    fiu_enable("check_config_omp_thread_num_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_omp_thread_num_fail");
+
+
+#ifdef MILVUS_GPU_VERSION
+    fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_search_threshold_fail");
+
+    fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_enable_fail");
+
+    fiu_enable("check_gpu_resource_config_cache_capacity_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_gpu_resource_config_cache_capacity_fail");
+
+    fiu_enable("check_config_gpu_resource_cache_threshold_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_gpu_resource_cache_threshold_fail");
+
+    fiu_enable("check_gpu_resource_config_search_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_gpu_resource_config_search_fail");
+
+    fiu_enable("check_gpu_resource_config_build_index_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_gpu_resource_config_build_index_fail");
+#endif
+
+    s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok());
+}
+
+TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
+    fiu_init(0);
+
+    std::string config_path(CONFIG_PATH);
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    milvus::Status s;
+
+    std::string get_cmd, set_cmd;
+    std::string result, dummy;
+
+    s = config.ProcessConfigCli(result, "get_config");
+    ASSERT_FALSE(s.ok());
+
+    s = config.ProcessConfigCli(result, "get_config");
+    ASSERT_FALSE(s.ok());
+
+    s = config.ProcessConfigCli(result, "get_config 1");
+    ASSERT_FALSE(s.ok());
+
+    s = config.ProcessConfigCli(result, "get_config 1.1");
+    ASSERT_FALSE(s.ok());
+
+    std::string build_index_resources = "gpu0";
+
+    set_cmd =
+        gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources);
+    std::cout<<set_cmd<<std::endl;
+
+    s = config.ProcessConfigCli(dummy, set_cmd + " invalid");
+    ASSERT_FALSE(s.ok());
+
+    s = config.ProcessConfigCli(dummy, "set_config gpu_resource_config.build_index_resources.sss gpu0");
+    ASSERT_FALSE(s.ok());
+
+    s = config.ProcessConfigCli(dummy, "set_config gpu_resource_config_invalid.build_index_resources_invalid gpu0");
+    ASSERT_FALSE(s.ok());
+
+    s = config.ProcessConfigCli(dummy, "invalid_config gpu_resource_config.build_index_resources.sss gpu0");
+    ASSERT_FALSE(s.ok());
+
+#ifndef MILVUS_GPU_VERSION
+    s = config.ProcessConfigCli(dummy, gen_set_command(ms::CONFIG_TRACING, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources));
+    ASSERT_FALSE(s.ok());
+#endif
+
+
 }
