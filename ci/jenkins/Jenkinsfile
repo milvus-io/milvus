@@ -77,7 +77,6 @@ pipeline {
                                         steps {
                                             container("milvus-${BINARY_VERSION}-build-env") {
                                                 script {
-                                                    sh 'printenv'
                                                     load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                                 }
                                             }
