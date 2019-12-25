@@ -57,7 +57,7 @@ class IVF : public VectorIndex, public FaissBaseIndex {
     Search(const DatasetPtr& dataset, const Config& config) override;
 
     void
-    GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config);
+    GenGraph(const float* data, const int64_t& k, Graph& graph, const Config& config);
 
     BinarySet
     Serialize() override;
