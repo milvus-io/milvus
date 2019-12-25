@@ -175,6 +175,9 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     }
 
     cpu_mgr->PrintInfo();
+
+    cpu_mgr->ClearCache();
+    ASSERT_EQ(cpu_mgr->ItemCount(),0);
 }
 
 #ifdef MILVUS_GPU_VERSION

@@ -124,6 +124,7 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     ASSERT_EQ(seq.size(), 2UL);
 
     server_config.SetValue("fake", "fake");
+    server_config.AddChild("fake",fake);
     milvus::server::ConfigNode combine;
     combine.Combine(server_config);
 
