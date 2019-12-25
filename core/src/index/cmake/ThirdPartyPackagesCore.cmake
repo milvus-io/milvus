@@ -116,20 +116,6 @@ endif (UNIX)
 set(THIRDPARTY_DIR "${INDEX_SOURCE_DIR}/thirdparty")
 
 # ----------------------------------------------------------------------
-# JFrog
-if (NOT DEFINED USE_JFROG_CACHE)
-    set(USE_JFROG_CACHE "OFF")
-endif ()
-if (USE_JFROG_CACHE STREQUAL "ON")
-    set(JFROG_ARTFACTORY_CACHE_URL "${JFROG_ARTFACTORY_URL}/milvus/thirdparty/cache/${CMAKE_OS_NAME}/${KNOWHERE_BUILD_ARCH}/${BUILD_TYPE}")
-    set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
-    if (NOT EXISTS ${THIRDPARTY_PACKAGE_CACHE})
-        message(STATUS "Will create cached directory: ${THIRDPARTY_PACKAGE_CACHE}")
-        file(MAKE_DIRECTORY ${THIRDPARTY_PACKAGE_CACHE})
-    endif ()
-endif ()
-
-# ----------------------------------------------------------------------
 # ExternalProject options
 
 string(TOUPPER ${CMAKE_BUILD_TYPE} UPPERCASE_BUILD_TYPE)
@@ -284,71 +270,25 @@ macro(build_arrow)
             -DBOOST_SOURCE=AUTO #try to find BOOST in the system default locations and build from source if not found
             )
 
-
-    if (USE_JFROG_CACHE STREQUAL "ON")
-        execute_process(COMMAND sh -c "git ls-remote --heads --tags ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
-        if (${ARROW_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
-            string(MD5 ARROW_COMBINE_MD5 "${ARROW_LAST_COMMIT_ID}")
-            set(ARROW_CACHE_PACKAGE_NAME "arrow_${ARROW_COMBINE_MD5}.tar.gz")
-            set(ARROW_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ARROW_CACHE_PACKAGE_NAME}")
-            set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
-
-            execute_process(COMMAND wget -q --method HEAD ${ARROW_CACHE_URL} RESULT_VARIABLE return_code)
-            message(STATUS "Check the remote file ${ARROW_CACHE_URL}. return code = ${return_code}")
-            if (NOT return_code EQUAL 0)
-                externalproject_add(arrow_ep
-                        GIT_REPOSITORY
-                        ${ARROW_SOURCE_URL}
-                        GIT_TAG
-                        ${ARROW_VERSION}
-                        GIT_SHALLOW
-                        TRUE
-                        SOURCE_SUBDIR
-                        cpp
-                        ${EP_LOG_OPTIONS}
-                        CMAKE_ARGS
-                        ${ARROW_CMAKE_ARGS}
-                        BUILD_COMMAND
-                        ""
-                        INSTALL_COMMAND
-                        ${MAKE} ${MAKE_BUILD_ARGS} install
-                        BUILD_BYPRODUCTS
-                        "${ARROW_STATIC_LIB}"
-                        )
-
-                ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
-            else ()
-                file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
-                list(GET status 0 status_code)
-                message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-                if (status_code EQUAL 0)
-                    ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
-                endif ()
-            endif ()
-        else ()
-            message(FATAL_ERROR "The last commit ID of \"${ARROW_SOURCE_URL}\" repository don't match!")
-        endif ()
-    else ()
-        externalproject_add(arrow_ep
-                GIT_REPOSITORY
-                ${ARROW_SOURCE_URL}
-                GIT_TAG
-                ${ARROW_VERSION}
-                GIT_SHALLOW
-                TRUE
-                SOURCE_SUBDIR
-                cpp
-                ${EP_LOG_OPTIONS}
-                CMAKE_ARGS
-                ${ARROW_CMAKE_ARGS}
-                BUILD_COMMAND
-                ""
-                INSTALL_COMMAND
-                ${MAKE} ${MAKE_BUILD_ARGS} install
-                BUILD_BYPRODUCTS
-                "${ARROW_STATIC_LIB}"
-                )
-    endif ()
+    externalproject_add(arrow_ep
+            GIT_REPOSITORY
+            ${ARROW_SOURCE_URL}
+            GIT_TAG
+            ${ARROW_VERSION}
+            GIT_SHALLOW
+            TRUE
+            SOURCE_SUBDIR
+            cpp
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${ARROW_CMAKE_ARGS}
+            BUILD_COMMAND
+            ""
+            INSTALL_COMMAND
+            ${MAKE} ${MAKE_BUILD_ARGS} install
+            BUILD_BYPRODUCTS
+            "${ARROW_STATIC_LIB}"
+            )
 
     file(MAKE_DIRECTORY "${ARROW_INCLUDE_DIR}")
     add_library(arrow STATIC IMPORTED)
@@ -409,39 +349,6 @@ macro(build_gtest)
             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
 
-
-    if (USE_JFROG_CACHE STREQUAL "ON")
-        set(GTEST_CACHE_PACKAGE_NAME "googletest_${GTEST_MD5}.tar.gz")
-        set(GTEST_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${GTEST_CACHE_PACKAGE_NAME}")
-        set(GTEST_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${GTEST_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${GTEST_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${GTEST_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            ExternalProject_Add(googletest_ep
-                    URL
-                    ${GTEST_SOURCE_URL}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    BUILD_BYPRODUCTS
-                    ${GTEST_STATIC_LIB}
-                    ${GTEST_MAIN_STATIC_LIB}
-                    ${GMOCK_STATIC_LIB}
-                    CMAKE_ARGS
-                    ${GTEST_CMAKE_ARGS}
-                    ${EP_LOG_OPTIONS})
-
-            ExternalProject_Create_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/googletest_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GTEST_CACHE_URL})
-        else ()
-            file(DOWNLOAD ${GTEST_CACHE_URL} ${GTEST_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${GTEST_CACHE_URL} TO ${GTEST_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
-            endif ()
-        endif ()
-    else ()
         ExternalProject_Add(googletest_ep
                 URL
                 ${GTEST_SOURCE_URL}
@@ -455,7 +362,6 @@ macro(build_gtest)
                 CMAKE_ARGS
                 ${GTEST_CMAKE_ARGS}
                 ${EP_LOG_OPTIONS})
-    endif ()
 
     # The include directory must exist before it is referenced by a target.
     file(MAKE_DIRECTORY "${GTEST_INCLUDE_DIR}")
@@ -564,86 +470,40 @@ macro(build_faiss)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
     endif ()
 
-    if (USE_JFROG_CACHE STREQUAL "ON")
-        string(MD5 FAISS_COMBINE_MD5 "${FAISS_MD5}${LAPACK_MD5}${OPENBLAS_MD5}")
-        if (KNOWHERE_GPU_VERSION)
-            set(FAISS_COMPUTE_TYPE "gpu")
-        else ()
-            set(FAISS_COMPUTE_TYPE "cpu")
-        endif ()
-        if (FAISS_WITH_MKL)
-            set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMPUTE_TYPE}_mkl_${FAISS_COMBINE_MD5}.tar.gz")
-        else ()
-            set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMPUTE_TYPE}_openblas_${FAISS_COMBINE_MD5}.tar.gz")
-        endif ()
-        set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
-        set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${FAISS_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${FAISS_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(faiss_ep
-                    URL
-                    ${FAISS_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    "./configure"
-                    ${FAISS_CONFIGURE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE} ${MAKE_BUILD_ARGS} all
-                    BUILD_IN_SOURCE
-                    1
-                    INSTALL_COMMAND
-                    ${MAKE} install
-                    BUILD_BYPRODUCTS
-                    ${FAISS_STATIC_LIB})
-
-            ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
-        else ()
-            file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
-            endif ()
-        endif ()
+    if (CUSTOMIZATION)
+        externalproject_add(faiss_ep
+                DOWNLOAD_COMMAND
+                ""
+                SOURCE_DIR
+                ${FAISS_SOURCE_DIR}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${FAISS_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS} all
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${FAISS_STATIC_LIB})
     else ()
-        if (CUSTOMIZATION)
-            externalproject_add(faiss_ep
-                    DOWNLOAD_COMMAND
-                    ""
-                    SOURCE_DIR
-                    ${FAISS_SOURCE_DIR}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    "./configure"
-                    ${FAISS_CONFIGURE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE} ${MAKE_BUILD_ARGS} all
-                    BUILD_IN_SOURCE
-                    1
-                    INSTALL_COMMAND
-                    ${MAKE} install
-                    BUILD_BYPRODUCTS
-                    ${FAISS_STATIC_LIB})
-        else ()
-            externalproject_add(faiss_ep
-                    URL
-                    ${FAISS_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    "./configure"
-                    ${FAISS_CONFIGURE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE} ${MAKE_BUILD_ARGS} all
-                    BUILD_IN_SOURCE
-                    1
-                    INSTALL_COMMAND
-                    ${MAKE} install
-                    BUILD_BYPRODUCTS
-                    ${FAISS_STATIC_LIB})
-        endif ()
-
+        externalproject_add(faiss_ep
+                URL
+                ${FAISS_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${FAISS_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS} all
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${FAISS_STATIC_LIB})
     endif ()
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
