@@ -19,8 +19,6 @@ set(KNOWHERE_THIRDPARTY_DEPENDENCIES
         Arrow
         FAISS
         GTest
-        LAPACK
-        OpenBLAS
         MKL
         )
 
@@ -36,12 +34,8 @@ endforeach ()
 macro(build_dependency DEPENDENCY_NAME)
     if ("${DEPENDENCY_NAME}" STREQUAL "Arrow")
         build_arrow()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "LAPACK")
-        build_lapack()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
         build_gtest()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
-        build_openblas()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "FAISS")
         build_faiss()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "MKL")
@@ -248,21 +242,6 @@ else ()
 endif ()
 set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
 
-if (DEFINED ENV{KNOWHERE_LAPACK_URL})
-    set(LAPACK_SOURCE_URL "$ENV{KNOWHERE_LAPACK_URL}")
-else ()
-    set(LAPACK_SOURCE_URL "https://github.com/Reference-LAPACK/lapack/archive/${LAPACK_VERSION}.tar.gz")
-endif ()
-set(LAPACK_MD5 "96591affdbf58c450d45c1daa540dbd2")
-
-if (DEFINED ENV{KNOWHERE_OPENBLAS_URL})
-    set(OPENBLAS_SOURCE_URL "$ENV{KNOWHERE_OPENBLAS_URL}")
-else ()
-    set(OPENBLAS_SOURCE_URL
-            "https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz")
-endif ()
-set(OPENBLAS_MD5 "8a110a25b819a4b94e8a9580702b6495")
-
 # ----------------------------------------------------------------------
 # ARROW
 set(ARROW_PREFIX "${INDEX_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
@@ -394,153 +373,6 @@ if (KNOWHERE_WITH_ARROW AND NOT TARGET arrow_ep)
     link_directories(SYSTEM ${ARROW_LIB_DIR})
     include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 endif ()
-
-# ----------------------------------------------------------------------
-# OpenBLAS
-
-macro(build_openblas)
-    message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
-    set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
-    set(OPENBLAS_STATIC_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(OPENBLAS_REAL_STATIC_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas_haswellp-r0.3.6${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    if (USE_JFROG_CACHE STREQUAL "ON")
-        set(OPENBLAS_CACHE_PACKAGE_NAME "openblas_${OPENBLAS_MD5}.tar.gz")
-        set(OPENBLAS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${OPENBLAS_CACHE_PACKAGE_NAME}")
-        set(OPENBLAS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${OPENBLAS_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${OPENBLAS_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${OPENBLAS_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(openblas_ep
-                    URL
-                    ${OPENBLAS_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    ""
-                    BUILD_IN_SOURCE
-                    1
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    INSTALL_COMMAND
-                    ${MAKE}
-                    PREFIX=${OPENBLAS_PREFIX}
-                    install
-                    BUILD_BYPRODUCTS
-                    ${OPENBLAS_STATIC_LIB})
-
-            ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
-        else ()
-            file(DOWNLOAD ${OPENBLAS_CACHE_URL} ${OPENBLAS_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${OPENBLAS_CACHE_URL} TO ${OPENBLAS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
-            endif ()
-        endif ()
-    else ()
-        externalproject_add(openblas_ep
-                URL
-                ${OPENBLAS_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                CONFIGURE_COMMAND
-                ""
-                BUILD_IN_SOURCE
-                1
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                INSTALL_COMMAND
-                ${MAKE}
-                PREFIX=${OPENBLAS_PREFIX}
-                install
-                BUILD_BYPRODUCTS
-                ${OPENBLAS_STATIC_LIB})
-    endif ()
-
-    file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
-    add_library(openblas STATIC IMPORTED)
-    set_target_properties(
-            openblas
-            PROPERTIES IMPORTED_LOCATION "${OPENBLAS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENBLAS_INCLUDE_DIR}")
-
-    add_dependencies(openblas openblas_ep)
-endmacro()
-
-# ----------------------------------------------------------------------
-# LAPACK
-
-macro(build_lapack)
-    message(STATUS "Building LAPACK-${LAPACK_VERSION} from source")
-    set(LAPACK_PREFIX "${INDEX_BINARY_DIR}/lapack_ep-prefix/src/lapack_ep")
-    set(LAPACK_INCLUDE_DIR "${LAPACK_PREFIX}/include")
-    set(LAPACK_STATIC_LIB
-            "${LAPACK_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}lapack${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(BLAS_STATIC_LIB
-            "${LAPACK_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}blas${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    set(LAPACK_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            "-DCMAKE_INSTALL_PREFIX=${LAPACK_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib)
-
-    if (USE_JFROG_CACHE STREQUAL "ON")
-        set(LAPACK_CACHE_PACKAGE_NAME "lapack_${LAPACK_MD5}.tar.gz")
-        set(LAPACK_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LAPACK_CACHE_PACKAGE_NAME}")
-        set(LAPACK_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LAPACK_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${LAPACK_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${LAPACK_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(lapack_ep
-                    URL
-                    ${LAPACK_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CMAKE_ARGS
-                    ${LAPACK_CMAKE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    BUILD_BYPRODUCTS
-                    ${LAPACK_STATIC_LIB})
-
-            ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
-        else ()
-            file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
-            endif ()
-        endif ()
-    else ()
-        externalproject_add(lapack_ep
-                URL
-                ${LAPACK_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                CMAKE_ARGS
-                ${LAPACK_CMAKE_ARGS}
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                BUILD_BYPRODUCTS
-                ${LAPACK_STATIC_LIB})
-    endif ()
-
-    file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
-    add_library(lapack STATIC IMPORTED)
-    set_target_properties(
-            lapack
-            PROPERTIES IMPORTED_LOCATION "${LAPACK_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${LAPACK_INCLUDE_DIR}")
-
-    add_dependencies(lapack lapack_ep)
-endmacro()
 
 # ----------------------------------------------------------------------
 # Google gtest
@@ -766,10 +598,6 @@ macro(build_faiss)
                     BUILD_BYPRODUCTS
                     ${FAISS_STATIC_LIB})
 
-            if (NOT FAISS_WITH_MKL)
-                ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
-            endif ()
-
             ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
         else ()
             file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
@@ -816,10 +644,6 @@ macro(build_faiss)
                     ${FAISS_STATIC_LIB})
         endif ()
 
-        if (NOT FAISS_WITH_MKL)
-            ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
-        endif ()
-
     endif ()
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
@@ -840,7 +664,7 @@ macro(build_faiss)
         set_target_properties(
                 faiss
                 PROPERTIES
-                INTERFACE_LINK_LIBRARIES "openblas;lapack")
+                INTERFACE_LINK_LIBRARIES ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
     endif ()
 
 
@@ -853,15 +677,15 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
     if (FAISS_WITH_MKL)
         resolve_dependency(MKL)
     else ()
-        resolve_dependency(OpenBLAS)
-        get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-        include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-        link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
+        #    set(BLA_STATIC ON)
+        set(BLA_VENDOR OpenBLAS)
+        find_package(BLAS REQUIRED)
+        #        message(STATUS ${BLAS_LINKER_FLAGS})
+        #        message(STATUS ${BLAS_LIBRARIES})
+        find_package(LAPACK REQUIRED)
+        #        message(STATUS ${LAPACK_LINKER_FLAGS})
+        #        message(STATUS ${LAPACK_LIBRARIES})
 
-        resolve_dependency(LAPACK)
-        get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
-        include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
-        link_directories(SYSTEM "${LAPACK_PREFIX}/lib")
     endif ()
 
     resolve_dependency(FAISS)

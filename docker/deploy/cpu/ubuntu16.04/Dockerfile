@@ -1,7 +1,7 @@
 FROM ubuntu:16.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 && \
+    gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 libopenblas-dev liblapack3 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
