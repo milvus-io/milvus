@@ -99,7 +99,7 @@ CommonUtil::CreateDirectory(const std::string& path) {
     fs::path fs_path(path);
     fs::path parent_path = fs_path.parent_path();
     Status err_status = CreateDirectory(parent_path.string());
-    fiu_do_on("CommonUtil.CreateDirectory.create_parent_fail", err_status = Status(SERVER_INVALID_ARGUMENT,""));
+    fiu_do_on("CommonUtil.CreateDirectory.create_parent_fail", err_status = Status(SERVER_INVALID_ARGUMENT, ""));
     if (!err_status.ok()) {
         return err_status;
     }
@@ -197,7 +197,7 @@ CommonUtil::GetExePath() {
     buf[cnt] = '\0';
 
     std::string exe_path = buf;
-    fiu_do_on("CommonUtil.GetExePath.exe_path_error", exe_path="");
+    fiu_do_on("CommonUtil.GetExePath.exe_path_error", exe_path = "");
     if (exe_path.rfind('/') != exe_path.length()) {
         std::string sub_str = exe_path.substr(0, exe_path.rfind('/'));
         return sub_str + "/";

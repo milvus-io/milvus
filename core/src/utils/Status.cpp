@@ -109,19 +109,26 @@ Status::ToString() const {
 
     std::string result;
     switch (code()) {
-        case DB_SUCCESS:result = "OK ";
+        case DB_SUCCESS:
+            result = "OK ";
             break;
-        case DB_ERROR:result = "Error: ";
+        case DB_ERROR:
+            result = "Error: ";
             break;
-        case DB_META_TRANSACTION_FAILED:result = "Database error: ";
+        case DB_META_TRANSACTION_FAILED:
+            result = "Database error: ";
             break;
-        case DB_NOT_FOUND:result = "Not found: ";
+        case DB_NOT_FOUND:
+            result = "Not found: ";
             break;
-        case DB_ALREADY_EXIST:result = "Already exist: ";
+        case DB_ALREADY_EXIST:
+            result = "Already exist: ";
             break;
-        case DB_INVALID_PATH:result = "Invalid path: ";
+        case DB_INVALID_PATH:
+            result = "Invalid path: ";
             break;
-        default:result = "Error code(" + std::to_string(code()) + "): ";
+        default:
+            result = "Error code(" + std::to_string(code()) + "): ";
             break;
     }
 

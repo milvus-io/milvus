@@ -555,8 +555,7 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 
 Status
 Config::CheckDBConfigPrimaryPath(const std::string& value) {
-    fiu_return_on("check_config_primary_path_fail",
-                  Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_return_on("check_config_primary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "db_config.db_path is empty.");
@@ -566,8 +565,7 @@ Config::CheckDBConfigPrimaryPath(const std::string& value) {
 
 Status
 Config::CheckDBConfigSecondaryPath(const std::string& value) {
-    fiu_return_on("check_config_secondary_path_fail",
-                  Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     return Status::OK();
 }
 
@@ -1307,7 +1305,7 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         std::ifstream tracer_config(value);
         Status s = tracer_config.good() ? Status::OK()
                                         : Status(SERVER_INVALID_ARGUMENT, "Failed to open tracer config file " + value +
-                                                                          ": " + std::strerror(errno));
+                                                                              ": " + std::strerror(errno));
         tracer_config.close();
         return s;
     }

@@ -254,7 +254,8 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
     fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
-        case 1:return Status::OK();
+        case 1:
+            return Status::OK();
         case 0: {
             std::string msg = "Invalid IP address: " + ip_address;
             SERVER_LOG_ERROR << msg;
