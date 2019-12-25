@@ -27,7 +27,6 @@
 #include "utils/ThreadPool.h"
 #include "utils/SignalUtil.h"
 
-
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -116,7 +115,6 @@ TEST(UtilTest, COMMON_TEST) {
     exe_path = milvus::server::CommonUtil::GetExePath();
     ASSERT_FALSE(exe_path.empty());
     fiu_disable("CommonUtil.GetExePath.exe_path_error");
-
 
     fiu_enable("CommonUtil.CreateDirectory.create_parent_fail", 1, NULL, 0);
     status = milvus::server::CommonUtil::CreateDirectory(path3);
@@ -353,7 +351,6 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
         ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexType(i).code(), milvus::SERVER_SUCCESS);
     }
 
-
     ASSERT_EQ(
         milvus::server::ValidationUtil::ValidateTableIndexType((int)milvus::engine::EngineType::MAX_VALUE + 1).code(),
         milvus::SERVER_INVALID_INDEX_TYPE);
@@ -407,6 +404,7 @@ TEST(ValidationUtilTest, VALIDATE_GPU_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::GetGpuMemory(0, memory).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::GetGpuMemory(100, memory).code(), milvus::SERVER_SUCCESS);
 }
+
 #endif
 
 TEST(ValidationUtilTest, VALIDATE_IPADDRESS_TEST) {
@@ -456,10 +454,10 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
     std::string dir1 = "/tmp/milvus_test";
     std::string dir2 = "/tmp/milvus_test/log_test";
     std::string filename[6] = {"log_global.log", "log_debug.log", "log_warning.log",
-                               "log_trace.log",  "log_error.log", "log_fatal.log"};
+                               "log_trace.log", "log_error.log", "log_fatal.log"};
 
     el::Level list[6] = {el::Level::Global, el::Level::Debug, el::Level::Warning,
-                         el::Level::Trace,  el::Level::Error, el::Level::Fatal};
+                         el::Level::Trace, el::Level::Error, el::Level::Fatal};
 
     mkdir(dir1.c_str(), S_IRWXU);
     mkdir(dir2.c_str(), S_IRWXU);
@@ -485,19 +483,19 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
 
 TEST(UtilTest, THREADPOOL_TEST) {
     auto thread_pool_ptr = std::make_unique<milvus::ThreadPool>(3);
-    auto fun = [](int i){
+    auto fun = [](int i) {
         sleep(1);
     };
-    for(int i = 0; i < 10; ++i){
+    for (int i = 0; i < 10; ++i) {
         thread_pool_ptr->enqueue(fun, i);
     }
 
     fiu_init(0);
     fiu_enable("ThreadPool.enqueue.stop_is_true", 1, NULL, 0);
-    try{
+    try {
         thread_pool_ptr->enqueue(fun, -1);
-    } catch (std::exception & err){
-        std::cout<<"catch an error here"<<std::endl;
+    } catch (std::exception& err) {
+        std::cout << "catch an error here" << std::endl;
     }
     fiu_disable("ThreadPool.enqueue.stop_is_true");
 

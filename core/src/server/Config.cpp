@@ -32,6 +32,7 @@
 #include "utils/ValidationUtil.h"
 
 #include "fiu-local.h"
+
 namespace milvus {
 namespace server {
 
@@ -488,7 +489,7 @@ Config::CheckConfigVersion(const std::string& value) {
 
 Status
 Config::CheckServerConfigAddress(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateIpAddress(value).ok();
+    auto exist_error = !ValidationUtil::ValidateIpAddress(value).ok();
     fiu_do_on("check_config_address_fail", exist_error = true);
 
     if (exist_error) {
@@ -501,7 +502,7 @@ Config::CheckServerConfigAddress(const std::string& value) {
 
 Status
 Config::CheckServerConfigPort(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_port_fail", exist_error = true);
 
     if (exist_error) {
@@ -521,8 +522,8 @@ Config::CheckServerConfigPort(const std::string& value) {
 Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
     fiu_return_on("check_config_deploy_mode_fail",
-        Status(SERVER_INVALID_ARGUMENT,
-            "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable."));
+                  Status(SERVER_INVALID_ARGUMENT,
+                         "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable."));
 
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
@@ -534,7 +535,7 @@ Config::CheckServerConfigDeployMode(const std::string& value) {
 Status
 Config::CheckServerConfigTimeZone(const std::string& value) {
     fiu_return_on("check_config_time_zone_fail",
-        Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value));
+                  Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value));
 
     if (value.length() <= 3) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
@@ -572,7 +573,7 @@ Config::CheckDBConfigSecondaryPath(const std::string& value) {
 
 Status
 Config::CheckDBConfigBackendUrl(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateDbURI(value).ok();
+    auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
     fiu_do_on("check_config_backend_url_fail", exist_error = true);
 
     if (exist_error) {
@@ -586,7 +587,7 @@ Config::CheckDBConfigBackendUrl(const std::string& value) {
 
 Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_archive_disk_threshold_fail", exist_error = true);
 
     if (exist_error) {
@@ -599,7 +600,7 @@ Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
 
 Status
 Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_archive_days_threshold_fail", exist_error = true);
 
     if (exist_error) {
@@ -612,7 +613,7 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
 
 Status
 Config::CheckDBConfigInsertBufferSize(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_insert_buffer_size_fail", exist_error = true);
 
     if (exist_error) {
@@ -640,7 +641,7 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
 
 Status
 Config::CheckMetricConfigEnableMonitor(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateStringIsBool(value).ok();
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
     fiu_do_on("check_config_enable_monitor_fail", exist_error = true);
 
     if (exist_error) {
@@ -666,7 +667,7 @@ Config::CheckMetricConfigCollector(const std::string& value) {
 
 Status
 Config::CheckMetricConfigPrometheusPort(const std::string& value) {
-    auto exist_error= !ValidationUtil::ValidateStringIsNumber(value).ok();
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
     fiu_do_on("check_config_promethus_port_fail", exist_error = true);
 
     if (exist_error) {
@@ -786,6 +787,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
     fiu_return_on("check_config_gpu_search_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
@@ -927,6 +929,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     return Status::OK();
 }
+
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1168,6 +1171,7 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     std::string str =
@@ -1291,18 +1295,19 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     }
     return Status::OK();
 }
+
 #endif
 
 /* tracing config */
 Status
 Config::GetTracingConfigJsonConfigPath(std::string& value) {
     value = GetConfigStr(CONFIG_TRACING, CONFIG_TRACING_JSON_CONFIG_PATH, "");
-    fiu_do_on("get_config_json_config_path_fail", value="error_config_json_path");
+    fiu_do_on("get_config_json_config_path_fail", value = "error_config_json_path");
     if (!value.empty()) {
         std::ifstream tracer_config(value);
         Status s = tracer_config.good() ? Status::OK()
                                         : Status(SERVER_INVALID_ARGUMENT, "Failed to open tracer config file " + value +
-                                                                              ": " + std::strerror(errno));
+                                                                          ": " + std::strerror(errno));
         tracer_config.close();
         return s;
     }
@@ -1496,6 +1501,7 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 /* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {

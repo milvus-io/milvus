@@ -44,7 +44,7 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
     std::string s(base);
     std::stringstream ss;
     std::string list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<",
-                          ">",  "|", "^",  "&",  "$", "#",  "!", "`", "~"};
+                          ">", "|", "^", "&", "$", "#", "!", "`", "~"};
     std::string::size_type position;
     for (auto substr : list) {
         position = 0;

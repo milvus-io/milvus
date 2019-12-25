@@ -30,7 +30,6 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
-
 namespace {
 
 static constexpr uint64_t KB = 1024;
@@ -313,12 +312,14 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 #endif
 }
 
-std::string gen_get_command(const std::string& parent_node, const std::string& child_node) {
+std::string
+gen_get_command(const std::string& parent_node, const std::string& child_node) {
     std::string cmd = "get_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
     return cmd;
 }
 
-std::string gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
+std::string
+gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
     std::string cmd = "set_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
     return cmd;
 }
@@ -714,7 +715,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_omp_thread_num_fail");
 
-
 #ifdef MILVUS_GPU_VERSION
     fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
     s = config.ValidateConfig();
@@ -757,19 +757,19 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
 
     fiu_enable("get_config_build_index_resources_empty_value_fail", 1, NULL, 0);
     std::vector<int64_t> empty_value;
-    s =config.GetGpuResourceConfigBuildIndexResources(empty_value);
+    s = config.GetGpuResourceConfigBuildIndexResources(empty_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("get_config_build_index_resources_empty_value_fail");
 
     fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
     empty_value.clear();
-    s =config.GetGpuResourceConfigBuildIndexResources(empty_value);
+    s = config.GetGpuResourceConfigBuildIndexResources(empty_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_gpu_resource_enable_fail");
 
     fiu_enable("get_gpu_config_build_index_resources.disable_gpu_resource_fail", 1, NULL, 0);
     empty_value.clear();
-    s =config.GetGpuResourceConfigBuildIndexResources(empty_value);
+    s = config.GetGpuResourceConfigBuildIndexResources(empty_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("get_gpu_config_build_index_resources.disable_gpu_resource_fail");
 
@@ -817,8 +817,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer");
 
-
-    float  f_value;
+    float f_value;
     fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
     s = config.GetGpuResourceConfigCacheThreshold(f_value);
     ASSERT_FALSE(s.ok());
@@ -828,7 +827,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.GetGpuResourceConfigCacheThreshold(f_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource");
-
 
 }
 
@@ -939,7 +937,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_omp_thread_num_fail");
 
-
 #ifdef MILVUS_GPU_VERSION
     fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
@@ -1002,7 +999,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
 
     set_cmd =
         gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources);
-    std::cout<<set_cmd<<std::endl;
+    std::cout << set_cmd << std::endl;
 
     s = config.ProcessConfigCli(dummy, set_cmd + " invalid");
     ASSERT_FALSE(s.ok());
@@ -1020,6 +1017,5 @@ TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
     s = config.ProcessConfigCli(dummy, gen_set_command(ms::CONFIG_TRACING, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources));
     ASSERT_FALSE(s.ok());
 #endif
-
 
 }

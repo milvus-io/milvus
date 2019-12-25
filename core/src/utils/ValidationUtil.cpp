@@ -21,14 +21,19 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
+
 #ifdef MILVUS_GPU_VERSION
+
 #include <cuda_runtime.h>
+
 #endif
+
 #include <algorithm>
 #include <cmath>
 #include <regex>
 #include <string>
 #include "fiu-local.h"
+
 namespace milvus {
 namespace server {
 
@@ -221,6 +226,7 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     fiu_return_on("ValidationUtil.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
@@ -237,6 +243,7 @@ ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     memory = deviceProp.totalGlobalMem;
     return Status::OK();
 }
+
 #endif
 
 Status
@@ -244,11 +251,10 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
     struct in_addr address;
 
     int result = inet_pton(AF_INET, ip_address.c_str(), &address);
-    fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result",result = 2);
+    fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
-        case 1:
-            return Status::OK();
+        case 1:return Status::OK();
         case 0: {
             std::string msg = "Invalid IP address: " + ip_address;
             SERVER_LOG_ERROR << msg;
@@ -278,7 +284,7 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
 
 Status
 ValidationUtil::ValidateStringIsBool(const std::string& str) {
-    fiu_return_on("ValidateStringNotBool",Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str));
+    fiu_return_on("ValidateStringNotBool", Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str));
     std::string s = str;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     if (s == "true" || s == "on" || s == "yes" || s == "1" || s == "false" || s == "off" || s == "no" || s == "0" ||
