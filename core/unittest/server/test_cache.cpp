@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <fiu-control.h>
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "utils/Error.h"
@@ -173,6 +174,9 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     }
 
     cpu_mgr->PrintInfo();
+
+    cpu_mgr->ClearCache();
+    ASSERT_EQ(cpu_mgr->ItemCount(), 0);
 }
 
 #ifdef MILVUS_GPU_VERSION

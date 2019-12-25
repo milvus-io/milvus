@@ -48,9 +48,7 @@ DeleteJob::ResourceDone() {
 json
 DeleteJob::Dump() const {
     json ret{
-        {"table_id", table_id_},
-        {"number_of_resource", num_resource_},
-        {"number_of_done", done_resource},
+        {"table_id", table_id_}, {"number_of_resource", num_resource_}, {"number_of_done", done_resource},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());

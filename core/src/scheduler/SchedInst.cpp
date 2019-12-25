@@ -52,7 +52,7 @@ load_simple_config() {
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
-    // get resources
+// get resources
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;
     server::Config& config = server::Config::GetInstance();
