@@ -23,9 +23,9 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogBuffer::MXLogBuffer(uint64_t &buffer_size, const std::string &mxlog_path, const std::string &file_no)
+MXLogBuffer::MXLogBuffer(uint64_t &buffer_size, const std::string &mxlog_path, const std::string &file_no, const std::string& mode)
 : mxlog_buffer_size_(buffer_size)
-, mxlog_writer_(mxlog_path, file_no)
+, mxlog_writer_(mxlog_path, file_no, mode)
 {
     __glibcxx_assert(mxlog_buffer_size_ >= 0);
     mxlog_buffer_size_ = std::max(mxlog_buffer_size_, (uint64_t)WAL_BUFFER_MIN_SIZE * 1024 * 1024);
@@ -146,7 +146,6 @@ bool MXLogBuffer::Append(const std::string &table_id,
     mxlog_buffer_writer_.buf_offset = current_write_offset;
     mxlog_buffer_writer_.lsn = lsn;
     mxlog_writer_.Write(buf_[mxlog_buffer_writer_.buf_idx].get(), record_size);//default async flush
-    if ()
     return true;
 }
 
