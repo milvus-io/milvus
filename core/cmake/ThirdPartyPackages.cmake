@@ -620,7 +620,7 @@ macro(build_sqlite_orm)
             list(GET status 1 status_string)
 
             if(status_code EQUAL 0)
-                message(STATUS "Downloading ... done")
+                message(STATUS "Downloading SQLITE_ORM ... done")
                 set(IS_EXIST_FILE TRUE)
                 break()
             else()
