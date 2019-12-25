@@ -73,8 +73,7 @@ IVF::Add(const DatasetPtr& dataset, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset)
 
-    auto array = dataset->array()[0];
-    auto p_ids = array->data()->GetValues<int64_t>(1, 0);
+    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -121,10 +120,13 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
 
     try {
         auto elems = rows * search_cfg->k;
-        auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
-        auto res_dis = (float*)malloc(sizeof(float) * elems);
 
-        search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
+
+        search_impl(rows, (float*)p_data, search_cfg->k, p_dist, p_id, config);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -139,23 +141,10 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
         //    std::cout << ss_res_id.str() << std::endl;
         //    std::cout << ss_res_dist.str() << std::endl << std::endl;
 
-        //    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
-        //    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
-        //
-        //    std::vector<BufferPtr> id_bufs{nullptr, id_buf};
-        //    std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
-        //
-        //    auto int64_type = std::make_shared<arrow::Int64Type>();
-        //    auto float_type = std::make_shared<arrow::FloatType>();
-        //
-        //    auto id_array_data = arrow::ArrayData::Make(int64_type, elems, id_bufs);
-        //    auto dist_array_data = arrow::ArrayData::Make(float_type, elems, dist_bufs);
-        //
-        //    auto ids = std::make_shared<NumericArray<arrow::Int64Type>>(id_array_data);
-        //    auto dists = std::make_shared<NumericArray<arrow::FloatType>>(dist_array_data);
-        //    std::vector<ArrayPtr> array{ids, dists};
-
-        return std::make_shared<Dataset>((void*)res_ids, (void*)res_dis);
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+        return ret_ds;
     } catch (faiss::FaissException& e) {
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
@@ -195,7 +184,7 @@ IVF::Dimension() {
 }
 
 void
-IVF::GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config) {
+IVF::GenGraph(const float* data, const int64_t& k, Graph& graph, const Config& config) {
     int64_t K = k + 1;
     auto ntotal = Count();
 
