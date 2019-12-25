@@ -86,14 +86,14 @@ class BFIndex : public VecIndexImpl {
     ErrorCode
     Build(const Config& cfg);
 
-    float*
+    const float*
     GetRawVectors();
 
     Status
     BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
              const float* xt) override;
 
-    int64_t*
+    const int64_t*
     GetRawIds();
 };
 

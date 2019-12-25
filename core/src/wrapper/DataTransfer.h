@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include "knowhere/common/Dataset.h"
 
 namespace milvus {
 namespace engine {

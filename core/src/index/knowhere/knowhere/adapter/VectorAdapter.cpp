@@ -15,38 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "knowhere/common/Dataset.h"
+#include "knowhere/adapter/VectorAdapter.h"
 
 namespace knowhere {
 
-extern ArrayPtr
-ConstructInt64ArraySmart(uint8_t* data, int64_t size);
-
-extern ArrayPtr
-ConstructFloatArraySmart(uint8_t* data, int64_t size);
-
-extern TensorPtr
-ConstructFloatTensorSmart(uint8_t* data, int64_t size, std::vector<int64_t> shape);
-
-extern ArrayPtr
-ConstructInt64Array(uint8_t* data, int64_t size);
-
-extern ArrayPtr
-ConstructFloatArray(uint8_t* data, int64_t size);
-
-extern TensorPtr
-ConstructFloatTensor(uint8_t* data, int64_t size, std::vector<int64_t> shape);
-
-extern FieldPtr
-ConstructInt64Field(const std::string& name);
-
-extern FieldPtr
-ConstructFloatField(const std::string& name);
+namespace meta {
+const char* DIM = "dim";
+const char* TENSOR = "tensor";
+const char* ROWS = "rows";
+const char* IDS = "ids";
+const char* DISTANCE = "distance";
+};  // namespace meta
 
 }  // namespace knowhere
