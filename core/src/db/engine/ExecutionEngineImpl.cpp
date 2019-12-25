@@ -34,7 +34,7 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
+#include "fiu-local.h"
 //#define ON_SEARCH
 namespace milvus {
 namespace engine {

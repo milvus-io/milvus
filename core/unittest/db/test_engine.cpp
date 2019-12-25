@@ -22,6 +22,8 @@
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngineImpl.h"
 #include "db/utils.h"
+#include "fiu-local.h"
+#include "fiu-control.h"
 
 TEST_F(EngineTest, FACTORY_TEST) {
     {
@@ -108,6 +110,9 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->Dimension(), dimension);
     ASSERT_EQ(engine_ptr->Count(), ids.size());
 
+    ASSERT_EQ(engine_ptr->GetLocation(), file_path);
+    ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
+
     status = engine_ptr->CopyToGpu(0, false);
     // ASSERT_TRUE(status.ok());
 
@@ -122,4 +127,45 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
     // ASSERT_TRUE(status.ok());
+}
+
+TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
+    uint16_t dimension = 64;
+    std::string file_path = "/tmp/milvus_index_1";
+    auto engine_ptr = milvus::engine::EngineFactory::Build(
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+
+
+    fiu_init(0); // init
+    fiu_enable("read_null_index", 1, NULL, 0);
+
+    engine_ptr->Load(true);
+    engine_ptr->Count();
+
+    engine_ptr->Dimension();
+
+
+    fiu_disable("read_null_index");
+}
+
+
+TEST_F(EngineTest, ENGINE_IMPL_THROW_EXCEPTION_TEST) {
+    uint16_t dimension = 64;
+    std::string file_path = "/tmp/invalid_file";
+    fiu_init(0); // init
+    fiu_enable("ValidateStringNotBool", 1, NULL, 0);
+
+    auto engine_ptr = milvus::engine::EngineFactory::Build(
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+
+    fiu_disable("ValidateStringNotBool");
+
+    fiu_init(0); // init
+    fiu_enable("vecIndex.throw_read_exception", 1, NULL, 0);
+
+    engine_ptr->Load(true);
+    engine_ptr->CopyToGpu(0, true);
+    engine_ptr->CopyToCpu();
+
+    fiu_disable("vecIndex.throw_read_exception");
 }

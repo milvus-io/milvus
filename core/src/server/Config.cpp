@@ -31,6 +31,8 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
+#include "fiu-local.h"
+
 namespace milvus {
 namespace server {
 
@@ -56,15 +58,10 @@ Config::LoadConfigFile(const std::string& filename) {
         return Status(SERVER_FILE_NOT_FOUND, str);
     }
 
-    try {
-        ConfigMgr* mgr = YamlConfigMgr::GetInstance();
-        Status s = mgr->LoadConfigFile(filename);
-        if (!s.ok()) {
-            return s;
-        }
-    } catch (YAML::Exception& e) {
-        std::string str = "Exception occurs when loading config file: " + filename;
-        return Status(SERVER_UNEXPECTED_ERROR, str);
+    ConfigMgr* mgr = YamlConfigMgr::GetInstance();
+    Status s = mgr->LoadConfigFile(filename);
+    if (!s.ok()) {
+        return s;
     }
 
     return Status::OK();
@@ -480,9 +477,11 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
 ////////////////////////////////////////////////////////////////////////////////
 Status
 Config::CheckConfigVersion(const std::string& value) {
-    if (milvus_config_version_map.at(MILVUS_VERSION) != value) {
-        std::string msg = "Invalid config version: " + value + ". Expected config version: " +
-                          milvus_config_version_map.at(MILVUS_VERSION);
+    bool exist_error = milvus_config_version_map.at(MILVUS_VERSION) != value;
+    fiu_do_on("check_config_version_fail", exist_error = true);
+    if (exist_error) {
+        std::string msg = "Invalid config version: " + value +
+                          ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -490,7 +489,10 @@ Config::CheckConfigVersion(const std::string& value) {
 
 Status
 Config::CheckServerConfigAddress(const std::string& value) {
-    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateIpAddress(value).ok();
+    fiu_do_on("check_config_address_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg =
             "Invalid server IP address: " + value + ". Possible reason: server_config.address is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -500,7 +502,10 @@ Config::CheckServerConfigAddress(const std::string& value) {
 
 Status
 Config::CheckServerConfigPort(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_port_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid server port: " + value + ". Possible reason: server_config.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
@@ -516,6 +521,10 @@ Config::CheckServerConfigPort(const std::string& value) {
 
 Status
 Config::CheckServerConfigDeployMode(const std::string& value) {
+    fiu_return_on("check_config_deploy_mode_fail",
+                  Status(SERVER_INVALID_ARGUMENT,
+                         "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable."));
+
     if (value != "single" && value != "cluster_readonly" && value != "cluster_writable") {
         return Status(SERVER_INVALID_ARGUMENT,
                       "server_config.deploy_mode is not one of single, cluster_readonly, and cluster_writable.");
@@ -525,6 +534,9 @@ Config::CheckServerConfigDeployMode(const std::string& value) {
 
 Status
 Config::CheckServerConfigTimeZone(const std::string& value) {
+    fiu_return_on("check_config_time_zone_fail",
+                  Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value));
+
     if (value.length() <= 3) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
     } else {
@@ -543,6 +555,8 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 
 Status
 Config::CheckDBConfigPrimaryPath(const std::string& value) {
+    fiu_return_on("check_config_primary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "db_config.db_path is empty.");
     }
@@ -551,12 +565,16 @@ Config::CheckDBConfigPrimaryPath(const std::string& value) {
 
 Status
 Config::CheckDBConfigSecondaryPath(const std::string& value) {
+    fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     return Status::OK();
 }
 
 Status
 Config::CheckDBConfigBackendUrl(const std::string& value) {
-    if (!ValidationUtil::ValidateDbURI(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
+    fiu_do_on("check_config_backend_url_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg =
             "Invalid backend url: " + value + ". Possible reason: db_config.db_backend_url is invalid. " +
             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
@@ -567,7 +585,10 @@ Config::CheckDBConfigBackendUrl(const std::string& value) {
 
 Status
 Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_archive_disk_threshold_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid archive disk threshold: " + value +
                           ". Possible reason: db_config.archive_disk_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -577,7 +598,10 @@ Config::CheckDBConfigArchiveDiskThreshold(const std::string& value) {
 
 Status
 Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_archive_days_threshold_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid archive days threshold: " + value +
                           ". Possible reason: db_config.archive_days_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -587,7 +611,10 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
 
 Status
 Config::CheckDBConfigInsertBufferSize(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_insert_buffer_size_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid insert buffer size: " + value +
                           ". Possible reason: db_config.insert_buffer_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -612,7 +639,10 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
 
 Status
 Config::CheckMetricConfigEnableMonitor(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_config_enable_monitor_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg =
             "Invalid metric config: " + value + ". Possible reason: metric_config.enable_monitor is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -622,7 +652,10 @@ Config::CheckMetricConfigEnableMonitor(const std::string& value) {
 
 Status
 Config::CheckMetricConfigCollector(const std::string& value) {
-    if (value != "prometheus") {
+    auto exist_error = value != "prometheus";
+    fiu_do_on("check_config_collector_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg =
             "Invalid metric collector: " + value + ". Possible reason: metric_config.collector is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -632,7 +665,10 @@ Config::CheckMetricConfigCollector(const std::string& value) {
 
 Status
 Config::CheckMetricConfigPrometheusPort(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_promethus_port_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid metric port: " + value +
                           ". Possible reason: metric_config.prometheus_config.port is not in range [1025, 65534].";
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config prometheus_port: " + value);
@@ -642,6 +678,8 @@ Config::CheckMetricConfigPrometheusPort(const std::string& value) {
 
 Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
+    fiu_return_on("check_config_cpu_cache_capacity_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid cpu cache capacity: " + value +
                           ". Possible reason: cache_config.cpu_cache_capacity is not a positive integer.";
@@ -671,6 +709,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         }
 
         int64_t insert_buffer_size = buffer_value * GB;
+        fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
             std::string msg = "Invalid cpu cache capacity: " + value +
                               ". Possible reason: sum of cache_config.cpu_cache_capacity and "
@@ -683,6 +722,8 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
 
 Status
 Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
+    fiu_return_on("check_config_cpu_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
         std::string msg = "Invalid cpu cache threshold: " + value +
                           ". Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
@@ -700,6 +741,8 @@ Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
 
 Status
 Config::CheckCacheConfigCacheInsertData(const std::string& value) {
+    fiu_return_on("check_config_cache_insert_data_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg = "Invalid cache insert data option: " + value +
                           ". Possible reason: cache_config.cache_insert_data is not a boolean.";
@@ -710,6 +753,8 @@ Config::CheckCacheConfigCacheInsertData(const std::string& value) {
 
 Status
 Config::CheckEngineConfigUseBlasThreshold(const std::string& value) {
+    fiu_return_on("check_config_use_blas_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid use blas threshold: " + value +
                           ". Possible reason: engine_config.use_blas_threshold is not a positive integer.";
@@ -720,6 +765,8 @@ Config::CheckEngineConfigUseBlasThreshold(const std::string& value) {
 
 Status
 Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
+    fiu_return_on("check_config_omp_thread_num_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
@@ -738,8 +785,11 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
+    fiu_return_on("check_config_gpu_search_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid gpu search threshold: " + value +
                           ". Possible reason: engine_config.gpu_search_threshold is not a positive integer.";
@@ -750,6 +800,8 @@ Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
 
 Status
 Config::CheckGpuResourceConfigEnable(const std::string& value) {
+    fiu_return_on("check_config_gpu_resource_enable_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg =
             "Invalid gpu resource config: " + value + ". Possible reason: gpu_resource_config.enable is not a boolean.";
@@ -760,6 +812,8 @@ Config::CheckGpuResourceConfigEnable(const std::string& value) {
 
 Status
 Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
+    fiu_return_on("check_gpu_resource_config_cache_capacity_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid gpu cache capacity: " + value +
                           ". Possible reason: gpu_resource_config.cache_capacity is not a positive integer.";
@@ -791,6 +845,8 @@ Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
 
 Status
 Config::CheckGpuResourceConfigCacheThreshold(const std::string& value) {
+    fiu_return_on("check_config_gpu_resource_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
         std::string msg = "Invalid gpu cache threshold: " + value +
                           ". Possible reason: gpu_resource_config.cache_threshold is not in range (0.0, 1.0].";
@@ -833,6 +889,8 @@ CheckGpuResource(const std::string& value) {
 
 Status
 Config::CheckGpuResourceConfigSearchResources(const std::vector<std::string>& value) {
+    fiu_return_on("check_gpu_resource_config_search_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (value.empty()) {
         std::string msg =
             "Invalid gpu search resource. "
@@ -851,6 +909,8 @@ Config::CheckGpuResourceConfigSearchResources(const std::vector<std::string>& va
 
 Status
 Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>& value) {
+    fiu_return_on("check_gpu_resource_config_build_index_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (value.empty()) {
         std::string msg =
             "Invalid gpu build index resource. "
@@ -867,6 +927,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     return Status::OK();
 }
+
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -886,10 +947,7 @@ Config::ConfigNodeValid(const std::string& parent_key, const std::string& child_
     if (config_map_.find(parent_key) == config_map_.end()) {
         return false;
     }
-    if (config_map_[parent_key].count(child_key) == 0) {
-        return false;
-    }
-    return true;
+    return config_map_[parent_key].count(child_key) != 0;
 }
 
 Status
@@ -976,7 +1034,7 @@ Config::GetDBConfigPrimaryPath(std::string& value) {
 Status
 Config::GetDBConfigSecondaryPath(std::string& value) {
     value = GetConfigStr(CONFIG_DB, CONFIG_DB_SECONDARY_PATH, CONFIG_DB_SECONDARY_PATH_DEFAULT);
-    return Status::OK();
+    return CheckDBConfigSecondaryPath(value);
 }
 
 Status
@@ -1041,7 +1099,7 @@ Config::GetMetricConfigEnableMonitor(bool& value) {
 Status
 Config::GetMetricConfigCollector(std::string& value) {
     value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_COLLECTOR, CONFIG_METRIC_COLLECTOR_DEFAULT);
-    return Status::OK();
+    return CheckMetricConfigCollector(value);
 }
 
 Status
@@ -1111,6 +1169,7 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     std::string str =
@@ -1142,6 +1201,7 @@ Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
     if (!s.ok()) {
         return s;
     }
+    fiu_do_on("Config.GetGpuResourceConfigCacheCapacity.diable_gpu_resource", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
@@ -1163,6 +1223,7 @@ Config::GetGpuResourceConfigCacheThreshold(float& value) {
     if (!s.ok()) {
         return s;
     }
+    fiu_do_on("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
@@ -1184,6 +1245,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
     if (!s.ok()) {
         return s;
     }
+    fiu_do_on("get_gpu_config_search_resources.disable_gpu_resource_fail", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
@@ -1192,6 +1254,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
                                            CONFIG_GPU_RESOURCE_DELIMITER, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT);
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
+    fiu_do_on("get_gpu_config_search_resources_empty_value_fail", res_vec.clear());
     s = CheckGpuResourceConfigSearchResources(res_vec);
     if (!s.ok()) {
         return s;
@@ -1209,6 +1272,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     if (!s.ok()) {
         return s;
     }
+    fiu_do_on("get_gpu_config_build_index_resources.disable_gpu_resource_fail", gpu_resource_enable = false);
     if (!gpu_resource_enable) {
         std::string msg = "GPU not supported. Possible reason: gpu_resource_config.enable is set to false.";
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
@@ -1218,6 +1282,8 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
                              CONFIG_GPU_RESOURCE_DELIMITER, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT);
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
+
+    fiu_do_on("get_config_build_index_resources_empty_value_fail", res_vec.clear());
     s = CheckGpuResourceConfigBuildIndexResources(res_vec);
     if (!s.ok()) {
         return s;
@@ -1227,12 +1293,14 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     }
     return Status::OK();
 }
+
 #endif
 
 /* tracing config */
 Status
 Config::GetTracingConfigJsonConfigPath(std::string& value) {
     value = GetConfigStr(CONFIG_TRACING, CONFIG_TRACING_JSON_CONFIG_PATH, "");
+    fiu_do_on("get_config_json_config_path_fail", value = "error_config_json_path");
     if (!value.empty()) {
         std::ifstream tracer_config(value);
         Status s = tracer_config.good() ? Status::OK()
@@ -1431,6 +1499,7 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 /* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
