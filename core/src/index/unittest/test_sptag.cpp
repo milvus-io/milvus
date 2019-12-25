@@ -19,9 +19,8 @@
 
 #include <iostream>
 #include <sstream>
-
 #include "knowhere/adapter/SptagAdapter.h"
-#include "knowhere/adapter/Structure.h"
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
@@ -76,10 +75,8 @@ TEST_P(SPTAGTest, sptag_basic) {
     AssertAnns(result, nq, k);
 
     {
-        // auto ids = result->array()[0];
-        // auto dists = result->array()[1];
-        auto ids = result->ids();
-        auto dists = result->dist();
+        auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+        auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
 
         std::stringstream ss_id;
         std::stringstream ss_dist;
@@ -88,7 +85,7 @@ TEST_P(SPTAGTest, sptag_basic) {
                 // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
                 // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
                 ss_id << *((int64_t*)(ids) + i * k + j) << " ";
-                ss_dist << *((float*)(dists) + i * k + j) << " ";
+                ss_dist << *((float*)(dist) + i * k + j) << " ";
             }
             ss_id << std::endl;
             ss_dist << std::endl;

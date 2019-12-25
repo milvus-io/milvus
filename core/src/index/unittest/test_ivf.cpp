@@ -24,6 +24,7 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #endif
 
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
 
@@ -165,6 +166,7 @@ TEST_P(IVFTest, ivf_serialize) {
     }
 }
 
+// TODO(linxj): deprecated
 #ifdef MILVUS_GPU_VERSION
 TEST_P(IVFTest, clone_test) {
     assert(!xb.empty());
@@ -182,8 +184,8 @@ TEST_P(IVFTest, clone_test) {
     // PrintResult(result, nq, k);
 
     auto AssertEqual = [&](knowhere::DatasetPtr p1, knowhere::DatasetPtr p2) {
-        auto ids_p1 = p1->ids();
-        auto ids_p2 = p2->ids();
+        auto ids_p1 = p1->Get<int64_t*>(knowhere::meta::IDS);
+        auto ids_p2 = p2->Get<int64_t*>(knowhere::meta::IDS);
 
         for (int i = 0; i < nq * k; ++i) {
             EXPECT_EQ(*((int64_t*)(ids_p2) + i), *((int64_t*)(ids_p1) + i));
