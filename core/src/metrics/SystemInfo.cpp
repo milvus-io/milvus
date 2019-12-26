@@ -16,17 +16,14 @@
 // under the License.
 
 #include "metrics/SystemInfo.h"
+#include "thirdparty/nlohmann/json.hpp"
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
+#include <sys/sysinfo.h>
+#include <sys/times.h>
 #include <unistd.h>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <utility>
+#include <map>
 
 #ifdef MILVUS_GPU_VERSION
 #include <nvml.h>
@@ -348,6 +345,26 @@ SystemInfo::Octets() {
     uint64_t outoctets_bytes = std::stoull(outoctets);
     std::pair<uint64_t, uint64_t> res(inoctets_bytes, outoctets_bytes);
     return res;
+}
+
+void
+SystemInfo::GetSysInfoJsonStr(std::string& result) {
+    std::map<std::string, std::string> sys_info_map;
+
+    sys_info_map["memory_total"] = std::to_string(GetPhysicalMemory());
+    sys_info_map["memory_used"] = std::to_string(GetProcessUsedMemory());
+
+    std::vector<uint64_t> gpu_mem_total = GPUMemoryTotal();
+    std::vector<uint64_t> gpu_mem_used = GPUMemoryUsed();
+    for (size_t i = 0; i < gpu_mem_total.size(); i++) {
+        std::string key_total = "gpu" + std::to_string(i) + "_memory_total";
+        std::string key_used = "gpu" + std::to_string(i) + "_memory_used";
+        sys_info_map[key_total] = std::to_string(gpu_mem_total[i]);
+        sys_info_map[key_used] = std::to_string(gpu_mem_used[i]);
+    }
+
+    nlohmann::json sys_info_json(sys_info_map);
+    result = sys_info_json.dump();
 }
 
 }  // namespace server
