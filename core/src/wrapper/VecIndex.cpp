@@ -38,7 +38,7 @@
 #include "wrapper/gpu/GPUVecImpl.h"
 #endif
 
-#include "fiu-local.h"
+#include <fiu-local.h>
 
 namespace milvus {
 namespace engine {

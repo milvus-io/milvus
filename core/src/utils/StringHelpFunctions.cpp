@@ -17,9 +17,9 @@
 
 #include "utils/StringHelpFunctions.h"
 
+#include <fiu-local.h>
 #include <regex>
 #include <string>
-#include "fiu-local.h"
 
 namespace milvus {
 namespace server {

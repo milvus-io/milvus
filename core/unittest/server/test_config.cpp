@@ -846,7 +846,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.GetGpuResourceConfigCacheThreshold(f_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource");
-
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
@@ -1033,8 +1032,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
 
 #ifndef MILVUS_GPU_VERSION
-    s = config.ProcessConfigCli(dummy, gen_set_command(ms::CONFIG_TRACING, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources));
+    s = config.ProcessConfigCli(dummy, gen_set_command(ms::CONFIG_TRACING,
+        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources));
     ASSERT_FALSE(s.ok());
 #endif
-
 }

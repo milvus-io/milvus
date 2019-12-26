@@ -28,11 +28,11 @@
 
 #endif
 
+#include <fiu-local.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>
 #include <string>
-#include "fiu-local.h"
 
 namespace milvus {
 namespace server {

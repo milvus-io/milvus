@@ -21,6 +21,7 @@
 
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "wrapper/WrapperException.h"
+
 #endif
 
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -99,10 +100,6 @@ TEST_P(KnowhereWrapperTest, WRAPPER_EXCEPTION_TEST) {
 
     std::string msg = ex.what();
     EXPECT_EQ(msg, err_msg);
-}
-
-TEST_P(KnowhereWrapperTest, VECINDEX_TEST) {
-   milvus::engine::VecIndex
 }
 
 TEST_P(KnowhereWrapperTest, BASE_TEST) {

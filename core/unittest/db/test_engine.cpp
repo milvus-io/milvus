@@ -22,8 +22,8 @@
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngineImpl.h"
 #include "db/utils.h"
-#include "fiu-local.h"
-#include "fiu-control.h"
+#include <fiu-local.h>
+#include <fiu-control.h>
 
 TEST_F(EngineTest, FACTORY_TEST) {
     {
@@ -64,23 +64,23 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_PQ, milvus::engine::MetricType::IP, 1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_PQ, milvus::engine::MetricType::IP, 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-                milvus::engine::MetricType::L2, 1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
+            milvus::engine::MetricType::L2, 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
-                512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-                milvus::engine::MetricType::L2, 1024);
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
+            milvus::engine::MetricType::L2, 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -135,7 +135,6 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     auto engine_ptr = milvus::engine::EngineFactory::Build(
         dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
 
-
     fiu_init(0); // init
     fiu_enable("read_null_index", 1, NULL, 0);
 
@@ -144,10 +143,8 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
 
     engine_ptr->Dimension();
 
-
     fiu_disable("read_null_index");
 }
-
 
 TEST_F(EngineTest, ENGINE_IMPL_THROW_EXCEPTION_TEST) {
     uint16_t dimension = 64;

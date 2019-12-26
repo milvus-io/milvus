@@ -25,7 +25,6 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 #include "utils/ThreadPool.h"
-#include "utils/SignalUtil.h"
 
 #include <gtest/gtest.h>
 #include <sys/stat.h>
@@ -34,8 +33,8 @@
 #include <thread>
 #include <src/utils/Exception.h>
 
-#include "fiu-local.h"
-#include "fiu-control.h"
+#include <fiu-local.h>
+#include <fiu-control.h>
 
 namespace {
 
@@ -462,7 +461,6 @@ TEST(ValidationUtilTest, VALIDATE_NUMBER_TEST) {
     fiu_enable("ValidationUtil.ValidateStringIsNumber.throw_exception", 1, NULL, 0);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateStringIsNumber("122").code(), milvus::SERVER_SUCCESS);
     fiu_disable("ValidationUtil.ValidateStringIsNumber.throw_exception");
-
 }
 
 TEST(ValidationUtilTest, VALIDATE_BOOL_TEST) {
@@ -498,20 +496,20 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
 
     mkdir(dir1.c_str(), S_IRWXU);
     mkdir(dir2.c_str(), S_IRWXU);
-    [&](){
-//        std::string tmp = dir2 + "/" + filename[0]+"*@%$";
-        std::string tmp = dir2 + "/" + filename[0]+"*$";
-        std::ofstream file;
-        file.open(tmp.c_str());
-        file << "test" << std::endl;
-        milvus::server::RolloutHandler(tmp.c_str(), 0, el::Level::Unknown);
-        tmp.append(".1");
-        std::ifstream file2;
-        file2.open(tmp);
-        std::string tmp2;
-        file2 >> tmp2;
-        ASSERT_EQ(tmp2, "test");
-    }();
+//    [&]() {
+////        std::string tmp = dir2 + "/" + filename[0]+"*@%$";
+//        std::string tmp = dir2 + "/" + filename[0] + "*$";
+//        std::ofstream file;
+//        file.open(tmp.c_str());
+//        file << "test" << std::endl;
+//        milvus::server::RolloutHandler(tmp.c_str(), 0, el::Level::Unknown);
+//        tmp.append(".1");
+//        std::ifstream file2;
+//        file2.open(tmp);
+//        std::string tmp2;
+//        file2 >> tmp2;
+//        ASSERT_EQ(tmp2, "test");
+//    }();
 
     for (int i = 0; i < 6; ++i) {
         std::string tmp = dir2 + "/" + filename[i];
@@ -544,8 +542,6 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
         file2 >> tmp2;
         ASSERT_EQ(tmp2, "test");
     }();
-
-
 
     boost::filesystem::remove_all(dir2);
 }

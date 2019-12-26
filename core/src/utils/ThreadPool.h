@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <fiu-local.h>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -27,7 +28,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include "fiu-local.h"
 
 #define MAX_THREADS_NUM 32
 
