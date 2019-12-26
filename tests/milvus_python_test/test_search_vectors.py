@@ -449,7 +449,8 @@ class TestSearchBase:
     def get_invalid_range(self, request):
         yield request.param
 
-    def test_search_invalid_query_ranges(self, connect, table, get_invalid_range):
+    # disable
+    def _test_search_invalid_query_ranges(self, connect, table, get_invalid_range):
         '''
         target: search table with query ranges
         method: search with the same query ranges
@@ -477,7 +478,8 @@ class TestSearchBase:
     def get_valid_range_no_result(self, request):
         yield request.param
 
-    def test_search_valid_query_ranges_no_result(self, connect, table, get_valid_range_no_result):
+    # disable
+    def _test_search_valid_query_ranges_no_result(self, connect, table, get_valid_range_no_result):
         '''
         target: search table with normal query ranges, but no data in db
         method: search with query ranges (low, low)
@@ -505,7 +507,8 @@ class TestSearchBase:
     def get_valid_range(self, request):
         yield request.param
 
-    def test_search_valid_query_ranges(self, connect, table, get_valid_range):
+    # disable
+    def _test_search_valid_query_ranges(self, connect, table, get_valid_range):
         '''
         target: search table with normal query ranges, but no data in db
         method: search with query ranges (low, normal)
@@ -878,8 +881,9 @@ class TestSearchParamsInvalid(object):
     def get_query_ranges(self, request):
         yield request.param
 
+    # disable
     @pytest.mark.level(1)
-    def test_search_flat_with_invalid_query_range(self, connect, table, get_query_ranges):
+    def _test_search_flat_with_invalid_query_range(self, connect, table, get_query_ranges):
         '''
         target: test search fuction, with the wrong query_range
         method: search with query_range
@@ -893,9 +897,9 @@ class TestSearchParamsInvalid(object):
         with pytest.raises(Exception) as e:
             status, result = connect.search_vectors(table, 1, nprobe, query_vecs, query_ranges=query_ranges)
 
-
+    # disable
     @pytest.mark.level(2)
-    def test_search_flat_with_invalid_query_range_ip(self, connect, ip_table, get_query_ranges):
+    def _test_search_flat_with_invalid_query_range_ip(self, connect, ip_table, get_query_ranges):
         '''
         target: test search fuction, with the wrong query_range
         method: search with query_range
