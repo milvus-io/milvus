@@ -1378,7 +1378,6 @@ include_directories(SYSTEM ${FIU_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------
 # oatpp
-
 macro(build_oatpp)
     message(STATUS "Building oatpp-${OATPP_VERSION} from source")
     set(OATPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/oatpp_ep-prefix/src/oatpp_ep")
@@ -1390,7 +1389,8 @@ macro(build_oatpp)
     set(OATPP_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF)
+            -DBUILD_SHARED_LIBS=OFF
+            -DOATPP_BUILD_TESTS=OFF)
 
     externalproject_add(oatpp_ep
             URL
