@@ -20,6 +20,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#738 - Use Openblas / lapack from apt install
 - \#758 - Enhance config description
 - \#791 - Remove Arrow
+- \#834 - add cpu mode for built-in Faiss
 
 ## Task
 
