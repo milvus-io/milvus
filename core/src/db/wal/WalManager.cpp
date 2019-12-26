@@ -73,9 +73,10 @@ WalManager::Insert(const std::string &table_id,
 //TBD
 void
 WalManager::DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids) {
-    buffer_.Delete();
+    //todo: similar to insert
 }
 
+//useless
 void
 WalManager::Flush() {
     buffer_.Flush(current_lsn_);

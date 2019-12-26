@@ -103,6 +103,7 @@ bool MXLogBuffer::Append(const std::string &table_id,
                          const float *vectors,
                          const milvus::engine::IDNumbers& vector_ids,
                          const size_t vector_ids_offset,
+                         const bool update_lsn,
                          const uint64_t lsn) {
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
@@ -146,6 +147,9 @@ bool MXLogBuffer::Append(const std::string &table_id,
     mxlog_buffer_writer_.buf_offset = current_write_offset;
     mxlog_buffer_writer_.lsn = lsn;
     mxlog_writer_.Write(buf_[mxlog_buffer_writer_.buf_idx].get(), record_size);//default async flush
+    if (update_lsn) {
+        //todo: update flushed wal's lsn to meta, for alloc next lsn when restart
+    }
     return true;
 }
 

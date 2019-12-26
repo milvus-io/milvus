@@ -42,6 +42,7 @@ class MXLogBuffer {
                 const float *vectors,
                 const milvus::engine::IDNumbers& vector_ids,
                 const size_t vector_ids_offset,
+                const bool update_lsn,
                 const uint64_t lsn);
 
     bool Next(std::string &table_id,
