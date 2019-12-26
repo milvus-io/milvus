@@ -28,6 +28,8 @@
 #include "wrapper/VecIndex.h"
 #include "wrapper/utils.h"
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 
 INITIALIZE_EASYLOGGINGPP
@@ -145,6 +147,28 @@ TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
             dev_idx->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
         }
         AssertResult(res_ids, res_dis);
+    }
+
+    {
+        std::string file_location = "/tmp/knowhere_gpu_file";
+        fiu_init(0);
+        fiu_enable("VecIndex.write_index.throw_knowhere_execption", 1, NULL, 0);
+        auto s =write_index(index_, file_location);
+        ASSERT_FALSE(s.ok());
+        fiu_disable("VecIndex.write_index.throw_knowhere_execption");
+
+        fiu_enable("VecIndex.write_index.throw_std_execption", 1, NULL, 0);
+        s =write_index(index_, file_location);
+        ASSERT_FALSE(s.ok());
+        fiu_disable("VecIndex.write_index.throw_std_execption");
+
+        fiu_enable("VecIndex.write_index.throw_no_space_execption", 1, NULL, 0);
+        s =write_index(index_, file_location);
+        ASSERT_FALSE(s.ok());
+        fiu_disable("VecIndex.write_index.throw_no_space_execption");
+
+        auto new_index = milvus::engine::read_index(file_location+"_invalid");
+        ASSERT_EQ(new_index, nullptr);
     }
 }
 

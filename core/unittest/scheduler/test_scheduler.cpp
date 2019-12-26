@@ -213,21 +213,21 @@ class SchedulerTest2 : public testing::Test {
 //}
 
 TEST(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
-    auto mock_ptr = std::make_shared<MockVecIndex>();
+    auto mock_index_ptr = std::make_shared<MockVecIndex>();
     milvus::engine::Config config;
-    auto quantizer_ptr = mock_ptr->LoadQuantizer(config);
+    auto quantizer_ptr = mock_index_ptr->LoadQuantizer(config);
     ASSERT_EQ(quantizer_ptr, nullptr);
 
-    auto vec_index_ptr = mock_ptr->LoadData(quantizer_ptr, config);
+    auto vec_index_ptr = mock_index_ptr->LoadData(quantizer_ptr, config);
     ASSERT_EQ(vec_index_ptr, nullptr);
 
-    auto s = mock_ptr->SetQuantizer(quantizer_ptr);
+    auto s = mock_index_ptr->SetQuantizer(quantizer_ptr);
     ASSERT_TRUE(s.ok());
 
-    s = mock_ptr->UnsetQuantizer();
+    s = mock_index_ptr->UnsetQuantizer();
     ASSERT_TRUE(s.ok());
 
-    auto res = mock_ptr->CopyToGpuWithQuantizer(0, config);
+    auto res = mock_index_ptr->CopyToGpuWithQuantizer(0, config);
     ASSERT_EQ(res.first, nullptr);
     ASSERT_EQ(res.second, nullptr);
 
@@ -246,6 +246,10 @@ TEST(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
 
     index = GetVecIndexFactory(IndexType::INVALID, config);
     ASSERT_EQ(index, nullptr);
+
+    knowhere::BinarySet empty_set;
+    auto res_ptr = LoadVecIndex(IndexType::INVALID, empty_set, 0);
+    ASSERT_EQ(res_ptr, nullptr);
 }
 
 }  // namespace scheduler
