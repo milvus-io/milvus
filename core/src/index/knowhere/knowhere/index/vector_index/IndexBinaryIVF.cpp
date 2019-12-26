@@ -15,39 +15,133 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "IndexBinaryIVF.h"
+#include <faiss/IndexBinaryFlat.h>
+#include <faiss/IndexBinaryIVF.h>
+
+#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexBinaryIVF.h"
+
+#include <chrono>
 
 namespace knowhere {
 
+using stdclock = std::chrono::high_resolution_clock;
+
 BinarySet
-IndexBinaryIVF::Serialize() {
-    return BinarySet();
+BinaryIVF::Serialize() {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    return SerializeImpl();
 }
 
 void
-IndexBinaryIVF::Load(const BinarySet& index_binary) {
-
+BinaryIVF::Load(const BinarySet& index_binary) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    LoadImpl(index_binary);
 }
 
 DatasetPtr
-IndexBinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
-    return knowhere::DatasetPtr();
+BinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (search_cfg != nullptr) {
+        search_cfg->CheckValid();  // throw exception
+    }
+
+    GETBINARYTENSOR(dataset)
+
+    try {
+        auto elems = rows * search_cfg->k;
+
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
+
+        search_impl(rows, (uint8_t*)p_data, search_cfg->k, p_dist, p_id, config);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
+void
+BinaryIVF::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
+                       const Config& cfg) {
+    auto params = GenParams(cfg);
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    ivf_index->nprobe = params->nprobe;
+    int32_t* pdistances = (int32_t*)distances;
+    stdclock::time_point before = stdclock::now();
+    ivf_index->search(n, (uint8_t*)data, k, pdistances, labels);
+    stdclock::time_point after = stdclock::now();
+    double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
+    KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
+                       << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
+                       << ", data search cost: " << faiss::indexIVF_stats.search_time;
+    faiss::indexIVF_stats.quantization_time = 0;
+    faiss::indexIVF_stats.search_time = 0;
+}
+
+std::shared_ptr<faiss::IVFSearchParameters>
+BinaryIVF::GenParams(const Config& config) {
+    auto params = std::make_shared<faiss::IVFSearchParameters>();
+
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    params->nprobe = search_cfg->nprobe;
+    // params->max_codes = config.get_with_default("max_codes", size_t(0));
+
+    return params;
+}
 
 IndexModelPtr
-IndexBinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
-    return VectorIndex::Train(dataset, config);
+BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
+    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid();  // throw exception
+    }
+
+    GETBINARYTENSOR(dataset)
+
+    faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, GetMetricType(build_cfg->metric_type));
+    auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, build_cfg->nlist,
+                                                         GetMetricType(build_cfg->metric_type));
+    index->train(rows, (uint8_t*)p_data);
+
+    // TODO(linxj): override here. train return model or not.
+    // return std::make_shared<IVFIndexModel>(index);
+
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+
+    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
+    index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
 }
 
 int64_t
-IndexBinaryIVF::Count() {
-    return 0;
+BinaryIVF::Count() {
+    return index_->ntotal;
 }
 
 int64_t
-IndexBinaryIVF::Dimension() {
-    return 0;
+BinaryIVF::Dimension() {
+    return index_->d;
 }
 
-} // knowhere
+}  // namespace knowhere
