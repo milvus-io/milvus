@@ -25,6 +25,7 @@
 #include "oatpp/core/macro/codegen.hpp"
 #include "oatpp/core/macro/component.hpp"
 
+#include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
@@ -32,7 +33,6 @@
 #include "server/web_impl/dto/VectorDto.hpp"
 
 #include "server/web_impl/handler/WebRequestHandler.h"
-
 
 # define CORS_SUPPORT(RESPONSE)                                                                 \
     do {                                                                                        \
@@ -43,7 +43,6 @@
             "Cache-Control, Content-Type, Range, Authorization");                               \
         response->putHeader("access-control-max-age", "1728000");                               \
     } while(false);
-
 
 namespace milvus {
 namespace server {
@@ -98,7 +97,105 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT("OPTIONS", "/tables", TablesOptions, REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
+    ENDPOINT("GET", "/devices", GetDevices) {
+        auto devices_dto = DevicesDto::createShared();
+        auto status_dto = handler_->GetDevices(devices_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        if (0 == status_dto->code->getValue()) {
+            response = createDtoResponse(Status::CODE_200, devices_dto);
+        } else {
+            response = createDtoResponse(Status::CODE_200, status_dto);
+        }
+
+        CORS_SUPPORT(response)
+
+        return response;
+    }
+
+    ENDPOINT("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
+        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        CORS_SUPPORT(response)
+        return response;
+    }
+
+    ENDPOINT_INFO(GetAdvancedConfig) {
+        info->summary = "";
+
+        info->addResponse<AdvancedConfigDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+    }
+
+    ENDPOINT("GET", "/config/advanced", GetAdvancedConfig) {
+        auto config_dto = AdvancedConfigDto::createShared();
+        auto status_dto = handler_->GetAdvancedConfig(config_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        if (0 == status_dto->code->getValue()) {
+            response = createDtoResponse(Status::CODE_200, config_dto);
+        } else {
+            response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        CORS_SUPPORT(response)
+        return response;
+    }
+
+    ENDPOINT_INFO(SetAdvancedConfig) {
+        info->summary = "";
+
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+    }
+
+    ENDPOINT("PUT", "/config/advanced", SetAdvancedConfig, BODY_DTO(AdvancedConfigDto::ObjectWrapper, config_dto)) {
+        auto status_dto = handler_->SetAdvancedConfig(config_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        if (0 == status_dto->code->getValue()) {
+            response = createDtoResponse(Status::CODE_200, status_dto);
+        } else {
+            response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+        CORS_SUPPORT(response)
+        return response;
+    }
+
+    ENDPOINT("OPTIONS", "config/gpu_resources", GPUConfigOptions) {
+        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        CORS_SUPPORT(response)
+        return response;
+    }
+
+    ENDPOINT("GET", "config/gpu_resources", GetGPUConfig) {
+        std::shared_ptr<OutgoingResponse> response;
+
+        auto gpu_config_dto = GPUConfigDto::createShared();
+        auto status_dto = handler_->GetGpuConfig(gpu_config_dto);
+
+        if (0 == status_dto->code->getValue()) {
+            response = createDtoResponse(Status::CODE_200, gpu_config_dto);
+        } else {
+            response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        CORS_SUPPORT(response)
+        return response;
+    }
+
+    ENDPOINT("PUT", "config/gpu_resources", SetGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, gpu_config_dto)) {
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler_->SetGpuConfig(gpu_config_dto);
+
+        if (0 == status_dto->code->getValue()) {
+            response = createDtoResponse(Status::CODE_200, status_dto);
+        } else {
+            response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        CORS_SUPPORT(response)
+        return response;
+    }
+
+    ENDPOINT("OPTIONS", "/tables", TablesOptions, REQUEST(
+        const std::shared_ptr<IncomingRequest>&, request)) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
         CORS_SUPPORT(response)
         return response;
@@ -109,9 +206,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         info->addConsumes<TableRequestDto::ObjectWrapper>("application/json");
 
-        // Created.
         info->addResponse<TableFieldsDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        // Error occurred.
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
@@ -201,7 +296,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("DELETE", "/tables/{table_name}", DropTable,
-             PATH(String, table_name), REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
+             PATH(String, table_name), REQUEST(
+                 const std::shared_ptr<IncomingRequest>&, request)) {
         auto status_dto = handler_->DropTable(table_name);
         auto code = status_dto->code->getValue();
         std::shared_ptr<OutgoingResponse> response;
@@ -218,7 +314,8 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions, REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
+    ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions, REQUEST(
+        const std::shared_ptr<IncomingRequest>&, request)) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
         CORS_SUPPORT(response)
         return response;
@@ -254,6 +351,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(GetIndex)
+
     ENDPOINT("GET", "/tables/{table_name}/indexes", GetIndex,
              PATH(String, table_name)) {
         auto index_dto = IndexDto::createShared();
@@ -263,7 +361,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         if (0 == code) {
             response = createDtoResponse(Status::CODE_200, index_dto);
         } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            response =  createDtoResponse(Status::CODE_404, status_dto);
+            response = createDtoResponse(Status::CODE_404, status_dto);
         } else {
             response = createDtoResponse(Status::CODE_400, status_dto);
         }
@@ -281,6 +379,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(DropIndex)
+
     ENDPOINT("DELETE", "/tables/{table_name}/indexes", DropIndex, PATH(String, table_name)) {
         auto status_dto = handler_->DropIndex(table_name);
         auto code = status_dto->code->getValue();
@@ -303,7 +402,8 @@ class WebController : public oatpp::web::server::api::ApiController {
      *
      * url = POST '<server address>/partitions/tables/<table_name>'
      */
-    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions, REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
+    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions, REQUEST(
+        const std::shared_ptr<IncomingRequest>&, request)) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
         CORS_SUPPORT(response)
         return response;
@@ -321,6 +421,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(CreatePartition)
+
     ENDPOINT("POST",
              "/tables/{table_name}/partitions",
              CreatePartition,
@@ -358,6 +459,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(ShowPartitions)
+
     ENDPOINT("GET",
              "/tables/{tableName}/partitions",
              ShowPartitions,
@@ -380,10 +482,12 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT("OPTIONS", "/tables/{table_name}/partition/{tag}", PartitionOptions, REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
+    ENDPOINT("OPTIONS", "/tables/{table_name}/partition/{tag}", PartitionOptions, REQUEST(
+        const std::shared_ptr<IncomingRequest>&, request)) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
         CORS_SUPPORT(response)
-        return response;    }
+        return response;
+    }
 
     ENDPOINT_INFO(DropPartition) {
         info->summary = "Drop partition";
@@ -394,6 +498,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(DropPartition)
+
     ENDPOINT("DELETE", "/tables/{table_name}/partition/{tag}", DropPartition,
              QUERY(String, table_name), QUERY(String, tag)) {
         auto status_dto = handler_->DropPartition(table_name, tag);
@@ -418,10 +523,11 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(Insert)
+
     ENDPOINT("POST",
              "/vectors/tables",
              Insert,
-            BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
+             BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
         auto ids_dto = VectorIdsDto::createShared();
         auto status_dto = handler_->Insert(insert_param, ids_dto);
 
@@ -451,6 +557,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(Search)
+
     ENDPOINT("GET", "/vectors/{table_name}", Search,
              PATH(String, table_name),
              QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(
@@ -476,6 +583,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(Cmd)
+
     ENDPOINT("GET", "/cmd/{cmd_str}", Cmd, PATH(String, cmd_str)) {
         auto cmd_dto = CommandDto::createShared();
         auto status_dto = handler_->Cmd(cmd_str, cmd_dto);

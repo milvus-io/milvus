@@ -29,6 +29,8 @@
 #include <oatpp/core/macro/codegen.hpp>
 
 #include "server/web_impl/Types.h"
+#include "server/web_impl/dto/DevicesDto.hpp"
+#include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
@@ -82,6 +84,21 @@ class WebRequestHandler {
     getTaleInfo(const std::shared_ptr<Context>& context,
                 const std::string& table_name,
                 std::map<std::string, std::string>& table_info);
+
+    StatusDto::ObjectWrapper
+    GetDevices(DevicesDto::ObjectWrapper& devices);
+
+    StatusDto::ObjectWrapper
+    GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& config);
+
+    StatusDto::ObjectWrapper
+    SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& config);
+
+    StatusDto::ObjectWrapper
+    GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto);
+
+    StatusDto::ObjectWrapper
+    SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
 
     StatusDto::ObjectWrapper
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);

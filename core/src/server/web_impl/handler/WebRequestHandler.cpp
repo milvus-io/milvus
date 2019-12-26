@@ -17,14 +17,18 @@
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
-#include <boost/algorithm/string.hpp>
 #include <string>
 #include <vector>
 #include <cmath>
+#include <boost/algorithm/string.hpp>
 
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
+
+#include "server/Config.h"
+
+#include "metrics/SystemInfo.h"
 
 namespace milvus {
 namespace server {
@@ -107,6 +111,202 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context,
     table_info["nlist"] = std::to_string(index_param.nlist_);
 
     table_info["count"] = std::to_string(count);
+}
+
+/////////////////////////////////////////// Router methods ////////////////////////////////////////////
+StatusDto::ObjectWrapper
+WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
+    auto lamd = [](uint64_t x) -> uint64_t {
+        return x / 1024 / 1024 / 1024;
+    };
+    auto system_info = SystemInfo::GetInstance();
+
+    devices_dto->cpu = devices_dto->cpu->createShared();
+    devices_dto->cpu->memory = lamd(system_info.GetPhysicalMemory());
+
+    devices_dto->gpus = devices_dto->gpus->createShared();
+    size_t count = system_info.num_device();
+    std::vector<uint64_t> device_mems = system_info.GPUMemoryTotal();
+
+    if (count != device_mems.size()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(UNEXPECTED_ERROR, "Can't obtain GPU info"));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        auto device_dto = DeviceInfoDto::createShared();
+        device_dto->memory = lamd(device_mems.at(i));
+        devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
+    }
+
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
+    Config& config = Config::GetInstance();
+
+//    advanced_config->cpu_cache_capacity =
+    int64_t value;
+    auto status = config.GetCacheConfigCpuCacheCapacity(value);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+    advanced_config->cpu_cache_capacity = value;
+
+    bool ok;
+    status = config.GetCacheConfigCacheInsertData(ok);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+    advanced_config->cache_insert_data = ok;
+
+    status = config.GetEngineConfigUseBlasThreshold(value);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+    advanced_config->use_blas_threshold = value;
+
+    status = config.GetEngineConfigGpuSearchThreshold(value);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+    advanced_config->gpu_search_threshold = value;
+
+    ASSIGN_RETURN_STATUS_DTO(status)
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
+    Config& config = Config::GetInstance();
+
+    auto
+        status = config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    status = config.SetCacheConfigCacheInsertData(std::to_string(advanced_config->cache_insert_data->getValue()));
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    status = config.SetEngineConfigUseBlasThreshold(std::to_string(advanced_config->use_blas_threshold->getValue()));
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    status =
+        config.SetEngineConfigGpuSearchThreshold(std::to_string(advanced_config->gpu_search_threshold->getValue()));
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    ASSIGN_RETURN_STATUS_DTO(status)
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+    Config& config = Config::GetInstance();
+
+    bool enable;
+    auto status = config.GetGpuResourceConfigEnable(enable);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    gpu_config_dto->enable = enable;
+
+    if (!enable) {
+        ASSIGN_RETURN_STATUS_DTO(Status::OK());
+    }
+
+    int64_t capacity;
+    status = config.GetGpuResourceConfigCacheCapacity(capacity);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+    gpu_config_dto->cache_capacity = capacity;
+
+    std::vector<int64_t> values;
+    status = config.GetGpuResourceConfigSearchResources(values);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+    for (auto& device_id : values) {
+        gpu_config_dto->search_resources->pushBack("GPU" + OString(std::to_string(device_id).c_str()));
+    }
+
+    values.clear();
+    status = config.GetGpuResourceConfigBuildIndexResources(values);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+    for (auto& device_id : values) {
+        gpu_config_dto->build_index_resources->pushBack("GPU" + OString(std::to_string(device_id).c_str()));
+    }
+
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+    auto str_lower_lamda = [](const std::string& str){
+        std::string str_out;
+        for (auto & item : str) {
+            str_out += tolower(item);
+        }
+        return str_out;
+    };
+
+    Config& config = Config::GetInstance();
+
+    auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
+    if (!status.ok() || !gpu_config_dto->enable->getValue()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    status = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_config_dto->cache_capacity->getValue()));
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    std::vector<std::string> search_resources;
+    gpu_config_dto->search_resources->forEach([&search_resources, str_lower_lamda](const OString& res) {
+        search_resources.emplace_back(str_lower_lamda(res->std_str()));
+    });
+
+    std::string search_resources_value;
+    for (auto& res : search_resources) {
+        search_resources_value += res + ",";
+    }
+    auto len = search_resources_value.size();
+    search_resources_value.erase(len -1);
+    status = config.SetGpuResourceConfigSearchResources(search_resources_value);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    std::vector<std::string> build_resources;
+    gpu_config_dto->build_index_resources->forEach([&build_resources, str_lower_lamda](const OString& res) {
+        build_resources.emplace_back(str_lower_lamda(res->std_str()));
+    });
+
+    std::string build_resources_value;
+    for (auto& res : build_resources) {
+        build_resources_value += res + ",";
+    }
+    len = build_resources_value.size();
+    build_resources_value.erase(len -1);
+    status = config.SetGpuResourceConfigBuildIndexResources(build_resources_value);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 StatusDto::ObjectWrapper
