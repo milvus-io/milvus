@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#770 - Server unittest run failed on low-end server
 
 ## Feature
+- \#216 - Add CLI to get server info
 - \#343 - Add Opentracing
 - \#665 - Support get/set config via CLI
 - \#766 - If partition tag is similar, wrong partition is searched
