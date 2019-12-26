@@ -136,30 +136,36 @@ class MetaSchema {
 };
 
 // Tables schema
-static const MetaSchema TABLES_SCHEMA(
-    META_TABLES,
-    {
-        MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-        MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"), MetaField("state", "INT", "NOT NULL"),
-        MetaField("dimension", "SMALLINT", "NOT NULL"), MetaField("created_on", "BIGINT", "NOT NULL"),
-        MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
-        MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
-        MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"), MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
-        MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"), MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
-        MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
-        MetaField("version", "VARCHAR(64)", std::string("DEFAULT '") + CURRENT_VERSION + "'"),
-    });
+static const MetaSchema TABLES_SCHEMA(META_TABLES, {
+                                                       MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                       MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
+                                                       MetaField("state", "INT", "NOT NULL"),
+                                                       MetaField("dimension", "SMALLINT", "NOT NULL"),
+                                                       MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                       MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                       MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
+                                                       MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                       MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
+                                                       MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                       MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("version", "VARCHAR(64)",
+                                                                 std::string("DEFAULT '") + CURRENT_VERSION + "'"),
+                                                   });
 
 // TableFiles schema
-static const MetaSchema TABLEFILES_SCHEMA(
-    META_TABLEFILES,
-    {
-        MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"), MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
-        MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"), MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
-        MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"), MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
-        MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"), MetaField("updated_time", "BIGINT", "NOT NULL"),
-        MetaField("created_on", "BIGINT", "NOT NULL"), MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
-    });
+static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
+                                                               MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                               MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                               MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("updated_time", "BIGINT", "NOT NULL"),
+                                                               MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                               MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+                                                           });
 
 }  // namespace
 

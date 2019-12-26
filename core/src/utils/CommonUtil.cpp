@@ -197,8 +197,8 @@ CommonUtil::GetExePath() {
     buf[cnt] = '\0';
 
     std::string exe_path = buf;
-    fiu_do_on("CommonUtil.GetExePath.exe_path_error", exe_path = "");
-    if (exe_path.rfind('/') != exe_path.length()) {
+    fiu_do_on("CommonUtil.GetExePath.exe_path_error", exe_path = "/");
+    if (exe_path.rfind('/') != exe_path.length() - 1) {
         std::string sub_str = exe_path.substr(0, exe_path.rfind('/'));
         return sub_str + "/";
     }

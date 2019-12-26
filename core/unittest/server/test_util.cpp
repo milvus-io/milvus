@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <boost/filesystem.hpp>
 #include <thread>
+#include <src/utils/Exception.h>
 
 #include "fiu-local.h"
 #include "fiu-control.h"
@@ -53,6 +54,17 @@ TEST(UtilTest, EXCEPTION_TEST) {
     ASSERT_EQ(ex.error_code(), milvus::SERVER_UNEXPECTED_ERROR);
     std::string msg = ex.what();
     ASSERT_EQ(msg, err_msg);
+
+    milvus::Exception ex1(milvus::SERVER_UNEXPECTED_ERROR, err_msg);
+    ASSERT_EQ(ex1.code(), milvus::SERVER_UNEXPECTED_ERROR);
+    msg = ex1.what();
+    ASSERT_EQ(msg, err_msg);
+
+    std::string empty_err_msg;
+    milvus::Exception empty_ex(milvus::SERVER_UNEXPECTED_ERROR, empty_err_msg);
+    ASSERT_EQ(empty_ex.code(), milvus::SERVER_UNEXPECTED_ERROR);
+    msg = empty_ex.what();
+    ASSERT_NE(msg, empty_err_msg);
 }
 
 TEST(UtilTest, SIGNAL_TEST) {
@@ -180,6 +192,31 @@ TEST(UtilTest, STRINGFUNCTIONS_TEST) {
     status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(result.size(), 3UL);
+
+    fiu_init(0);
+    fiu_enable("StringHelpFunctions.SplitStringByQuote.invalid_index", 1, NULL, 0);
+    result.clear();
+    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("StringHelpFunctions.SplitStringByQuote.invalid_index");
+
+    fiu_enable("StringHelpFunctions.SplitStringByQuote.index_gt_last", 1, NULL, 0);
+    result.clear();
+    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    ASSERT_TRUE(status.ok());
+    fiu_disable("StringHelpFunctions.SplitStringByQuote.index_gt_last");
+
+    fiu_enable("StringHelpFunctions.SplitStringByQuote.invalid_index2", 1, NULL, 0);
+    result.clear();
+    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("StringHelpFunctions.SplitStringByQuote.invalid_index2");
+
+    fiu_enable("StringHelpFunctions.SplitStringByQuote.last_is_end", 1, NULL, 0);
+    result.clear();
+    status = milvus::server::StringHelpFunctions::SplitStringByQuote(str, ",", "\"", result);
+    ASSERT_TRUE(status.ok());
+    fiu_disable("StringHelpFunctions.SplitStringByQuote.last_is_end2");
 
     ASSERT_TRUE(milvus::server::StringHelpFunctions::IsRegexMatch("abc", "abc"));
     ASSERT_TRUE(milvus::server::StringHelpFunctions::IsRegexMatch("a8c", "a\\d."));
@@ -461,6 +498,21 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
 
     mkdir(dir1.c_str(), S_IRWXU);
     mkdir(dir2.c_str(), S_IRWXU);
+    [&](){
+//        std::string tmp = dir2 + "/" + filename[0]+"*@%$";
+        std::string tmp = dir2 + "/" + filename[0]+"*$";
+        std::ofstream file;
+        file.open(tmp.c_str());
+        file << "test" << std::endl;
+        milvus::server::RolloutHandler(tmp.c_str(), 0, el::Level::Unknown);
+        tmp.append(".1");
+        std::ifstream file2;
+        file2.open(tmp);
+        std::string tmp2;
+        file2 >> tmp2;
+        ASSERT_EQ(tmp2, "test");
+    }();
+
     for (int i = 0; i < 6; ++i) {
         std::string tmp = dir2 + "/" + filename[i];
 
@@ -478,6 +530,23 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
         file2 >> tmp2;
         ASSERT_EQ(tmp2, "test");
     }
+
+    [&]() {
+        std::string tmp = dir2 + "/" + filename[0];
+        std::ofstream file;
+        file.open(tmp.c_str());
+        file << "test" << std::endl;
+        milvus::server::RolloutHandler(tmp.c_str(), 0, el::Level::Unknown);
+        tmp.append(".1");
+        std::ifstream file2;
+        file2.open(tmp);
+        std::string tmp2;
+        file2 >> tmp2;
+        ASSERT_EQ(tmp2, "test");
+    }();
+
+
+
     boost::filesystem::remove_all(dir2);
 }
 
