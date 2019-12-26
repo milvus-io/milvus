@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#715 - Milvus crash when searching and building index simultaneously using SQ8H
 - \#744 - Don't return partition table for show_tables
 - \#770 - Server unittest run failed on low-end server
+- \#831 - Judge branch error in CommonUtil.cpp
 
 ## Feature
 - \#216 - Add CLI to get server info
