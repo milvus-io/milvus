@@ -16,6 +16,7 @@
 // under the License.
 
 #include "server/delivery/request/CmdRequest.h"
+#include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -52,6 +53,9 @@ CmdRequest::OnExecute() {
 #else
         result_ = "CPU";
 #endif
+    } else if (cmd_ == "get_system_info") {
+        server::SystemInfo& sys_info_inst = server::SystemInfo::GetInstance();
+        sys_info_inst.GetSysInfoJsonStr(result_);
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
     } else if (cmd_.substr(0, 10) == "set_config" || cmd_.substr(0, 10) == "get_config") {
