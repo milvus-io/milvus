@@ -15,52 +15,114 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "IndexBinaryIDMAP.h"
+#include <faiss/IndexBinaryFlat.h>
+#include <faiss/MetaIndexes.h>
+
+#include <faiss/index_factory.h>
+
+#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 
 namespace knowhere {
 
 BinarySet
-IndexBinaryIDMAP::Serialize() {
-    return BinarySet();
+BinaryIDMAP::Serialize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    return SerializeImpl();
 }
 
 void
-IndexBinaryIDMAP::Load(const BinarySet& index_binary) {
-
+BinaryIDMAP::Load(const BinarySet& index_binary) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    LoadImpl(index_binary);
 }
 
 DatasetPtr
-IndexBinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
-    return knowhere::DatasetPtr();
+BinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    config->CheckValid();
+    GETBINARYTENSOR(dataset)
+
+    auto elems = rows * config->k;
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
+
+    search_impl(rows, (uint8_t*)p_data, config->k, p_dist, p_id, Config());
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
+    return ret_ds;
 }
 
 void
-IndexBinaryIDMAP::Add(const DatasetPtr& dataset, const Config& config) {
-
+BinaryIDMAP::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
+                         const Config& cfg) {
+    int32_t* pdistances = (int32_t*)distances;
+    index_->search(n, (uint8_t*)data, k, pdistances, labels);
 }
 
-IndexModelPtr
-IndexBinaryIDMAP::Train(const DatasetPtr& dataset, const Config& config) {
-    return VectorIndex::Train(dataset, config);
+void
+BinaryIDMAP::Add(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    GETBINARYTENSOR(dataset)
+
+    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
+    index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
+}
+
+const char* type = "BFLAT";
+
+void
+BinaryIDMAP::Train(const Config& config) {
+    config->CheckValid();
+
+    auto index = faiss::index_binary_factory(config->d, type, GetMetricType(config->metric_type));
+    index_.reset(index);
 }
 
 int64_t
-IndexBinaryIDMAP::Count() {
-    return 0;
+BinaryIDMAP::Count() {
+    return index_->ntotal;
 }
 
 int64_t
-IndexBinaryIDMAP::Dimension() {
-    return 0;
+BinaryIDMAP::Dimension() {
+    return index_->d;
 }
 
 const uint8_t*
-IndexBinaryIDMAP::GetRawVectors() {
-    return nullptr;
+BinaryIDMAP::GetRawVectors() {
+    try {
+        auto file_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get());
+        auto flat_index = dynamic_cast<faiss::IndexBinaryFlat*>(file_index->index);
+        return flat_index->xb.data();
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 const int64_t*
-IndexBinaryIDMAP::GetRawIds() {
-    return nullptr;
+BinaryIDMAP::GetRawIds() {
+    try {
+        auto file_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get());
+        return file_index->id_map.data();
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
-}
+
+}  // namespace knowhere

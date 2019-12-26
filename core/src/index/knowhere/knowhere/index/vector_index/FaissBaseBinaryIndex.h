@@ -21,8 +21,8 @@
 
 #include <faiss/IndexBinary.h>
 
-#include "knowhere/common/Dataset.h"
 #include "knowhere/common/BinarySet.h"
+#include "knowhere/common/Dataset.h"
 
 namespace knowhere {
 
