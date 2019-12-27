@@ -66,7 +66,6 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    config->CheckValid();
     GETTENSOR(dataset)
 
     auto elems = rows * config->k;

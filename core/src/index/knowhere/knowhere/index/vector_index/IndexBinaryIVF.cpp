@@ -50,9 +50,9 @@ BinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (search_cfg != nullptr) {
-        search_cfg->CheckValid();  // throw exception
+    auto search_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
+    if (search_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("not support this kind of config");
     }
 
     GETBINARYTENSOR(dataset)
@@ -109,7 +109,7 @@ BinaryIVF::GenParams(const Config& config) {
 
 IndexModelPtr
 BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    auto build_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
     if (build_cfg != nullptr) {
         build_cfg->CheckValid();  // throw exception
     }
@@ -142,6 +142,16 @@ BinaryIVF::Count() {
 int64_t
 BinaryIVF::Dimension() {
     return index_->d;
+}
+
+void
+BinaryIVF::Add(const DatasetPtr& dataset, const Config& config) {
+    KNOWHERE_THROW_MSG("not support yet");
+}
+
+void
+BinaryIVF::Seal() {
+    // do nothing
 }
 
 }  // namespace knowhere

@@ -30,6 +30,12 @@ namespace knowhere {
 
 class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
  public:
+    BinaryIVF() : FaissBaseBinaryIndex(nullptr) {
+    }
+
+    explicit BinaryIVF(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
+    }
+
     BinarySet
     Serialize() override;
 
@@ -38,6 +44,12 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
 
     DatasetPtr
     Search(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    Add(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    Seal() override;
 
     IndexModelPtr
     Train(const DatasetPtr& dataset, const Config& config) override;

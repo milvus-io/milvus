@@ -47,7 +47,6 @@ BinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    config->CheckValid();
     GETBINARYTENSOR(dataset)
 
     auto elems = rows * config->k;
@@ -88,6 +87,10 @@ const char* type = "BFLAT";
 
 void
 BinaryIDMAP::Train(const Config& config) {
+    auto build_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
+    if (build_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("not support this kind of config");
+    }
     config->CheckValid();
 
     auto index = faiss::index_binary_factory(config->d, type, GetMetricType(config->metric_type));
@@ -123,6 +126,11 @@ BinaryIDMAP::GetRawIds() {
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
+}
+
+void
+BinaryIDMAP::Seal() {
+    // do nothing
 }
 
 }  // namespace knowhere
