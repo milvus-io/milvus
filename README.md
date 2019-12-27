@@ -17,7 +17,7 @@ Milvus is the world's fastest similarity search engine for massive-scale feature
 
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
 
-Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) SDKs. 
+Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/sdk) SDKs. 
 
 Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.6.0/).
 
@@ -29,15 +29,7 @@ To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/
 
 ### Try your first Milvus program
 
-Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/) or [Java example code](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples). 
-
-To use C++ example code, use below command:
-
-```shell
- # Run Milvus C++ example
- $ cd [Milvus root path]/core/milvus/bin
- $ ./sdk_simple
-```
+Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples). 
 
 ## Roadmap
 
