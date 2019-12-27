@@ -17,7 +17,7 @@ Milvus 是一款开源的、针对海量特征向量的相似性搜索引擎。�
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/zh-CN/aboutmilvus/overview/)。
 
-Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及[C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) 的 SDK。
+Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java) 以及[C++](https://github.com/milvus-io/milvus/tree/master/sdk) 的 SDK。
 
 通过 [版本发布说明](https://milvus.io/docs/zh-CN/release/v0.6.0/) 获取最新版本的功能和更新。
 
@@ -29,15 +29,7 @@ Milvus 提供稳定的 [Python](https://github.com/milvus-io/pymilvus)、[Java](
 
 ### 开始您的第一个 Milvus 程序
 
-您可以尝试用 [Python](https://www.milvus.io/docs/en/userguide/example_code/) 或 [Java example code](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) 运行 Milvus 示例代码。
-
-若要使用 C++ 示例代码，请使用以下命令：
-
-```shell
- # Run Milvus C++ example
- $ cd [Milvus root path]/core/milvus/bin
- $ ./sdk_simple
-```
+您可以尝试用 [Python](https://www.milvus.io/docs/en/userguide/example_code/)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
 
 ## 路线图
 
