@@ -24,10 +24,11 @@
 
 #include "FaissBaseBinaryIndex.h"
 #include "VectorIndex.h"
+#include "faiss/IndexIVF.h"
 
 namespace knowhere {
 
-class IndexBinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
+class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
  public:
     BinarySet
     Serialize() override;
@@ -46,6 +47,16 @@ class IndexBinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
 
     int64_t
     Dimension() override;
+
+ protected:
+    virtual std::shared_ptr<faiss::IVFSearchParameters>
+    GenParams(const Config& config);
+
+    virtual void
+    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+
+ protected:
+    std::mutex mutex_;
 };
 
 }  // namespace knowhere

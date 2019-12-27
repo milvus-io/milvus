@@ -27,7 +27,7 @@
 
 namespace knowhere {
 
-class IndexBinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
+class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
  public:
     BinarySet
     Serialize() override;
@@ -41,8 +41,8 @@ class IndexBinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
     void
     Add(const DatasetPtr& dataset, const Config& config) override;
 
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
+    void
+    Train(const Config& config);
 
     int64_t
     Count() override;
@@ -55,6 +55,13 @@ class IndexBinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
 
     const int64_t*
     GetRawIds();
+
+ protected:
+    virtual void
+    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+
+ protected:
+    std::mutex mutex_;
 };
 
 }  // namespace knowhere

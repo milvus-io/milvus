@@ -35,4 +35,9 @@ extern const char* DISTANCE;
     auto rows = dataset->Get<int64_t>(meta::ROWS); \
     auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
+#define GETBINARYTENSOR(dataset)                   \
+    auto dim = dataset->Get<int64_t>(meta::DIM);   \
+    auto rows = dataset->Get<int64_t>(meta::ROWS); \
+    auto p_data = dataset->Get<const uint8_t*>(meta::TENSOR);
+
 }  // namespace knowhere
