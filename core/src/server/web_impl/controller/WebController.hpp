@@ -31,6 +31,7 @@
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
+#include "server/web_impl/dto/ConfigDto.hpp"
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
@@ -296,8 +297,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ENDPOINT("DELETE", "/tables/{table_name}", DropTable,
-             PATH(String, table_name), REQUEST(
-                 const std::shared_ptr<IncomingRequest>&, request)) {
+             PATH(String, table_name)) {
         auto status_dto = handler_->DropTable(table_name);
         auto code = status_dto->code->getValue();
         std::shared_ptr<OutgoingResponse> response;

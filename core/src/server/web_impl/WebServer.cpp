@@ -19,7 +19,6 @@
 #include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/WebServer.h"
-#include "server/web_impl/component/AppComponent.hpp"
 #include "server/web_impl/controller/WebController.hpp"
 
 #include "server/Config.h"
@@ -36,14 +35,17 @@ WebServer::~WebServer() {
 
 void
 WebServer::Start() {
-    //    oatpp::base::Environment::init();
-    StartService();
+    thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
 }
 
 void
 WebServer::Stop() {
     StopService();
-    //    oatpp::base::Environment::destroy();
+
+    if (thread_ptr_ != nullptr) {
+        thread_ptr_->join();
+        thread_ptr_ = nullptr;
+    }
 }
 
 Status
@@ -53,7 +55,7 @@ WebServer::StartService() {
     Status status;
 
     status = config.GetServerConfigWebPort(port);
-    AppComponent components(atoi(port.c_str()));
+    AppComponent components = AppComponent(std::stoi(port));
 
     /* create ApiControllers and add endpoints to router */
     auto router = components.http_router_.getObject();
@@ -72,7 +74,7 @@ WebServer::StartService() {
     server_ptr_ = std::make_unique<oatpp::network::server::Server>(components.server_connection_provider_.getObject(),
                                                                    components.server_connection_handler_.getObject());
 
-    // start asynchronously
+    // start synchronously
     server_ptr_->run();
 
     return Status::OK();
@@ -80,7 +82,7 @@ WebServer::StartService() {
 
 Status
 WebServer::StopService() {
-    if (server_ptr_) {
+    if (server_ptr_ != nullptr) {
         server_ptr_->stop();
     }
     return Status::OK();

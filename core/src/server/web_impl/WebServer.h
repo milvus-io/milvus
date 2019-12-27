@@ -23,6 +23,8 @@
 
 #include <oatpp/network/server/Server.hpp>
 
+#include "server/web_impl/component/AppComponent.hpp"
+
 #include "utils/Status.h"
 
 namespace milvus {
@@ -54,6 +56,7 @@ class WebServer {
 
  private:
     std::unique_ptr<oatpp::network::server::Server> server_ptr_;
+    std::shared_ptr<std::thread> thread_ptr_;
 };
 
 }  // namespace web

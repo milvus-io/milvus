@@ -17,6 +17,9 @@
 
 #pragma once
 
+#include <map>
+#include <string>
+
 #include <oatpp/core/data/mapping/type/Object.hpp>
 
 #include "db/engine/ExecutionEngine.h"
@@ -36,7 +39,7 @@ enum StatusCode : int {
     UNEXPECTED_ERROR = 1,
     CONNECT_FAILED = 2,  // reserved.
     PERMISSION_DENIED = 3,
-    TABLE_NOT_EXISTS = 4, // DB_NOT_FOUND || TABLE_NOT_EXISTS
+    TABLE_NOT_EXISTS = 4,  // DB_NOT_FOUND || TABLE_NOT_EXISTS
     ILLEGAL_ARGUMENT = 5,
     ILLEGAL_RANGE = 6,
     ILLEGAL_DIMENSION = 7,
@@ -60,21 +63,15 @@ enum StatusCode : int {
 };
 
 static const std::map<engine::EngineType, std::string> IndexMap = {
-    {engine::EngineType::FAISS_IDMAP, "FLAT"},
-    {engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
-    {engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
-    {engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
-    {engine::EngineType::NSG_MIX, "RNSG"},
-    {engine::EngineType::FAISS_IVFSQ8H, "IVFPQ"},
+    {engine::EngineType::FAISS_IDMAP, "FLAT"},    {engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
+    {engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"}, {engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
+    {engine::EngineType::NSG_MIX, "RNSG"},        {engine::EngineType::FAISS_PQ, "IVFPQ"},
 };
 
 static const std::map<std::string, engine::EngineType> IndexNameMap = {
-    {"FLAT", engine::EngineType::FAISS_IDMAP},
-    {"IVFFLAT", engine::EngineType::FAISS_IVFFLAT},
-    {"IVFSQ8", engine::EngineType::FAISS_IVFSQ8},
-    {"IVFSQ8H", engine::EngineType::FAISS_IVFSQ8H},
-    {"RNSG", engine::EngineType::NSG_MIX},
-    {"IVFPQ", engine::EngineType::FAISS_IVFSQ8H},
+    {"FLAT", engine::EngineType::FAISS_IDMAP},    {"IVFFLAT", engine::EngineType::FAISS_IVFFLAT},
+    {"IVFSQ8", engine::EngineType::FAISS_IVFSQ8}, {"IVFSQ8H", engine::EngineType::FAISS_IVFSQ8H},
+    {"RNSG", engine::EngineType::NSG_MIX},        {"IVFPQ", engine::EngineType::FAISS_PQ},
 };
 
 static const std::map<engine::MetricType, std::string> MetricMap = {

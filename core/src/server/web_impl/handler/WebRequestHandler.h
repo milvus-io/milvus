@@ -29,9 +29,9 @@
 #include <oatpp/core/macro/codegen.hpp>
 
 #include "server/web_impl/Types.h"
-#include "server/web_impl/dto/DevicesDto.hpp"
-#include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/CmdDto.hpp"
+#include "server/web_impl/dto/ConfigDto.hpp"
+#include "server/web_impl/dto/DevicesDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/dto/TableDto.hpp"
@@ -45,16 +45,16 @@ namespace milvus {
 namespace server {
 namespace web {
 
-#define ASSIGN_RETURN_STATUS_DTO(STATUS)                        \
-    do {                                                        \
-        auto status_dto = StatusDto::createShared();            \
-        if (0 != (STATUS).code()) {                             \
-            status_dto->code = WebErrorMap((STATUS).code());    \
-        } else {                                                \
-            status_dto->code = 0;                               \
-        }                                                       \
-        status_dto->message = (STATUS).message().c_str();       \
-        return status_dto;                                      \
+#define ASSIGN_RETURN_STATUS_DTO(STATUS)                     \
+    do {                                                     \
+        auto status_dto = StatusDto::createShared();         \
+        if (0 != (STATUS).code()) {                          \
+            status_dto->code = WebErrorMap((STATUS).code()); \
+        } else {                                             \
+            status_dto->code = 0;                            \
+        }                                                    \
+        status_dto->message = (STATUS).message().c_str();    \
+        return status_dto;                                   \
     } while (false);
 
 StatusCode
@@ -81,8 +81,7 @@ class WebRequestHandler {
     }
 
     Status
-    getTaleInfo(const std::shared_ptr<Context>& context,
-                const std::string& table_name,
+    getTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
                 std::map<std::string, std::string>& table_info);
 
     StatusDto::ObjectWrapper
@@ -125,9 +124,7 @@ class WebRequestHandler {
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OInt64& offset,
-                   const OInt64& page_size,
-                   const OString& table_name,
+    ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper

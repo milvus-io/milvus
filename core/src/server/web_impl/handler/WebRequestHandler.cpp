@@ -17,10 +17,10 @@
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
+#include <boost/algorithm/string.hpp>
+#include <cmath>
 #include <string>
 #include <vector>
-#include <cmath>
-#include <boost/algorithm/string.hpp>
 
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Types.h"
@@ -81,8 +81,7 @@ WebErrorMap(ErrorCode code) {
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 
 Status
-WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context,
-                               const std::string& table_name,
+WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
                                std::map<std::string, std::string>& table_info) {
     TableSchema schema;
     auto status = request_handler_.DescribeTable(context_ptr_, table_name, schema);
@@ -105,7 +104,7 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context,
     table_info["table_name"] = schema.table_name_;
     table_info["dimension"] = std::to_string(schema.dimension_);
     table_info["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
-    table_info["index_file_size"] = schema.index_file_size_;
+    table_info["index_file_size"] = std::to_string(schema.index_file_size_);
 
     table_info["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
     table_info["nlist"] = std::to_string(index_param.nlist_);
@@ -116,9 +115,7 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context,
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto lamd = [](uint64_t x) -> uint64_t {
-        return x / 1024 / 1024 / 1024;
-    };
+    auto lamd = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
@@ -145,7 +142,7 @@ StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
     Config& config = Config::GetInstance();
 
-//    advanced_config->cpu_cache_capacity =
+    //    advanced_config->cpu_cache_capacity =
     int64_t value;
     auto status = config.GetCacheConfigCpuCacheCapacity(value);
     if (!status.ok()) {
@@ -179,8 +176,8 @@ StatusDto::ObjectWrapper
 WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
     Config& config = Config::GetInstance();
 
-    auto
-        status = config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
+    auto status =
+        config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -254,9 +251,9 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    auto str_lower_lamda = [](const std::string& str){
+    auto str_lower_lamda = [](const std::string& str) {
         std::string str_out;
-        for (auto & item : str) {
+        for (auto& item : str) {
             str_out += tolower(item);
         }
         return str_out;
@@ -284,7 +281,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         search_resources_value += res + ",";
     }
     auto len = search_resources_value.size();
-    search_resources_value.erase(len -1);
+    search_resources_value.erase(len - 1);
     status = config.SetGpuResourceConfigSearchResources(search_resources_value);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -300,7 +297,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         build_resources_value += res + ",";
     }
     len = build_resources_value.size();
-    build_resources_value.erase(len -1);
+    build_resources_value.erase(len - 1);
     status = config.SetGpuResourceConfigBuildIndexResources(build_resources_value);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -325,47 +322,48 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
  *  - *,*,*...:
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::GetTable(const OString& table_name,
-                            const OQueryParams& query_params,
+WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query_params,
                             TableFieldsDto::ObjectWrapper& fields_dto) {
     Status status = Status::OK();
 
     // TODO: query string field `fields` npt used here
-
     std::map<std::string, std::string> table_info;
-    getTaleInfo(context_ptr_, table_name->std_str(), table_info);
+    status = getTaleInfo(context_ptr_, table_name->std_str(), table_info);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
     fields_dto->table_name = table_info["table_name"].c_str();
-    fields_dto->dimension = atol(table_info["dimension"].c_str());
+    fields_dto->dimension = std::stol(table_info["dimension"]);
     fields_dto->index = table_info["index"].c_str();
-    fields_dto->nlist = atol(table_info["nlist"].c_str());
+    fields_dto->nlist = std::stol(table_info["nlist"]);
     fields_dto->metric_type = table_info["metric_type"].c_str();
-    fields_dto->num = atol(table_info["count"].c_str());
-//    if (query_params.getSize() == 0) {
-//        TableSchema schema;
-//        status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
-//        if (status.ok()) {
-//            fields_dto->schema->put("table_name", schema.table_name_.c_str());
-//            fields_dto->schema->put("dimension", OString(std::to_string(schema.dimension_).c_str()));
-//            fields_dto->schema->put("index_file_size", OString(std::to_string(schema.index_file_size_).c_str()));
-//            fields_dto->schema->put("metric_type", OString(std::to_string(schema.metric_type_).c_str()));
-//        }
-//    } else {
-//        for (auto& param : query_params.getAll()) {
-//            std::string key = param.first.std_str();
-//            std::string value = param.second.std_str();
-//
-//            if ("fields" == key) {
-//                if ("num" == value) {
-//                    int64_t count;
-//                    status = request_handler_.CountTable(context_ptr_, table_name->std_str(), count);
-//                    if (status.ok()) {
-//                        fields_dto->schema->put("num", OString(std::to_string(count).c_str()));
-//                    }
-//                }
-//            }
-//        }
-//    }
+    fields_dto->num = std::stol(table_info["count"]);
+    //    if (query_params.getSize() == 0) {
+    //        TableSchema schema;
+    //        status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
+    //        if (status.ok()) {
+    //            fields_dto->schema->put("table_name", schema.table_name_.c_str());
+    //            fields_dto->schema->put("dimension", OString(std::to_string(schema.dimension_).c_str()));
+    //            fields_dto->schema->put("index_file_size", OString(std::to_string(schema.index_file_size_).c_str()));
+    //            fields_dto->schema->put("metric_type", OString(std::to_string(schema.metric_type_).c_str()));
+    //        }
+    //    } else {
+    //        for (auto& param : query_params.getAll()) {
+    //            std::string key = param.first.std_str();
+    //            std::string value = param.second.std_str();
+    //
+    //            if ("fields" == key) {
+    //                if ("num" == value) {
+    //                    int64_t count;
+    //                    status = request_handler_.CountTable(context_ptr_, table_name->std_str(), count);
+    //                    if (status.ok()) {
+    //                        fields_dto->schema->put("num", OString(std::to_string(count).c_str()));
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
 
     ASSIGN_RETURN_STATUS_DTO(status);
 }
@@ -379,10 +377,14 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
     response_dto->tables = response_dto->tables->createShared();
 
     if (offset < 0 || page_size < 0) {
-        status = Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should bigger than 0");
+        ASSIGN_RETURN_STATUS_DTO(
+            Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should bigger than 0"));
     } else {
         status = request_handler_.ShowTables(context_ptr_, tables);
-        if (status.ok() && offset < tables.size()) {
+        if (!status.ok()) {
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
+        if (offset < tables.size()) {
             int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
                                                                                         : page_size->getValue();
             for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
@@ -395,12 +397,12 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
 
                 auto table_fields_dto = TableFieldsDto::createShared();
                 table_fields_dto->table_name = table_info["table_name"].c_str();
-                table_fields_dto->dimension = atol(table_info["dimension"].c_str());
-                table_fields_dto->index_file_size = atol(table_info["index_file_size"].c_str());
+                table_fields_dto->dimension = std::stol(table_info["dimension"]);
+                table_fields_dto->index_file_size = std::stol(table_info["index_file_size"]);
                 table_fields_dto->index = table_info["index"].c_str();
-                table_fields_dto->nlist = atol(table_info["nlist"].c_str());
+                table_fields_dto->nlist = std::stol(table_info["nlist"]);
                 table_fields_dto->metric_type = table_info["metric_type"].c_str();
-                table_fields_dto->num = atol(table_info["count"].c_str());
+                table_fields_dto->num = std::stol(table_info["count"]);
 
                 response_dto->tables->pushBack(table_fields_dto);
             }
@@ -422,10 +424,13 @@ WebRequestHandler::DropTable(const OString& table_name) {
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param) {
     std::string index_type = index_param->index_type->std_str();
-    auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
-                                               static_cast<int64_t>(IndexNameMap.at(index_type)),
-                                               index_param->nlist->getValue());
+    if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_INVALID_INDEX_TYPE, "The index type is invalid."))
+    }
 
+    auto status =
+        request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
+                                     static_cast<int64_t>(IndexNameMap.at(index_type)), index_param->nlist->getValue());
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
@@ -466,15 +471,14 @@ WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size,
     if (status.ok()) {
         partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
-        if (offset->getValue() + 1 < partitions.size()) {
-            int64_t size = (offset->getValue() + page_size->getValue() > partitions.size()) ? partitions.size()
+        if (offset->getValue() < partitions.size()) {
+            int64_t size = (offset->getValue() + page_size->getValue() > partitions.size()) ? partitions.size() - offset
                                                                                             : page_size->getValue();
-
-            for (int64_t i = 0; i < size; i++) {
+            for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
                 auto partition_dto = PartitionFieldsDto::createShared();
                 partition_dto->schema = partition_dto->schema->createShared();
-                partition_dto->schema->put("partitin_name", partitions.at(i + offset).partition_name_.c_str());
-                partition_dto->schema->put("tag", partitions.at(i + offset).tag_.c_str());
+                partition_dto->schema->put("partitin_name", partitions.at(i).partition_name_.c_str());
+                partition_dto->schema->put("tag", partitions.at(i).tag_.c_str());
 
                 partition_list_dto->partitions->pushBack(partition_dto);
             }
