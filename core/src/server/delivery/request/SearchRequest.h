@@ -36,8 +36,7 @@ class SearchRequest : public BaseRequest {
 
  protected:
     SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                  const engine::VectorsData& vectors,
-                  const std::vector<Range>& range_list, int64_t topk,
+                  const engine::VectorsData& vectors, const std::vector<Range>& range_list, int64_t topk,
                   int64_t nprobe, const std::vector<std::string>& partition_list,
                   const std::vector<std::string>& file_id_list, TopKQueryResult& result);
 

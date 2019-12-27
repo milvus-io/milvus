@@ -29,7 +29,7 @@ namespace engine {
 
 class VectorSource {
  public:
-    VectorSource(VectorsData& vectors);
+    explicit VectorSource(VectorsData& vectors);
 
     Status
     Add(const ExecutionEnginePtr& execution_engine, const meta::TableFileSchema& table_file_schema,

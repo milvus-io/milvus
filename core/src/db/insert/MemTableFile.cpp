@@ -67,8 +67,7 @@ MemTableFile::Add(VectorSourcePtr& source) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status =
-            source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
+        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }

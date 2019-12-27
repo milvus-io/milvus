@@ -43,7 +43,7 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
         data[TABLE_DIM * i] += i / 2000.;
     }
 }
-}
+} // namespace
 
 TEST_F(MetricTest, METRIC_TEST) {
     milvus::server::Config::GetInstance().SetMetricConfigCollector("zabbix");

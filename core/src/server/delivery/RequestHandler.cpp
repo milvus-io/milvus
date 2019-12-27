@@ -77,8 +77,7 @@ RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::
 Status
 RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
                        engine::VectorsData& vectors, const std::string& partition_tag) {
-    BaseRequestPtr request_ptr =
-        InsertRequest::Create(context, table_name, vectors, partition_tag);
+    BaseRequestPtr request_ptr = InsertRequest::Create(context, table_name, vectors, partition_tag);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -95,14 +94,11 @@ RequestHandler::ShowTables(const std::shared_ptr<Context>& context, std::vector<
 Status
 RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& table_name,
                        const engine::VectorsData& vectors,
-                       const std::vector<std::pair<std::string, std::string>>& range_list,
-                       int64_t topk,
-                       int64_t nprobe,
-                       const std::vector<std::string>& partition_list,
-                       const std::vector<std::string>& file_id_list,
+                       const std::vector<std::pair<std::string, std::string>>& range_list, int64_t topk, int64_t nprobe,
+                       const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = SearchRequest::Create(context, table_name, vectors, range_list, topk,
-                                                       nprobe, partition_list, file_id_list, result);
+    BaseRequestPtr request_ptr = SearchRequest::Create(context, table_name, vectors, range_list, topk, nprobe,
+                                                       partition_list, file_id_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

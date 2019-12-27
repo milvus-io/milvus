@@ -407,23 +407,21 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+              ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result =
-        Query(context, table_id, partition_tags, k, nprobe, vectors, dates, result_ids, result_distances);
+    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors, dates, result_ids, result_distances);
     return result;
 }
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-              const VectorsData& vectors, const meta::DatesT& dates, ResultIds& result_ids,
-              ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+              const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (shutting_down_.load(std::memory_order_acquire)) {
@@ -470,9 +468,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe,
-                      const VectorsData& vectors, const meta::DatesT& dates, ResultIds& result_ids,
-                      ResultDistances& result_distances) {
+                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+                      const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (shutting_down_.load(std::memory_order_acquire)) {

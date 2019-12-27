@@ -221,8 +221,8 @@ XSearchTask::Execute() {
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
                 hybrid = true;
             }
-            Status s =
-                index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
+            Status s = index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(),
+                                             output_ids.data(), hybrid);
             if (!s.ok()) {
                 search_job->GetStatus() = s;
                 search_job->SearchDone(index_id_);

@@ -230,8 +230,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         request_handler_.Insert(context_map_[context], request->table_name(), vectors, request->partition_tag());
 
     response->mutable_vector_id_array()->Resize(static_cast<int>(vectors.id_array_.size()), 0);
-    memcpy(response->mutable_vector_id_array()->mutable_data(),
-           vectors.id_array_.data(),
+    memcpy(response->mutable_vector_id_array()->mutable_data(), vectors.id_array_.data(),
            vectors.id_array_.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -272,9 +271,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     std::vector<std::string> file_ids;
     TopKQueryResult result;
 
-    Status status =
-        request_handler_.Search(context_map_[context], request->table_name(), vectors, ranges, request->topk(),
-                                request->nprobe(), partitions, file_ids, result);
+    Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors, ranges,
+                                            request->topk(), request->nprobe(), partitions, file_ids, result);
 
     // construct result
     response->set_row_num(result.row_num_);
@@ -331,9 +329,9 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     TopKQueryResult result;
 
-    Status status = request_handler_.Search(
-        context_map_[context], search_request->table_name(), vectors,
-        ranges, search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
+    Status status =
+        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, ranges,
+                                search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
 
     // construct result
     response->set_row_num(result.row_num_);

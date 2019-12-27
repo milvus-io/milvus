@@ -88,20 +88,18 @@ class DB {
 
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+          ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-          const VectorsData& vectors, const meta::DatesT& dates, ResultIds& result_ids,
-          ResultDistances& result_distances) = 0;
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe,
-                  const VectorsData& vectors, const meta::DatesT& dates, ResultIds& result_ids,
-                  ResultDistances& result_distances) = 0;
+                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+                  const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;

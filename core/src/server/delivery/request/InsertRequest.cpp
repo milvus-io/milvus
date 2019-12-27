@@ -38,10 +38,8 @@ InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std:
 
 BaseRequestPtr
 InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      engine::VectorsData& vectors,
-                      const std::string& partition_tag) {
-    return std::shared_ptr<BaseRequest>(
-        new InsertRequest(context, table_name, vectors, partition_tag));
+                      engine::VectorsData& vectors, const std::string& partition_tag) {
+    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, vectors, partition_tag));
 }
 
 Status
