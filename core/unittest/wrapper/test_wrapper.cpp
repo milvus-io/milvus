@@ -115,6 +115,39 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
     index_->BuildAll(nb, xb.data(), ids.data(), conf);
     index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
     AssertResult(res_ids, res_dis);
+
+    {
+        auto device_id = index_->GetDeviceId();
+
+        fiu_init(0);
+        fiu_enable("VecIndexImpl.BuildAll.throw_knowhere_exception", 1, NULL, 0);
+        fiu_enable("BFIndex.BuildAll.throw_knowhere_exception", 1, NULL, 0);
+        auto s = index_->BuildAll(nb, xb.data(), ids.data(), conf);
+        fiu_disable("BFIndex.BuildAll.throw_knowhere_exception");
+        fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
+
+        fiu_enable("VecIndexImpl.BuildAll.throw_std_exception", 1, NULL, 0);
+        fiu_enable("BFIndex.BuildAll.throw_std_exception", 1, NULL, 0);
+        s = index_->BuildAll(nb, xb.data(), ids.data(), conf);
+        fiu_disable("BFIndex.BuildAll.throw_std_exception");
+        fiu_disable("VecIndexImpl.BuildAll.throw_std_exception");
+
+        fiu_enable("VecIndexImpl.Add.throw_knowhere_exception", 1, NULL, 0);
+        s = index_->Add(nb, xb.data(), ids.data());
+        fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
+
+        fiu_enable(" VecIndexImpl.Add.throw_std_exception", 1, NULL, 0);
+        s = index_->Add(nb, xb.data(), ids.data());
+        fiu_disable(" VecIndexImpl.Add.throw_std_exception");
+
+        fiu_enable("VecIndexImpl.Search.throw_knowhere_exception", 1, NULL, 0);
+        s = index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
+        fiu_disable("VecIndexImpl.Search.throw_knowhere_exception");
+
+        fiu_enable("VecIndexImpl.Search.throw_std_exception", 1, NULL, 0);
+        s = index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
+        fiu_disable("VecIndexImpl.Search.throw_std_exception");
+    }
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -147,28 +180,6 @@ TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
             dev_idx->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
         }
         AssertResult(res_ids, res_dis);
-    }
-
-    {
-        std::string file_location = "/tmp/knowhere_gpu_file";
-        fiu_init(0);
-        fiu_enable("VecIndex.write_index.throw_knowhere_execption", 1, NULL, 0);
-        auto s =write_index(index_, file_location);
-        ASSERT_FALSE(s.ok());
-        fiu_disable("VecIndex.write_index.throw_knowhere_execption");
-
-        fiu_enable("VecIndex.write_index.throw_std_execption", 1, NULL, 0);
-        s =write_index(index_, file_location);
-        ASSERT_FALSE(s.ok());
-        fiu_disable("VecIndex.write_index.throw_std_execption");
-
-        fiu_enable("VecIndex.write_index.throw_no_space_execption", 1, NULL, 0);
-        s =write_index(index_, file_location);
-        ASSERT_FALSE(s.ok());
-        fiu_disable("VecIndex.write_index.throw_no_space_execption");
-
-        auto new_index = milvus::engine::read_index(file_location+"_invalid");
-        ASSERT_EQ(new_index, nullptr);
     }
 }
 
@@ -211,6 +222,28 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
         new_index->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
         AssertResult(res_ids, res_dis);
     }
+
+    {
+        std::string file_location = "/tmp/knowhere_gpu_file";
+        fiu_init(0);
+        fiu_enable("VecIndex.write_index.throw_knowhere_exception", 1, NULL, 0);
+        auto s = write_index(index_, file_location);
+        ASSERT_FALSE(s.ok());
+        fiu_disable("VecIndex.write_index.throw_knowhere_exception");
+
+        fiu_enable("VecIndex.write_index.throw_std_exception", 1, NULL, 0);
+        s = write_index(index_, file_location);
+        ASSERT_FALSE(s.ok());
+        fiu_disable("VecIndex.write_index.throw_std_exception");
+
+        fiu_enable("VecIndex.write_index.throw_no_space_exception", 1, NULL, 0);
+        s = write_index(index_, file_location);
+        ASSERT_FALSE(s.ok());
+        fiu_disable("VecIndex.write_index.throw_no_space_exception");
+
+        auto new_index = milvus::engine::read_index(file_location + "_invalid");
+        ASSERT_EQ(new_index, nullptr);
+    }
 }
 
 #include "wrapper/ConfAdapter.h"
@@ -234,6 +267,67 @@ TEST(whatever, test_config) {
     auto bkt_conf = std::make_shared<milvus::engine::SPTAGBKTConfAdapter>();
     bkt_conf->Match(conf);
     bkt_conf->MatchSearch(conf, milvus::engine::IndexType::SPTAG_BKT_RNT_CPU);
+
+    auto config_mgr = milvus::engine::AdapterMgr::GetInstance();
+    try {
+        config_mgr.GetAdapter(milvus::engine::IndexType::INVALID);
+    } catch (std::exception& e) {
+        std::cout<< "catch an expected exception"<<std::endl;
+    }
+
+    conf.size = 1000000.0;
+    conf.nlist = 10;
+    auto ivf_conf = std::make_shared<milvus::engine::IVFConfAdapter>();
+    ivf_conf->Match(conf);
+    conf.nprobe = -1;
+    ivf_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFFLAT_GPU);
+    conf.nprobe = 4096;
+    ivf_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_GPU);
+
+    auto ivf_pq_conf = std::make_shared<milvus::engine::IVFPQConfAdapter>();
+    conf.metric_type = knowhere::METRICTYPE::IP;
+    try{
+        ivf_pq_conf->Match(conf);
+    }catch (std::exception &e){
+        std::cout<< "catch an expected exception"<<std::endl;
+    }
+
+    conf.metric_type = knowhere::METRICTYPE::L2;
+    fiu_init(0);
+    fiu_enable("IVFPQConfAdapter.Match.empty_resset", 1, NULL, 0);
+    try{
+        ivf_pq_conf->Match(conf);
+    }catch (std::exception &e){
+        std::cout<< "catch an expected exception"<<std::endl;
+    }
+    fiu_disable("IVFPQConfAdapter.Match.empty_resset");
+
+    conf.nprobe = -1;
+    try{
+        ivf_pq_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_GPU);
+    }catch (std::exception &e){
+        std::cout<< "catch an expected exception"<<std::endl;
+    }
+}
+
+#include "wrapper/VecImpl.h"
+TEST(BFIndex, test_bf_index_fail) {
+    using namespace milvus::engine;
+    auto bf_ptr = std::make_shared<BFIndex>(nullptr);
+    auto float_vec = bf_ptr->GetRawVectors();
+    ASSERT_EQ(float_vec, nullptr);
+    Config config;
+
+    fiu_init(0);
+    fiu_enable("BFIndex.Build.throw_knowhere_exception", 1, NULL, 0);
+    auto err_code = bf_ptr->Build(config);
+    ASSERT_EQ(err_code, milvus::KNOWHERE_UNEXPECTED_ERROR);
+    fiu_disable("BFIndex.Build.throw_knowhere_exception");
+
+    fiu_enable("BFIndex.Build.throw_std_exception", 1, NULL, 0);
+    err_code = bf_ptr->Build(config);
+    ASSERT_EQ(err_code, milvus::KNOWHERE_ERROR);
+    fiu_disable("BFIndex.Build.throw_std_exception");
 }
 
 // #include "knowhere/index/vector_index/IndexIDMAP.h"

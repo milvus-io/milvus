@@ -31,6 +31,7 @@
 
 #endif
 
+#include <fiu-local.h>
 /*
  * no parameter check in this layer.
  * only responsible for index combination
@@ -45,6 +46,8 @@ VecIndexImpl::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, c
     try {
         dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
+        fiu_do_on("VecIndexImpl.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("VecIndexImpl.BuildAll.throw_std_exception", throw std::exception());
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
         index_->set_preprocessor(preprocessor);
@@ -65,7 +68,8 @@ Status
 VecIndexImpl::Add(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg) {
     try {
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
-
+        fiu_do_on("VecIndexImpl.Add.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("VecIndexImpl.Add.throw_std_exception", throw std::exception());
         index_->Add(dataset, cfg);
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -84,6 +88,9 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         auto dataset = GenDataset(nq, dim, xq);
 
         Config search_cfg = cfg;
+
+        fiu_do_on("VecIndexImpl.Search.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("VecIndexImpl.Search.throw_std_exception", throw std::exception());
 
         auto res = index_->Search(dataset, search_cfg);
         //        auto ids_array = res->array()[0];
@@ -217,6 +224,8 @@ BFIndex::GetRawIds() {
 ErrorCode
 BFIndex::Build(const Config& cfg) {
     try {
+        fiu_do_on("BFIndex.Build.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("BFIndex.Build.throw_std_exception", throw std::exception());
         dim = cfg->d;
         std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
     } catch (knowhere::KnowhereException& e) {
@@ -235,6 +244,8 @@ BFIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const 
     try {
         dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
+        fiu_do_on("BFIndex.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("BFIndex.BuildAll.throw_std_exception", throw std::exception());
 
         std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
         index_->Add(dataset, cfg);

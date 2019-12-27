@@ -257,9 +257,9 @@ write_index(VecIndexPtr index, const std::string& location) {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
-        fiu_do_on("VecIndex.write_index.throw_knowhere_execption", throw knowhere::KnowhereException(""));
-        fiu_do_on("VecIndex.write_index.throw_std_execption", throw std::exception());
-        fiu_do_on("VecIndex.write_index.throw_no_space_execption",
+        fiu_do_on("VecIndex.write_index.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("VecIndex.write_index.throw_std_exception", throw std::exception());
+        fiu_do_on("VecIndex.write_index.throw_no_space_exception",
             throw Exception(SERVER_INVALID_ARGUMENT, "No space left on device"));
 
         FileIOWriter writer(location);

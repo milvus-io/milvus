@@ -23,6 +23,7 @@
 #include "scheduler/Utils.h"
 #include "server/Config.h"
 
+#include <fiu-local.h>
 #include <map>
 #include <set>
 #include <string>
@@ -43,7 +44,7 @@ KnowhereResource::Initialize() {
     s = config.GetGpuResourceConfigEnable(enable_gpu);
     if (!s.ok())
         return s;
-
+    fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
     if (not enable_gpu)
         return Status::OK();
 
