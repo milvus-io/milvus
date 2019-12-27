@@ -46,9 +46,18 @@ VectorSource::Add(const ExecutionEnginePtr& execution_engine, const meta::TableF
             vector_ids_to_add[pos - current_num_vectors_added] = vectors_.id_array_[pos];
         }
     }
-    Status status = execution_engine->AddWithIds(
-        num_vectors_added, vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
-        vector_ids_to_add.data());
+
+    Status status;
+    if (!vectors_.float_data_.empty()) {
+        status = execution_engine->AddWithIds(
+            num_vectors_added, vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
+            vector_ids_to_add.data());
+    } else if (!vectors_.binary_data_.empty()) {
+        status = execution_engine->AddWithIds(
+            num_vectors_added, vectors_.binary_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
+            vector_ids_to_add.data());
+    }
+
     if (status.ok()) {
         current_num_vectors_added += num_vectors_added;
         vectors_.id_array_.insert(vectors_.id_array_.end(), std::make_move_iterator(vector_ids_to_add.begin()),

@@ -50,6 +50,9 @@ class ExecutionEngine {
     virtual Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) = 0;
 
+    virtual Status
+    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) = 0;
+
     virtual size_t
     Count() const = 0;
 
@@ -85,6 +88,10 @@ class ExecutionEngine {
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels, bool hybrid) = 0;
+
+    virtual Status
+    Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+           bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;

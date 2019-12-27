@@ -45,6 +45,11 @@ enum class IndexType {
 enum class MetricType {
     L2 = 1,
     IP = 2,
+
+    // the following metric types are only available for binary vectors
+    HAMMING = 20,
+    JACCARD = 21,
+    TANIMOTO = 22,
 };
 
 /**
@@ -78,7 +83,8 @@ struct Range {
  * @brief Record inserted
  */
 struct RowRecord {
-    std::vector<float> data;  ///< Vector raw data
+    std::vector<float> float_data;  ///< Vector raw float data
+    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
 /**

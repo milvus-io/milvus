@@ -34,9 +34,15 @@ UriCheck(const std::string& uri) {
 
 void
 CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
-    auto vector_data = target->mutable_vector_data();
-    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
-    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
+    if (!src.float_data.empty()) {
+        auto vector_data = target->mutable_vector_data();
+        vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
+        memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
+    }
+
+    if (!src.binary_data.empty()) {
+        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
+    }
 }
 
 Status
