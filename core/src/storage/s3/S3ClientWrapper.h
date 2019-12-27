@@ -18,7 +18,6 @@
 #pragma once
 
 #include <aws/core/Aws.h>
-#include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/s3/S3Client.h>
 #include <string>
 #include "storage/IStorage.h"
@@ -38,15 +37,17 @@ class S3ClientWrapper : public IStorage {
     Close() override;
 
     Status
-    CreateBucket(std::string& bucket_name) override;
+    CreateBucket(const std::string& bucket_name) override;
     Status
-    DeleteBucket(std::string& bucket_name) override;
+    DeleteBucket(const std::string& bucket_name) override;
     Status
-    UploadFile(std::string& bucket_name, std::string& object_key, std::string& path_key) override;
+    PutObjectFile(const std::string& bucket_name, const std::string& object_key, const std::string& path_key) override;
     Status
-    DownloadFile(std::string& bucket_name, std::string& object_key, std::string& path_key) override;
+    PutObjectStr(const std::string& bucket_name, const std::string& object_key, const std::string& content) override;
     Status
-    DeleteFile(std::string& bucket_name, std::string& object_key) override;
+    GetObjectFile(const std::string& bucket_name, const std::string& object_key, const std::string& path_key) override;
+    Status
+    DeleteObject(const std::string& bucket_name, const std::string& object_key) override;
 
  private:
     Aws::S3::S3Client* client_ = nullptr;

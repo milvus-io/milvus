@@ -27,8 +27,6 @@
 INITIALIZE_EASYLOGGINGPP
 
 TEST(StorageTest, S3_CLIENT_TEST) {
-    std::shared_ptr<milvus::storage::IStorage> storage_ptr = std::make_shared<milvus::storage::S3ClientWrapper>();
-
     std::string ip_address = "127.0.0.1";
     std::string port = "9000";
 
@@ -36,35 +34,56 @@ TEST(StorageTest, S3_CLIENT_TEST) {
     std::string access_key = "minioadmin";
     std::string secret_key = "minioadmin";
 
+    std::string bucket_name = "bucket";
+    std::string object_name = "test_file";
+    std::string filename_in = "/tmp/s3_test_file_in";
+    std::string filename_out = "/tmp/s3_test_file_out";
+    std::string content = "abcdefghijklmnopqrstuvwxyz";
+
+    std::shared_ptr<milvus::storage::IStorage> storage_ptr = std::make_shared<milvus::storage::S3ClientWrapper>();
     milvus::Status status = storage_ptr->Create(ip_address, port, access_key, secret_key);
     ASSERT_TRUE(status.ok());
 
-    std::string filename = "/tmp/s3_test_file";
-    std::string bucket_name = "bucket";
-    std::string object_name = "test_file";
-
     status = storage_ptr->CreateBucket(bucket_name);
     ASSERT_TRUE(status.ok());
     status = storage_ptr->CreateBucket(bucket_name);
-    ASSERT_FALSE(status.ok());
+    ASSERT_TRUE(status.ok());
 
-    std::ofstream ofile(filename);
-    std::stringstream ss;
-    for (int i = 0; i < 1024; ++i) {
-        ss << i;
+    ///////////////////////////////////////////////////////////////////////////
+    /* check PutObjectFile() */
+    {
+        std::ofstream ofile(filename_in);
+        std::stringstream ss;
+        for (int i = 0; i < 1024; ++i) {
+            ss << i;
+        }
+        ofile << ss.str() << std::endl;
+        ofile.close();
+        status = storage_ptr->PutObjectFile(bucket_name, object_name, filename_in);
+        ASSERT_TRUE(status.ok());
+
+        status = storage_ptr->GetObjectFile(bucket_name, object_name, filename_out);
+        std::ifstream infile(filename_out);
+        std::string in_buffer;
+        infile >> in_buffer;
+        ASSERT_STREQ(in_buffer.c_str(), ss.str().c_str());
     }
-    ofile << ss.str() << std::endl;
-    ofile.close();
-    status = storage_ptr->UploadFile(bucket_name, object_name, filename);
-    ASSERT_TRUE(status.ok());
 
-    status = storage_ptr->DownloadFile(bucket_name, object_name, filename);
-    std::ifstream infile(filename);
-    std::string in_buffer;
-    infile >> in_buffer;
-    ASSERT_STREQ(in_buffer.c_str(), ss.str().c_str());
+    ///////////////////////////////////////////////////////////////////////////
+    /* check PutObjectStr() */
+    {
+        status = storage_ptr->PutObjectStr(bucket_name, object_name, content);
+        ASSERT_TRUE(status.ok());
 
-    status = storage_ptr->DeleteFile(bucket_name, object_name);
+        status = storage_ptr->GetObjectFile(bucket_name, object_name, filename_out);
+        std::ifstream infile(filename_out);
+        std::string in_buffer;
+        infile >> in_buffer;
+        ASSERT_STREQ(in_buffer.c_str(), content.c_str());
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    status = storage_ptr->DeleteObject(bucket_name, object_name);
     ASSERT_TRUE(status.ok());
 
     status = storage_ptr->DeleteBucket(bucket_name);

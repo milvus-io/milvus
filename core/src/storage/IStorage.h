@@ -33,15 +33,17 @@ class IStorage {
     Close() = 0;
 
     virtual Status
-    CreateBucket(std::string& bucket_name) = 0;
+    CreateBucket(const std::string& bucket_name) = 0;
     virtual Status
-    DeleteBucket(std::string& bucket_name) = 0;
+    DeleteBucket(const std::string& bucket_name) = 0;
     virtual Status
-    UploadFile(std::string& bucket_name, std::string& object_key, std::string& path_key) = 0;
+    PutObjectFile(const std::string& bucket_name, const std::string& object_name, const std::string& file_path) = 0;
     virtual Status
-    DownloadFile(std::string& bucket_name, std::string& object_key, std::string& path_key) = 0;
+    PutObjectStr(const std::string& bucket_name, const std::string& object_name, const std::string& content) = 0;
     virtual Status
-    DeleteFile(std::string& bucket_name, std::string& object_key) = 0;
+    GetObjectFile(const std::string& bucket_name, const std::string& object_name, const std::string& file_path) = 0;
+    virtual Status
+    DeleteObject(const std::string& bucket_name, const std::string& object_name) = 0;
 };
 
 }  // namespace storage

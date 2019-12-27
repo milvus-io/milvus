@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -22,6 +23,7 @@
 #include <aws/s3/model/PutObjectRequest.h>
 #include <fstream>
 #include <iostream>
+#include <memory>
 
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"
@@ -60,86 +62,130 @@ S3ClientWrapper::Close() {
 }
 
 Status
-S3ClientWrapper::CreateBucket(std::string& bucket_name) {
+S3ClientWrapper::CreateBucket(const std::string& bucket_name) {
     Aws::S3::Model::CreateBucketRequest request;
     request.SetBucket(bucket_name);
 
-    auto ret = client_->CreateBucket(request);
+    auto outcome = client_->CreateBucket(request);
 
-    if (ret.IsSuccess()) {
-        return Status::OK();
-    } else {
-        STORAGE_LOG_ERROR << "CreateBucket error: " << ret.GetError().GetExceptionName() << ": "
-                          << ret.GetError().GetMessage();
-        return Status(SERVER_UNEXPECTED_ERROR, ret.GetError().GetMessage());
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        if (err.GetErrorType() != Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) {
+            STORAGE_LOG_ERROR << "ERROR: CreateBucket: " << err.GetExceptionName() << ": " << err.GetMessage();
+            return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
+        }
     }
+
+    STORAGE_LOG_DEBUG << "CreateBucket '" << bucket_name << "' successfully!";
+    return Status::OK();
 }
 
 Status
-S3ClientWrapper::DeleteBucket(std::string& bucket_name) {
+S3ClientWrapper::DeleteBucket(const std::string& bucket_name) {
     Aws::S3::Model::DeleteBucketRequest request;
     request.SetBucket(bucket_name);
 
-    auto ret = client_->DeleteBucket(request);
+    auto outcome = client_->DeleteBucket(request);
 
-    if (ret.IsSuccess()) {
-        return Status::OK();
-    } else {
-        STORAGE_LOG_ERROR << "DeleteBucket error: " << ret.GetError().GetExceptionName() << ": "
-                          << ret.GetError().GetMessage();
-        return Status(SERVER_UNEXPECTED_ERROR, ret.GetError().GetMessage());
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: DeleteBucket: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
+
+    STORAGE_LOG_DEBUG << "DeleteBucket '" << bucket_name << "' successfully!";
+    return Status::OK();
 }
 
 Status
-S3ClientWrapper::UploadFile(std::string& bucket_name, std::string& object_key, std::string& path_key) {
+S3ClientWrapper::PutObjectFile(const std::string& bucket_name, const std::string& object_name,
+                               const std::string& file_path) {
+    struct stat buffer;
+    if (stat(file_path.c_str(), &buffer) != 0) {
+        std::string str = "File '" + file_path + "' not exist!";
+        STORAGE_LOG_ERROR << "ERROR: " << str;
+        return Status(SERVER_UNEXPECTED_ERROR, str);
+    }
+
     Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(bucket_name.c_str()).WithKey(object_key.c_str());
+    request.WithBucket(bucket_name).WithKey(object_name);
 
-    auto input_data = Aws::MakeShared<Aws::FStream>("PutObjectInputStream", path_key.c_str(),
-                                                    std::ios_base::in | std::ios_base::binary);
+    auto input_data =
+        Aws::MakeShared<Aws::FStream>("PutObjectFile", file_path.c_str(), std::ios_base::in | std::ios_base::binary);
     request.SetBody(input_data);
-    auto ret = client_->PutObject(request);
-    if (ret.IsSuccess()) {
-        return Status::OK();
-    } else {
-        STORAGE_LOG_ERROR << "PutObject error: " << ret.GetError().GetExceptionName() << ": "
-                          << ret.GetError().GetMessage();
-        return Status(SERVER_UNEXPECTED_ERROR, ret.GetError().GetMessage());
+
+    auto outcome = client_->PutObject(request);
+
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: PutObject: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
+
+    STORAGE_LOG_DEBUG << "PutObjectFile '" << file_path << "' successfully!";
+    return Status::OK();
 }
 
 Status
-S3ClientWrapper::DownloadFile(std::string& bucket_name, std::string& object_key, std::string& path_key) {
+S3ClientWrapper::PutObjectStr(const std::string& bucket_name, const std::string& object_name,
+                              const std::string& content) {
+    Aws::S3::Model::PutObjectRequest request;
+    request.WithBucket(bucket_name).WithKey(object_name);
+
+    const std::shared_ptr<Aws::IOStream> input_data = Aws::MakeShared<Aws::StringStream>("");
+    *input_data << content.c_str();
+    request.SetBody(input_data);
+
+    auto outcome = client_->PutObject(request);
+
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: PutObject: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
+    }
+
+    STORAGE_LOG_DEBUG << "PutObjectStr successfully!";
+    return Status::OK();
+}
+
+Status
+S3ClientWrapper::GetObjectFile(const std::string& bucket_name, const std::string& object_name,
+                               const std::string& file_path) {
     Aws::S3::Model::GetObjectRequest request;
-    request.WithBucket(bucket_name.c_str()).WithKey(object_key.c_str());
-    auto ret = client_->GetObject(request);
-    if (ret.IsSuccess()) {
-        Aws::OFStream local_file(path_key.c_str(), std::ios::out | std::ios::binary);
-        local_file << ret.GetResult().GetBody().rdbuf();
-        return Status::OK();
-    } else {
-        STORAGE_LOG_ERROR << "GetObject error: " << ret.GetError().GetExceptionName() << ": "
-                          << ret.GetError().GetMessage();
-        return Status(SERVER_UNEXPECTED_ERROR, ret.GetError().GetMessage());
+    request.WithBucket(bucket_name).WithKey(object_name);
+
+    auto outcome = client_->GetObject(request);
+
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: GetObject: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
+
+    auto& retrieved_file = outcome.GetResultWithOwnership().GetBody();
+    std::ofstream output_file(file_path, std::ios::binary);
+    output_file << retrieved_file.rdbuf();
+    output_file.close();
+
+    STORAGE_LOG_DEBUG << "GetObjectFile '" << file_path << "' successfully!";
+    return Status::OK();
 }
 
 Status
-S3ClientWrapper::DeleteFile(std::string& bucket_name, std::string& object_key) {
+S3ClientWrapper::DeleteObject(const std::string& bucket_name, const std::string& object_name) {
     Aws::S3::Model::DeleteObjectRequest request;
-    request.WithBucket(bucket_name).WithKey(object_key);
+    request.WithBucket(bucket_name).WithKey(object_name);
 
-    auto ret = client_->DeleteObject(request);
+    auto outcome = client_->DeleteObject(request);
 
-    if (ret.IsSuccess()) {
-        return Status::OK();
-    } else {
-        STORAGE_LOG_ERROR << "DeleteObject error: " << ret.GetError().GetExceptionName() << ": "
-                          << ret.GetError().GetMessage();
-
-        return Status(SERVER_UNEXPECTED_ERROR, ret.GetError().GetMessage());
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: DeleteObject: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
+
+    STORAGE_LOG_DEBUG << "DeleteObject '" << object_name << "' successfully!";
+    return Status::OK();
 }
 
 }  // namespace storage
