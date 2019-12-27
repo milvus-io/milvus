@@ -44,6 +44,10 @@
 #define STOP_TIMER(name)
 #endif
 
+#ifdef FIU_ENABLE
+#define FIU_ENABLE_FIU(name) fiu_enable(name, 1, nullptr, 0)
+#endif
+
 static const char* CONFIG_PATH = "/tmp/milvus_test";
 static const char* CONFIG_FILE = "/server_config.yaml";
 

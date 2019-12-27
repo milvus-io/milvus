@@ -774,6 +774,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.ValidateConfig();
     ASSERT_TRUE(s.ok());
 
+#ifdef MILVUS_GPU_VERSION
     fiu_enable("get_config_build_index_resources_empty_value_fail", 1, NULL, 0);
     std::vector<int64_t> empty_value;
     s = config.GetGpuResourceConfigBuildIndexResources(empty_value);
