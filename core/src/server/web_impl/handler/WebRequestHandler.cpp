@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "server/delivery/request/BaseRequest.h"
+#include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
 
@@ -101,15 +102,15 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
         return status;
     }
 
-    table_info["table_name"] = schema.table_name_;
-    table_info["dimension"] = std::to_string(schema.dimension_);
-    table_info["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
-    table_info["index_file_size"] = std::to_string(schema.index_file_size_);
+    table_info[KEY_TABLE_TABLE_NAME] = schema.table_name_;
+    table_info[KEY_TABLE_DIMENSION] = std::to_string(schema.dimension_);
+    table_info[KEY_TABLE_INDEX_METRIC_TYPE] = MetricMap.at(engine::MetricType(schema.metric_type_));
+    table_info[KEY_TABLE_INDEX_FILE_SIZE] = std::to_string(schema.index_file_size_);
 
-    table_info["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
-    table_info["nlist"] = std::to_string(index_param.nlist_);
+    table_info[KEy_INDEX_INDEX_TYPE] = IndexMap.at(engine::EngineType(index_param.index_type_));
+    table_info[KEY_INDEX_NLIST] = std::to_string(index_param.nlist_);
 
-    table_info["count"] = std::to_string(count);
+    table_info[KEY_TABLE_COUNT] = std::to_string(count);
 }
 
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
@@ -333,12 +334,12 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    fields_dto->table_name = table_info["table_name"].c_str();
-    fields_dto->dimension = std::stol(table_info["dimension"]);
-    fields_dto->index = table_info["index"].c_str();
-    fields_dto->nlist = std::stol(table_info["nlist"]);
-    fields_dto->metric_type = table_info["metric_type"].c_str();
-    fields_dto->num = std::stol(table_info["count"]);
+    fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
+    fields_dto->dimension = std::stol(table_info[KEY_TABLE_DIMENSION]);
+    fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
+    fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
+    fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
+    fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
     //    if (query_params.getSize() == 0) {
     //        TableSchema schema;
     //        status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
@@ -402,7 +403,7 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
                 table_fields_dto->index = table_info["index"].c_str();
                 table_fields_dto->nlist = std::stol(table_info["nlist"]);
                 table_fields_dto->metric_type = table_info["metric_type"].c_str();
-                table_fields_dto->num = std::stol(table_info["count"]);
+                table_fields_dto->count = std::stol(table_info["count"]);
 
                 response_dto->tables->pushBack(table_fields_dto);
             }

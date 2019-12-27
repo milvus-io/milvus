@@ -19,6 +19,7 @@
 
 #include "server/web_impl/dto/Dto.h"
 #include "server/web_impl/dto/StatusDto.hpp"
+#include "server/web_impl/Constants.h"
 
 namespace milvus {
 namespace server {
@@ -36,8 +37,8 @@ class IndexDto : public oatpp::data::mapping::type::Object {
 class IndexRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(IndexRequestDto, Object)
 
-    DTO_FIELD(String, index_type);
-    DTO_FIELD(Int64, nlist);
+    DTO_FIELD(String, index_type) = VALUE_INDEX_INDEX_TYPE_DEFAULT;
+    DTO_FIELD(Int64, nlist) = VALUE_INDEX_NLIST_DEFAULT;
 };
 
 #include OATPP_CODEGEN_END(DTO)

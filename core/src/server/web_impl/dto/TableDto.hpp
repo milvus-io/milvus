@@ -19,6 +19,7 @@
 
 #include "server/web_impl/dto/Dto.h"
 #include "server/web_impl/dto/StatusDto.hpp"
+#include "server/web_impl/Constants.h"
 
 namespace milvus {
 namespace server {
@@ -32,19 +33,18 @@ class TableRequestDto : public oatpp::data::mapping::type::Object {
 
     DTO_FIELD(String, table_name, "table_name");
     DTO_FIELD(Int64, dimension, "dimension");
-    DTO_FIELD(Int64, index_file_size, "index_file_size");
-    DTO_FIELD(Int64, metric_type, "metric_type");
+    DTO_FIELD(Int64, index_file_size, "index_file_size") = VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT;
+    DTO_FIELD(Int64, metric_type, "metric_type") = VALUE_TABLE_METRIC_TYPE_DEFAULT;
 };
 
 class TableFieldsDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableFieldsDto, Object)
 
-//    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
     DTO_FIELD(String, table_name);
     DTO_FIELD(Int64, dimension);
     DTO_FIELD(Int64, index_file_size);
     DTO_FIELD(String, metric_type);
-    DTO_FIELD(Int64, num);
+    DTO_FIELD(Int64, count);
     DTO_FIELD(String, index);
     DTO_FIELD(Int64, nlist);
 };
@@ -67,10 +67,6 @@ class TablesResponseDto : public OObject {
 
     DTO_FIELD(TableListFieldsDto::ObjectWrapper, tables_fields);
     DTO_FIELD(Int64, page_num);
-};
-
-class RangeDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(RangeDto, Object)
 };
 
 #include OATPP_CODEGEN_END(DTO)

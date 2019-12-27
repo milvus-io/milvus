@@ -18,6 +18,7 @@
 #pragma once
 
 #include "server/web_impl/dto/Dto.h"
+#include "server/web_impl/Constants.h"
 
 namespace milvus {
 namespace server {
@@ -42,7 +43,7 @@ class InsertRequestDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(InsertRequestDto, Object)
 
     DTO_FIELD(String, table_name);
-    DTO_FIELD(String, tag) = "";
+    DTO_FIELD(String, tag) = VALUE_PARTITION_TAG_DEFAULT;
     DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
     DTO_FIELD(List<Int64>::ObjectWrapper, ids);
 };

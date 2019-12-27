@@ -24,6 +24,8 @@
 
 #include "db/engine/ExecutionEngine.h"
 
+#include "server/web_impl/Constants.h"
+
 namespace milvus {
 namespace server {
 namespace web {
@@ -62,21 +64,27 @@ enum StatusCode : int {
     OUT_OF_MEMORY = 24,
 };
 
-static const std::map<engine::EngineType, std::string> IndexMap = {
-    {engine::EngineType::FAISS_IDMAP, "FLAT"},    {engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
-    {engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"}, {engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
-    {engine::EngineType::NSG_MIX, "RNSG"},        {engine::EngineType::FAISS_PQ, "IVFPQ"},
+static const std::unordered_map<engine::EngineType, std::string> IndexMap = {
+    {engine::EngineType::FAISS_IDMAP, NAME_ENGINE_TYPE_FLAT},
+    {engine::EngineType::FAISS_IVFFLAT, NAME_ENGINE_TYPE_IVFFLAT},
+    {engine::EngineType::FAISS_IVFSQ8, NAME_ENGINE_TYPE_IVFSQ8},
+    {engine::EngineType::FAISS_IVFSQ8H, NAME_ENGINE_TYPE_IVFSQ8H},
+    {engine::EngineType::NSG_MIX, NAME_ENGINE_TYPE_RNSG},
+    {engine::EngineType::FAISS_PQ, NAME_ENGINE_TYPE_IVFPQ},
 };
 
-static const std::map<std::string, engine::EngineType> IndexNameMap = {
-    {"FLAT", engine::EngineType::FAISS_IDMAP},    {"IVFFLAT", engine::EngineType::FAISS_IVFFLAT},
-    {"IVFSQ8", engine::EngineType::FAISS_IVFSQ8}, {"IVFSQ8H", engine::EngineType::FAISS_IVFSQ8H},
-    {"RNSG", engine::EngineType::NSG_MIX},        {"IVFPQ", engine::EngineType::FAISS_PQ},
+static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = {
+    {NAME_ENGINE_TYPE_FLAT, engine::EngineType::FAISS_IDMAP},
+    {NAME_ENGINE_TYPE_IVFFLAT, engine::EngineType::FAISS_IVFFLAT},
+    {NAME_ENGINE_TYPE_IVFSQ8, engine::EngineType::FAISS_IVFSQ8},
+    {NAME_ENGINE_TYPE_IVFSQ8H, engine::EngineType::FAISS_IVFSQ8H},
+    {NAME_ENGINE_TYPE_RNSG, engine::EngineType::NSG_MIX},
+    {NAME_ENGINE_TYPE_IVFPQ, engine::EngineType::FAISS_PQ},
 };
 
-static const std::map<engine::MetricType, std::string> MetricMap = {
-    {engine::MetricType::L2, "L2"},
-    {engine::MetricType::IP, "IP"},
+static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
+    {engine::MetricType::L2, NAME_METRIC_TYPE_L2},
+    {engine::MetricType::IP, NAME_METRIC_TYPE_IP},
 };
 
 }  // namespace web
