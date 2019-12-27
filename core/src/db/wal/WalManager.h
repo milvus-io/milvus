@@ -67,11 +67,11 @@ class WalManager {
     MXLogConfiguration mxlog_config_;
     std::atomic<uint64_t > current_lsn_;
     uint64_t last_applied_lsn_;
-    uint64_t last_flushed_lsn_;
+//    uint64_t last_flushed_lsn_;//get from meta
     std::unordered_map<std::string, TableSchemaPtr> table_meta_;
     MXLogBuffer buffer_;
+    MXLogMetaHandler meta_handler_;
 
-    std::thread auto_flush_;
     std::thread reader_;
     std::condition_variable reader_cv_;
     bool reader_is_waiting_;

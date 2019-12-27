@@ -37,13 +37,12 @@ enum class MXLogType {
 #pragma pack(1)
 
 struct MXLogRecord{
-    uint32_t mxl_crc;//crc 4 this record
     uint32_t mxl_size;//data length
-    uint64_t mxl_lsn;//log sequence number, self-increment by 1
+    uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
     uint32_t vector_num;
     uint16_t table_id_size;//
     uint16_t dim;//one record contains the same dimension vectors
-    uint8_t mxl_type;//record type, insert/delete/update/...
+    uint8_t mxl_type;//record type, insert/delete/update/flush...
     //mxl_data include vecter_ids[vector_num], table_id and float* vectors
     char mxl_data[];//data address
 //    char* mxl_data;

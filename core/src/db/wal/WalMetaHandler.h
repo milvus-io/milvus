@@ -17,10 +17,18 @@
 
 #pragma once
 
+#include "db/meta/Meta.h"
+#include "db/meta/MetaTypes.h"
+#include "db/meta/MetaFactory.h"
+
 
 namespace milvus {
 namespace engine {
 namespace wal {
+
+class MXLogMetaHandler {
+
+};
 
 
 } // wal
