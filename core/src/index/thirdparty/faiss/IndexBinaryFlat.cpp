@@ -11,6 +11,7 @@
 #include <faiss/IndexBinary.h>
 #include <faiss/IndexBinaryFlat.h>
 
+#include <cmath>
 #include <cstring>
 #include <faiss/utils/hamming.h>
 #include <faiss/utils/jaccard.h>
@@ -40,7 +41,7 @@ void IndexBinaryFlat::reset() {
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels) const {
   const idx_t block_size = query_batch_size;
-  if (metric_type == METRIC_Jaccard) {
+  if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
       float *D = new float[k * n];
       for (idx_t s = 0; s < n; s += block_size) {
           idx_t nn = block_size;
@@ -60,6 +61,11 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
 
           } else {
               FAISS_THROW_MSG("tanimoto_knn_mc not implemented");
+          }
+      }
+      if (metric_type == METRIC_Tanimoto) {
+          for (int i = 0; i < k * n; i++) {
+              D[i] = -log2(1-D[i]);
           }
       }
       memcpy(distances, D, sizeof(float) * n * k);
