@@ -206,11 +206,6 @@ foreach (_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
 endforeach ()
 
 set(FAISS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/faiss)
-if (DEFINED ENV{FAISS_SOURCE_URL})
-    set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
-else ()
-    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz")
-endif ()
 
 if (DEFINED ENV{KNOWHERE_ARROW_URL})
     set(ARROW_SOURCE_URL "$ENV{KNOWHERE_ARROW_URL}")
@@ -472,12 +467,11 @@ macro(build_faiss)
                 --without-cuda)
     endif ()
 
-    if (CUSTOMIZATION)
+    if (DEFINED ENV{FAISS_SOURCE_URL})
+        set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
         externalproject_add(faiss_ep
-                DOWNLOAD_COMMAND
-                ""
-                SOURCE_DIR
-                ${FAISS_SOURCE_DIR}
+                URL
+                ${FAISS_SOURCE_URL}
                 ${EP_LOG_OPTIONS}
                 CONFIGURE_COMMAND
                 "./configure"
@@ -492,8 +486,10 @@ macro(build_faiss)
                 ${FAISS_STATIC_LIB})
     else ()
         externalproject_add(faiss_ep
-                URL
-                ${FAISS_SOURCE_URL}
+                DOWNLOAD_COMMAND
+                ""
+                SOURCE_DIR
+                ${FAISS_SOURCE_DIR}
                 ${EP_LOG_OPTIONS}
                 CONFIGURE_COMMAND
                 "./configure"

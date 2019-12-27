@@ -9,7 +9,6 @@ BUILD_COVERAGE="OFF"
 DB_PATH="/tmp/milvus"
 PROFILING="OFF"
 RUN_CPPLINT="OFF"
-CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 WITH_MKL="OFF"
@@ -18,7 +17,7 @@ FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 
-while getopts "p:d:t:f:ulrcghxzmei" arg; do
+while getopts "p:d:t:f:ulrcghzmei" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -51,9 +50,6 @@ while getopts "p:d:t:f:ulrcghxzmei" arg; do
     ;;
   z)
     PROFILING="ON"
-    ;;
-  x)
-    CUSTOMIZATION="ON"
     ;;
   g)
     GPU_VERSION="ON"
@@ -120,7 +116,6 @@ CMAKE_CMD="cmake \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DMILVUS_ENABLE_PROFILING=${PROFILING} \
--DCUSTOMIZATION=${CUSTOMIZATION} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
