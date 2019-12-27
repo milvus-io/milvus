@@ -109,29 +109,22 @@ BinaryIVF::GenParams(const Config& config) {
 
 IndexModelPtr
 BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
+    std::lock_guard<std::mutex> lk(mutex_);
+
     auto build_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
     if (build_cfg != nullptr) {
         build_cfg->CheckValid();  // throw exception
     }
 
     GETBINARYTENSOR(dataset)
+    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
 
     faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, GetMetricType(build_cfg->metric_type));
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, build_cfg->nlist,
                                                          GetMetricType(build_cfg->metric_type));
     index->train(rows, (uint8_t*)p_data);
-
-    // TODO(linxj): override here. train return model or not.
-    // return std::make_shared<IVFIndexModel>(index);
-
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
-    index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
+    index->add_with_ids(rows, (uint8_t*)p_data, p_ids);
+    index_ = index;
 }
 
 int64_t
