@@ -16,6 +16,8 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <fiu-control.h>
+#include <fiu-local.h>
 
 #include <boost/filesystem.hpp>
 #include <random>
@@ -124,6 +126,18 @@ TEST_F(DBTest, CONFIG_TEST) {
         ASSERT_EQ(conf.GetType(), "swap");
         auto criterias = conf.GetCriterias();
         ASSERT_EQ(criterias.size(), 0);
+    }
+    {
+        fiu_init(0);
+        fiu_enable("OptionsParseCritiriasOutOfRange", 1, NULL, 0);
+        ASSERT_ANY_THROW(milvus::engine::ArchiveConf conf("swap", "disk:"));
+        fiu_disable("OptionsParseCritiriasOutOfRange");
+    }
+    {
+        fiu_enable("ArchiveConfParseCritiriasEmptyTokens", 1, NULL, 0);
+        milvus::engine::ArchiveConf conf("swap", "");
+        ASSERT_TRUE(conf.GetCriterias().empty());
+        fiu_disable("ArchiveConfParseCritiriasEmptyTokens");
     }
     {
         ASSERT_ANY_THROW(milvus::engine::ArchiveConf conf1("swap", "disk:"));
