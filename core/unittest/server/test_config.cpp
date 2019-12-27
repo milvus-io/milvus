@@ -847,6 +847,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.GetGpuResourceConfigCacheThreshold(f_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource");
+#endif
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
