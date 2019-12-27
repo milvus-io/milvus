@@ -38,7 +38,7 @@
 #include "wrapper/gpu/GPUVecImpl.h"
 #endif
 
-#include "fiu-local.h"
+#include <fiu-local.h>
 
 namespace milvus {
 namespace engine {
@@ -256,6 +256,11 @@ write_index(VecIndexPtr index, const std::string& location) {
     try {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
+
+        fiu_do_on("VecIndex.write_index.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("VecIndex.write_index.throw_std_exception", throw std::exception());
+        fiu_do_on("VecIndex.write_index.throw_no_space_exception",
+            throw Exception(SERVER_INVALID_ARGUMENT, "No space left on device"));
 
         FileIOWriter writer(location);
         writer(&index_type, sizeof(IndexType));

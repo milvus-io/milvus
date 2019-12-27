@@ -76,7 +76,7 @@ ConvertToDataset(std::vector<SPTAG::QueryResult> query_results) {
 
     auto p_id = (int64_t*)malloc(sizeof(int64_t) * elems);
     auto p_dist = (float*)malloc(sizeof(float) * elems);
-// TODO: throw if malloc failed.
+    // TODO: throw if malloc failed.
 
 #pragma omp parallel for
     for (auto i = 0; i < query_results.size(); ++i) {

@@ -33,7 +33,8 @@ Job::Job(JobType type) : type_(type) {
 json
 Job::Dump() const {
     json ret{
-        {"id", id_}, {"type", type_},
+        {"id", id_},
+        {"type", type_},
     };
     return ret;
 }

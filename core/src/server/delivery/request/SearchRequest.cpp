@@ -59,8 +59,8 @@ SearchRequest::OnExecute() {
     try {
         auto pre_query_ctx = context_->Child("Pre query");
 
-        std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(record_size_) + ", k=" +
-                          std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
+        std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(record_size_) +
+                          ", k=" + std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
 
         TimeRecorder rc(hdr);
 

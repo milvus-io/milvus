@@ -144,7 +144,10 @@ TaskTableItem::Moved() {
 json
 TaskTableItem::Dump() const {
     json ret{
-        {"id", id}, {"task", (int64_t)task.get()}, {"state", ToString(state)}, {"timestamp", timestamp.Dump()},
+        {"id", id},
+        {"task", (int64_t)task.get()},
+        {"state", ToString(state)},
+        {"timestamp", timestamp.Dump()},
     };
     return ret;
 }

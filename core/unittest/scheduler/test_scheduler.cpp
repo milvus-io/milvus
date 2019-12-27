@@ -212,5 +212,45 @@ class SchedulerTest2 : public testing::Test {
 //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 //}
 
+TEST(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
+    auto mock_index_ptr = std::make_shared<MockVecIndex>();
+    milvus::engine::Config config;
+    auto quantizer_ptr = mock_index_ptr->LoadQuantizer(config);
+    ASSERT_EQ(quantizer_ptr, nullptr);
+
+    auto vec_index_ptr = mock_index_ptr->LoadData(quantizer_ptr, config);
+    ASSERT_EQ(vec_index_ptr, nullptr);
+
+    auto s = mock_index_ptr->SetQuantizer(quantizer_ptr);
+    ASSERT_TRUE(s.ok());
+
+    s = mock_index_ptr->UnsetQuantizer();
+    ASSERT_TRUE(s.ok());
+
+    auto res = mock_index_ptr->CopyToGpuWithQuantizer(0, config);
+    ASSERT_EQ(res.first, nullptr);
+    ASSERT_EQ(res.second, nullptr);
+
+    using namespace milvus::engine;
+    auto index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU, config);
+    ASSERT_EQ(index->GetType(), IndexType::SPTAG_KDT_RNT_CPU);
+
+    index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU, config);
+    ASSERT_EQ(index->GetType(), IndexType::SPTAG_BKT_RNT_CPU);
+
+    index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_GPU, config);
+    ASSERT_EQ(index->GetType(), IndexType::FAISS_IVFPQ_GPU);
+
+    index = GetVecIndexFactory(IndexType::NSG_MIX, config);
+    ASSERT_EQ(index->GetType(), IndexType::NSG_MIX);
+
+    index = GetVecIndexFactory(IndexType::INVALID, config);
+    ASSERT_EQ(index, nullptr);
+
+    knowhere::BinarySet empty_set;
+    auto res_ptr = LoadVecIndex(IndexType::INVALID, empty_set, 0);
+    ASSERT_EQ(res_ptr, nullptr);
+}
+
 }  // namespace scheduler
 }  // namespace milvus
