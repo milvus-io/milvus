@@ -26,6 +26,7 @@
 #include "utils/Log.h"
 #include "wrapper/VecImpl.h"
 
+#include <fiu-local.h>
 /*
  * no parameter check in this layer.
  * only responible for index combination
@@ -39,9 +40,11 @@ Status
 IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                       const float* xt) {
     try {
+        fiu_do_on("IVFMixIndex.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFMixIndex.BuildAll.throw_std_exception", throw std::exception());
+
         dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
-
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
         index_->set_preprocessor(preprocessor);
         auto model = index_->Train(dataset, cfg);

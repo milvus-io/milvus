@@ -117,18 +117,22 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
     AssertResult(res_ids, res_dis);
 
     {
-        auto device_id = index_->GetDeviceId();
+        index_->GetDeviceId();
 
         fiu_init(0);
         fiu_enable("VecIndexImpl.BuildAll.throw_knowhere_exception", 1, NULL, 0);
         fiu_enable("BFIndex.BuildAll.throw_knowhere_exception", 1, NULL, 0);
+        fiu_enable("IVFMixIndex.BuildAll.throw_knowhere_exception", 1, NULL, 0);
         auto s = index_->BuildAll(nb, xb.data(), ids.data(), conf);
+        fiu_disable("IVFMixIndex.BuildAll.throw_knowhere_exception");
         fiu_disable("BFIndex.BuildAll.throw_knowhere_exception");
         fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
 
         fiu_enable("VecIndexImpl.BuildAll.throw_std_exception", 1, NULL, 0);
         fiu_enable("BFIndex.BuildAll.throw_std_exception", 1, NULL, 0);
+        fiu_enable("IVFMixIndex.BuildAll.throw_std_exception", 1, NULL, 0);
         s = index_->BuildAll(nb, xb.data(), ids.data(), conf);
+        fiu_disable("IVFMixIndex.BuildAll.throw_std_exception");
         fiu_disable("BFIndex.BuildAll.throw_std_exception");
         fiu_disable("VecIndexImpl.BuildAll.throw_std_exception");
 
@@ -136,9 +140,9 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
         s = index_->Add(nb, xb.data(), ids.data());
         fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
 
-        fiu_enable(" VecIndexImpl.Add.throw_std_exception", 1, NULL, 0);
+        fiu_enable("VecIndexImpl.Add.throw_std_exception", 1, NULL, 0);
         s = index_->Add(nb, xb.data(), ids.data());
-        fiu_disable(" VecIndexImpl.Add.throw_std_exception");
+        fiu_disable("VecIndexImpl.Add.throw_std_exception");
 
         fiu_enable("VecIndexImpl.Search.throw_knowhere_exception", 1, NULL, 0);
         s = index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), searchconf);
@@ -186,6 +190,7 @@ TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
 #endif
 
 TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
+    std::cout<<"type: "<< static_cast<int>(index_type) << std::endl;
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
