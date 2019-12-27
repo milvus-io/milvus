@@ -45,6 +45,7 @@ AdapterMgr::RegisterAdapter() {
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_IVFFLAT_CPU, ivf_cpu);
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_IVFFLAT_GPU, ivf_gpu);
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_IVFFLAT_MIX, ivf_mix);
+    REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_BIN_IVFLAT_CPU, ivf_bin_cpu);
 
     REGISTER_CONF_ADAPTER(IVFSQConfAdapter, IndexType::FAISS_IVFSQ8_CPU, ivfsq8_cpu);
     REGISTER_CONF_ADAPTER(IVFSQConfAdapter, IndexType::FAISS_IVFSQ8_GPU, ivfsq8_gpu);

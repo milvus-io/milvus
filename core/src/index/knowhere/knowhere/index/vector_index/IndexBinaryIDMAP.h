@@ -29,6 +29,12 @@ namespace knowhere {
 
 class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
  public:
+    BinaryIDMAP() : FaissBaseBinaryIndex(nullptr) {
+    }
+
+    explicit BinaryIDMAP(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
+    }
+
     BinarySet
     Serialize() override;
 
@@ -49,6 +55,9 @@ class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
 
     int64_t
     Dimension() override;
+
+    void
+    Seal() override;
 
     const uint8_t*
     GetRawVectors();
