@@ -18,6 +18,7 @@
 #include "db/Options.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include <fiu-local.h>
 
 #include <assert.h>
 #include <stdlib.h>
@@ -45,6 +46,7 @@ ArchiveConf::ParseCritirias(const std::string& criterias) {
 
     boost::algorithm::split(tokens, criterias, boost::is_any_of(";"));
 
+    fiu_do_on("ArchiveConfParseCritiriasEmptyTokens",tokens.clear());
     if (tokens.size() == 0) {
         return;
     }
@@ -65,6 +67,7 @@ ArchiveConf::ParseCritirias(const std::string& criterias) {
             continue;
         }
         try {
+            fiu_do_on("OptionsParseCritiriasOutOfRange",kv[1]=std::to_string(std::numeric_limits<int>::max()+1UL));
             auto value = std::stoi(kv[1]);
             criterias_[kv[0]] = value;
         } catch (std::out_of_range&) {
