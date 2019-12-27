@@ -432,12 +432,12 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
             return SetEngineConfigOmpThreadNum(value);
 #ifdef MILVUS_GPU_VERSION
-            } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
+        } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             return SetEngineConfigGpuSearchThreshold(value);
 #endif
         }
 #ifdef MILVUS_GPU_VERSION
-        } else if (parent_key == CONFIG_GPU_RESOURCE) {
+    } else if (parent_key == CONFIG_GPU_RESOURCE) {
         if (child_key == CONFIG_GPU_RESOURCE_ENABLE) {
             return SetGpuResourceConfigEnable(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_CAPACITY) {
@@ -1543,4 +1543,3 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
 
 }  // namespace server
 }  // namespace milvus
-

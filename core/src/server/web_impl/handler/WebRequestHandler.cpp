@@ -107,7 +107,7 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
     table_info[KEY_TABLE_INDEX_METRIC_TYPE] = MetricMap.at(engine::MetricType(schema.metric_type_));
     table_info[KEY_TABLE_INDEX_FILE_SIZE] = std::to_string(schema.index_file_size_);
 
-    table_info[KEy_INDEX_INDEX_TYPE] = IndexMap.at(engine::EngineType(index_param.index_type_));
+    table_info[KEY_INDEX_INDEX_TYPE] = IndexMap.at(engine::EngineType(index_param.index_type_));
     table_info[KEY_INDEX_NLIST] = std::to_string(index_param.nlist_);
 
     table_info[KEY_TABLE_COUNT] = std::to_string(count);
