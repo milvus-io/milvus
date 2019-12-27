@@ -30,6 +30,16 @@ GetMetricType(METRICTYPE& type) {
     if (type == METRICTYPE::IP) {
         return faiss::METRIC_INNER_PRODUCT;
     }
+    // binary only
+    if (type == METRICTYPE::JACCARD) {
+        return faiss::METRIC_Jaccard;
+    }
+    if (type == METRICTYPE::TANIMOTO) {
+        return faiss::METRIC_Tanimoto;
+    }
+    if (type == METRICTYPE::HAMMING) {
+        return faiss::METRIC_Hamming;
+    }
 
     KNOWHERE_THROW_MSG("Metric type is invalid");
 }

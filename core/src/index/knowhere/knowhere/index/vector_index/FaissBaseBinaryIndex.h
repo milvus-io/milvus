@@ -17,27 +17,27 @@
 
 #pragma once
 
-#include <string>
+#include <memory>
+
+#include <faiss/IndexBinary.h>
+
+#include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Dataset.h"
 
 namespace knowhere {
 
-namespace meta {
-extern const char* DIM;
-extern const char* TENSOR;
-extern const char* ROWS;
-extern const char* IDS;
-extern const char* DISTANCE;
-};  // namespace meta
+class FaissBaseBinaryIndex {
+ protected:
+    explicit FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index);
 
-#define GETTENSOR(dataset)                         \
-    auto dim = dataset->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset->Get<const float*>(meta::TENSOR);
+    virtual BinarySet
+    SerializeImpl();
 
-#define GETBINARYTENSOR(dataset)                   \
-    auto dim = dataset->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset->Get<const uint8_t*>(meta::TENSOR);
+    virtual void
+    LoadImpl(const BinarySet& index_binary);
+
+ public:
+    std::shared_ptr<faiss::IndexBinary> index_ = nullptr;
+};
 
 }  // namespace knowhere

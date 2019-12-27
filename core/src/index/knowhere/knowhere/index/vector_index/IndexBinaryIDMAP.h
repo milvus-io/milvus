@@ -17,27 +17,51 @@
 
 #pragma once
 
-#include <string>
-#include "knowhere/common/Dataset.h"
+#include <memory>
+#include <mutex>
+#include <utility>
+#include <vector>
+
+#include "FaissBaseBinaryIndex.h"
+#include "VectorIndex.h"
 
 namespace knowhere {
 
-namespace meta {
-extern const char* DIM;
-extern const char* TENSOR;
-extern const char* ROWS;
-extern const char* IDS;
-extern const char* DISTANCE;
-};  // namespace meta
+class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
+ public:
+    BinarySet
+    Serialize() override;
 
-#define GETTENSOR(dataset)                         \
-    auto dim = dataset->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset->Get<const float*>(meta::TENSOR);
+    void
+    Load(const BinarySet& index_binary) override;
 
-#define GETBINARYTENSOR(dataset)                   \
-    auto dim = dataset->Get<int64_t>(meta::DIM);   \
-    auto rows = dataset->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset->Get<const uint8_t*>(meta::TENSOR);
+    DatasetPtr
+    Search(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    Add(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    Train(const Config& config);
+
+    int64_t
+    Count() override;
+
+    int64_t
+    Dimension() override;
+
+    const uint8_t*
+    GetRawVectors();
+
+    const int64_t*
+    GetRawIds();
+
+ protected:
+    virtual void
+    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+
+ protected:
+    std::mutex mutex_;
+};
 
 }  // namespace knowhere
