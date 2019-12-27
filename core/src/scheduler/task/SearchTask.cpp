@@ -207,7 +207,7 @@ XSearchTask::Execute() {
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
         uint64_t nprobe = search_job->nprobe();
-        const float* vectors = search_job->vectors();
+        const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
@@ -221,8 +221,8 @@ XSearchTask::Execute() {
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
                 hybrid = true;
             }
-            Status s =
-                index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
+            Status s = index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(),
+                                             output_ids.data(), hybrid);
             if (!s.ok()) {
                 search_job->GetStatus() = s;
                 search_job->SearchDone(index_id_);
