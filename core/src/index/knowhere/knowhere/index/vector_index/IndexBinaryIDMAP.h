@@ -73,4 +73,6 @@ class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
     std::mutex mutex_;
 };
 
+using BinaryIDMAPPtr = std::shared_ptr<BinaryIDMAP>;
+
 }  // namespace knowhere

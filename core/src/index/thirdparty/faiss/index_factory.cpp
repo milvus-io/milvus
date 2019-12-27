@@ -378,6 +378,7 @@ IndexBinary *index_binary_factory(int d, const char *description, MetricType met
     int ncentroids = -1;
     int M;
 
+    ScopeDeleter1<IndexBinary> del_index;
     if (sscanf(description, "BIVF%d_HNSW%d", &ncentroids, &M) == 2) {
         IndexBinaryIVF *index_ivf = new IndexBinaryIVF(
                 new IndexBinaryHNSW(d, M), d, ncentroids
@@ -397,12 +398,26 @@ IndexBinary *index_binary_factory(int d, const char *description, MetricType met
         index = index_hnsw;
 
     } else if (std::string(description) == "BFlat") {
-        index = new IndexBinaryFlat(d, metric);
+        IndexBinary* index_x = new IndexBinaryFlat(d, metric);
+
+        {
+            IndexBinaryIDMap *idmap = new IndexBinaryIDMap(index_x);
+            del_index.set (idmap);
+            idmap->own_fields = true;
+            index_x = idmap;
+        }
+
+        if (index_x) {
+            index = index_x;
+            del_index.set(index);
+        }
 
     } else {
         FAISS_THROW_IF_NOT_FMT(index, "description %s did not generate an index",
                                    description);
     }
+
+    del_index.release();
 
     return index;
 }

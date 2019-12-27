@@ -71,4 +71,6 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
     std::mutex mutex_;
 };
 
+using BinaryIVFIndexPtr = std::shared_ptr<BinaryIVF>;
+
 }  // namespace knowhere

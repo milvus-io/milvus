@@ -16,20 +16,20 @@
 // under the License.
 
 #include "wrapper/VecIndex.h"
-#include "wrapper/BinVecImpl.h"
 #include "VecImpl.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+#include "knowhere/index/vector_index/IndexBinaryIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "knowhere/index/vector_index/IndexBinaryIVF.h"
-#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "server/Config.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "wrapper/BinVecImpl.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>

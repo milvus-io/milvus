@@ -83,8 +83,6 @@ BinaryIDMAP::Add(const DatasetPtr& dataset, const Config& config) {
     index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
 }
 
-const char* type = "BFLAT";
-
 void
 BinaryIDMAP::Train(const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
@@ -93,7 +91,8 @@ BinaryIDMAP::Train(const Config& config) {
     }
     config->CheckValid();
 
-    auto index = faiss::index_binary_factory(config->d, type, GetMetricType(config->metric_type));
+    const char* binary_type = "BFlat";
+    auto index = faiss::index_binary_factory(config->d, binary_type, GetMetricType(config->metric_type));
     index_.reset(index);
 }
 

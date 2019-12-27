@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "BinVecImpl.h"
+#include "wrapper/BinVecImpl.h"
 #include "WrapperException.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
