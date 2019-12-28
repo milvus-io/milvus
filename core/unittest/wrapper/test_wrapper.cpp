@@ -27,7 +27,6 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "wrapper/VecIndex.h"
 #include "wrapper/utils.h"
-#include "wrapper/WrapperException.h"
 
 #include <fiu-control.h>
 #include <fiu-local.h>
@@ -191,7 +190,7 @@ TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
 #endif
 
 TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
-    std::cout<<"type: "<< static_cast<int>(index_type) << std::endl;
+    std::cout << "type: " << static_cast<int>(index_type) << std::endl;
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
@@ -278,7 +277,7 @@ TEST(whatever, test_config) {
     try {
         config_mgr.GetAdapter(milvus::engine::IndexType::INVALID);
     } catch (std::exception& e) {
-        std::cout<< "catch an expected exception"<<std::endl;
+        std::cout << "catch an expected exception" << std::endl;
     }
 
     conf.size = 1000000.0;
@@ -292,31 +291,32 @@ TEST(whatever, test_config) {
 
     auto ivf_pq_conf = std::make_shared<milvus::engine::IVFPQConfAdapter>();
     conf.metric_type = knowhere::METRICTYPE::IP;
-    try{
+    try {
         ivf_pq_conf->Match(conf);
-    }catch (std::exception &e){
-        std::cout<< "catch an expected exception"<<std::endl;
+    } catch (std::exception& e) {
+        std::cout << "catch an expected exception" << std::endl;
     }
 
     conf.metric_type = knowhere::METRICTYPE::L2;
     fiu_init(0);
     fiu_enable("IVFPQConfAdapter.Match.empty_resset", 1, NULL, 0);
-    try{
+    try {
         ivf_pq_conf->Match(conf);
-    }catch (std::exception &e){
-        std::cout<< "catch an expected exception"<<std::endl;
+    } catch (std::exception& e) {
+        std::cout << "catch an expected exception" << std::endl;
     }
     fiu_disable("IVFPQConfAdapter.Match.empty_resset");
 
     conf.nprobe = -1;
-    try{
+    try {
         ivf_pq_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_GPU);
-    }catch (std::exception &e){
-        std::cout<< "catch an expected exception"<<std::endl;
+    } catch (std::exception& e) {
+        std::cout << "catch an expected exception" << std::endl;
     }
 }
 
 #include "wrapper/VecImpl.h"
+
 TEST(BFIndex, test_bf_index_fail) {
     using namespace milvus::engine;
     auto bf_ptr = std::make_shared<BFIndex>(nullptr);

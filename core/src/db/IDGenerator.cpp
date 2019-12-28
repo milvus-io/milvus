@@ -18,9 +18,9 @@
 #include "db/IDGenerator.h"
 
 #include <assert.h>
+#include <fiu-local.h>
 #include <chrono>
 #include <iostream>
-#include <fiu-local.h>
 
 namespace milvus {
 namespace engine {
@@ -43,7 +43,7 @@ SimpleIDGenerator::NextIDNumbers(size_t n, IDNumbers& ids) {
         NextIDNumbers(MAX_IDS_PER_MICRO, ids);
         return;
     }
-    fiu_do_on("SimpleIDGeneratorNextIDNumbersZero",n = 0);
+    fiu_do_on("SimpleIDGeneratorNextIDNumbersZero", n = 0);
     if (n <= 0) {
         return;
     }

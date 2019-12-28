@@ -199,7 +199,6 @@ TEST_F(MySqlDBTest, DB_TEST_2) {
     ASSERT_FALSE(stat.ok());
     ASSERT_FALSE(has_table);
     fiu_disable("MySQLMetaImpl_HasTable_ThrowException");
-
 }
 
 TEST_F(MySqlDBTest, SEARCH_TEST) {
@@ -319,7 +318,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl_Size_NUllConnection");
     FIU_ENABLE_FIU("MySQLMetaImpl_Size_ThrowException");
-    stat =db_->Size(size);
+    stat = db_->Size(size);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl_Size_ThrowException");
 }
@@ -472,7 +471,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         //Drop partition will failed,since it firstly drop partition meta table.
         FIU_ENABLE_FIU("MySQLMetaImpl_DropTable_NUllConnection");
         stat = db_->DropPartition(table_name + "_5");
-        //TODO(sjh):add assert expr, since DropPartion always return Status::OK().
+        //TODO(sjh): add assert expr, since DropPartion always return Status::OK().
 //        ASSERT_TRUE(stat.ok());
         fiu_disable("MySQLMetaImpl_DropTable_NUllConnection");
 
@@ -544,8 +543,6 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         stat = db_->DropTable(table_name, dates);
         ASSERT_TRUE(stat.ok());
     }
-
-
 }
 
 
