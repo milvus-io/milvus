@@ -77,7 +77,7 @@ TEST_F(BinaryIVFTest, binaryivf_basic) {
 
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
-    PrintResult(result, nq, k);
+    // PrintResult(result, nq, k);
 }
 
 TEST_F(BinaryIVFTest, binaryivf_serialize) {

@@ -148,9 +148,9 @@ Utils::BuildVectors(int64_t from, int64_t to, std::vector<milvus::RowRecord>& ve
     record_ids.clear();
     for (int64_t k = from; k < to; k++) {
         milvus::RowRecord record;
-        record.data.resize(dimension);
+        record.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            record.data[i] = (float)(k % (i + 1));
+            record.float_data[i] = (float)(k % (i + 1));
         }
 
         vector_record_array.emplace_back(record);

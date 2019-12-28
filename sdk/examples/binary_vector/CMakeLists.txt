@@ -17,8 +17,17 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/utils util_files)
+aux_source_directory(src src_files)
 
-add_subdirectory(simple)
-add_subdirectory(partition)
-add_subdirectory(binary_vector)
+add_executable(binary_vector
+        main.cpp
+        ${src_files}
+        ${util_files}
+        )
+
+target_link_libraries(binary_vector
+        milvus_sdk
+        pthread
+        )
+
+install(TARGETS binary_vector DESTINATION bin)

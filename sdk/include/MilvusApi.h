@@ -45,6 +45,9 @@ enum class IndexType {
 enum class MetricType {
     L2 = 1,
     IP = 2,
+    HAMMING = 3,
+    JACCARD = 4,
+    TANIMOTO = 5,
 };
 
 /**
@@ -78,7 +81,8 @@ struct Range {
  * @brief Record inserted
  */
 struct RowRecord {
-    std::vector<float> data;  ///< Vector raw data
+    std::vector<float> float_data;  ///< Vector raw float data
+    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
 /**

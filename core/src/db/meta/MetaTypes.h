@@ -39,9 +39,6 @@ constexpr char CURRENT_VERSION[] = MILVUS_VERSION;
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
 constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
 
-constexpr int64_t FLAG_MASK_FLOAT_DATA = 0x1 << 2;
-constexpr int64_t FLAG_MASK_BINARY_DATA = 0x1 << 3;
-
 using DateT = int;
 const DateT EmptyDate = -1;
 using DatesT = std::vector<DateT>;
