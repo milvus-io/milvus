@@ -25,6 +25,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/ValidationUtil.h"
 
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
@@ -61,7 +62,10 @@ class CachedQuantizer : public cache::DataObj {
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
                                          MetricType metric_type, int32_t nlist)
     : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
-    index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
+    EngineType tmp_index_type = server::ValidationUtil::IsBinaryMetricType((int32_t)metric_type)
+                                    ? EngineType::FAISS_BIN_IDMAP
+                                    : EngineType::FAISS_IDMAP;
+    index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }
