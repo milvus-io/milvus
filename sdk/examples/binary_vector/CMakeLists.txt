@@ -19,15 +19,15 @@
 
 aux_source_directory(src src_files)
 
-add_executable(binary_vector
+add_executable(sdk_binary
         main.cpp
         ${src_files}
         ${util_files}
         )
 
-target_link_libraries(binary_vector
+target_link_libraries(sdk_binary
         milvus_sdk
         pthread
         )
 
-install(TARGETS binary_vector DESTINATION bin)
+install(TARGETS sdk_binary DESTINATION bin)

@@ -8,8 +8,10 @@ Please mark all change in change log and use the issue from GitHub
 - \#715 - Milvus crash when searching and building index simultaneously using SQ8H
 - \#744 - Don't return partition table for show_tables
 - \#770 - Server unittest run failed on low-end server
+- \#831 - Judge branch error in CommonUtil.cpp
 
 ## Feature
+- \#216 - Add CLI to get server info
 - \#343 - Add Opentracing
 - \#665 - Support get/set config via CLI
 - \#766 - If partition tag is similar, wrong partition is searched
@@ -20,6 +22,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#738 - Use Openblas / lapack from apt install
 - \#758 - Enhance config description
 - \#791 - Remove Arrow
+- \#834 - add cpu mode for built-in Faiss
+- \#848 - Add ready-to-use config files to the Milvus repo for enhanced user experince
 
 ## Task
 

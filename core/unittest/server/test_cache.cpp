@@ -58,7 +58,7 @@ class MockVecIndex : public milvus::engine::VecIndex {
     }
 
     milvus::engine::IndexType
-    GetType() override {
+    GetType() const override {
         return milvus::engine::IndexType::INVALID;
     }
 

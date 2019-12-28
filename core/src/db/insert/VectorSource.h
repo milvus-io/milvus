@@ -38,6 +38,9 @@ class VectorSource {
     size_t
     GetNumVectorsAdded();
 
+    size_t
+    SingleVectorSize(uint16_t dimension);
+
     bool
     AllAdded();
 

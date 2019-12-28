@@ -27,6 +27,7 @@
 #include "utils/Log.h"
 #include "utils/ValidationUtil.h"
 
+#include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
@@ -39,6 +40,40 @@
 //#define ON_SEARCH
 namespace milvus {
 namespace engine {
+
+namespace {
+
+Status
+MappingMetricType(MetricType metric_type, knowhere::METRICTYPE& kw_type) {
+    switch (metric_type) {
+        case MetricType::IP:
+            kw_type = knowhere::METRICTYPE::IP;
+            break;
+        case MetricType::L2:
+            kw_type = knowhere::METRICTYPE::L2;
+            break;
+        case MetricType::HAMMING:
+            kw_type = knowhere::METRICTYPE::HAMMING;
+            break;
+        case MetricType::JACCARD:
+            kw_type = knowhere::METRICTYPE::JACCARD;
+            break;
+        case MetricType::TANIMOTO:
+            kw_type = knowhere::METRICTYPE::TANIMOTO;
+            break;
+        default:
+            return Status(DB_ERROR, "Unsupported metric type");
+    }
+
+    return Status::OK();
+}
+
+bool
+IsBinaryIndexType(IndexType type) {
+    return type == IndexType::FAISS_BIN_IDMAP || type == IndexType::FAISS_BIN_IVFLAT_CPU;
+}
+
+}  // namespace
 
 class CachedQuantizer : public cache::DataObj {
  public:
@@ -73,11 +108,20 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     TempMetaConf temp_conf;
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = dimension;
-    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    auto status = MappingMetricType(metric_type, temp_conf.metric_type);
+    if (!status.ok()) {
+        throw Exception(DB_ERROR, status.message());
+    }
+
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->Match(temp_conf);
 
-    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
+    ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
+    if (auto bf_index = std::dynamic_pointer_cast<BFIndex>(index_)) {
+        ec = bf_index->Build(conf);
+    } else if (auto bf_bin_index = std::dynamic_pointer_cast<BinBFIndex>(index_)) {
+        ec = bf_bin_index->Build(conf);
+    }
     if (ec != KNOWHERE_SUCCESS) {
         throw Exception(DB_ERROR, "Build index error");
     }
@@ -124,6 +168,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             if (gpu_resource_enable) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
@@ -132,6 +177,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             }
             break;
         }
+#endif
 #endif
         case EngineType::FAISS_PQ: {
 #ifdef MILVUS_GPU_VERSION
@@ -269,7 +315,11 @@ ExecutionEngineImpl::Count() const {
 
 size_t
 ExecutionEngineImpl::Size() const {
-    return (size_t)(Count() * Dimension()) * sizeof(float);
+    if (IsBinaryIndexType(index_->GetType())) {
+        return (size_t)(Count() * Dimension() / 8);
+    } else {
+        return (size_t)(Count() * Dimension()) * sizeof(float);
+    }
 }
 
 size_t
@@ -499,6 +549,14 @@ ExecutionEngineImpl::Merge(const std::string& location) {
             ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
         }
         return status;
+    } else if (auto bin_index = std::dynamic_pointer_cast<BinBFIndex>(to_merge)) {
+        auto status = index_->Add(bin_index->Count(), bin_index->GetRawVectors(), bin_index->GetRawIds());
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
+        } else {
+            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
+        }
+        return status;
     } else {
         return Status(DB_ERROR, "file index type is not idmap");
     }
@@ -509,7 +567,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    if (from_index == nullptr) {
+    auto bin_from_index = std::dynamic_pointer_cast<BinBFIndex>(index_);
+    if (from_index == nullptr && bin_from_index == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: from_index is null, failed to build index";
         return nullptr;
     }
@@ -523,13 +582,20 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = Dimension();
     temp_conf.nlist = nlist_;
-    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
     temp_conf.size = Count();
+    auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
+    if (!status.ok()) {
+        throw Exception(DB_ERROR, status.message());
+    }
 
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     auto conf = adapter->Match(temp_conf);
 
-    auto status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+    if (from_index) {
+        status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+    } else if (bin_from_index) {
+        status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
+    }
     if (!status.ok()) {
         throw Exception(DB_ERROR, status.message());
     }

@@ -103,7 +103,7 @@ class VecIndex : public cache::DataObj {
     GetDeviceId() = 0;
 
     virtual IndexType
-    GetType() = 0;
+    GetType() const = 0;
 
     virtual int64_t
     Dimension() = 0;
