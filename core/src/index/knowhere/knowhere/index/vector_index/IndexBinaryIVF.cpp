@@ -50,10 +50,10 @@ BinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-//    auto search_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
-//    if (search_cfg == nullptr) {
-//        KNOWHERE_THROW_MSG("not support this kind of config");
-//    }
+    //    auto search_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
+    //    if (search_cfg == nullptr) {
+    //        KNOWHERE_THROW_MSG("not support this kind of config");
+    //    }
 
     GETBINARYTENSOR(dataset)
 
