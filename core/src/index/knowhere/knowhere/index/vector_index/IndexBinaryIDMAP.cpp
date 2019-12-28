@@ -91,8 +91,8 @@ BinaryIDMAP::Train(const Config& config) {
     }
     config->CheckValid();
 
-    const char* binary_type = "BFlat";
-    auto index = faiss::index_binary_factory(config->d, binary_type, GetMetricType(config->metric_type));
+    const char* type = "BFlat";
+    auto index = faiss::index_binary_factory(config->d, type, GetMetricType(config->metric_type));
     index_.reset(index);
 }
 
