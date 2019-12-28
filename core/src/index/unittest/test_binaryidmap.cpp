@@ -23,7 +23,11 @@
 #include "Helper.h"
 #include "unittest/utils.h"
 
-class BinaryIDMAPTest : public BinaryDataGen, public ::testing::Test {
+using ::testing::Combine;
+using ::testing::TestWithParam;
+using ::testing::Values;
+
+class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<knowhere::METRICTYPE> {
  protected:
     void
     SetUp() override {
@@ -38,13 +42,18 @@ class BinaryIDMAPTest : public BinaryDataGen, public ::testing::Test {
     knowhere::BinaryIDMAPPtr index_ = nullptr;
 };
 
-TEST_F(BinaryIDMAPTest, binaryidmap_basic) {
+INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
+                        Values(knowhere::METRICTYPE::JACCARD, knowhere::METRICTYPE::TANIMOTO,
+                               knowhere::METRICTYPE::HAMMING));
+
+TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
+    knowhere::METRICTYPE MetricType = GetParam();
     auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
     conf->d = dim;
     conf->k = k;
-    conf->metric_type = knowhere::METRICTYPE::JACCARD;
+    conf->metric_type = MetricType;
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);
@@ -54,17 +63,17 @@ TEST_F(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
-    // PrintResult(result, nq, k);
+    PrintResult(result, nq, k);
 
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<knowhere::BinaryIDMAP>();
     new_index->Load(binaryset);
     auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
-    // PrintResult(re_result, nq, k);
+    PrintResult(re_result, nq, k);
 }
 
-TEST_F(BinaryIDMAPTest, binaryidmap_serialize) {
+TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
     auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
@@ -73,10 +82,11 @@ TEST_F(BinaryIDMAPTest, binaryidmap_serialize) {
         reader(ret, bin->size);
     };
 
+    knowhere::METRICTYPE MetricType = GetParam();
     auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
     conf->d = dim;
     conf->k = k;
-    conf->metric_type = knowhere::METRICTYPE::JACCARD;
+    conf->metric_type = MetricType;
 
     {
         // serialize index
