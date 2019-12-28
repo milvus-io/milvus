@@ -133,8 +133,8 @@ InsertRequest::OnExecute() {
         }
 
         // step 6: update table flag
-        user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID : table_info.flag_ |=
-                                                                                    engine::meta::FLAG_MASK_NO_USERID;
+        user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
+                         : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
         status = DBWrapper::DB()->UpdateTableFlag(table_name_, table_info.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING

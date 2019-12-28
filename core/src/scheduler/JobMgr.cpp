@@ -52,7 +52,8 @@ JobMgr::Stop() {
 json
 JobMgr::Dump() const {
     json ret{
-        {"running", running_}, {"event_queue_length", queue_.size()},
+        {"running", running_},
+        {"event_queue_length", queue_.size()},
     };
     return ret;
 }

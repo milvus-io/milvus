@@ -234,6 +234,6 @@ fvecs_read(const char* fname, size_t* d_out, size_t* n_out) {
 }
 
 int*  // not very clean, but works as long as sizeof(int) == sizeof(float)
-    ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
+ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
     return (int*)fvecs_read(fname, d_out, n_out);
 }

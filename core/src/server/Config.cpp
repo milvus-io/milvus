@@ -481,8 +481,8 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
 Status
 Config::CheckConfigVersion(const std::string& value) {
     if (milvus_config_version_map.at(MILVUS_VERSION) != value) {
-        std::string msg = "Invalid config version: " + value + ". Expected config version: " +
-                          milvus_config_version_map.at(MILVUS_VERSION);
+        std::string msg = "Invalid config version: " + value +
+                          ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
