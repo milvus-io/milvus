@@ -98,7 +98,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 set(storage_files
         ${storage_main_files}
         ${storage_file_files}
-        ${storage_s3_files}
+#        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
