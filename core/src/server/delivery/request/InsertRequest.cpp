@@ -129,7 +129,7 @@ InsertRequest::OnExecute() {
                               "The vector dimension must be equal to the table dimension.");
             }
 
-            if (vectors_data_.binary_data_.size() / vector_count != table_info.dimension_) {
+            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_info.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }

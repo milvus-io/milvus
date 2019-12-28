@@ -90,14 +90,14 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
 
     status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(vectors.id_array_.size(), 50);
     ASSERT_EQ(num_vectors_added, 50);
+    ASSERT_EQ(source.GetVectorIds().size(), 50);
 
     vectors.id_array_.clear();
     status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(num_vectors_added, 50);
-    ASSERT_EQ(vectors.id_array_.size(), 50);
+    ASSERT_EQ(source.GetVectorIds().size(), 100);
 }
 
 TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
@@ -121,8 +121,6 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     //    std::cout << mem_table_file.GetCurrentMem() << " " << mem_table_file.GetMemLeft() << std::endl;
 
-    ASSERT_EQ(vectors_100.id_array_.size(), 100);
-
     size_t singleVectorMem = sizeof(float) * TABLE_DIM;
     ASSERT_EQ(mem_table_file.GetCurrentMem(), n_100 * singleVectorMem);
 
@@ -135,7 +133,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     vector_ids.clear();
     status = mem_table_file.Add(source_128M);
 
-    ASSERT_EQ(vectors_128M.id_array_.size(), n_max - n_100);
+    ASSERT_EQ(source_128M->GetVectorIds().size(), n_max - n_100);
 
     ASSERT_TRUE(mem_table_file.IsFull());
 }
@@ -159,7 +157,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     milvus::engine::IDNumbers vector_ids;
     status = mem_table.Add(source_100);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(vectors_100.id_array_.size(), 100);
+    ASSERT_EQ(source_100->GetVectorIds().size(), 100);
 
     milvus::engine::MemTableFilePtr mem_table_file;
     mem_table.GetCurrentMemTableFile(mem_table_file);
@@ -176,7 +174,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     status = mem_table.Add(source_128M);
     ASSERT_TRUE(status.ok());
 
-    ASSERT_EQ(vectors_128M.id_array_.size(), n_max);
+    ASSERT_EQ(source_128M->GetVectorIds().size(), n_max);
 
     mem_table.GetCurrentMemTableFile(mem_table_file);
     ASSERT_EQ(mem_table_file->GetCurrentMem(), n_100 * singleVectorMem);
@@ -193,7 +191,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     status = mem_table.Add(source_1G);
     ASSERT_TRUE(status.ok());
 
-    ASSERT_EQ(vectors_1G.id_array_.size(), n_1G);
+    ASSERT_EQ(source_1G->GetVectorIds().size(), n_1G);
 
     int expectedTableFileCount = 2 + std::ceil((n_1G - n_100) * singleVectorMem / milvus::engine::MAX_TABLE_FILE_MEM);
     ASSERT_EQ(mem_table.GetTableFileCount(), expectedTableFileCount);

@@ -62,7 +62,7 @@ MemTableFile::Add(VectorSourcePtr& source) {
         return Status(DB_ERROR, "Not able to create table file");
     }
 
-    size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
+    size_t single_vector_mem_size = source->SingleVectorSize(table_file_schema_.dimension_);
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
@@ -88,7 +88,7 @@ MemTableFile::GetMemLeft() {
 
 bool
 MemTableFile::IsFull() {
-    size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
+    size_t single_vector_mem_size = table_file_schema_.dimension_ * FLOAT_TYPE_SIZE;
     return (GetMemLeft() < single_vector_mem_size);
 }
 
@@ -103,7 +103,8 @@ MemTableFile::Serialize() {
 
     // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
     // else set file type to RAW, no need to build index
-    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
+        table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
         table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::TableFileSchema::TO_INDEX
                                                                                       : meta::TableFileSchema::RAW;
     } else {

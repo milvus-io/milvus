@@ -54,7 +54,8 @@ VectorSource::Add(const ExecutionEnginePtr& execution_engine, const meta::TableF
             vector_ids_to_add.data());
     } else if (!vectors_.binary_data_.empty()) {
         status = execution_engine->AddWithIds(
-            num_vectors_added, vectors_.binary_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
+            num_vectors_added,
+            vectors_.binary_data_.data() + current_num_vectors_added * SingleVectorSize(table_file_schema.dimension_),
             vector_ids_to_add.data());
     }
 
@@ -72,6 +73,17 @@ VectorSource::Add(const ExecutionEnginePtr& execution_engine, const meta::TableF
 size_t
 VectorSource::GetNumVectorsAdded() {
     return current_num_vectors_added;
+}
+
+size_t
+VectorSource::SingleVectorSize(uint16_t dimension) {
+    if (!vectors_.float_data_.empty()) {
+        return dimension * FLOAT_TYPE_SIZE;
+    } else if (!vectors_.binary_data_.empty()) {
+        return dimension / 8;
+    }
+
+    return 0;
 }
 
 bool

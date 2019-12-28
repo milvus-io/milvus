@@ -32,7 +32,7 @@ const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
 
 constexpr int64_t TABLE_DIMENSION = 512;
 constexpr int64_t TABLE_INDEX_FILE_SIZE = 128;
-constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::TANIMOTO;
+constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::JACCARD;
 constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
@@ -64,13 +64,12 @@ BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::RowRecord>& vec
     vector_record_array.clear();
     record_ids.clear();
 
-    unsigned int seed = 123;
-    std::default_random_engine rand;
+    int64_t dim_byte = dimension/8;
     for (int64_t k = from; k < to; k++) {
         milvus::RowRecord record;
-        record.binary_data.resize(dimension);
-        for (int64_t i = 0; i < dimension; i++) {
-            record.binary_data[i] = rand_r(&seed) % 256;
+        record.binary_data.resize(dim_byte);
+        for (int64_t i = 0; i < dim_byte; i++) {
+            record.binary_data[i] = (uint8_t)lrand48();
         }
 
         vector_record_array.emplace_back(record);
@@ -159,10 +158,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                                     topk_query_result);
     }
 
-    {  // drop table
-        stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DropTable function call status: " << stat.message() << std::endl;
-    }
+//    {  // drop table
+//        stat = conn->DropTable(TABLE_NAME);
+//        std::cout << "DropTable function call status: " << stat.message() << std::endl;
+//    }
 
     milvus::Connection::Destroy(conn);
 }
