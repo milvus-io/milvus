@@ -33,10 +33,11 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIVFTest : public BinaryDataGen, public ::testing::Test {
+class BinaryIVFTest : public BinaryDataGen, public TestWithParam<knowhere::METRICTYPE> {
  protected:
     void
     SetUp() override {
+        knowhere::METRICTYPE MetricType = GetParam();
         Init_with_binary_default();
         //        nb = 1000000;
         //        nq = 1000;
@@ -46,7 +47,7 @@ class BinaryIVFTest : public BinaryDataGen, public ::testing::Test {
         auto x_conf = std::make_shared<knowhere::IVFBinCfg>();
         x_conf->d = dim;
         x_conf->k = k;
-        x_conf->metric_type = knowhere::METRICTYPE::JACCARD;
+        x_conf->metric_type = MetricType;
         x_conf->nlist = 100;
         x_conf->nprobe = 10;
         conf = x_conf;
@@ -63,7 +64,11 @@ class BinaryIVFTest : public BinaryDataGen, public ::testing::Test {
     knowhere::BinaryIVFIndexPtr index_ = nullptr;
 };
 
-TEST_F(BinaryIVFTest, binaryivf_basic) {
+INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
+                        Values(knowhere::METRICTYPE::JACCARD, knowhere::METRICTYPE::TANIMOTO,
+                               knowhere::METRICTYPE::HAMMING));
+
+TEST_P(BinaryIVFTest, binaryivf_basic) {
     assert(!xb.empty());
 
     //    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
@@ -80,7 +85,7 @@ TEST_F(BinaryIVFTest, binaryivf_basic) {
     // PrintResult(result, nq, k);
 }
 
-TEST_F(BinaryIVFTest, binaryivf_serialize) {
+TEST_P(BinaryIVFTest, binaryivf_serialize) {
     auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);

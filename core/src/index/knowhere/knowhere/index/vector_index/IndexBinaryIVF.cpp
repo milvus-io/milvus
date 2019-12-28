@@ -125,6 +125,7 @@ BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
     index->train(rows, (uint8_t*)p_data);
     index->add_with_ids(rows, (uint8_t*)p_data, p_ids);
     index_ = index;
+    return nullptr;
 }
 
 int64_t

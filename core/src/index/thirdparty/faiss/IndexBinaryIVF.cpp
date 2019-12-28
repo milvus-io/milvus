@@ -294,7 +294,7 @@ void IndexBinaryIVF::train(idx_t n, const uint8_t *x) {
 
     IndexFlat index_tmp;
 
-    if (metric_type == METRIC_Jaccard){
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         index_tmp = IndexFlat(d, METRIC_Jaccard);
     } else {
         index_tmp = IndexFlat(d, METRIC_L2);
