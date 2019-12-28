@@ -25,6 +25,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <fiu-local.h>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"

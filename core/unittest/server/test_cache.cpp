@@ -17,10 +17,14 @@
 
 #include <gtest/gtest.h>
 #include <fiu-control.h>
-#include "cache/CpuCacheMgr.h"
-#include "cache/GpuCacheMgr.h"
+#include <fiu-local.h>
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
+
+#define private public
+
+#include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
 
 namespace {
 
@@ -141,13 +145,17 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     ASSERT_EQ(cpu_mgr->CacheCapacity(), cap);
 
     uint64_t item_count = 20;
-    for (uint64_t i = 0; i < item_count; i++) {
+    for (uint64_t i = 0; i < item_count + 1; i++) {
         // each vector is 1k byte, total size less than 1G
         milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
     ASSERT_LT(cpu_mgr->ItemCount(), g_num);
+
+    //insert null data
+    std::shared_ptr<milvus::cache::DataObj> null_data_obj = nullptr;
+    cpu_mgr->InsertItem("index_null", null_data_obj);
 
     auto obj = cpu_mgr->GetIndex("index_0");
     ASSERT_TRUE(obj == nullptr);
@@ -177,6 +185,11 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 
     cpu_mgr->ClearCache();
     ASSERT_EQ(cpu_mgr->ItemCount(), 0);
+
+    fiu_enable("CpuCacheMgr_CpuCacheMgr_Zero_CpucacheThreshold", 1, nullptr, 0);
+    auto* cpu_cache_mgr = new milvus::cache::CpuCacheMgr();
+    fiu_disable("CpuCacheMgr_CpuCacheMgr_Zero_CpucacheThreshold");
+    delete cpu_cache_mgr;
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -206,6 +219,11 @@ TEST(CacheTest, GPU_CACHE_TEST) {
 
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
+
+    fiu_enable("CpuCacheMgr_GpuCacheMgr_Zero_CpucacheThreshold", 1, nullptr, 0);
+    auto* gpu_cache_mgr = new milvus::cache::GpuCacheMgr();
+    fiu_disable("CpuCacheMgr_GpuCacheMgr_Zero_CpucacheThreshold");
+    delete gpu_cache_mgr;
 }
 #endif
 
@@ -236,4 +254,24 @@ TEST(CacheTest, INVALID_TEST) {
         }
         ASSERT_EQ(mgr.GetItem("index_0"), nullptr);
     }
+}
+
+TEST(CacheTest, PARTIAL_LRU_TEST) {
+    constexpr int MAX_SIZE = 5;
+    milvus::cache::LRU<int, int> lru(MAX_SIZE);
+
+    lru.put(0, 2);
+    lru.put(0, 3);
+    ASSERT_EQ(lru.size(), 1);
+
+    for (int i = 1; i < MAX_SIZE; ++i) {
+        lru.put(i, 0);
+    }
+    ASSERT_EQ(lru.size(), MAX_SIZE);
+
+    lru.put(99, 0);
+    ASSERT_EQ(lru.size(), MAX_SIZE);
+    ASSERT_TRUE(lru.exists(99));
+
+    ASSERT_ANY_THROW(lru.get(-1));
 }

@@ -20,6 +20,7 @@
 #include "utils/Log.h"
 
 #include <utility>
+#include <fiu-local.h>
 
 namespace milvus {
 namespace cache {
@@ -45,6 +46,7 @@ CpuCacheMgr::CpuCacheMgr() {
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
+    fiu_do_on("CpuCacheMgr_CpuCacheMgr_Zero_CpucacheThreshold",cpu_cache_threshold=0;);
     if (cpu_cache_threshold > 0.0 && cpu_cache_threshold <= 1.0) {
         cache_->set_freemem_percent(cpu_cache_threshold);
     } else {

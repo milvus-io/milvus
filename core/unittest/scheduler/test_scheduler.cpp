@@ -238,8 +238,10 @@ TEST(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU, config);
     ASSERT_EQ(index->GetType(), IndexType::SPTAG_BKT_RNT_CPU);
 
+#ifdef MILVUS_GPU_VERSION
     index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_GPU, config);
     ASSERT_EQ(index->GetType(), IndexType::FAISS_IVFPQ_GPU);
+#endif
 
     index = GetVecIndexFactory(IndexType::NSG_MIX, config);
     ASSERT_EQ(index->GetType(), IndexType::NSG_MIX);

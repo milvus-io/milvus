@@ -485,6 +485,10 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         stat = db_->ShowPartitions(table_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
+        FIU_ENABLE_FIU("MySQLMetaImpl_ShowPartitions_ThrowException");
+        stat = db_->ShowPartitions(table_name, partition_schema_array);
+        ASSERT_FALSE(stat.ok());
+
         FIU_ENABLE_FIU("MySQLMetaImpl_DropTable_ThrowException");
         stat = db_->DropPartition(table_name + "_4");
         fiu_disable("MySQLMetaImpl_DropTable_ThrowException");

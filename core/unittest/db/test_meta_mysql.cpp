@@ -24,6 +24,7 @@
 #include <mysql++/mysql++.h>
 #include <stdlib.h>
 #include <time.h>
+#include <boost/filesystem/operations.hpp>
 #include <iostream>
 #include <thread>
 #include <fiu-local.h>
@@ -265,6 +266,14 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_Archive_ThrowException");
 
+    FIU_ENABLE_FIU("MySQLMetaImpl_Archive_NUllConnection");
+    impl.Archive();
+    fiu_disable("MySQLMetaImpl_Archive_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_Archive_ThrowException");
+    impl.Archive();
+    fiu_disable("MySQLMetaImpl_Archive_ThrowException");
+
     impl.Archive();
     int i = 0;
 
@@ -364,6 +373,24 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
 
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
+}
+
+TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
+    fiu_init(0);
+    auto table_id = "meta_test_group";
+    milvus::engine::meta::TableSchema table;
+    table.table_id_ = table_id;
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateDirectory");
+    milvus::engine::DBMetaOptions meta = GetOptions().meta_;
+    milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_);
+    fiu_disable("MySQLMetaImpl_Initialize_FailCreateDirectory");
+
+    meta.backend_uri_ = "null";
+    ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
+
+    meta.backend_uri_ = "notmysql://root:123456@127.0.0.1:3306/test";
+    ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
 }
 
 TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
@@ -499,9 +526,9 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
 
     file_types = {
-        milvus::engine::meta::TableFileSchema::NEW,       milvus::engine::meta::TableFileSchema::NEW_MERGE,
+        milvus::engine::meta::TableFileSchema::NEW, milvus::engine::meta::TableFileSchema::NEW_MERGE,
         milvus::engine::meta::TableFileSchema::NEW_INDEX, milvus::engine::meta::TableFileSchema::TO_INDEX,
-        milvus::engine::meta::TableFileSchema::INDEX,     milvus::engine::meta::TableFileSchema::RAW,
+        milvus::engine::meta::TableFileSchema::INDEX, milvus::engine::meta::TableFileSchema::RAW,
         milvus::engine::meta::TableFileSchema::BACKUP,
     };
     status = impl_->FilesByType(table.table_id_, file_types, table_files);
@@ -528,6 +555,36 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
 
     status = impl_->CleanUpFilesWithTTL(0UL);
     ASSERT_TRUE(status.ok());
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpFilesWithTTL_RomoveToDeleteFiles_NUllConnection");
+    status = impl_->CleanUpFilesWithTTL(0UL);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_CleanUpFilesWithTTL_RomoveToDeleteFiles_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpFilesWithTTL_RomoveToDeleteFiles_ThrowException");
+    status = impl_->CleanUpFilesWithTTL(0UL);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_CleanUpFilesWithTTL_RomoveToDeleteFiles_ThrowException");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveToDeleteTables_NUllConnection");
+    status = impl_->CleanUpFilesWithTTL(0UL);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveToDeleteTables_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveToDeleteTables_ThrowException");
+    status = impl_->CleanUpFilesWithTTL(0UL);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveToDeleteTables_ThrowException");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveDeletedTableFolder_NUllConnection");
+    status = impl_->CleanUpFilesWithTTL(0UL);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveDeletedTableFolder_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveDeletedTableFolder_ThrowException");
+    status = impl_->CleanUpFilesWithTTL(0UL);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_CleanUpFilesWithTTL_RemoveDeletedTableFolder_ThrowException");
 }
 
 TEST_F(MySqlMetaTest, INDEX_TEST) {
@@ -600,3 +657,4 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     status = impl_->UpdateTableFilesToIndex(table_id);
     ASSERT_TRUE(status.ok());
 }
+

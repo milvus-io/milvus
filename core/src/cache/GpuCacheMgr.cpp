@@ -50,6 +50,7 @@ GpuCacheMgr::GpuCacheMgr() {
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
+    fiu_do_on("CpuCacheMgr_GpuCacheMgr_Zero_CpucacheThreshold",cpu_cache_threshold=0;);
     if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
         cache_->set_freemem_percent(gpu_mem_threshold);
     } else {

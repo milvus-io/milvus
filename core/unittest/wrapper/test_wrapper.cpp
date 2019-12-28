@@ -27,6 +27,7 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "wrapper/VecIndex.h"
 #include "wrapper/utils.h"
+#include "wrapper/WrapperException.h"
 
 #include <fiu-control.h>
 #include <fiu-local.h>
