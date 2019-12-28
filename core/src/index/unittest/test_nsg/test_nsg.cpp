@@ -42,7 +42,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
-// Init_with_default();
+    // Init_with_default();
 #ifdef MILVUS_GPU_VERSION
         int64_t MB = 1024 * 1024;
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
