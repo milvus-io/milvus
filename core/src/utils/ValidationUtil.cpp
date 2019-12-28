@@ -108,6 +108,12 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     return Status::OK();
 }
 
+bool
+ValidationUtil::IsBinaryIndexType(int32_t index_type) {
+    return (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP)) ||
+           (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT));
+}
+
 Status
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if (nlist <= 0) {
@@ -135,14 +141,20 @@ ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
 
 Status
 ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
-    if (metric_type != static_cast<int32_t>(engine::MetricType::L2) &&
-        metric_type != static_cast<int32_t>(engine::MetricType::IP)) {
+    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
         std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
-                          "Make sure the metric type is either MetricType.L2 or MetricType.IP.";
+                          "Make sure the metric type is in MetricType list.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
     return Status::OK();
+}
+
+bool
+ValidationUtil::IsBinaryMetricType(int32_t metric_type) {
+    return (metric_type == static_cast<int32_t>(engine::MetricType::HAMMING)) ||
+           (metric_type == static_cast<int32_t>(engine::MetricType::JACCARD)) ||
+           (metric_type == static_cast<int32_t>(engine::MetricType::TANIMOTO));
 }
 
 Status

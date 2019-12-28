@@ -55,7 +55,7 @@ InsertRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        if (vectors_data_.float_data_.empty() && vectors_data_.float_data_.empty()) {
+        if (vectors_data_.float_data_.empty() && vectors_data_.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector array is empty. Make sure you have entered vector records.");
         }
@@ -102,15 +102,37 @@ InsertRequest::OnExecute() {
             "/tmp/insert_" + std::to_string(this->insert_param_->row_record_array_size()) + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
+        // step 4: some metric type doesn't support float vectors
+        if (!vectors_data_.float_data_.empty()) {  // insert float vectors
+            if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float vectors.");
+            }
 
-        // step 4: check prepared float data
-        if (vectors_data_.float_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
-        }
+            // check prepared float data
+            if (vectors_data_.float_data_.size() % vector_count != 0) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
+            }
 
-        if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
-            return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the table dimension.");
+            if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
+                return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                              "The vector dimension must be equal to the table dimension.");
+            }
+        } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
+            if (!ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary vectors.");
+            }
+
+            // check prepared binary data
+            if (vectors_data_.binary_data_.size() % vector_count != 0) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
+            }
+
+            if (vectors_data_.binary_data_.size() / vector_count != table_info.dimension_) {
+                return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                              "The vector dimension must be equal to the table dimension.");
+            }
         }
 
         // step 5: insert vectors

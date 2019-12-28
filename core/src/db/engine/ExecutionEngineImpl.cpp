@@ -146,6 +146,14 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
             break;
         }
+        case EngineType::FAISS_BIN_IDMAP: {
+            index = GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+            break;
+        }
+        case EngineType::FAISS_BIN_IVFFLAT: {
+            index = GetVecIndexFactory(IndexType::FAISS_BIN_IVFLAT_CPU);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;
@@ -236,6 +244,12 @@ ExecutionEngineImpl::HybridUnset() const {
 
 Status
 ExecutionEngineImpl::AddWithIds(int64_t n, const float* xdata, const int64_t* xids) {
+    auto status = index_->Add(n, xdata, xids);
+    return status;
+}
+
+Status
+ExecutionEngineImpl::AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) {
     auto status = index_->Add(n, xdata, xids);
     return status;
 }
@@ -578,6 +592,40 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     }
 #endif
 
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+    }
+
+    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+    temp_conf.k = k;
+    temp_conf.nprobe = nprobe;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    if (hybrid) {
+        HybridLoad();
+    }
+
+    auto status = index_->Search(n, data, distances, labels, conf);
+
+    if (hybrid) {
+        HybridUnset();
+    }
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
+    }
+    return status;
+}
+
+Status
+ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances,
+                            int64_t* labels, bool hybrid) {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");

@@ -90,7 +90,7 @@ SearchRequest::OnExecute() {
             return status;
         }
 
-        if (vectors_data_.float_data_.empty() && vectors_data_.float_data_.empty()) {
+        if (vectors_data_.float_data_.empty() && vectors_data_.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector array is empty. Make sure you have entered vector records.");
         }
@@ -104,14 +104,28 @@ SearchRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 5: check prepared float data
-        if (vectors_data_.float_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
-        }
+        if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+            // check prepared binary data
+            if (vectors_data_.binary_data_.size() % vector_count != 0) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
+            }
 
-        if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
-            return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the table dimension.");
+            if (vectors_data_.binary_data_.size() / vector_count != table_info.dimension_) {
+                return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                              "The vector dimension must be equal to the table dimension.");
+            }
+        } else {
+            // check prepared float data
+            if (vectors_data_.float_data_.size() % vector_count != 0) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
+            }
+
+            if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
+                return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                              "The vector dimension must be equal to the table dimension.");
+            }
         }
 
         rc.RecordSection("prepare vector data");
