@@ -14,6 +14,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <cmath>
 
 #include <faiss/utils/hamming.h>
 #include <faiss/utils/jaccard.h>
@@ -823,7 +824,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                         const IVFSearchParameters *params
                                         ) const {
 
-    if (metric_type == METRIC_Jaccard) {
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         if (use_heap) {
             float *D = new float[k * n];
             float *c_dis = new float [k * nprobe];
@@ -831,6 +832,11 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
             search_knn_jaccard_heap (*this, n, x, k, idx, c_dis ,
                                      D, labels, store_pairs,
                                      params);
+            if (metric_type == METRIC_Tanimoto) {
+                for (int i = 0; i < k * n; i++) {
+                    D[i] = -log2(1-D[i]);
+                }
+            }
             memcpy(distances, D, sizeof(float) * n * k);
             delete [] D;
             delete [] c_dis;
