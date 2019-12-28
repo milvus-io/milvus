@@ -92,6 +92,15 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
@@ -105,6 +114,7 @@ set(engine_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
@@ -114,10 +124,6 @@ if (MILVUS_WITH_PROMETHEUS)
     set(engine_files ${engine_files}
             ${metrics_prometheus_files})
 endif ()
-
-set(s3_client_files
-        storage/s3/S3ClientWrapper.cpp
-        storage/s3/S3ClientWrapper.h)
 
 set(grpc_lib
         grpcpp_channelz

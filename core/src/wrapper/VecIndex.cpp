@@ -25,6 +25,8 @@
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "server/Config.h"
+#include "storage/file/FileIOReader.h"
+#include "storage/file/FileIOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -54,6 +56,7 @@ VecIndex::set_size(int64_t size) {
     size_ = size;
 }
 
+#if 0
 struct FileIOReader {
     std::fstream fs;
     std::string name;
@@ -111,6 +114,7 @@ size_t
 FileIOWriter::operator()(void* ptr, size_t size) {
     fs.write(reinterpret_cast<char*>(ptr), size);
 }
+#endif
 
 VecIndexPtr
 GetVecIndexFactory(const IndexType& type, const Config& cfg) {
@@ -207,7 +211,7 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 VecIndexPtr
 read_index(const std::string& location) {
     knowhere::BinarySet load_data_list;
-    FileIOReader reader(location);
+    storage::FileIOReader reader(location);
     reader.fs.seekg(0, reader.fs.end);
     int64_t length = reader.fs.tellg();
     if (length <= 0) {
@@ -255,7 +259,7 @@ write_index(VecIndexPtr index, const std::string& location) {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
-        FileIOWriter writer(location);
+        storage::FileIOWriter writer(location);
         writer(&index_type, sizeof(IndexType));
         for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
