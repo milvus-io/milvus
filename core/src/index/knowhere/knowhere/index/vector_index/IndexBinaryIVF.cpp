@@ -50,22 +50,22 @@ BinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto search_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
-    if (search_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("not support this kind of config");
-    }
+    //    auto search_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
+    //    if (search_cfg == nullptr) {
+    //        KNOWHERE_THROW_MSG("not support this kind of config");
+    //    }
 
     GETBINARYTENSOR(dataset)
 
     try {
-        auto elems = rows * search_cfg->k;
+        auto elems = rows * config->k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        search_impl(rows, (uint8_t*)p_data, search_cfg->k, p_dist, p_id, config);
+        search_impl(rows, (uint8_t*)p_data, config->k, p_dist, p_id, config);
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);

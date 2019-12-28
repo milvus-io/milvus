@@ -153,3 +153,73 @@ DataGenBase::AssertResult(const std::vector<int64_t>& ids, const std::vector<flo
     EXPECT_GT(precision, 0.5);
     std::cout << std::endl << "Precision: " << precision << ", match: " << match << ", total: " << nq * k << std::endl;
 }
+
+void
+BinDataGen::GenData(const int& dim,
+                    const int& nb,
+                    const int& nq,
+                    uint8_t* xb,
+                    uint8_t* xq,
+                    int64_t* ids,
+                    const int& k,
+                    int64_t* gt_ids,
+                    float* gt_dis) {
+    for (auto i = 0; i < nb; ++i) {
+        for (auto j = 0; j < dim; ++j) {
+            // p_data[i * d + j] = float(base + i);
+            xb[i * dim + j] = (uint8_t)lrand48();
+        }
+        ids[i] = i;
+    }
+    for (int64_t i = 0; i < nq * dim; ++i) {
+        xq[i] = xb[i];
+    }
+}
+
+void
+BinDataGen::GenData(const int& dim,
+                    const int& nb,
+                    const int& nq,
+                    std::vector<uint8_t>& xb,
+                    std::vector<uint8_t>& xq,
+                    std::vector<int64_t>& ids,
+                    const int& k,
+                    std::vector<int64_t>& gt_ids,
+                    std::vector<float>& gt_dis) {
+    xb.clear();
+    xq.clear();
+    ids.clear();
+    gt_ids.clear();
+    gt_dis.clear();
+    xb.resize(nb * dim);
+    xq.resize(nq * dim);
+    ids.resize(nb);
+    gt_ids.resize(nq * k);
+    gt_dis.resize(nq * k);
+    GenData(dim, nb, nq, xb.data(), xq.data(), ids.data(), k,  gt_ids.data(), gt_dis.data());
+    assert(xb.size() == (size_t)dim * nb);
+    assert(xq.size() == (size_t)dim * nq);
+}
+
+void
+BinDataGen::AssertResult(const std::vector<int64_t>& ids, const std::vector<float>& dis) {
+    EXPECT_EQ(ids.size(), nq * k);
+    EXPECT_EQ(dis.size(), nq * k);
+
+    for (auto i = 0; i < nq; i++) {
+        EXPECT_EQ(ids[i * k], i);
+        // EXPECT_EQ(dis[i * k], gt_dis[i * k]);
+    }
+}
+
+void
+BinDataGen::Generate(const int& dim, const int& nb, const int& nq, const int& k) {
+    this->nb = nb;
+    this->nq = nq;
+    this->dim = dim;
+    this->k = k;
+
+    int64_t dim_x = dim / 8;
+
+    GenData(dim_x, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
+}
