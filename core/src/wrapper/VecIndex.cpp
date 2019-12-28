@@ -134,7 +134,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
         }
         case IndexType::FAISS_BIN_IVFLAT_CPU: {
             index = std::make_shared<knowhere::BinaryIVF>();
-            break;
+            return std::make_shared<BinVecImpl>(index, type);
         }
         case IndexType::FAISS_IVFPQ_CPU: {
             index = std::make_shared<knowhere::IVFPQ>();
