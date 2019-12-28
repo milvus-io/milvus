@@ -29,15 +29,47 @@ WalManager::GetInstance() {
 }
 
 WalManager::WalManager() {
-
+    Init();
 }
 
 void
 WalManager::Init() {
-    //todo: init buffer_ and other vars
+    //todo: init p_buffer_ and other vars
+    //todo: step1 load configuration about wal
+    //todo: step2 init p_buffer_;
+    //step3 run wal thread
+    Start();
 }
 
-//no consideration about multi-thread insert
+void
+WalManager::Start() {
+    is_running_ = true;
+    Run();
+}
+
+void
+WalManager::Stop() {
+    is_running_ = false;
+    //todo: xjbx
+    reader_cv.notify_one();
+}
+
+void
+WalManager::Run() {
+    auto work = [&]() {
+        while (is_running_) {
+            if (p_buffer_->Next()) {
+                reader_is_waiting = false;
+            } else {
+                reader_is_waiting = true;
+                reader_cv.wait();
+            }
+        }
+    };
+    reader_ = std::thread(work);
+    reader_.join();
+}
+
 bool
 WalManager::Insert(const std::string &table_id,
                    size_t n,
@@ -55,12 +87,12 @@ WalManager::Insert(const std::string &table_id,
     size_t i = 0;
     __glibcxx_assert(vectors_per_record > 0);
     for (; i + vectors_per_record < n; i += vectors_per_record) {
-        if(!buffer_.Append(table_id, vectors_per_record, dim, vectors + i * (dim << 2), vector_ids, i, current_lsn_)) {
+        if(!p_buffer_->Insert(table_id, vectors_per_record, dim, vectors + i * (dim << 2), vector_ids, i, last_applied_lsn_)) {
             return false;
         }
     }
     if (i < n) {
-        if(!buffer_.Append(table_id, n - i, dim, vectors + i * (dim << 2), vector_ids, i, current_lsn_)) {
+        if(!p_buffer_->Insert(table_id, n - i, dim, vectors + i * (dim << 2), vector_ids, i, last_applied_lsn_)) {
             return false;
         }
     }
@@ -78,8 +110,8 @@ WalManager::DeleteById(const std::string& table_id, const milvus::engine::IDNumb
 
 //useless
 void
-WalManager::Flush() {
-    buffer_.Flush(current_lsn_);
+WalManager::Flush(const std::string& table_id) {
+    p_buffer_->Flush(table_id);
 }
 
 void

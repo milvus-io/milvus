@@ -32,18 +32,16 @@ using BufferPtr = std::shared_ptr<char>;
 
 class MXLogBuffer {
  public:
-    MXLogBuffer(uint64_t &buffer_size, const std::string& mxlog_path, const std::string& file_no, const std::string& mode);
+    MXLogBuffer();
     ~MXLogBuffer();
 
-
-    bool Append(const std::string &table_id,
+    bool Insert(const std::string &table_id,
                 const size_t n,
                 const size_t dim,
                 const float *vectors,
                 const milvus::engine::IDNumbers& vector_ids,
                 const size_t vector_ids_offset,
-                const bool update_lsn,
-                const uint64_t lsn);
+                uint64_t& lsn);
 
     bool Next(std::string &table_id,
               size_t &n,
@@ -51,25 +49,29 @@ class MXLogBuffer {
               float *vectors,
               milvus::engine::IDNumbers &vector_ids,
               uint64_t &lsn);
+    bool Next();
     void Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);//TBD
-    void Flush(const uint64_t up_to_lsn);
+    void Flush(const std::string& table_id);
     void SwitchBuffer(MXLogBufferHandler &handler);//switch buffer
 
  private:
     bool Init();
     uint64_t SurplusSpace();
     uint64_t RecordSize(const size_t n, const size_t dim, const size_t table_id_size);
+    void SetBufferSize(const uint64_t& buffer_size);
+    void SetMXLogPath(const std::string& mxlog_path);
+
 
  private:
-//    char* buf_[2];
-//    std::shared_ptr<char> buf_[2];
-    uint64_t mxlog_buffer_size_;
+    uint64_t mxlog_buffer_size_;//from config
+    std::string mxlog_path_;//from config
     BufferPtr buf_[2];
-    std::atomic<uint64_t > write_file_no_;
     std::mutex lock_;
     MXLogBufferHandler mxlog_buffer_reader_, mxlog_buffer_writer_;
     MXLogFileHandler mxlog_writer_;
 };
+
+using MXLogBufferPtr = std::shared_ptr<MXLogBuffer>;
 
 } // wal
 } // engine

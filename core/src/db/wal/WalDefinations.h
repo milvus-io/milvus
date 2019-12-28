@@ -18,11 +18,15 @@
 #pragma once
 #include <stdint-gcc.h>
 #include <src/db/Types.h>
+#include <condition_variable>
 
 
 namespace milvus {
 namespace engine {
 namespace wal {
+
+std::condition_variable reader_cv;
+bool reader_is_waiting;
 
 #define WAL_BUFFER_MIN_SIZE 64
 #define offsetof(type, field) ((long) &((type *)0)->field)
@@ -30,7 +34,9 @@ namespace wal {
 enum class MXLogType {
     Insert,
     Delete,
-    Update
+    Update,
+    Flush,
+    FlushAll
 };
 
 #pragma pack(push)
@@ -56,15 +62,15 @@ struct MXLogRecord{
 struct MXLogConfiguration {
     uint32_t record_size;
     uint64_t buffer_size;
+    std::string mxlog_path;
 };
 
 struct MXLogBufferHandler {
     uint64_t lsn;
-    uint64_t min_lsn;
-    uint64_t max_offset;
-    uint64_t file_no;
-    uint64_t buf_offset;
-    int buf_idx;
+    uint32_t max_offset;
+    uint32_t file_no;
+    uint32_t buf_offset;
+    uint8_t buf_idx;
 };
 
 } //wal

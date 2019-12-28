@@ -75,7 +75,6 @@ bool MXLogBuffer::Init() {
     //2:init handlers of two buffers
     mxlog_buffer_writer_.buf_idx = mxlog_buffer_reader_.buf_idx = 0;
     mxlog_buffer_writer_.buf_offset = mxlog_buffer_reader_.buf_offset = 0;
-    mxlog_buffer_writer_.file_no = write_file_no_;
     mxlog_buffer_reader_.file_no = 0;//reader file number equals 0 means read from buffer
 //    mxlog_buffer_writer_.lsn = mxlog_buffer_writer_.min_lsn = ${WalManager.current_lsn};
 //    mxlog_buffer_reader_.lsn = mxlog_buffer_reader_.min_lsn = ${WalManager.current_lsn};
@@ -97,14 +96,13 @@ uint64_t MXLogBuffer::RecordSize(const size_t n,
     return data_size + (uint64_t)SizeOfMXLogRecordHeader;
 }
 
-bool MXLogBuffer::Append(const std::string &table_id,
+bool MXLogBuffer::Insert(const std::string &table_id,
                          const size_t n,
                          const size_t dim,
                          const float *vectors,
                          const milvus::engine::IDNumbers& vector_ids,
                          const size_t vector_ids_offset,
-                         const bool update_lsn,
-                         const uint64_t lsn) {
+                         uint64_t& lsn) {
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
     if (SurplusSpace() < record_size) {
@@ -118,10 +116,11 @@ bool MXLogBuffer::Append(const std::string &table_id,
         }
         mxlog_buffer_writer_.file_no ++;
     }
+    lsn = mxlog_buffer_writer_.file_no;
+    lsn <<= 32;
+    lsn += mxlog_buffer_writer_.buf_offset;//point to the offset of current record in wal file
     char* current_write_buf = buf_[mxlog_buffer_writer_.buf_idx].get();
     uint64_t current_write_offset = mxlog_buffer_writer_.buf_offset;
-    if (!current_write_offset)
-        mxlog_buffer_writer_.min_lsn = lsn;
     memcpy(current_write_buf + current_write_offset, (char*)&record_size, 4);
     current_write_offset += 4;
     memcpy(current_write_buf + current_write_offset, (char*)&lsn, 8);
@@ -146,8 +145,8 @@ bool MXLogBuffer::Append(const std::string &table_id,
     mxlog_buffer_writer_.buf_offset = current_write_offset;
     mxlog_buffer_writer_.lsn = lsn;
     mxlog_writer_.Write(buf_[mxlog_buffer_writer_.buf_idx].get(), record_size);//default async flush
-    if (update_lsn) {
-        //todo: update flushed wal's lsn to meta, for alloc next lsn when restart
+    if (reader_is_waiting) {
+        reader_cv.notify_one();
     }
     return true;
 }
@@ -193,8 +192,6 @@ bool MXLogBuffer::Next(std::string &table_id,
     uint8_t mxl_type;
     memcpy(&mxl_type, current_read_buf + current_read_offset, 1);
     current_read_offset += 1;
-    //todo: check record_size (0, max_record_size), then check crc
-    //...
     int64_t tmp_id;
     for (auto i = 0; i < n; ++ i) {
         memcpy(&tmp_id, current_read_buf + current_read_offset, 8);
@@ -231,8 +228,17 @@ bool MXLogBuffer::Next(std::string &table_id,
     return true;
 }
 
+bool
+MXLogBuffer::Next() {
+
+}
+
 bool Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids) {
 
+}
+
+void
+MXLogBuffer::Flush(const std::string &table_id) {
 }
 
 } // wal

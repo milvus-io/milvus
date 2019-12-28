@@ -41,6 +41,9 @@ class WalManager {
 
 
     void Init();
+    void Run();
+    void Start();
+    void Stop();
     //todo: return error code
     bool
     CreateTable();
@@ -54,7 +57,7 @@ class WalManager {
     void DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);
     //not support right now
     void UpdateById(const std::string& table_id, const float* vectors, const milvus::engine::IDNumbers& vector_ids);
-    void Flush();
+    void Flush(const std::string& table_id = "");
 
     void Recovery();
 
@@ -64,16 +67,15 @@ class WalManager {
 
  private:
 
+    bool is_running_;
     MXLogConfiguration mxlog_config_;
     uint64_t last_applied_lsn_;
     uint32_t file_no_;
     std::unordered_map<std::string, TableSchemaPtr> table_meta_;
-    MXLogBuffer buffer_;
+    MXLogBufferPtr p_buffer_;
     MXLogMetaHandler meta_handler_;
 
     std::thread reader_;
-    std::condition_variable reader_cv_;
-    bool reader_is_waiting_;
 
 };
 } // wal
