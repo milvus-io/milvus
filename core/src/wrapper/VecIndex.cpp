@@ -170,6 +170,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
 
 #endif
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
         case IndexType::FAISS_IVFSQ8_HYBRID: {
             server::Config& config = server::Config::GetInstance();
             bool gpu_resource_enable = true;
@@ -181,6 +182,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
                 throw Exception(DB_ERROR, "No GPU resources for IndexType::FAISS_IVFSQ8_HYBRID");
             }
         }
+#endif
 #endif
         case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);
