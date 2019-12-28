@@ -63,14 +63,14 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
-    PrintResult(result, nq, k);
+    // PrintResult(result, nq, k);
 
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<knowhere::BinaryIDMAP>();
     new_index->Load(binaryset);
     auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
-    PrintResult(re_result, nq, k);
+    // PrintResult(re_result, nq, k);
 }
 
 TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
