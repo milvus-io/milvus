@@ -35,7 +35,7 @@ UriCheck(const std::string& uri) {
 void
 CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
     if (!src.float_data.empty()) {
-        auto vector_data = target->mutable_vector_data();
+        auto vector_data = target->mutable_float_data();
         vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
         memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
     }
@@ -254,6 +254,9 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         // step 3: search vectors
         ::milvus::grpc::TopKQueryResult result;
         Status status = client_ptr_->Search(result, search_param);
+        if (result.row_num() == 0) {
+            return status;
+        }
 
         // step 4: convert result array
         topk_query_result.reserve(result.row_num());

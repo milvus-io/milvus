@@ -45,11 +45,9 @@ enum class IndexType {
 enum class MetricType {
     L2 = 1,
     IP = 2,
-
-    // the following metric types are only available for binary vectors
-    HAMMING = 20,
-    JACCARD = 21,
-    TANIMOTO = 22,
+    HAMMING = 3,
+    JACCARD = 4,
+    TANIMOTO = 5,
 };
 
 /**

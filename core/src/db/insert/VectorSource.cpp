@@ -60,8 +60,8 @@ VectorSource::Add(const ExecutionEnginePtr& execution_engine, const meta::TableF
 
     if (status.ok()) {
         current_num_vectors_added += num_vectors_added;
-        vectors_.id_array_.insert(vectors_.id_array_.end(), std::make_move_iterator(vector_ids_to_add.begin()),
-                                  std::make_move_iterator(vector_ids_to_add.end()));
+        vector_ids_.insert(vector_ids_.end(), std::make_move_iterator(vector_ids_to_add.begin()),
+                           std::make_move_iterator(vector_ids_to_add.end()));
     } else {
         ENGINE_LOG_ERROR << "VectorSource::Add failed: " + status.ToString();
     }
@@ -77,6 +77,11 @@ VectorSource::GetNumVectorsAdded() {
 bool
 VectorSource::AllAdded() {
     return (current_num_vectors_added == vectors_.vector_count_);
+}
+
+IDNumbers
+VectorSource::GetVectorIds() {
+    return vector_ids_;
 }
 
 }  // namespace engine

@@ -37,12 +37,18 @@ enum class EngineType {
     FAISS_PQ,
     SPTAG_KDT,
     SPTAG_BKT,
-    MAX_VALUE = SPTAG_BKT,
+    FAISS_BIN_IDMAP,
+    FAISS_BIN_IVFFLAT,
+    MAX_VALUE = FAISS_BIN_IVFFLAT,
 };
 
 enum class MetricType {
     L2 = 1,
     IP = 2,
+    HAMMING = 3,
+    JACCARD = 4,
+    TANIMOTO = 5,
+    MAX_VALUE = TANIMOTO,
 };
 
 class ExecutionEngine {
