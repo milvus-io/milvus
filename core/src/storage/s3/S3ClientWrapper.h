@@ -30,28 +30,34 @@ class S3ClientWrapper : public IStorage {
     S3ClientWrapper() = default;
     ~S3ClientWrapper() = default;
 
-    Status
-    Create(const std::string& ip_address, const std::string& port, const std::string& access_key,
-           const std::string& secret_key) override;
-    Status
-    Close() override;
+    static S3ClientWrapper&
+    GetInstance() {
+        static S3ClientWrapper wrapper;
+        return wrapper;
+    }
 
     Status
-    CreateBucket(const std::string& bucket_name) override;
+    StartService();
     Status
-    DeleteBucket(const std::string& bucket_name) override;
+    StopService();
+
     Status
-    PutObjectFile(const std::string& bucket_name, const std::string& object_key, const std::string& path_key) override;
+    CreateBucket() override;
     Status
-    PutObjectStr(const std::string& bucket_name, const std::string& object_key, const std::string& content) override;
+    DeleteBucket() override;
     Status
-    GetObjectFile(const std::string& bucket_name, const std::string& object_key, const std::string& path_key) override;
+    PutObjectFile(const std::string& object_key, const std::string& file_path) override;
     Status
-    DeleteObject(const std::string& bucket_name, const std::string& object_key) override;
+    PutObjectStr(const std::string& object_key, const std::string& content) override;
+    Status
+    GetObjectFile(const std::string& object_key, const std::string& file_path) override;
+    Status
+    DeleteObject(const std::string& object_key) override;
 
  private:
-    Aws::S3::S3Client* client_ = nullptr;
+    Aws::S3::S3Client* client_ptr_ = nullptr;
     Aws::SDKOptions options_;
+    std::string bucket_name_;
 };
 
 }  // namespace storage

@@ -27,23 +27,17 @@ namespace storage {
 class IStorage {
  public:
     virtual Status
-    Create(const std::string& ip_address, const std::string& port, const std::string& access_key,
-           const std::string& secret_key) = 0;
+    CreateBucket() = 0;
     virtual Status
-    Close() = 0;
-
+    DeleteBucket() = 0;
     virtual Status
-    CreateBucket(const std::string& bucket_name) = 0;
+    PutObjectFile(const std::string& object_name, const std::string& file_path) = 0;
     virtual Status
-    DeleteBucket(const std::string& bucket_name) = 0;
+    PutObjectStr(const std::string& object_name, const std::string& content) = 0;
     virtual Status
-    PutObjectFile(const std::string& bucket_name, const std::string& object_name, const std::string& file_path) = 0;
+    GetObjectFile(const std::string& object_name, const std::string& file_path) = 0;
     virtual Status
-    PutObjectStr(const std::string& bucket_name, const std::string& object_name, const std::string& content) = 0;
-    virtual Status
-    GetObjectFile(const std::string& bucket_name, const std::string& object_name, const std::string& file_path) = 0;
-    virtual Status
-    DeleteObject(const std::string& bucket_name, const std::string& object_name) = 0;
+    DeleteObject(const std::string& object_name) = 0;
 };
 
 }  // namespace storage

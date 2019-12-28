@@ -33,40 +33,48 @@ namespace milvus {
 namespace storage {
 
 Status
-S3ClientWrapper::Create(const std::string& ip_address, const std::string& port, const std::string& access_key,
-                        const std::string& secret_key) {
+S3ClientWrapper::StartService() {
+    const std::string ip_address = "127.0.0.1";
+    const std::string port = "9000";
+
+    /* get from "/data/.minio.sys/config/config.json" in docker minio/minio */
+    const std::string access_key = "minioadmin";
+    const std::string secret_key = "minioadmin";
+
+    bucket_name_ = "milvus-bucket";
+
     Aws::InitAPI(options_);
     Aws::Client::ClientConfiguration cfg;
 
     cfg.endpointOverride = ip_address + ":" + port;
     cfg.scheme = Aws::Http::Scheme::HTTP;
     cfg.verifySSL = false;
-    client_ = new Aws::S3::S3Client(Aws::Auth::AWSCredentials(access_key, secret_key), cfg,
-                                    Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
-    if (client_ == nullptr) {
+    client_ptr_ = new Aws::S3::S3Client(Aws::Auth::AWSCredentials(access_key, secret_key), cfg,
+                                        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
+    if (client_ptr_ == nullptr) {
         std::string str = "Cannot connect S3 server.";
         return milvus::Status(SERVER_UNEXPECTED_ERROR, str);
-    } else {
-        return Status::OK();
     }
+
+    return CreateBucket();
 }
 
 Status
-S3ClientWrapper::Close() {
-    if (client_ != nullptr) {
-        delete client_;
-        client_ = nullptr;
+S3ClientWrapper::StopService() {
+    if (client_ptr_ != nullptr) {
+        delete client_ptr_;
+        client_ptr_ = nullptr;
     }
     Aws::ShutdownAPI(options_);
     return Status::OK();
 }
 
 Status
-S3ClientWrapper::CreateBucket(const std::string& bucket_name) {
+S3ClientWrapper::CreateBucket() {
     Aws::S3::Model::CreateBucketRequest request;
-    request.SetBucket(bucket_name);
+    request.SetBucket(bucket_name_);
 
-    auto outcome = client_->CreateBucket(request);
+    auto outcome = client_ptr_->CreateBucket(request);
 
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
@@ -76,16 +84,16 @@ S3ClientWrapper::CreateBucket(const std::string& bucket_name) {
         }
     }
 
-    STORAGE_LOG_DEBUG << "CreateBucket '" << bucket_name << "' successfully!";
+    STORAGE_LOG_DEBUG << "CreateBucket '" << bucket_name_ << "' successfully!";
     return Status::OK();
 }
 
 Status
-S3ClientWrapper::DeleteBucket(const std::string& bucket_name) {
+S3ClientWrapper::DeleteBucket() {
     Aws::S3::Model::DeleteBucketRequest request;
-    request.SetBucket(bucket_name);
+    request.SetBucket(bucket_name_);
 
-    auto outcome = client_->DeleteBucket(request);
+    auto outcome = client_ptr_->DeleteBucket(request);
 
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
@@ -93,13 +101,12 @@ S3ClientWrapper::DeleteBucket(const std::string& bucket_name) {
         return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
 
-    STORAGE_LOG_DEBUG << "DeleteBucket '" << bucket_name << "' successfully!";
+    STORAGE_LOG_DEBUG << "DeleteBucket '" << bucket_name_ << "' successfully!";
     return Status::OK();
 }
 
 Status
-S3ClientWrapper::PutObjectFile(const std::string& bucket_name, const std::string& object_name,
-                               const std::string& file_path) {
+S3ClientWrapper::PutObjectFile(const std::string& object_name, const std::string& file_path) {
     struct stat buffer;
     if (stat(file_path.c_str(), &buffer) != 0) {
         std::string str = "File '" + file_path + "' not exist!";
@@ -108,13 +115,13 @@ S3ClientWrapper::PutObjectFile(const std::string& bucket_name, const std::string
     }
 
     Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(bucket_name).WithKey(object_name);
+    request.WithBucket(bucket_name_).WithKey(object_name);
 
     auto input_data =
         Aws::MakeShared<Aws::FStream>("PutObjectFile", file_path.c_str(), std::ios_base::in | std::ios_base::binary);
     request.SetBody(input_data);
 
-    auto outcome = client_->PutObject(request);
+    auto outcome = client_ptr_->PutObject(request);
 
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
@@ -127,16 +134,15 @@ S3ClientWrapper::PutObjectFile(const std::string& bucket_name, const std::string
 }
 
 Status
-S3ClientWrapper::PutObjectStr(const std::string& bucket_name, const std::string& object_name,
-                              const std::string& content) {
+S3ClientWrapper::PutObjectStr(const std::string& object_name, const std::string& content) {
     Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(bucket_name).WithKey(object_name);
+    request.WithBucket(bucket_name_).WithKey(object_name);
 
     const std::shared_ptr<Aws::IOStream> input_data = Aws::MakeShared<Aws::StringStream>("");
     *input_data << content.c_str();
     request.SetBody(input_data);
 
-    auto outcome = client_->PutObject(request);
+    auto outcome = client_ptr_->PutObject(request);
 
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
@@ -149,12 +155,11 @@ S3ClientWrapper::PutObjectStr(const std::string& bucket_name, const std::string&
 }
 
 Status
-S3ClientWrapper::GetObjectFile(const std::string& bucket_name, const std::string& object_name,
-                               const std::string& file_path) {
+S3ClientWrapper::GetObjectFile(const std::string& object_name, const std::string& file_path) {
     Aws::S3::Model::GetObjectRequest request;
-    request.WithBucket(bucket_name).WithKey(object_name);
+    request.WithBucket(bucket_name_).WithKey(object_name);
 
-    auto outcome = client_->GetObject(request);
+    auto outcome = client_ptr_->GetObject(request);
 
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
@@ -172,11 +177,11 @@ S3ClientWrapper::GetObjectFile(const std::string& bucket_name, const std::string
 }
 
 Status
-S3ClientWrapper::DeleteObject(const std::string& bucket_name, const std::string& object_name) {
+S3ClientWrapper::DeleteObject(const std::string& object_name) {
     Aws::S3::Model::DeleteObjectRequest request;
-    request.WithBucket(bucket_name).WithKey(object_name);
+    request.WithBucket(bucket_name_).WithKey(object_name);
 
-    auto outcome = client_->DeleteObject(request);
+    auto outcome = client_ptr_->DeleteObject(request);
 
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();

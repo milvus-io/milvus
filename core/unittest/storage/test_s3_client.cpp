@@ -27,26 +27,13 @@
 INITIALIZE_EASYLOGGINGPP
 
 TEST(StorageTest, S3_CLIENT_TEST) {
-    std::string ip_address = "127.0.0.1";
-    std::string port = "9000";
-
-    // get from "/data/.minio.sys/config/config.json" in docker minio/minio
-    std::string access_key = "minioadmin";
-    std::string secret_key = "minioadmin";
-
-    std::string bucket_name = "bucket";
     std::string object_name = "test_file";
     std::string filename_in = "/tmp/s3_test_file_in";
     std::string filename_out = "/tmp/s3_test_file_out";
     std::string content = "abcdefghijklmnopqrstuvwxyz";
 
-    std::shared_ptr<milvus::storage::IStorage> storage_ptr = std::make_shared<milvus::storage::S3ClientWrapper>();
-    milvus::Status status = storage_ptr->Create(ip_address, port, access_key, secret_key);
-    ASSERT_TRUE(status.ok());
-
-    status = storage_ptr->CreateBucket(bucket_name);
-    ASSERT_TRUE(status.ok());
-    status = storage_ptr->CreateBucket(bucket_name);
+    auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+    milvus::Status status = storage_inst.StartService();
     ASSERT_TRUE(status.ok());
 
     ///////////////////////////////////////////////////////////////////////////
@@ -59,10 +46,10 @@ TEST(StorageTest, S3_CLIENT_TEST) {
         }
         ofile << ss.str() << std::endl;
         ofile.close();
-        status = storage_ptr->PutObjectFile(bucket_name, object_name, filename_in);
+        status = storage_inst.PutObjectFile(filename_in, filename_in);
         ASSERT_TRUE(status.ok());
 
-        status = storage_ptr->GetObjectFile(bucket_name, object_name, filename_out);
+        status = storage_inst.GetObjectFile(filename_in, filename_out);
         std::ifstream infile(filename_out);
         std::string in_buffer;
         infile >> in_buffer;
@@ -72,10 +59,10 @@ TEST(StorageTest, S3_CLIENT_TEST) {
     ///////////////////////////////////////////////////////////////////////////
     /* check PutObjectStr() */
     {
-        status = storage_ptr->PutObjectStr(bucket_name, object_name, content);
+        status = storage_inst.PutObjectStr(object_name, content);
         ASSERT_TRUE(status.ok());
 
-        status = storage_ptr->GetObjectFile(bucket_name, object_name, filename_out);
+        status = storage_inst.GetObjectFile(object_name, filename_out);
         std::ifstream infile(filename_out);
         std::string in_buffer;
         infile >> in_buffer;
@@ -83,13 +70,16 @@ TEST(StorageTest, S3_CLIENT_TEST) {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    status = storage_ptr->DeleteObject(bucket_name, object_name);
+    status = storage_inst.DeleteObject(filename_in);
     ASSERT_TRUE(status.ok());
 
-    status = storage_ptr->DeleteBucket(bucket_name);
+    status = storage_inst.DeleteObject(object_name);
     ASSERT_TRUE(status.ok());
 
-    status = storage_ptr->Close();
+    status = storage_inst.DeleteBucket();
+    ASSERT_TRUE(status.ok());
+
+    status = storage_inst.StopService();
     ASSERT_TRUE(status.ok());
 }
 
