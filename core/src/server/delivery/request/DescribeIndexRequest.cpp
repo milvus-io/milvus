@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 
 namespace milvus {
@@ -40,6 +41,7 @@ DescribeIndexRequest::Create(const std::shared_ptr<Context>& context, const std:
 Status
 DescribeIndexRequest::OnExecute() {
     try {
+        fiu_do_on("DescribeIndexRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "DescribeIndexRequest(table=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 

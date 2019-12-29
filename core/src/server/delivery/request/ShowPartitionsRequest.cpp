@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <vector>
 
@@ -44,14 +45,16 @@ ShowPartitionsRequest::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     auto status = ValidationUtil::ValidateTableName(table_name_);
+    fiu_do_on("ShowPartitionsRequest.OnExecute.invalid_table_name", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
 
     std::vector<engine::meta::TableSchema> schema_array;
-    auto statuts = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
-    if (!statuts.ok()) {
-        return statuts;
+    status = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
+    fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+    if (!status.ok()) {
+        return status;
     }
 
     for (auto& schema : schema_array) {

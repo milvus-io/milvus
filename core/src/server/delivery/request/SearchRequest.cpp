@@ -21,9 +21,8 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
-
-#
 
 namespace milvus {
 namespace server {
@@ -57,6 +56,7 @@ SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string
 Status
 SearchRequest::OnExecute() {
     try {
+        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
         auto pre_query_ctx = context_->Child("Pre query");
 
         std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(record_size_) +
@@ -74,6 +74,7 @@ SearchRequest::OnExecute() {
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
+        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
@@ -108,10 +109,12 @@ SearchRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 5: check prepared float data
+        fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array", record_size_ = data_list_.size() + 1);
         if (data_list_.size() % record_size_ != 0) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
         }
 
+        fiu_do_on("SearchRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
         if (data_list_.size() / record_size_ != table_info.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
                           "The vector dimension must be equal to the table dimension.");
@@ -134,6 +137,7 @@ SearchRequest::OnExecute() {
 
         if (file_id_list_.empty()) {
             status = ValidationUtil::ValidatePartitionTags(partition_list_);
+            fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
             if (!status.ok()) {
                 return status;
             }
@@ -150,10 +154,11 @@ SearchRequest::OnExecute() {
 #endif
 
         rc.RecordSection("search vectors from engine");
+        fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
-
+        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
         if (result_ids.empty()) {
             return Status::OK();  // empty table
         }
