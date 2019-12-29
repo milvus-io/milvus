@@ -49,7 +49,7 @@ MXLogBuffer::~MXLogBuffer() {
 }
 
 /**
- * alloc space 4 buffers
+ * alloc space for buffers
  * @param buffer_size
  * @return
  */

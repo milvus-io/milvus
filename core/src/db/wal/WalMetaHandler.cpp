@@ -15,12 +15,47 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <cstring>
 #include "WalMetaHandler.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
+void
+MXLogMetaHandler::GetMXLogInternelMeta(uint64_t &wal_lsn, uint32_t &wal_file_no) {
+    auto meta_file_size = wal_meta_.GetFileSize();
+    char *p_meta_buf = (char*)malloc(meta_file_size + 1);
+    __glibcxx_assert(p_meta_buf != NULL);
+    wal_meta_.Load(p_meta_buf);
+    p_meta_buf[meta_file_size] = 0;
+    uint64_t tmp_meta[WAL_META_AMOUNT];
+    memset(tmp_meta, 0, sizeof(tmp_meta));
+    char* p_buf = p_meta_buf;
+    int idx = 0;
+    do {
+        while (*p_buf && (*p_buf) != '\n') {
+            tmp_meta[idx] = tmp_meta[idx] * 10 + (*p_buf++ - '0');
+        }
+        idx ++;
+        if (*p_buf)
+            ++ p_buf;
+    }while (*p_buf);
+    //hard code right now
+    wal_lsn = tmp_meta[0];
+    wal_file_no = (uint32_t)tmp_meta[1];
+    free(p_meta_buf);
+}
+
+void
+MXLogMetaHandler::SetMXLogInternelMeta(const uint64_t &wal_lsn, const uint32_t &wal_file_no) {
+    char* p_meta_buf = (char*)malloc(100);
+    __glibcxx_assert(p_meta_buf != NULL);
+    memset(p_meta_buf, 0, 100);
+    sprintf(p_meta_buf, "%uld\n%u\n", wal_lsn, wal_file_no);
+    wal_meta_.Write(p_meta_buf, sizeof(p_meta_buf));
+    free(p_meta_buf);
+}
 
 } // wal
 } // engine

@@ -29,6 +29,7 @@ std::condition_variable reader_cv;
 bool reader_is_waiting;
 
 #define WAL_BUFFER_MIN_SIZE 64
+#define WAL_META_AMOUNT 2
 #define offsetof(type, field) ((long) &((type *)0)->field)
 
 enum class MXLogType {

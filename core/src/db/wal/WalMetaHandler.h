@@ -20,6 +20,8 @@
 #include "db/meta/Meta.h"
 #include "db/meta/MetaTypes.h"
 #include "db/meta/MetaFactory.h"
+#include "db/wal/WalDefinations.h"
+#include "db/wal/WalFileHandler.h"
 
 
 namespace milvus {
@@ -27,7 +29,15 @@ namespace engine {
 namespace wal {
 
 class MXLogMetaHandler {
+ public:
+    MXLogMetaHandler();
+    ~MXLogMetaHandler();
 
+    void GetMXLogInternelMeta(uint64_t& wal_lsn, uint32_t& wal_file_no);
+    void SetMXLogInternelMeta(const uint64_t& wal_lsn, const uint32_t& wal_file_no);
+ private:
+    MXLogFileHandler wal_meta_;
+    std::string wal_meta_file_name_;
 };
 
 
