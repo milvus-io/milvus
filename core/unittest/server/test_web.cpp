@@ -263,7 +263,7 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
     status_dto = handler->GetTable(table_name, query_params, tables_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
-    ASSERT_EQ(1000, tables_dto->num->getValue());
+    ASSERT_EQ(1000, tables_dto->count->getValue());
 }
 
 TEST_F(WebHandlerTest, INDEX) {

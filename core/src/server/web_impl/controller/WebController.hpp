@@ -20,10 +20,10 @@
 #include <string>
 #include <iostream>
 
-#include "oatpp/web/server/api/ApiController.hpp"
-#include "oatpp/parser/json/mapping/ObjectMapper.hpp"
-#include "oatpp/core/macro/codegen.hpp"
-#include "oatpp/core/macro/component.hpp"
+#include <oatpp/web/server/api/ApiController.hpp>
+#include <oatpp/parser/json/mapping/ObjectMapper.hpp>
+#include <oatpp/core/macro/codegen.hpp>
+#include <oatpp/core/macro/component.hpp>
 
 #include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/TableDto.hpp"
@@ -33,6 +33,7 @@
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 
+#include "server/delivery/RequestHandler.h"
 #include "server/web_impl/handler/WebRequestHandler.h"
 
 # define CORS_SUPPORT(RESPONSE)                                                                 \
@@ -54,18 +55,22 @@ class WebController : public oatpp::web::server::api::ApiController {
     WebController(OATPP_COMPONENT(std::shared_ptr<ObjectMapper>, objectMapper))
         : oatpp::web::server::api::ApiController(objectMapper) {}
 
- private:
-
-    /**
-     *  Inject web handler
-     */
-    OATPP_COMPONENT(std::shared_ptr<WebRequestHandler>, handler_);
+// private:
+//
+//    /**
+//     *  Inject web handler
+//     */
+//    OATPP_COMPONENT(std::shared_ptr<WebRequestHandler>, handler_);
  public:
 
     static std::shared_ptr<WebController> createShared(OATPP_COMPONENT(std::shared_ptr<ObjectMapper>,
                                                                        objectMapper)) {
         return std::make_shared<WebController>(objectMapper);
     }
+
+//    std::shared_ptr<WebRequestHandler> GetRequestHandler() {
+//        return handler_;
+//    }
 
     /**
      *  Begin ENDPOINTs generation ('ApiController' codegen)
@@ -98,20 +103,26 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT("GET", "/devices", GetDevices) {
-        auto devices_dto = DevicesDto::createShared();
-        auto status_dto = handler_->GetDevices(devices_dto);
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, devices_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_200, status_dto);
+    ENDPOINT_ASYNC("GET", "/devices", GetDevices) {
+     ENDPOINT_ASYNC_INIT(GetDevices);
+
+        Action
+        act() override {
+            auto devices_dto = DevicesDto::createShared();
+            WebRequestHandler handler = WebRequestHandler();
+            auto status_dto = handler.GetDevices(devices_dto);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, devices_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_200, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+
+            return _return(response);
         }
-
-        CORS_SUPPORT(response)
-
-        return response;
-    }
+    };
 
     ENDPOINT("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
@@ -126,19 +137,25 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("GET", "/config/advanced", GetAdvancedConfig) {
-        auto config_dto = AdvancedConfigDto::createShared();
-        auto status_dto = handler_->GetAdvancedConfig(config_dto);
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, config_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
-        }
+    ENDPOINT_ASYNC("GET", "/config/advanced", GetAdvancedConfig) {
+     ENDPOINT_ASYNC_INIT(GetAdvancedConfig);
 
-        CORS_SUPPORT(response)
-        return response;
-    }
+        Action
+        act() override {
+            auto config_dto = AdvancedConfigDto::createShared();
+            WebRequestHandler handler = WebRequestHandler();
+            auto status_dto = handler.GetAdvancedConfig(config_dto);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, config_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(SetAdvancedConfig) {
         info->summary = "";
@@ -147,17 +164,32 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("PUT", "/config/advanced", SetAdvancedConfig, BODY_DTO(AdvancedConfigDto::ObjectWrapper, config_dto)) {
-        auto status_dto = handler_->SetAdvancedConfig(config_dto);
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+    ENDPOINT_ASYNC("PUT",
+                   "/config/advanced",
+                   SetAdvancedConfig) {
+//                   BODY_DTO(AdvancedConfigDto::ObjectWrapper, config_dto)) {
+     ENDPOINT_ASYNC_INIT(SetAdvancedConfig);
+
+        Action
+        act() override {
+            return request->readBodyToDtoAsync<AdvancedConfigDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&SetAdvancedConfig::returnResponse);
         }
-        CORS_SUPPORT(response)
-        return response;
-    }
+
+        Action returnResponse(const AdvancedConfigDto::ObjectWrapper& body) {
+            WebRequestHandler handler = WebRequestHandler();
+
+            auto status_dto = handler.SetAdvancedConfig(body);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT("OPTIONS", "config/gpu_resources", GPUConfigOptions) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
@@ -165,35 +197,52 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT("GET", "config/gpu_resources", GetGPUConfig) {
-        std::shared_ptr<OutgoingResponse> response;
+    ENDPOINT_ASYNC("GET", "config/gpu_resources", GetGPUConfig) {
+     ENDPOINT_ASYNC_INIT(GetGPUConfig);
 
-        auto gpu_config_dto = GPUConfigDto::createShared();
-        auto status_dto = handler_->GetGpuConfig(gpu_config_dto);
+        Action
+        act() override {
+            std::shared_ptr<OutgoingResponse> response;
 
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, gpu_config_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+            auto gpu_config_dto = GPUConfigDto::createShared();
+            WebRequestHandler handler = WebRequestHandler().RegisterRequestHandler(::milvus::server::RequestHandler());
+            auto status_dto = handler.GetGpuConfig(gpu_config_dto);
+
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, gpu_config_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
+
+    ENDPOINT_ASYNC("PUT", "config/gpu_resources", SetGPUConfig) {
+//    BODY_DTO(GPUConfigDto::ObjectWrapper, gpu_config_dto)) {
+     ENDPOINT_ASYNC_INIT(SetGPUConfig);
+        Action
+        act() override {
+            return request->readBodyToDtoAsync<GPUConfigDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&SetGPUConfig::returnResponse);
         }
 
-        CORS_SUPPORT(response)
-        return response;
-    }
+        Action returnResponse(const GPUConfigDto::ObjectWrapper& body) {
+            WebRequestHandler handler = WebRequestHandler();
+            auto status_dto = handler.SetGpuConfig(body);
 
-    ENDPOINT("PUT", "config/gpu_resources", SetGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, gpu_config_dto)) {
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler_->SetGpuConfig(gpu_config_dto);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
 
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+            CORS_SUPPORT(response)
+            return _return(response);
         }
-
-        CORS_SUPPORT(response)
-        return response;
-    }
+    };
 
     ENDPOINT("OPTIONS", "/tables", TablesOptions, REQUEST(
         const std::shared_ptr<IncomingRequest>&, request)) {
@@ -211,19 +260,31 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("POST", "/tables", CreateTable,
-             BODY_DTO(TableRequestDto::ObjectWrapper, table_schema)) {
-        auto status_dto = handler_->CreateTable(table_schema);
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 != status_dto->code) {
-            response = createDtoResponse(Status::CODE_400, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_201, status_dto);
+    ENDPOINT_ASYNC("POST", "/tables", CreateTable) {
+     ENDPOINT_ASYNC_INIT(CreateTable);
+
+        Action
+        act()
+        override {
+            return request->readBodyToDtoAsync<TableRequestDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&CreateTable::returnResponse);
         }
 
-        CORS_SUPPORT(response);
-        return response;
-    }
+        Action returnResponse(const TableRequestDto::ObjectWrapper& body) {
+            WebRequestHandler handler = WebRequestHandler();
+
+            auto status_dto = handler.CreateTable(body);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 != status_dto->code) {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_201, status_dto);
+            }
+
+            CORS_SUPPORT(response);
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(ShowTables) {
         info->summary = "Show whole tables";
@@ -231,19 +292,29 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("GET", "/tables", ShowTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
-        auto response_dto = TableListFieldsDto::createShared();
-        auto status_dto = handler_->ShowTables(offset, page_size, response_dto);
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, response_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
-        }
+    ENDPOINT_ASYNC("GET", "/tables", ShowTables) {
+     ENDPOINT_ASYNC_INIT(ShowTables);
 
-        CORS_SUPPORT(response);
-        return response;
-    }
+        Action
+        act()
+        override {
+            Int64 offset = std::stol(request->getQueryParameter("offset")->std_str());
+            Int64 page_size = std::stol(request->getQueryParameter("page_size")->std_str());
+
+            WebRequestHandler handler = WebRequestHandler();
+            auto response_dto = TableListFieldsDto::createShared();
+            auto status_dto = handler.ShowTables(offset, page_size, response_dto);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, response_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response);
+            return _return(response);
+        }
+    };
 
     ENDPOINT("OPTIONS", "/tables/{table_name}", TableOptions, PATH(String, table_name)) {
         auto status_dto = StatusDto::createShared();
@@ -268,26 +339,31 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("GET", "/tables/{table_name}", GetTable,
-             PATH(String, table_name), QUERIES(
-                 const QueryParams&, query_params)) {
+    ENDPOINT_ASYNC("GET", "/tables/{table_name}", GetTable) {
+     ENDPOINT_ASYNC_INIT(GetTable);
 
-        auto fields_dto = TableFieldsDto::createShared();
-        auto status_dto = handler_->GetTable(table_name, query_params, fields_dto);
-        std::shared_ptr<OutgoingResponse> response;
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            response = createDtoResponse(Status::CODE_200, fields_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            response = createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
-        }
+        Action
+        act() override {
+            auto table_name = request->getPathVariable("table_name");
+            auto query_params = request->getQueryParameters();
 
-        CORS_SUPPORT(response);
+            WebRequestHandler handler = WebRequestHandler();
+            auto fields_dto = TableFieldsDto::createShared();
+            auto status_dto = handler.GetTable(table_name, query_params, fields_dto);
+            std::shared_ptr<OutgoingResponse> response;
+            auto code = status_dto->code->getValue();
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_200, fields_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
 
-        return response;
-    }
+            CORS_SUPPORT(response);
+            return _return(response);
+        };
+    };
 
     ENDPOINT_INFO(DropTable) {
         info->summary = "Drop table";
@@ -296,23 +372,28 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT("DELETE", "/tables/{table_name}", DropTable,
-             PATH(String, table_name)) {
-        auto status_dto = handler_->DropTable(table_name);
-        auto code = status_dto->code->getValue();
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == code) {
-            response = createDtoResponse(Status::CODE_204, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            response = createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+    ENDPOINT_ASYNC("DELETE", "/tables/{table_name}", DropTable) {
+     ENDPOINT_ASYNC_INIT(DropTable);
+
+        Action
+        act() override {
+            auto table_name = request->getPathVariable("table_name");
+            WebRequestHandler handler = WebRequestHandler();
+            auto status_dto = handler.DropTable(table_name);
+            auto code = status_dto->code->getValue();
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_204, status_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response);
+            return _return(response);
         }
-
-        CORS_SUPPORT(response);
-
-        return response;
-    }
+    };
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions, REQUEST(
         const std::shared_ptr<IncomingRequest>&, request)) {
@@ -328,20 +409,31 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT("POST", "/tables/{table_name}/indexes", CreateIndex,
-             PATH(String, table_name), BODY_DTO(IndexRequestDto::ObjectWrapper, index_param)) {
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler_->CreateIndex(table_name, index_param);
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_201, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+    ENDPOINT_ASYNC("POST", "/tables/{table_name}/indexes", CreateIndex) {
+     ENDPOINT_ASYNC_INIT(CreateIndex);
+
+        Action
+        act() override {
+            return request->readBodyToDtoAsync<IndexRequestDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&CreateIndex::requestResponse);
         }
 
-        CORS_SUPPORT(response);
+        Action requestResponse(const IndexRequestDto::ObjectWrapper& body) {
+            auto table_name = request->getPathVariable("table_name");
+            auto handler = WebRequestHandler();
+            auto status_dto = handler.CreateIndex(table_name, body);
 
-        return response;
-    }
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_201, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response);
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(GetIndex) {
         info->summary = "Describe index";
@@ -350,26 +442,30 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(GetIndex)
+    ENDPOINT_ASYNC("GET", "/tables/{table_name}/indexes", GetIndex) {
+     ENDPOINT_ASYNC_INIT(GetIndex);
 
-    ENDPOINT("GET", "/tables/{table_name}/indexes", GetIndex,
-             PATH(String, table_name)) {
-        auto index_dto = IndexDto::createShared();
-        auto status_dto = handler_->GetIndex(table_name, index_dto);
-        auto code = status_dto->code->getValue();
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == code) {
-            response = createDtoResponse(Status::CODE_200, index_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            response = createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+        Action
+        act() override {
+            auto table_name = request->getPathVariable("table_name");
+            auto index_dto = IndexDto::createShared();
+            auto handler = WebRequestHandler();
+            auto status_dto = handler.GetIndex(table_name, index_dto);
+            auto code = status_dto->code->getValue();
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_200, index_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+
+            return _return(response);
         }
-
-        CORS_SUPPORT(response)
-
-        return response;
-    }
+    };
 
     ENDPOINT_INFO(DropIndex) {
         info->summary = "Drop index";
@@ -380,28 +476,34 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(DropIndex)
 
-    ENDPOINT("DELETE", "/tables/{table_name}/indexes", DropIndex, PATH(String, table_name)) {
-        auto status_dto = handler_->DropIndex(table_name);
-        auto code = status_dto->code->getValue();
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == code) {
-            response = createDtoResponse(Status::CODE_204, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            response = createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+    ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/indexes", DropIndex) {
+     ENDPOINT_ASYNC_INIT(DropIndex);
+        Action
+        act()
+        override {
+            auto handler = WebRequestHandler();
+            auto table_name = request->getPathVariable("table_name");
+            auto status_dto = handler.DropIndex(table_name);
+            auto code = status_dto->code->getValue();
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_204, status_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response);
+            return _return(response);
         }
+    };
 
-        CORS_SUPPORT(response);
-
-        return response;
-    }
-
-    /*
-     * Create partition
-     *
-     * url = POST '<server address>/partitions/tables/<table_name>'
-     */
+/*
+ * Create partition
+ *
+ * url = POST '<server address>/partitions/tables/<table_name>'
+ */
     ENDPOINT("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions, REQUEST(
         const std::shared_ptr<IncomingRequest>&, request)) {
         auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
@@ -411,42 +513,49 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(CreatePartition) {
         info->summary = "Create partition";
+
         info->addConsumes<PartitionRequestDto::ObjectWrapper>("application/json");
 
-        // Created.
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        // Error occurred.
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-//        info->addResponse<String>(Status::CODE_404, "text/plain");
     }
 
-    ADD_CORS(CreatePartition)
+    ENDPOINT_ASYNC("POST",
+                   "/tables/{table_name}/partitions",
+                   CreatePartition) {
+//             PATH(String, table_name),
+//             BODY_DTO(PartitionRequestDto::ObjectWrapper, partition_param)) {
 
-    ENDPOINT("POST",
-             "/tables/{table_name}/partitions",
-             CreatePartition,
-             PATH(String, table_name),
-             BODY_DTO(PartitionRequestDto::ObjectWrapper, partition_param)) {
+     ENDPOINT_ASYNC_INIT(CreatePartition);
 
-        auto status_dto = handler_->CreatePartition(table_name, partition_param);
-        std::shared_ptr<OutgoingResponse> response;
-
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_201, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+        Action
+        act() override {
+            return request->readBodyToDtoAsync<PartitionRequestDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&CreatePartition::returnResponse);
         }
 
-        CORS_SUPPORT(response)
+        Action returnResponse(const PartitionRequestDto::ObjectWrapper& body) {
+            auto handler = WebRequestHandler();
+            auto table_name = request->getPathVariable("table_name");
+            auto status_dto = handler.CreatePartition(table_name, body);
+            std::shared_ptr<OutgoingResponse> response;
 
-        return response;
-    }
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_201, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
 
-    /*
-     * Show partitions
-     *
-     * url = GET '<server address>/partitions/tables/{tableName}?offset={}&page_size={}'
-     */
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
+
+/*
+ * Show partitions
+ *
+ * url = GET '<server address>/partitions/tables/{tableName}?offset={}&page_size={}'
+ */
     ENDPOINT_INFO(ShowPartitions) {
         info->summary = "Show partitions";
 
@@ -460,27 +569,30 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(ShowPartitions)
 
-    ENDPOINT("GET",
-             "/tables/{tableName}/partitions",
-             ShowPartitions,
-             PATH(String, table_name),
-             QUERY(Int64, offset, "Page offset"),
-             QUERY(Int64, page_size, "Page size")) {
-        auto partition_list_dto = PartitionListDto::createShared();
-        auto status_dto = handler_->ShowPartitions(offset, page_size, table_name, partition_list_dto);
-        int64_t code = status_dto->code->getValue();
-        std::shared_ptr<OutgoingResponse> response;
-        if (0 == code) {
-            response = createDtoResponse(Status::CODE_200, partition_list_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            response = createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
-        }
+    ENDPOINT_ASYNC("GET", "/tables/{tableName}/partitions", ShowPartitions) {
+     ENDPOINT_ASYNC_INIT(ShowPartitions);
+        Action
+        act() override {
+            auto partition_list_dto = PartitionListDto::createShared();
+            auto handler = WebRequestHandler();
+            auto table_name = request->getPathVariable("table_name");
+            Int64 page_size = std::stol(request->getQueryParameter("page_size")->std_str());
+            Int64 offset = std::stol(request->getQueryParameter("offset")->std_str());
+            auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
+            int64_t code = status_dto->code->getValue();
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_200, partition_list_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
 
-        CORS_SUPPORT(response)
-        return response;
-    }
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/partition/{tag}", PartitionOptions, REQUEST(
         const std::shared_ptr<IncomingRequest>&, request)) {
@@ -497,20 +609,30 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(DropPartition)
+    ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/partition/{tag}", DropPartition) {
+//             QUERY(String, table_name), QUERY(String, tag)) {
+     ENDPOINT_ASYNC_INIT(DropPartition);
 
-    ENDPOINT("DELETE", "/tables/{table_name}/partition/{tag}", DropPartition,
-             QUERY(String, table_name), QUERY(String, tag)) {
-        auto status_dto = handler_->DropPartition(table_name, tag);
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_204, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        Action
+        act() override {
+            auto handler = WebRequestHandler();
+            auto table_name = request->getPathVariable("table_name");
+            auto tag = request->getPathVariable("tag");
+            auto status_dto = handler.DropPartition(table_name, tag);
+            auto code = status_dto->code->getValue();
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_204, status_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+            return _return(response);
         }
-    }
+    };
 
     ENDPOINT_INFO(Insert) {
         info->summary = "Insert vectors";
@@ -522,30 +644,42 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(Insert)
+    ENDPOINT_ASYNC("POST", "/vectors/tables", Insert) {
+     ENDPOINT_ASYNC_INIT(Insert);
 
-    ENDPOINT("POST",
-             "/vectors/tables",
-             Insert,
-             BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
-        auto ids_dto = VectorIdsDto::createShared();
-        auto status_dto = handler_->Insert(insert_param, ids_dto);
-
-        int64_t code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_201, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        Action
+        act() override {
+//             BODY_DTO(InsertRequestDto::ObjectWrapper, insert_param)) {
+            return request->readBodyToDtoAsync<InsertRequestDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&Insert::returnResponse);
         }
-    }
 
-    /*
-     * Search
-     *
-     * url GET 'vectors/tables/{tableName}?topk={topk}&nprobe={nprobe}&tags={tag list}'
-     */
+        Action returnResponse(const InsertRequestDto::ObjectWrapper& body) {
+            auto ids_dto = VectorIdsDto::createShared();
+            WebRequestHandler handler = WebRequestHandler();
+            auto status_dto = handler.Insert(body, ids_dto);
+
+            std::shared_ptr<OutgoingResponse> response;
+            int64_t code = status_dto->code->getValue();
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_201, status_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+
+    };
+
+/*
+ * Search
+ *
+ * url GET 'vectors/tables/{tableName}?topk={topk}&nprobe={nprobe}&tags={tag list}'
+ */
     ENDPOINT_INFO(Search) {
         info->summary = "Search";
 
@@ -556,24 +690,40 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(Search)
-
-    ENDPOINT("GET", "/vectors/{table_name}", Search,
-             PATH(String, table_name),
-             QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(
-                 const QueryParams&, query_params),
-             BODY_DTO(RecordsDto::ObjectWrapper, records)) {
-        auto result_dto = ResultDto::createShared();
-        auto status_dto = handler_->Search(table_name, topk, nprobe, query_params, records, result_dto);
-        int64_t code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_200, result_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+    ENDPOINT_ASYNC("GET", "/vectors/{table_name}", Search) {
+//             PATH(String, table_name),
+//             QUERY(Int64, topk), QUERY(Int64, nprobe), QUERIES(
+//                 const QueryParams&, query_params),
+//             BODY_DTO(RecordsDto::ObjectWrapper, records)) {
+     ENDPOINT_ASYNC_INIT(Search);
+        Action
+        act() override {
+            return request->readBodyToDtoAsync<RecordsDto>(controller->getDefaultObjectMapper())
+                .callbackTo(&Search::returnResponse);
         }
-    }
+
+        Action returnResponse(const RecordsDto::ObjectWrapper& body) {
+            auto result_dto = ResultDto::createShared();
+            WebRequestHandler handler = WebRequestHandler();
+            auto table_name = request->getPathVariable("table_name");
+            Int64 topk = std::stol(request->getQueryParameter("topk")->std_str());
+            Int64 nprobe = std::stol(request->getQueryParameter("nprobe")->std_str());
+            auto query_params = request->getQueryParameters();
+            auto status_dto = handler.Search(table_name, topk, nprobe, query_params, body, result_dto);
+            int64_t code = status_dto->code->getValue();
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == code) {
+                response = controller->createDtoResponse(Status::CODE_200, result_dto);
+            } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+                response = controller->createDtoResponse(Status::CODE_404, status_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(Cmd) {
         info->summary = "Command";
@@ -584,19 +734,30 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(Cmd)
 
-    ENDPOINT("GET", "/cmd/{cmd_str}", Cmd, PATH(String, cmd_str)) {
-        auto cmd_dto = CommandDto::createShared();
-        auto status_dto = handler_->Cmd(cmd_str, cmd_dto);
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_200, cmd_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
-        }
-    }
+    ENDPOINT_ASYNC("GET", "/cmd/{cmd_str}", Cmd) {
+     ENDPOINT_ASYNC_INIT(Cmd);
 
-    /**
-     *  Finish ENDPOINTs generation ('ApiController' codegen)
-     */
+        Action
+        act() override {
+            auto cmd_str = request->getPathVariable("cmd_str");
+            auto cmd_dto = CommandDto::createShared();
+            WebRequestHandler handler = WebRequestHandler();
+            auto status_dto = handler.Cmd(cmd_str, cmd_dto);
+            std::shared_ptr<OutgoingResponse> response;
+            if (0 == status_dto->code->getValue()) {
+                response = controller->createDtoResponse(Status::CODE_200, cmd_dto);
+            } else {
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
+            }
+
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
+
+/**
+ *  Finish ENDPOINTs generation ('ApiController' codegen)
+ */
 #include OATPP_CODEGEN_END(ApiController)
 
 };

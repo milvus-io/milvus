@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include <oatpp/core/macro/component.hpp>
-#include <oatpp/parser/json/mapping/ObjectMapper.hpp>
 #include <oatpp/parser/json/mapping/Serializer.hpp>
 #include <oatpp/parser/json/mapping/Deserializer.hpp>
-#include <oatpp/web/server/HttpConnectionHandler.hpp>
+#include <oatpp/web/server/AsyncHttpConnectionHandler.hpp>
 #include <oatpp/web/server/HttpRouter.hpp>
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>
+#include <oatpp/parser/json/mapping/ObjectMapper.hpp>
+#include <oatpp/core/macro/component.hpp>
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 #include "server/web_impl/component/SwaggerComponent.hpp"
@@ -60,6 +60,15 @@ class AppComponent {
         return std::make_shared<SwaggerComponent>("192.168.1.57", this->port_);
     }());
 
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor_)([] {
+        return std::make_shared<oatpp::async::Executor>(
+            9 /* Data-Processing threads */,
+            2 /* I/O threads */,
+            1 /* Timer threads */
+        );
+    }());
+
+
     /**
      *  Create ConnectionProvider component which listens on the port
      */
@@ -79,7 +88,9 @@ class AppComponent {
      */
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, server_connection_handler_)([] {
         OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router); // get Router component
-        return oatpp::web::server::HttpConnectionHandler::createShared(router);
+        OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor); // get Async executor component
+        return oatpp::web::server::AsyncHttpConnectionHandler::createShared(router, executor);
+//        return oatpp::web::server::AsyncHttpConnectionHandler::createShared(router);
     }());
 
     /**
@@ -94,17 +105,16 @@ class AppComponent {
         return objectMapper;
     }());
 
-    /**
-     *  Create Demo-Database component which stores information about users
-     */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<WebRequestHandler>, web_handler_)([] {
-        std::shared_ptr<WebRequestHandler> web_handler = std::make_shared<WebRequestHandler>();
-        web_handler->RegisterRequestHandler(RequestHandler());
-        return web_handler;
-    }());
+//    /**
+//     *  Create Demo-Database component which stores information about users
+//     */
+//    OATPP_CREATE_COMPONENT(std::shared_ptr<WebRequestHandler>, web_handler_)([] {
+//        std::shared_ptr<WebRequestHandler> web_handler = std::make_shared<WebRequestHandler>();
+//        web_handler->RegisterRequestHandler(RequestHandler());
+//        return web_handler;
+//    }());
 };
 
 } //namespace web
 } //namespace server
 } //namespace milvus
-
