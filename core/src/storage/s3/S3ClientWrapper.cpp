@@ -177,6 +177,28 @@ S3ClientWrapper::GetObjectFile(const std::string& object_name, const std::string
 }
 
 Status
+S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& content) {
+    Aws::S3::Model::GetObjectRequest request;
+    request.WithBucket(bucket_name_).WithKey(object_name);
+
+    auto outcome = client_ptr_->GetObject(request);
+
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: GetObject: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
+    }
+
+    auto& retrieved_file = outcome.GetResultWithOwnership().GetBody();
+    std::stringstream ss;
+    ss << retrieved_file.rdbuf();
+    content = std::move(ss.str());
+
+    STORAGE_LOG_DEBUG << "GetObjectStr successfully!";
+    return Status::OK();
+}
+
+Status
 S3ClientWrapper::DeleteObject(const std::string& object_name) {
     Aws::S3::Model::DeleteObjectRequest request;
     request.WithBucket(bucket_name_).WithKey(object_name);

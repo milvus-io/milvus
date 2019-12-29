@@ -37,6 +37,8 @@ class IStorage {
     virtual Status
     GetObjectFile(const std::string& object_name, const std::string& file_path) = 0;
     virtual Status
+    GetObjectStr(const std::string& object_name, std::string& content) = 0;
+    virtual Status
     DeleteObject(const std::string& object_name) = 0;
 };
 

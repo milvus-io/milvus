@@ -52,6 +52,8 @@ class S3ClientWrapper : public IStorage {
     Status
     GetObjectFile(const std::string& object_key, const std::string& file_path) override;
     Status
+    GetObjectStr(const std::string& object_key, std::string& content) override;
+    Status
     DeleteObject(const std::string& object_key) override;
 
  private:

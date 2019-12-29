@@ -27,50 +27,48 @@
 INITIALIZE_EASYLOGGINGPP
 
 TEST(StorageTest, S3_CLIENT_TEST) {
-    std::string object_name = "test_file";
-    std::string filename_in = "/tmp/s3_test_file_in";
-    std::string filename_out = "/tmp/s3_test_file_out";
-    std::string content = "abcdefghijklmnopqrstuvwxyz";
+    const std::string filename = "/tmp/test_file_in";
+    const std::string filename_out = "/tmp/test_file_out";
+    const std::string object_name = "test_obj";
+    const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
     milvus::Status status = storage_inst.StartService();
     ASSERT_TRUE(status.ok());
 
     ///////////////////////////////////////////////////////////////////////////
-    /* check PutObjectFile() */
+    /* check PutObjectFile() and GetObjectFile() */
     {
-        std::ofstream ofile(filename_in);
-        std::stringstream ss;
+        std::ofstream fs_in(filename);
+        std::stringstream ss_in;
         for (int i = 0; i < 1024; ++i) {
-            ss << i;
+            ss_in << i;
         }
-        ofile << ss.str() << std::endl;
-        ofile.close();
-        status = storage_inst.PutObjectFile(filename_in, filename_in);
+        fs_in << ss_in.str() << std::endl;
+        fs_in.close();
+        status = storage_inst.PutObjectFile(filename, filename);
         ASSERT_TRUE(status.ok());
 
-        status = storage_inst.GetObjectFile(filename_in, filename_out);
-        std::ifstream infile(filename_out);
-        std::string in_buffer;
-        infile >> in_buffer;
-        ASSERT_STREQ(in_buffer.c_str(), ss.str().c_str());
+        status = storage_inst.GetObjectFile(filename, filename_out);
+        std::ifstream fs_out(filename_out);
+        std::string str_out;
+        fs_out >> str_out;
+        ASSERT_STREQ(str_out.c_str(), ss_in.str().c_str());
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    /* check PutObjectStr() */
+    /* check PutObjectStr() and GetObjectStr() */
     {
         status = storage_inst.PutObjectStr(object_name, content);
         ASSERT_TRUE(status.ok());
 
-        status = storage_inst.GetObjectFile(object_name, filename_out);
-        std::ifstream infile(filename_out);
-        std::string in_buffer;
-        infile >> in_buffer;
-        ASSERT_STREQ(in_buffer.c_str(), content.c_str());
+        std::string content_out;
+        status = storage_inst.GetObjectStr(object_name, content_out);
+        ASSERT_STREQ(content_out.c_str(), content.c_str());
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    status = storage_inst.DeleteObject(filename_in);
+    status = storage_inst.DeleteObject(filename);
     ASSERT_TRUE(status.ok());
 
     status = storage_inst.DeleteObject(object_name);
