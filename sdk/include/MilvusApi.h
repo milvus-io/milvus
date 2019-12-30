@@ -45,7 +45,7 @@ enum class IndexType {
 enum class MetricType {
     L2 = 1,         // Euclidean Distance
     IP = 2,         // Cosine Similarity
-    HAMMING = 3,    // Hamming distance
+    HAMMING = 3,    // Hamming Distance
     JACCARD = 4,    // Jaccard Distance
     TANIMOTO = 5,   // Tanimoto Distance
 };
