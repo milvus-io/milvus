@@ -17,32 +17,32 @@
 
 #pragma once
 
+#include <memory>
+
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
+class VectorIndex {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    VectorIndex(knowhere::VectorIndexPtr vector_index_ptr);
 
-    virtual AttrsFormat
-    attrsFormat() = 0;
+    void
+    Get(knowhere::VectorIndexPtr& vector_index_ptr);
 
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
+    // No copy and move
+    VectorIndex(const VectorIndex&) = delete;
+    VectorIndex(VectorIndex&&) = delete;
 
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
+    VectorIndex&
+    operator=(const VectorIndex&) = delete;
+    VectorIndex&
+    operator=(VectorIndex&&) = delete;
 
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+ private:
+    knowhere::VectorIndexPtr vector_index_ptr_;
 };
 
-}  // namespace codec
+using VectorIndexPtr = std::shared_ptr<VectorIndex>;
+
+}  // namespace segment
 }  // namespace milvus

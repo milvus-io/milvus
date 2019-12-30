@@ -18,31 +18,29 @@
 #pragma once
 
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
+class IdBloomFilter {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    IdBloomFilter(BloomFilter bloom_filter);
 
-    virtual AttrsFormat
-    attrsFormat() = 0;
+    bool
+    test(int64_t uid);
 
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
+    // No copy and move
+    IdBloomFilter(const IdBloomFilter&) = delete;
+    IdBloomFilter(IdBloomFilter&&) = delete;
 
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
+    IdBloomFilter&
+    operator=(const IdBloomFilter&) = delete;
+    IdBloomFilter&
+    operator=(IdBloomFilter&&) = delete;
 
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+ private:
+    BloomFilter bloom_filter_;
 };
 
-}  // namespace codec
+using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
+
+}  // namespace segment
 }  // namespace milvus

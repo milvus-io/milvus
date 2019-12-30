@@ -20,28 +20,13 @@
 namespace milvus {
 namespace codec {
 
-class Codec {
+class AttrsFormat {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    virtual Attrs
+    read() = 0;
 
-    virtual AttrsFormat
-    attrsFormat() = 0;
-
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
-
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+    virtual void
+    write(Attrs attrs) = 0;
 };
 
 }  // namespace codec

@@ -17,32 +17,10 @@
 
 #pragma once
 
-namespace milvus {
-namespace codec {
+namespace faiss {
 
-class Codec {
- public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
-
-    virtual AttrsFormat
-    attrsFormat() = 0;
-
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
-
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+class ConcurrentBitset {
+    // TODO
 };
 
-}  // namespace codec
-}  // namespace milvus
+}  // namespace faiss

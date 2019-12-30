@@ -17,32 +17,34 @@
 
 #pragma once
 
+#include <memory>
+
+#include "index/thirdparty/faiss/utils/ConcurrentBitset.h"
+
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
+class LiveDocs {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    LiveDocs(faiss::ConcurrentBitset bitset);
 
-    virtual AttrsFormat
-    attrsFormat() = 0;
+    void
+    GetBitset(faiss::ConcurrentBitset& bitset);
 
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
+    // No copy and move
+    LiveDocs(const LiveDocs&) = delete;
+    LiveDocs(LiveDocs&&) = delete;
 
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
+    LiveDocs&
+    operator=(const LiveDocs&) = delete;
+    LiveDocs&
+    operator=(LiveDocs&&) = delete;
 
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+ private:
+    faiss::ConcurrentBitset bitset_;
 };
 
-}  // namespace codec
+using LiveDocsPtr = std::shared_ptr<LiveDocs>;
+
+}  // namespace segment
 }  // namespace milvus

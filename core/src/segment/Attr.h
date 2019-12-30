@@ -17,32 +17,30 @@
 
 #pragma once
 
+#include <memory>
+
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
+class Attr {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    Attr(void* data, size_t nbytes);
 
-    virtual AttrsFormat
-    attrsFormat() = 0;
+    // No copy and move
+    Attr(const Attr&) = delete;
+    Attr(Attr&&) = delete;
 
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
+    Attr&
+    operator=(const Attr&) = delete;
+    Attr&
+    operator=(Attr&&) = delete;
 
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+ private:
+    void* data_;
+    size_t nbytes_;
 };
 
-}  // namespace codec
+using AttrPtr = std::shared_ptr<Attr>;
+
+}  // namespace segment
 }  // namespace milvus
