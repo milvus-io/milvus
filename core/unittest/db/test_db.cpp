@@ -510,9 +510,11 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
 
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
+#endif
 #endif
 
     milvus::engine::TableIndex index_out;
