@@ -19,15 +19,17 @@
 
 #include <memory>
 
+#include "index/knowhere/knowhere/index/Index.h"
+
 namespace milvus {
 namespace segment {
 
 class VectorIndex {
  public:
-    VectorIndex(knowhere::VectorIndexPtr vector_index_ptr);
+    VectorIndex(knowhere::IndexPtr index_ptr);
 
     void
-    Get(knowhere::VectorIndexPtr& vector_index_ptr);
+    Get(knowhere::IndexPtr& index_ptr);
 
     // No copy and move
     VectorIndex(const VectorIndex&) = delete;
@@ -39,7 +41,7 @@ class VectorIndex {
     operator=(VectorIndex&&) = delete;
 
  private:
-    knowhere::VectorIndexPtr vector_index_ptr_;
+    knowhere::IndexPtr index_ptr_;
 };
 
 using VectorIndexPtr = std::shared_ptr<VectorIndex>;
