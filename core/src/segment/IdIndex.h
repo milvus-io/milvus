@@ -17,17 +17,16 @@
 
 #pragma once
 
+#include <memory>
+
+#include "AttrIndex.h"
+
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class DeleteDocsFormat {
- public:
-    virtual DeleteDocs
-    read() = 0;
+class IdIndex : public AttrIndex {};
 
-    virtual void
-    write(DeleteDocs delete_docs) = 0;
-};
+using IdIndexPtr = std::shared_ptr<IdIndex>;
 
-}  // namespace codec
+}  // namespace segment
 }  // namespace milvus

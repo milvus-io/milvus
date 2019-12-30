@@ -18,31 +18,29 @@
 #pragma once
 
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
+class AttrIndex {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    AttrIndex(AttrIndexWrapper attr_index_wrapper);
 
-    virtual AttrsFormat
-    attrsFormat() = 0;
+    void
+    Get(AttrIndexWrapper &attr_index_wrapper);
 
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
+    // No copy and move
+    AttrIndex(const AttrIndex&) = delete;
+    AttrIndex(AttrIndex&&) = delete;
 
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
+    AttrIndex&
+    operator=(const AttrIndex&) = delete;
+    AttrIndex&
+    operator=(AttrIndex&&) = delete;
 
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+ private:
+    AttrIndexWrapper attr_index_wrapper_;
 };
 
-}  // namespace codec
+using AttrIndexPtr = std::shared_ptr<AttrIndex>;
+
+}  // namespace segment
 }  // namespace milvus

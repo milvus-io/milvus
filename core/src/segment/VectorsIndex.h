@@ -17,32 +17,16 @@
 
 #pragma once
 
+#include <unordered_map>
+
+#include "VectorIndex.h"
+
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
- public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
-
-    virtual AttrsFormat
-    attrsFormat() = 0;
-
-    virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
-
-    virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+struct VectorsIndex {
+    std::unordered_map<std::string, VectorIndexPtr> vector_indexes;
 };
 
-}  // namespace codec
+}  // namespace segment
 }  // namespace milvus
