@@ -19,24 +19,27 @@
 
 #include <fstream>
 #include <string>
+#include "storage/IOReader.h"
 
 namespace milvus {
 namespace storage {
 
-struct FileIOReader {
+class FileIOReader : public IOReader {
  public:
-    explicit FileIOReader(const std::string& fname);
+    explicit FileIOReader(const std::string& name);
     ~FileIOReader();
 
-    size_t
-    operator()(void* ptr, size_t size);
+    void
+    read(void* ptr, size_t size) override;
 
-    size_t
-    operator()(void* ptr, size_t size, size_t pos);
+    void
+    seekg(size_t pos) override;
+
+    int64_t
+    length() override;
 
  public:
-    std::fstream fs;
-    std::string name;
+    std::fstream fs_;
 };
 
 }  // namespace storage

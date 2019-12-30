@@ -19,20 +19,21 @@
 
 #include <fstream>
 #include <string>
+#include "storage/IOWriter.h"
 
 namespace milvus {
 namespace storage {
 
-class FileIOWriter {
+class FileIOWriter : public IOWriter {
  public:
-    explicit FileIOWriter(const std::string& fname);
+    explicit FileIOWriter(const std::string& name);
     ~FileIOWriter();
+
     size_t
-    operator()(void* ptr, size_t size);
+    write(void* ptr, size_t size) override;
 
  public:
-    std::fstream fs;
-    std::string name;
+    std::fstream fs_;
 };
 
 }  // namespace storage

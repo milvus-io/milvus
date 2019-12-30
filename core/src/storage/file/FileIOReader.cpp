@@ -20,24 +20,28 @@
 namespace milvus {
 namespace storage {
 
-FileIOReader::FileIOReader(const std::string& fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::in | std::ios::binary);
+FileIOReader::FileIOReader(const std::string& name) : IOReader(name) {
+    fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
 }
 
 FileIOReader::~FileIOReader() {
-    fs.close();
+    fs_.close();
 }
 
-size_t
-FileIOReader::operator()(void* ptr, size_t size) {
-    fs.read(reinterpret_cast<char*>(ptr), size);
+void
+FileIOReader::read(void* ptr, size_t size) {
+    fs_.read(reinterpret_cast<char*>(ptr), size);
 }
 
-size_t
-FileIOReader::operator()(void* ptr, size_t size, size_t pos) {
-    return 0;
+void
+FileIOReader::seekg(size_t pos) {
+    fs_.seekg(pos);
 }
 
+int64_t
+FileIOReader::length() {
+    fs_.seekg(0, fs_.end);
+    return fs_.tellg();
+}
 }  // namespace storage
 }  // namespace milvus

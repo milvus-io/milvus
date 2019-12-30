@@ -15,22 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "storage/file/FileIOWriter.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3ClientWrapper.h"
 
 namespace milvus {
 namespace storage {
 
-FileIOWriter::FileIOWriter(const std::string& name) : IOWriter(name) {
-    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
+S3IOReader::S3IOReader(const std::string& name) : IOReader(name), pos_(0) {
+    S3ClientWrapper::GetInstance().GetObjectStr(name_, buffer_);
 }
 
-FileIOWriter::~FileIOWriter() {
-    fs_.close();
+S3IOReader::~S3IOReader() {
 }
 
-size_t
-FileIOWriter::write(void* ptr, size_t size) {
-    fs_.write(reinterpret_cast<char*>(ptr), size);
+void
+S3IOReader::read(void* ptr, size_t size) {
+    memcpy(ptr, buffer_.data() + pos_, size);
+}
+
+void
+S3IOReader::seekg(size_t pos) {
+    pos_ = pos;
+}
+
+int64_t
+S3IOReader::length() {
+    return buffer_.length();
 }
 
 }  // namespace storage

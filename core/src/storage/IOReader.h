@@ -15,23 +15,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "storage/file/FileIOWriter.h"
+#pragma once
+
+#include <string>
 
 namespace milvus {
 namespace storage {
 
-FileIOWriter::FileIOWriter(const std::string& name) : IOWriter(name) {
-    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
-}
+struct IOReader {
+ public:
+    explicit IOReader(const std::string& name) : name_(name) {
+    }
+    ~IOReader() = default;
 
-FileIOWriter::~FileIOWriter() {
-    fs_.close();
-}
+    virtual void
+    read(void* ptr, size_t size) = 0;
 
-size_t
-FileIOWriter::write(void* ptr, size_t size) {
-    fs_.write(reinterpret_cast<char*>(ptr), size);
-}
+    virtual void
+    seekg(size_t pos) = 0;
+
+    virtual int64_t
+    length() = 0;
+
+ public:
+    std::string name_;
+};
 
 }  // namespace storage
 }  // namespace milvus

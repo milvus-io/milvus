@@ -212,36 +212,34 @@ VecIndexPtr
 read_index(const std::string& location) {
     knowhere::BinarySet load_data_list;
     storage::FileIOReader reader(location);
-    reader.fs.seekg(0, reader.fs.end);
-    int64_t length = reader.fs.tellg();
+    int64_t length = reader.length();
     if (length <= 0) {
         return nullptr;
     }
 
-    reader.fs.seekg(0);
-
+    reader.seekg(0);
     size_t rp = 0;
     auto current_type = IndexType::INVALID;
-    reader(&current_type, sizeof(current_type));
+    reader.read(&current_type, sizeof(current_type));
     rp += sizeof(current_type);
     while (rp < length) {
         size_t meta_length;
-        reader(&meta_length, sizeof(meta_length));
+        reader.read(&meta_length, sizeof(meta_length));
         rp += sizeof(meta_length);
-        reader.fs.seekg(rp);
+        reader.seekg(rp);
 
         auto meta = new char[meta_length];
-        reader(meta, meta_length);
+        reader.read(meta, meta_length);
         rp += meta_length;
-        reader.fs.seekg(rp);
+        reader.seekg(rp);
 
         size_t bin_length;
-        reader(&bin_length, sizeof(bin_length));
+        reader.read(&bin_length, sizeof(bin_length));
         rp += sizeof(bin_length);
-        reader.fs.seekg(rp);
+        reader.seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        reader(bin, bin_length);
+        reader.read(bin, bin_length);
         rp += bin_length;
 
         auto binptr = std::make_shared<uint8_t>();
@@ -260,17 +258,17 @@ write_index(VecIndexPtr index, const std::string& location) {
         auto index_type = index->GetType();
 
         storage::FileIOWriter writer(location);
-        writer(&index_type, sizeof(IndexType));
+        writer.write(&index_type, sizeof(IndexType));
         for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
-            writer(&meta_length, sizeof(meta_length));
-            writer((void*)meta, meta_length);
+            writer.write(&meta_length, sizeof(meta_length));
+            writer.write((void*)meta, meta_length);
 
             auto binary = iter.second;
             int64_t binary_length = binary->size;
-            writer(&binary_length, sizeof(binary_length));
-            writer((void*)binary->data.get(), binary_length);
+            writer.write(&binary_length, sizeof(binary_length));
+            writer.write((void*)binary->data.get(), binary_length);
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
