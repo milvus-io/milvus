@@ -32,13 +32,13 @@ const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
 
 constexpr int64_t TABLE_DIMENSION = 512;
 constexpr int64_t TABLE_INDEX_FILE_SIZE = 128;
-constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::JACCARD;
+constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::TANIMOTO;
 constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different, ensure less than BATCH_ROW_COUNT
-constexpr int64_t ADD_VECTOR_LOOP = 5;
+constexpr int64_t ADD_VECTOR_LOOP = 20;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t N_LIST = 1024;
 
@@ -158,10 +158,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                                     topk_query_result);
     }
 
-//    {  // drop table
-//        stat = conn->DropTable(TABLE_NAME);
-//        std::cout << "DropTable function call status: " << stat.message() << std::endl;
-//    }
+    {  // drop table
+        stat = conn->DropTable(TABLE_NAME);
+        std::cout << "DropTable function call status: " << stat.message() << std::endl;
+    }
 
     milvus::Connection::Destroy(conn);
 }
