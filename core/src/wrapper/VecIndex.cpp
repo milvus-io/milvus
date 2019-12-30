@@ -27,6 +27,8 @@
 #include "server/Config.h"
 #include "storage/file/FileIOReader.h"
 #include "storage/file/FileIOWriter.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -211,17 +213,21 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 VecIndexPtr
 read_index(const std::string& location) {
     knowhere::BinarySet load_data_list;
-    storage::FileIOReader reader(location);
+    //storage::FileIOReader reader(location);
+    storage::S3IOReader reader(location);
     int64_t length = reader.length();
     if (length <= 0) {
         return nullptr;
     }
 
-    reader.seekg(0);
     size_t rp = 0;
+    reader.seekg(0);
+
     auto current_type = IndexType::INVALID;
     reader.read(&current_type, sizeof(current_type));
     rp += sizeof(current_type);
+    reader.seekg(rp);
+
     while (rp < length) {
         size_t meta_length;
         reader.read(&meta_length, sizeof(meta_length));
@@ -241,6 +247,7 @@ read_index(const std::string& location) {
         auto bin = new uint8_t[bin_length];
         reader.read(bin, bin_length);
         rp += bin_length;
+        reader.seekg(rp);
 
         auto binptr = std::make_shared<uint8_t>();
         binptr.reset(bin);
@@ -257,8 +264,10 @@ write_index(VecIndexPtr index, const std::string& location) {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
-        storage::FileIOWriter writer(location);
+        //storage::FileIOWriter writer(location);
+        storage::S3IOWriter writer(location);
         writer.write(&index_type, sizeof(IndexType));
+
         for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
