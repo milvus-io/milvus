@@ -26,7 +26,6 @@
 #include <oatpp/core/macro/component.hpp>
 
 #include "server/web_impl/handler/WebRequestHandler.h"
-//#include "server/web_impl/component/SwaggerComponent.hpp"
 
 /**
  *  Class which creates and holds Application components and registers components in oatpp::base::Environment
@@ -72,7 +71,8 @@ class AppComponent {
     /**
      *  Create ConnectionProvider component which listens on the port
      */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)([this] {
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)
+    ([this] {
 //        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
         return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
 //        return oatpp::network::ServerConnectionPoo;
