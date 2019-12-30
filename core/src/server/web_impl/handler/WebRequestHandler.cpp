@@ -116,7 +116,9 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto lamd = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
+    auto lamd = [](uint64_t x) -> uint64_t {
+        return x / 1024 / 1024 / 1024;
+    };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
@@ -252,13 +254,6 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    auto str_lower_lamda = [](const std::string& str) {
-        std::string str_out;
-        for (auto& item : str) {
-            str_out += tolower(item);
-        }
-        return str_out;
-    };
 
     Config& config = Config::GetInstance();
 
@@ -273,8 +268,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
 
     std::vector<std::string> search_resources;
-    gpu_config_dto->search_resources->forEach([&search_resources, str_lower_lamda](const OString& res) {
-        search_resources.emplace_back(str_lower_lamda(res->std_str()));
+    gpu_config_dto->search_resources->forEach([&search_resources](const OString& res) {
+        search_resources.emplace_back(res->toLowerCase()->std_str());
     });
 
     std::string search_resources_value;
@@ -282,15 +277,17 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         search_resources_value += res + ",";
     }
     auto len = search_resources_value.size();
-    search_resources_value.erase(len - 1);
+    if (len > 0) {
+        search_resources_value.erase(len - 1);
+    }
     status = config.SetGpuResourceConfigSearchResources(search_resources_value);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
     std::vector<std::string> build_resources;
-    gpu_config_dto->build_index_resources->forEach([&build_resources, str_lower_lamda](const OString& res) {
-        build_resources.emplace_back(str_lower_lamda(res->std_str()));
+    gpu_config_dto->build_index_resources->forEach([&build_resources](const OString& res) {
+        build_resources.emplace_back(res->toLowerCase()->std_str());
     });
 
     std::string build_resources_value;
@@ -340,31 +337,6 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
     fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
     fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
     fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
-    //    if (query_params.getSize() == 0) {
-    //        TableSchema schema;
-    //        status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
-    //        if (status.ok()) {
-    //            fields_dto->schema->put("table_name", schema.table_name_.c_str());
-    //            fields_dto->schema->put("dimension", OString(std::to_string(schema.dimension_).c_str()));
-    //            fields_dto->schema->put("index_file_size", OString(std::to_string(schema.index_file_size_).c_str()));
-    //            fields_dto->schema->put("metric_type", OString(std::to_string(schema.metric_type_).c_str()));
-    //        }
-    //    } else {
-    //        for (auto& param : query_params.getAll()) {
-    //            std::string key = param.first.std_str();
-    //            std::string value = param.second.std_str();
-    //
-    //            if ("fields" == key) {
-    //                if ("num" == value) {
-    //                    int64_t count;
-    //                    status = request_handler_.CountTable(context_ptr_, table_name->std_str(), count);
-    //                    if (status.ok()) {
-    //                        fields_dto->schema->put("num", OString(std::to_string(count).c_str()));
-    //                    }
-    //                }
-    //            }
-    //        }
-    //    }
 
     ASSIGN_RETURN_STATUS_DTO(status);
 }

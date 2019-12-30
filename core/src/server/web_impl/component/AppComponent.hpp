@@ -26,7 +26,7 @@
 #include <oatpp/core/macro/component.hpp>
 
 #include "server/web_impl/handler/WebRequestHandler.h"
-#include "server/web_impl/component/SwaggerComponent.hpp"
+//#include "server/web_impl/component/SwaggerComponent.hpp"
 
 /**
  *  Class which creates and holds Application components and registers components in oatpp::base::Environment
@@ -53,12 +53,12 @@ class AppComponent {
     const int port_;
 
  public:
-   /**
-    *  Swagger component
-    */
-    OATPP_CREATE_COMPONENT(std::shared_ptr<SwaggerComponent>, swagger_component_)([this] {
-        return std::make_shared<SwaggerComponent>("192.168.1.57", this->port_);
-    }());
+//   /**
+//    *  Swagger component
+//    */
+//    OATPP_CREATE_COMPONENT(std::shared_ptr<SwaggerComponent>, swagger_component_)([this] {
+//        return std::make_shared<SwaggerComponent>("192.168.1.57", this->port_);
+//    }());
 
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor_)([] {
         return std::make_shared<oatpp::async::Executor>(
@@ -73,7 +73,10 @@ class AppComponent {
      *  Create ConnectionProvider component which listens on the port
      */
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)([this] {
-        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(static_cast<v_word16>(this->port_));
+//        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
+        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
+//        return oatpp::network::ServerConnectionPoo;
+//        return oatpp::network::server::ConnectionHandler
     }());
 
     /**

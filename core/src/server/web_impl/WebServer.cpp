@@ -15,11 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <oatpp-swagger/Controller.hpp>
+#include <oatpp-swagger/AsyncController.hpp>
 #include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/controller/WebController.hpp"
+#include "server/web_impl/component/SwaggerComponent.hpp"
 
 #include "server/Config.h"
 
@@ -56,18 +57,19 @@ WebServer::StartService() {
 
     status = config.GetServerConfigWebPort(port);
     AppComponent components = AppComponent(std::stoi(port));
+    SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
     /* create ApiControllers and add endpoints to router */
     auto router = components.http_router_.getObject();
 
-    auto doc_endpoints = oatpp::swagger::Controller::Endpoints::createShared();
+    auto doc_endpoints = oatpp::swagger::AsyncController::Endpoints::createShared();
 
     auto user_controller = WebController::createShared();
     user_controller->addEndpointsToRouter(router);
 
     doc_endpoints->pushBackAll(user_controller->getEndpoints());
 
-    auto swaggerController = oatpp::swagger::Controller::createShared(doc_endpoints);
+    auto swaggerController = oatpp::swagger::AsyncController::createShared(doc_endpoints);
     swaggerController->addEndpointsToRouter(router);
 
     /* create server */

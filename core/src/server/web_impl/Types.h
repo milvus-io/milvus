@@ -62,6 +62,11 @@ enum StatusCode : int {
     ILLEGAL_NLIST = 22,
     ILLEGAL_METRIC_TYPE = 23,
     OUT_OF_MEMORY = 24,
+
+    //
+    PATH_PARAM_LOSS = 51,
+    QUERY_PARAM_LOSS = 52,
+    BODY_FIELD_LOSS = 53,
 };
 
 static const std::unordered_map<engine::EngineType, std::string> IndexMap = {

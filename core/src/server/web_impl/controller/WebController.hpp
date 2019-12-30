@@ -82,13 +82,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<String>(Status::CODE_200, "text/html");
     }
 
-    ENDPOINT("GET", "/", root) {
-        auto response = createResponse(Status::CODE_302, "Welcome to milvus");
-        response->putHeader(Header::CONTENT_TYPE, "text/html");
-        // redirect to swagger ui
-        response->putHeader("location", "/swagger/ui");
-        return response;
-    }
+    ENDPOINT_ASYNC("GET", "/", root) {
+     ENDPOINT_ASYNC_INIT(root);
+        Action
+        act() override {
+            auto response = controller->createResponse(Status::CODE_302, "Welcome to milvus");
+            response->putHeader(Header::CONTENT_TYPE, "text/html");
+            // redirect to swagger ui
+            response->putHeader("location", "/swagger/ui");
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(State) {
         info->summary = "Server state";
@@ -97,11 +101,15 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
     }
 
-    ENDPOINT("GET", "/state", State) {
-        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
-        CORS_SUPPORT(response)
-        return response;
-    }
+    ENDPOINT_ASYNC("GET", "/state", State) {
+     ENDPOINT_ASYNC_INIT(State);
+
+        Action act() {
+            auto response = controller->createDtoResponse(Status::CODE_200, StatusDto::createShared());
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_ASYNC("GET", "/devices", GetDevices) {
      ENDPOINT_ASYNC_INIT(GetDevices);
@@ -110,6 +118,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         act() override {
             auto devices_dto = DevicesDto::createShared();
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.GetDevices(devices_dto);
             std::shared_ptr<OutgoingResponse> response;
             if (0 == status_dto->code->getValue()) {
@@ -124,11 +133,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
-        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
-        CORS_SUPPORT(response)
-        return response;
-    }
+    ENDPOINT_ASYNC("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
+     ENDPOINT_ASYNC_INIT(AdvancedConfigOptions);
+
+        Action
+        act() override {
+            auto response = controller->createDtoResponse(Status::CODE_200, StatusDto::createShared());
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(GetAdvancedConfig) {
         info->summary = "";
@@ -144,6 +158,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         act() override {
             auto config_dto = AdvancedConfigDto::createShared();
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.GetAdvancedConfig(config_dto);
             std::shared_ptr<OutgoingResponse> response;
             if (0 == status_dto->code->getValue()) {
@@ -178,6 +193,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         Action returnResponse(const AdvancedConfigDto::ObjectWrapper& body) {
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
             auto status_dto = handler.SetAdvancedConfig(body);
             std::shared_ptr<OutgoingResponse> response;
@@ -191,11 +207,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT("OPTIONS", "config/gpu_resources", GPUConfigOptions) {
-        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
-        CORS_SUPPORT(response)
-        return response;
-    }
+    ENDPOINT_ASYNC("OPTIONS", "config/gpu_resources", GPUConfigOptions) {
+     ENDPOINT_ASYNC_INIT(GPUConfigOptions);
+
+        Action
+        act() override {
+            auto response = controller->createDtoResponse(Status::CODE_200, StatusDto::createShared());
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_ASYNC("GET", "config/gpu_resources", GetGPUConfig) {
      ENDPOINT_ASYNC_INIT(GetGPUConfig);
@@ -205,7 +226,8 @@ class WebController : public oatpp::web::server::api::ApiController {
             std::shared_ptr<OutgoingResponse> response;
 
             auto gpu_config_dto = GPUConfigDto::createShared();
-            WebRequestHandler handler = WebRequestHandler().RegisterRequestHandler(::milvus::server::RequestHandler());
+            WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.GetGpuConfig(gpu_config_dto);
 
             if (0 == status_dto->code->getValue()) {
@@ -230,6 +252,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         Action returnResponse(const GPUConfigDto::ObjectWrapper& body) {
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.SetGpuConfig(body);
 
             std::shared_ptr<OutgoingResponse> response;
@@ -244,12 +267,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT("OPTIONS", "/tables", TablesOptions, REQUEST(
-        const std::shared_ptr<IncomingRequest>&, request)) {
-        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
-        CORS_SUPPORT(response)
-        return response;
-    }
+    ENDPOINT_ASYNC("OPTIONS", "/tables", TablesOptions) {
+     ENDPOINT_ASYNC_INIT(TablesOptions);
+
+        Action
+        act() override {
+            auto response = controller->createDtoResponse(Status::CODE_200, StatusDto::createShared());
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(CreateTable) {
         info->summary = "Create table";
@@ -272,6 +299,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         Action returnResponse(const TableRequestDto::ObjectWrapper& body) {
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
             auto status_dto = handler.CreateTable(body);
             std::shared_ptr<OutgoingResponse> response;
@@ -288,6 +316,10 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(ShowTables) {
         info->summary = "Show whole tables";
+
+//        info->queryParams.add<Int64>("offset");
+        info->queryParams.add<Int64>("page_size");
+
         info->addResponse<TableListFieldsDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
@@ -298,10 +330,25 @@ class WebController : public oatpp::web::server::api::ApiController {
         Action
         act()
         override {
-            Int64 offset = std::stol(request->getQueryParameter("offset")->std_str());
-            Int64 page_size = std::stol(request->getQueryParameter("page_size")->std_str());
+            auto error_status_dto = StatusDto::createShared();
+            String offset_str = request->getQueryParameter("offset");
+            if (nullptr == offset_str.get()) {
+                error_status_dto->code = StatusCode::QUERY_PARAM_LOSS;
+                error_status_dto->message = "Query param \'offset\' is required!";
+                return _return(controller->createDtoResponse(Status::CODE_400, error_status_dto));
+            }
+            Int64 offset = std::stol(offset_str->std_str());
+
+            String page_size_str = request->getQueryParameter("page_size");
+            if (nullptr == page_size_str.get()) {
+                error_status_dto->code = StatusCode::QUERY_PARAM_LOSS;
+                error_status_dto->message = "Query param \'page_size\' is required!";
+                return _return(controller->createDtoResponse(Status::CODE_400, error_status_dto));
+            }
+            Int64 page_size = std::stol(page_size_str->std_str());
 
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto response_dto = TableListFieldsDto::createShared();
             auto status_dto = handler.ShowTables(offset, page_size, response_dto);
             std::shared_ptr<OutgoingResponse> response;
@@ -316,16 +363,21 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT("OPTIONS", "/tables/{table_name}", TableOptions, PATH(String, table_name)) {
-        auto status_dto = StatusDto::createShared();
-        status_dto->code = 0;
-        status_dto->message = "OK";
+    ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}", TableOptions) {
+     ENDPOINT_ASYNC_INIT(TableOptions);
 
-        auto response = createDtoResponse(Status::CODE_200, status_dto);
+        Action
+        act() override {
+            auto status_dto = StatusDto::createShared();
+            status_dto->code = 0;
+            status_dto->message = "OK";
 
-        CORS_SUPPORT(response);
-        return response;
-    }
+            auto response = controller->createDtoResponse(Status::CODE_200, status_dto);
+
+            CORS_SUPPORT(response);
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(GetTable) {
         info->summary = "Get table";
@@ -344,10 +396,18 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         Action
         act() override {
+            auto error_status_dto = StatusDto::createShared();
             auto table_name = request->getPathVariable("table_name");
+            if (nullptr == table_name.get()) {
+                error_status_dto->code = StatusCode::QUERY_PARAM_LOSS;
+                error_status_dto->message = "Path param \'table_name\' is required!";
+                return _return(controller->createDtoResponse(Status::CODE_400, error_status_dto));
+            }
+
             auto query_params = request->getQueryParameters();
 
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto fields_dto = TableFieldsDto::createShared();
             auto status_dto = handler.GetTable(table_name, query_params, fields_dto);
             std::shared_ptr<OutgoingResponse> response;
@@ -379,6 +439,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         act() override {
             auto table_name = request->getPathVariable("table_name");
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.DropTable(table_name);
             auto code = status_dto->code->getValue();
             std::shared_ptr<OutgoingResponse> response;
@@ -395,12 +456,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions, REQUEST(
-        const std::shared_ptr<IncomingRequest>&, request)) {
-        auto response = createDtoResponse(Status::CODE_200, StatusDto::createShared());
-        CORS_SUPPORT(response)
-        return response;
-    }
+    ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/indexes", IndexOptions) {
+     ENDPOINT_ASYNC_INIT(IndexOptions);
+
+        Action
+        act() override {
+            auto response = controller->createDtoResponse(Status::CODE_200, StatusDto::createShared());
+            CORS_SUPPORT(response)
+            return _return(response);
+        }
+    };
 
     ENDPOINT_INFO(CreateIndex) {
         info->summary = "Create index";
@@ -421,6 +486,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         Action requestResponse(const IndexRequestDto::ObjectWrapper& body) {
             auto table_name = request->getPathVariable("table_name");
             auto handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.CreateIndex(table_name, body);
 
             std::shared_ptr<OutgoingResponse> response;
@@ -450,6 +516,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             auto table_name = request->getPathVariable("table_name");
             auto index_dto = IndexDto::createShared();
             auto handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.GetIndex(table_name, index_dto);
             auto code = status_dto->code->getValue();
             std::shared_ptr<OutgoingResponse> response;
@@ -482,6 +549,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         act()
         override {
             auto handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto table_name = request->getPathVariable("table_name");
             auto status_dto = handler.DropIndex(table_name);
             auto code = status_dto->code->getValue();
@@ -536,6 +604,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         Action returnResponse(const PartitionRequestDto::ObjectWrapper& body) {
             auto handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto table_name = request->getPathVariable("table_name");
             auto status_dto = handler.CreatePartition(table_name, body);
             std::shared_ptr<OutgoingResponse> response;
@@ -575,6 +644,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         act() override {
             auto partition_list_dto = PartitionListDto::createShared();
             auto handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto table_name = request->getPathVariable("table_name");
             Int64 page_size = std::stol(request->getQueryParameter("page_size")->std_str());
             Int64 offset = std::stol(request->getQueryParameter("offset")->std_str());
@@ -616,6 +686,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         Action
         act() override {
             auto handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto table_name = request->getPathVariable("table_name");
             auto tag = request->getPathVariable("tag");
             auto status_dto = handler.DropPartition(table_name, tag);
@@ -657,6 +728,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         Action returnResponse(const InsertRequestDto::ObjectWrapper& body) {
             auto ids_dto = VectorIdsDto::createShared();
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.Insert(body, ids_dto);
 
             std::shared_ptr<OutgoingResponse> response;
@@ -705,6 +777,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         Action returnResponse(const RecordsDto::ObjectWrapper& body) {
             auto result_dto = ResultDto::createShared();
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto table_name = request->getPathVariable("table_name");
             Int64 topk = std::stol(request->getQueryParameter("topk")->std_str());
             Int64 nprobe = std::stol(request->getQueryParameter("nprobe")->std_str());
@@ -742,6 +815,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             auto cmd_str = request->getPathVariable("cmd_str");
             auto cmd_dto = CommandDto::createShared();
             WebRequestHandler handler = WebRequestHandler();
+            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.Cmd(cmd_str, cmd_dto);
             std::shared_ptr<OutgoingResponse> response;
             if (0 == status_dto->code->getValue()) {

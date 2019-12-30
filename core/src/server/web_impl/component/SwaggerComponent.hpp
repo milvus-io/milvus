@@ -17,9 +17,9 @@
 
 #pragma once
 
-#include "oatpp-swagger/Model.hpp"
-#include "oatpp-swagger/Resources.hpp"
-#include "oatpp/core/macro/component.hpp"
+#include <oatpp-swagger/Model.hpp>
+#include <oatpp-swagger/Resources.hpp>
+#include <oatpp/core/macro/component.hpp>
 
 /**
  *  Swagger ui is served at
@@ -31,7 +31,7 @@ class SwaggerComponent {
     const std::string host_;
 
  public:
-    explicit SwaggerComponent(const std::string& host, int port) : host_(host),port_(port) {
+    SwaggerComponent(const std::string& host, int port) : host_(host),port_(port) {
 
     }
 
