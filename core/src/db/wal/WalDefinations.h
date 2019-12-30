@@ -19,14 +19,19 @@
 #include <stdint-gcc.h>
 #include <src/db/Types.h>
 #include <condition_variable>
+#include <unordered_map>
+#include <src/db/meta/MetaTypes.h>
 
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
+using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
+using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
 std::condition_variable reader_cv;
 bool reader_is_waiting;
+bool is_recoverying;
 
 #define WAL_BUFFER_MIN_SIZE 64
 #define WAL_META_AMOUNT 2

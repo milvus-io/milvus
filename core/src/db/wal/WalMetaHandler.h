@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <unordered_map>
 #include "db/meta/Meta.h"
 #include "db/meta/MetaTypes.h"
 #include "db/meta/MetaFactory.h"
@@ -33,8 +34,10 @@ class MXLogMetaHandler {
     MXLogMetaHandler();
     ~MXLogMetaHandler();
 
-    void GetMXLogInternelMeta(uint64_t& wal_lsn, uint32_t& wal_file_no);
-    void SetMXLogInternelMeta(const uint64_t& wal_lsn, const uint32_t& wal_file_no);
+    void GetMXLogInternalMeta(uint64_t& wal_lsn, uint32_t& wal_file_no);
+    void SetMXLogInternalMeta(const uint64_t& wal_lsn, const uint32_t& wal_file_no);
+    void GetMXLogExternalMeta(TableMetaPtr global_meta);
+
  private:
     MXLogFileHandler wal_meta_;
     std::string wal_meta_file_name_;

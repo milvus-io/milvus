@@ -23,7 +23,7 @@ namespace engine {
 namespace wal {
 
 void
-MXLogMetaHandler::GetMXLogInternelMeta(uint64_t &wal_lsn, uint32_t &wal_file_no) {
+MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn, uint32_t &wal_file_no) {
     auto meta_file_size = wal_meta_.GetFileSize();
     char *p_meta_buf = (char*)malloc(meta_file_size + 1);
     __glibcxx_assert(p_meta_buf != NULL);
@@ -48,13 +48,18 @@ MXLogMetaHandler::GetMXLogInternelMeta(uint64_t &wal_lsn, uint32_t &wal_file_no)
 }
 
 void
-MXLogMetaHandler::SetMXLogInternelMeta(const uint64_t &wal_lsn, const uint32_t &wal_file_no) {
+MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t &wal_lsn, const uint32_t &wal_file_no) {
     char* p_meta_buf = (char*)malloc(100);
     __glibcxx_assert(p_meta_buf != NULL);
     memset(p_meta_buf, 0, 100);
     sprintf(p_meta_buf, "%uld\n%u\n", wal_lsn, wal_file_no);
     wal_meta_.Write(p_meta_buf, sizeof(p_meta_buf));
     free(p_meta_buf);
+}
+
+void
+MXLogMetaHandler::GetMXLogExternalMeta(TableMetaPtr global_meta) {
+    //todo: wait interfaces from @zhiru
 }
 
 } // wal

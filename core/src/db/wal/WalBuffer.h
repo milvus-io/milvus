@@ -35,12 +35,14 @@ class MXLogBuffer {
     MXLogBuffer();
     ~MXLogBuffer();
 
-    bool Insert(const std::string &table_id,
-                const size_t n,
-                const size_t dim,
+    bool Append(const std::string &table_id,
+                const MXLogType& record_type,
+                const size_t& n,
+                const size_t& dim,
                 const float *vectors,
                 const milvus::engine::IDNumbers& vector_ids,
-                const size_t vector_ids_offset,
+                const size_t& vector_ids_offset,
+                bool update_file_no,
                 uint64_t& lsn);
 
     bool Next(std::string &table_id,
@@ -50,9 +52,12 @@ class MXLogBuffer {
               milvus::engine::IDNumbers &vector_ids,
               uint64_t &lsn);
     bool Next();
-    void Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);//TBD
     void Flush(const std::string& table_id);
     void SwitchBuffer(MXLogBufferHandler &handler);//switch buffer
+    void SetTableMeta(TableMetaPtr& p_table_meta);
+    uint32_t GetWriterFileNo();
+    void SetWriterFileNo(const uint32_t& file_no);
+    void ReSet();
 
  private:
     bool Init();
@@ -69,6 +74,7 @@ class MXLogBuffer {
     std::mutex lock_;
     MXLogBufferHandler mxlog_buffer_reader_, mxlog_buffer_writer_;
     MXLogFileHandler mxlog_writer_;
+    TableMetaPtr& p_table_meta_;
 };
 
 using MXLogBufferPtr = std::shared_ptr<MXLogBuffer>;

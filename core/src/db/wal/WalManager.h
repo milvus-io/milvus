@@ -18,8 +18,6 @@
 #pragma once
 
 #include <atomic>
-#include <unordered_map>
-#include <src/db/meta/MetaTypes.h>
 #include <thread>
 #include <condition_variable>
 //#include <src/sdk/include/MilvusApi.h>
@@ -32,7 +30,6 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 class WalManager {
  public:
     WalManager* GetInstance();
@@ -70,8 +67,8 @@ class WalManager {
     bool is_running_;
     MXLogConfiguration mxlog_config_;
     uint64_t last_applied_lsn_;
-    uint32_t file_no_;
-    std::unordered_map<std::string, TableSchemaPtr> table_meta_;
+    uint32_t current_file_no_;
+    TableMetaPtr p_table_meta_;
     MXLogBufferPtr p_buffer_;
     MXLogMetaHandler meta_handler_;
 

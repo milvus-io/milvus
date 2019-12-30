@@ -73,13 +73,18 @@ bool MXLogBuffer::Init() {
     buf_[0] = BufferPtr(new char[mxlog_buffer_size_]);
     buf_[1] = BufferPtr(new char[mxlog_buffer_size_]);
     //2:init handlers of two buffers
-    mxlog_buffer_writer_.buf_idx = mxlog_buffer_reader_.buf_idx = 0;
-    mxlog_buffer_writer_.buf_offset = mxlog_buffer_reader_.buf_offset = 0;
-    mxlog_buffer_reader_.file_no = 0;//reader file number equals 0 means read from buffer
+    ReSet();
 //    mxlog_buffer_writer_.lsn = mxlog_buffer_writer_.min_lsn = ${WalManager.current_lsn};
 //    mxlog_buffer_reader_.lsn = mxlog_buffer_reader_.min_lsn = ${WalManager.current_lsn};
 
     return true;
+}
+
+void
+MXLogBuffer::ReSet() {
+    mxlog_buffer_writer_.buf_idx = mxlog_buffer_reader_.buf_idx = 0;
+    mxlog_buffer_writer_.buf_offset = mxlog_buffer_reader_.buf_offset = 0;
+    mxlog_buffer_reader_.file_no = 0;//reader file number equals 0 means read from buffer
 }
 
 //buffer writer cares about surplus space of buffer
@@ -96,12 +101,14 @@ uint64_t MXLogBuffer::RecordSize(const size_t n,
     return data_size + (uint64_t)SizeOfMXLogRecordHeader;
 }
 
-bool MXLogBuffer::Insert(const std::string &table_id,
-                         const size_t n,
-                         const size_t dim,
+bool MXLogBuffer::Append(const std::string &table_id,
+                         const MXLogType& record_type,
+                         const size_t& n,
+                         const size_t& dim,
                          const float *vectors,
                          const milvus::engine::IDNumbers& vector_ids,
-                         const size_t vector_ids_offset,
+                         const size_t& vector_ids_offset,
+                         bool update_file_no,
                          uint64_t& lsn) {
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
@@ -239,6 +246,21 @@ bool Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector
 
 void
 MXLogBuffer::Flush(const std::string &table_id) {
+}
+
+void
+MXLogBuffer::SetTableMeta(TableMetaPtr& p_table_meta) {
+    p_table_meta_ = p_table_meta;
+}
+
+uint32_t
+MXLogBuffer::GetWriterFileNo() {
+    return mxlog_buffer_writer_.file_no;
+}
+
+void
+MXLogBuffer::SetWriterFileNo(const uint32_t &file_no) {
+
 }
 
 } // wal
