@@ -20,6 +20,7 @@
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 #include <fstream>
 #include <iostream>
@@ -73,7 +74,7 @@ S3ClientWrapper::StopService() {
 Status
 S3ClientWrapper::CreateBucket() {
     Aws::S3::Model::CreateBucketRequest request;
-    request.SetBucket(bucket_name_);
+    request.WithBucket(bucket_name_);
 
     auto outcome = client_ptr_->CreateBucket(request);
 
@@ -92,7 +93,7 @@ S3ClientWrapper::CreateBucket() {
 Status
 S3ClientWrapper::DeleteBucket() {
     Aws::S3::Model::DeleteBucketRequest request;
-    request.SetBucket(bucket_name_);
+    request.WithBucket(bucket_name_);
 
     auto outcome = client_ptr_->DeleteBucket(request);
 
@@ -140,7 +141,7 @@ S3ClientWrapper::PutObjectStr(const std::string& object_name, const std::string&
     request.WithBucket(bucket_name_).WithKey(object_name);
 
     const std::shared_ptr<Aws::IOStream> input_data = Aws::MakeShared<Aws::StringStream>("");
-    *input_data << content.c_str();
+    input_data->write(content.data(), content.length());
     request.SetBody(input_data);
 
     auto outcome = client_ptr_->PutObject(request);
@@ -196,6 +197,29 @@ S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& conte
     content = std::move(ss.str());
 
     STORAGE_LOG_DEBUG << "GetObjectStr successfully!";
+    return Status::OK();
+}
+
+Status
+S3ClientWrapper::ListObjects(std::vector<std::string>& object_list) {
+    Aws::S3::Model::ListObjectsRequest request;
+    request.WithBucket(bucket_name_);
+
+    auto outcome = client_ptr_->ListObjects(request);
+
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        STORAGE_LOG_ERROR << "ERROR: ListObjects: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
+    }
+
+    Aws::Vector<Aws::S3::Model::Object> result_list = outcome.GetResult().GetContents();
+
+    for (auto const& s3_object : result_list) {
+        object_list.push_back(s3_object.GetKey());
+    }
+
+    STORAGE_LOG_DEBUG << "ListObjects '" << bucket_name_ << "' successfully!";
     return Status::OK();
 }
 

@@ -53,7 +53,7 @@ TEST(StorageTest, S3_CLIENT_TEST) {
         std::ifstream fs_out(filename_out);
         std::string str_out;
         fs_out >> str_out;
-        ASSERT_STREQ(str_out.c_str(), ss_in.str().c_str());
+        ASSERT_TRUE(str_out == ss_in.str());
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -64,15 +64,18 @@ TEST(StorageTest, S3_CLIENT_TEST) {
 
         std::string content_out;
         status = storage_inst.GetObjectStr(object_name, content_out);
-        ASSERT_STREQ(content_out.c_str(), content.c_str());
+        ASSERT_TRUE(content_out == content);
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    status = storage_inst.DeleteObject(filename);
+    std::vector<std::string> object_list;
+    status = storage_inst.ListObjects(object_list);
     ASSERT_TRUE(status.ok());
 
-    status = storage_inst.DeleteObject(object_name);
-    ASSERT_TRUE(status.ok());
+    for (const std::string& object_name : object_list) {
+        status = storage_inst.DeleteObject(object_name);
+        ASSERT_TRUE(status.ok());
+    }
 
     status = storage_inst.DeleteBucket();
     ASSERT_TRUE(status.ok());

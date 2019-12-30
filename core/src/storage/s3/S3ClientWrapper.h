@@ -20,6 +20,7 @@
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
 #include <string>
+#include <vector>
 #include "storage/IStorage.h"
 
 namespace milvus {
@@ -53,6 +54,8 @@ class S3ClientWrapper : public IStorage {
     GetObjectFile(const std::string& object_key, const std::string& file_path) override;
     Status
     GetObjectStr(const std::string& object_key, std::string& content) override;
+    Status
+    ListObjects(std::vector<std::string>& object_list) override;
     Status
     DeleteObject(const std::string& object_key) override;
 

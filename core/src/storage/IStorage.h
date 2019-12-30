@@ -18,7 +18,7 @@
 #pragma once
 
 #include <string>
-
+#include <vector>
 #include "utils/Status.h"
 
 namespace milvus {
@@ -38,6 +38,8 @@ class IStorage {
     GetObjectFile(const std::string& object_name, const std::string& file_path) = 0;
     virtual Status
     GetObjectStr(const std::string& object_name, std::string& content) = 0;
+    virtual Status
+    ListObjects(std::vector<std::string>& object_list) = 0;
     virtual Status
     DeleteObject(const std::string& object_name) = 0;
 };
