@@ -18,7 +18,6 @@
 #pragma once
 
 #include <gtest/gtest.h>
-#include <chrono>
 
 static const char* CONFIG_PATH = "/tmp/milvus_test/";
 static const char* CONFIG_FILE = "server_config.yaml";

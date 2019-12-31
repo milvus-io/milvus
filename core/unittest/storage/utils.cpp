@@ -15,13 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <fstream>
+#include <string>
+
 #include "storage/utils.h"
 #include "utils/CommonUtil.h"
-
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <thread>
 
 namespace {
 
@@ -34,8 +32,6 @@ static const char* CONFIG_STR =
     "  minio_secret_key: minioadmin\n"
     "  minio_bucket: milvus-bucket\n"
     "\n";
-
-static const char* INVALID_CONFIG_STR = "*INVALID*";
 
 void
 WriteToFile(const std::string& file_path, const char* content) {
