@@ -160,7 +160,6 @@ if (MILVUS_USE_CCACHE)
 endif ()
 
 if (CUSTOMIZATION)
-    set(MILVUS_GPU_VERSION ON)
     add_compile_definitions(CUSTOMIZATION)
 endif ()
 

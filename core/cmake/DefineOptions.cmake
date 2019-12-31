@@ -45,7 +45,7 @@ set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
-define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
+define_option(CUSTOMIZATION "Build with customized FAISS library" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
