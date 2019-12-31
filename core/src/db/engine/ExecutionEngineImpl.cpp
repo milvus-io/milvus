@@ -120,6 +120,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             if (gpu_resource_enable) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
@@ -128,6 +129,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             }
             break;
         }
+#endif
 #endif
         case EngineType::FAISS_PQ: {
 #ifdef MILVUS_GPU_VERSION
