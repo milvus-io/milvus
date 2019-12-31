@@ -17,20 +17,37 @@
 
 #pragma once
 
-#include "segment/Vectors.h"
-#include "store/Directory.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
-namespace codec {
+namespace store {
 
-class VectorsFormat {
+class Directory {
  public:
-    virtual segment::Vectors
-    read(store::DirectoryPtr directory_ptr) = 0;
+    explicit Directory(const std::string& dir_path);
 
-    virtual void
-    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) = 0;
+    void
+    ListAll(std::vector<std::string>& file_paths);
+
+    bool
+    DeleteFile(const std::string& file_path);
+
+    void
+    GetDirPath(std::string& dir_path);
+
+    // TODO:
+    //  open(), sync(), close()
+    //  function that opens a stream for reading file
+    //  function that creates a new, empty file and returns an stream for appending data to this file
+    //  function that creates a new, empty, temporary file and returns an stream for appending data to this file
+
+ private:
+    const std::string dir_path_;
 };
 
-}  // namespace codec
+using DirectoryPtr = std::shared_ptr<Directory>;
+
+}  // namespace store
 }  // namespace milvus

@@ -17,19 +17,34 @@
 
 #pragma once
 
+#include "codecs/VectorsFormat.h"
 #include "segment/Vectors.h"
-#include "store/Directory.h"
 
 namespace milvus {
 namespace codec {
 
-class VectorsFormat {
+class DefaultVectorsFormat : public VectorsFormat {
  public:
-    virtual segment::Vectors
-    read(store::DirectoryPtr directory_ptr) = 0;
+    DefaultVectorsFormat() = default;
 
-    virtual void
-    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) = 0;
+    segment::Vectors
+    read(store::DirectoryPtr directory_ptr) override;
+
+    void
+    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) override;
+
+    // No copy and move
+    DefaultVectorsFormat(const DefaultVectorsFormat&) = delete;
+    DefaultVectorsFormat(DefaultVectorsFormat&&) = delete;
+
+    DefaultVectorsFormat&
+    operator=(const DefaultVectorsFormat&) = delete;
+    DefaultVectorsFormat&
+    operator=(DefaultVectorsFormat&&) = delete;
+
+ private:
+    const std::string raw_vector_extension_ = "rv";
+    const std::string user_id_extension_ = "uid";
 };
 
 }  // namespace codec

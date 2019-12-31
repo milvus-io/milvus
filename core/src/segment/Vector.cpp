@@ -15,22 +15,56 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "Vector.h"
 
-#include "segment/Vectors.h"
-#include "store/Directory.h"
+#include "Vectors.h"
 
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class VectorsFormat {
- public:
-    virtual segment::Vectors
-    read(store::DirectoryPtr directory_ptr) = 0;
+Vector::Vector(void* data, size_t nbytes, int64_t* uids) : data_(data), nbytes_(nbytes), uids_(uids) {
+}
 
-    virtual void
-    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) = 0;
-};
+Vector::Vector() {
+}
 
-}  // namespace codec
+
+void
+Vector::SetData(void* data) {
+    data_ = data;
+}
+void
+Vector::SetNbytes(size_t nbytes) {
+    nbytes_ = nbytes;
+}
+void
+Vector::SetUids(int64_t* uids) {
+    uids_ = uids;
+}
+void
+Vector::SetCount(size_t count) {
+    count_ = count;
+}
+
+void*
+Vector::GetData() const {
+    return data_;
+}
+
+size_t
+Vector::GetNumBytes() const {
+    return nbytes_;
+}
+
+int64_t*
+Vector::GetUids() const {
+    return uids_;
+}
+
+size_t
+Vector::GetCount() const {
+    return count_;
+}
+
+}  // namespace segment
 }  // namespace milvus

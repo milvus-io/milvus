@@ -24,7 +24,33 @@ namespace segment {
 
 class Vector {
  public:
-    Vector(void* data, size_t nbytes, int64_t* uid);
+    Vector(void* data, size_t nbytes, int64_t* uids);
+
+    Vector();
+
+    void
+    SetData(void* data);
+
+    void
+    SetNbytes(size_t nbytes);
+
+    void
+    SetUids(int64_t* uids);
+
+    void
+    SetCount(size_t count);
+
+    void*
+    GetData() const;
+
+    size_t
+    GetNumBytes() const;
+
+    int64_t*
+    GetUids() const;
+
+    size_t
+    GetCount() const;
 
     // No copy and move
     Vector(const Vector&) = delete;
@@ -38,7 +64,8 @@ class Vector {
  private:
     void* data_;
     size_t nbytes_;
-    int64_t* uid_;
+    int64_t* uids_;
+    size_t count_;
 };
 
 using VectorPtr = std::shared_ptr<Vector>;
