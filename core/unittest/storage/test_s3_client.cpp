@@ -21,20 +21,26 @@
 #include <memory>
 
 #include "easyloggingpp/easylogging++.h"
+#include "server/Config.h"
 #include "storage/IStorage.h"
 #include "storage/s3/S3ClientWrapper.h"
+#include "storage/utils.h"
 
 INITIALIZE_EASYLOGGINGPP
 
-TEST(StorageTest, S3_CLIENT_TEST) {
+TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string filename = "/tmp/test_file_in";
     const std::string filename_out = "/tmp/test_file_out";
     const std::string object_name = "test_obj";
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
+    std::string config_path(CONFIG_PATH);
+    config_path += CONFIG_FILE;
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
+
     auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    milvus::Status status = storage_inst.StartService();
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(storage_inst.StartService().ok());
 
     ///////////////////////////////////////////////////////////////////////////
     /* check PutObjectFile() and GetObjectFile() */
@@ -46,10 +52,9 @@ TEST(StorageTest, S3_CLIENT_TEST) {
         }
         fs_in << ss_in.str() << std::endl;
         fs_in.close();
-        status = storage_inst.PutObjectFile(filename, filename);
-        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(storage_inst.PutObjectFile(filename, filename).ok());
 
-        status = storage_inst.GetObjectFile(filename, filename_out);
+        ASSERT_TRUE(storage_inst.GetObjectFile(filename, filename_out).ok());
         std::ifstream fs_out(filename_out);
         std::string str_out;
         fs_out >> str_out;
@@ -59,28 +64,23 @@ TEST(StorageTest, S3_CLIENT_TEST) {
     ///////////////////////////////////////////////////////////////////////////
     /* check PutObjectStr() and GetObjectStr() */
     {
-        status = storage_inst.PutObjectStr(object_name, content);
-        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(storage_inst.PutObjectStr(object_name, content).ok());
 
         std::string content_out;
-        status = storage_inst.GetObjectStr(object_name, content_out);
+        ASSERT_TRUE(storage_inst.GetObjectStr(object_name, content_out).ok());
         ASSERT_TRUE(content_out == content);
     }
 
     ///////////////////////////////////////////////////////////////////////////
     std::vector<std::string> object_list;
-    status = storage_inst.ListObjects(object_list);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(storage_inst.ListObjects(object_list).ok());
 
     for (const std::string& object_name : object_list) {
-        status = storage_inst.DeleteObject(object_name);
-        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(storage_inst.DeleteObject(object_name).ok());
     }
 
-    status = storage_inst.DeleteBucket();
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(storage_inst.DeleteBucket().ok());
 
-    status = storage_inst.StopService();
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(storage_inst.StopService().ok());
 }
 

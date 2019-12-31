@@ -34,14 +34,6 @@
 namespace milvus {
 namespace server {
 
-#define CONFIG_CHECK(func) \
-    do {                   \
-        Status s = func;   \
-        if (!s.ok()) {     \
-            return s;      \
-        }                  \
-    } while (false);
-
 constexpr int64_t GB = 1UL << 30;
 
 static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"}});

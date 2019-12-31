@@ -27,6 +27,7 @@
 #include <memory>
 #include <utility>
 
+#include "server/Config.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
@@ -36,22 +37,27 @@ namespace storage {
 
 Status
 S3ClientWrapper::StartService() {
-    const std::string ip_address = "127.0.0.1";
-    const std::string port = "9000";
+    server::Config& config = server::Config::GetInstance();
+    bool minio_enable = false;
+    CONFIG_CHECK(config.GetStorageConfigMinioEnable(minio_enable));
+    if (!minio_enable) {
+        STORAGE_LOG_INFO << "MinIO not enabled!";
+        return Status::OK();
+    }
 
-    /* get from "/data/.minio.sys/config/config.json" in docker minio/minio */
-    const std::string access_key = "minioadmin";
-    const std::string secret_key = "minioadmin";
-
-    bucket_name_ = "milvus-bucket";
+    CONFIG_CHECK(config.GetStorageConfigMinioAddress(minio_address_));
+    CONFIG_CHECK(config.GetStorageConfigMinioPort(minio_port_));
+    CONFIG_CHECK(config.GetStorageConfigMinioAccessKey(minio_access_key_));
+    CONFIG_CHECK(config.GetStorageConfigMinioSecretKey(minio_secret_key_));
+    CONFIG_CHECK(config.GetStorageConfigMinioBucket(minio_bucket_));
 
     Aws::InitAPI(options_);
     Aws::Client::ClientConfiguration cfg;
 
-    cfg.endpointOverride = ip_address + ":" + port;
+    cfg.endpointOverride = minio_address_ + ":" + minio_port_;
     cfg.scheme = Aws::Http::Scheme::HTTP;
     cfg.verifySSL = false;
-    client_ptr_ = new Aws::S3::S3Client(Aws::Auth::AWSCredentials(access_key, secret_key), cfg,
+    client_ptr_ = new Aws::S3::S3Client(Aws::Auth::AWSCredentials(minio_access_key_, minio_secret_key_), cfg,
                                         Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
     if (client_ptr_ == nullptr) {
         std::string str = "Cannot connect S3 server.";
@@ -74,7 +80,7 @@ S3ClientWrapper::StopService() {
 Status
 S3ClientWrapper::CreateBucket() {
     Aws::S3::Model::CreateBucketRequest request;
-    request.WithBucket(bucket_name_);
+    request.WithBucket(minio_bucket_);
 
     auto outcome = client_ptr_->CreateBucket(request);
 
@@ -86,14 +92,14 @@ S3ClientWrapper::CreateBucket() {
         }
     }
 
-    STORAGE_LOG_DEBUG << "CreateBucket '" << bucket_name_ << "' successfully!";
+    STORAGE_LOG_DEBUG << "CreateBucket '" << minio_bucket_ << "' successfully!";
     return Status::OK();
 }
 
 Status
 S3ClientWrapper::DeleteBucket() {
     Aws::S3::Model::DeleteBucketRequest request;
-    request.WithBucket(bucket_name_);
+    request.WithBucket(minio_bucket_);
 
     auto outcome = client_ptr_->DeleteBucket(request);
 
@@ -103,7 +109,7 @@ S3ClientWrapper::DeleteBucket() {
         return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
 
-    STORAGE_LOG_DEBUG << "DeleteBucket '" << bucket_name_ << "' successfully!";
+    STORAGE_LOG_DEBUG << "DeleteBucket '" << minio_bucket_ << "' successfully!";
     return Status::OK();
 }
 
@@ -117,7 +123,7 @@ S3ClientWrapper::PutObjectFile(const std::string& object_name, const std::string
     }
 
     Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(bucket_name_).WithKey(object_name);
+    request.WithBucket(minio_bucket_).WithKey(object_name);
 
     auto input_data =
         Aws::MakeShared<Aws::FStream>("PutObjectFile", file_path.c_str(), std::ios_base::in | std::ios_base::binary);
@@ -138,7 +144,7 @@ S3ClientWrapper::PutObjectFile(const std::string& object_name, const std::string
 Status
 S3ClientWrapper::PutObjectStr(const std::string& object_name, const std::string& content) {
     Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(bucket_name_).WithKey(object_name);
+    request.WithBucket(minio_bucket_).WithKey(object_name);
 
     const std::shared_ptr<Aws::IOStream> input_data = Aws::MakeShared<Aws::StringStream>("");
     input_data->write(content.data(), content.length());
@@ -159,7 +165,7 @@ S3ClientWrapper::PutObjectStr(const std::string& object_name, const std::string&
 Status
 S3ClientWrapper::GetObjectFile(const std::string& object_name, const std::string& file_path) {
     Aws::S3::Model::GetObjectRequest request;
-    request.WithBucket(bucket_name_).WithKey(object_name);
+    request.WithBucket(minio_bucket_).WithKey(object_name);
 
     auto outcome = client_ptr_->GetObject(request);
 
@@ -181,7 +187,7 @@ S3ClientWrapper::GetObjectFile(const std::string& object_name, const std::string
 Status
 S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& content) {
     Aws::S3::Model::GetObjectRequest request;
-    request.WithBucket(bucket_name_).WithKey(object_name);
+    request.WithBucket(minio_bucket_).WithKey(object_name);
 
     auto outcome = client_ptr_->GetObject(request);
 
@@ -203,7 +209,7 @@ S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& conte
 Status
 S3ClientWrapper::ListObjects(std::vector<std::string>& object_list) {
     Aws::S3::Model::ListObjectsRequest request;
-    request.WithBucket(bucket_name_);
+    request.WithBucket(minio_bucket_);
 
     auto outcome = client_ptr_->ListObjects(request);
 
@@ -219,14 +225,14 @@ S3ClientWrapper::ListObjects(std::vector<std::string>& object_list) {
         object_list.push_back(s3_object.GetKey());
     }
 
-    STORAGE_LOG_DEBUG << "ListObjects '" << bucket_name_ << "' successfully!";
+    STORAGE_LOG_DEBUG << "ListObjects '" << minio_bucket_ << "' successfully!";
     return Status::OK();
 }
 
 Status
 S3ClientWrapper::DeleteObject(const std::string& object_name) {
     Aws::S3::Model::DeleteObjectRequest request;
-    request.WithBucket(bucket_name_).WithKey(object_name);
+    request.WithBucket(minio_bucket_).WithKey(object_name);
 
     auto outcome = client_ptr_->DeleteObject(request);
 

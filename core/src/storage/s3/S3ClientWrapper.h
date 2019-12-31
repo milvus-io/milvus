@@ -62,7 +62,12 @@ class S3ClientWrapper : public IStorage {
  private:
     Aws::S3::S3Client* client_ptr_ = nullptr;
     Aws::SDKOptions options_;
-    std::string bucket_name_;
+
+    std::string minio_address_;
+    std::string minio_port_;
+    std::string minio_access_key_;
+    std::string minio_secret_key_;
+    std::string minio_bucket_;
 };
 
 }  // namespace storage

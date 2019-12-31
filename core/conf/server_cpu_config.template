@@ -68,7 +68,7 @@ db_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Storage Config       | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | Enable MinIO storage or not.                               | Boolean    | false           |
+# minio_enable         | Enable MinIO storage or not.                               | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # minio_address        | MinIO storage service IP address.                          | String     | 127.0.0.1       |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -81,7 +81,7 @@ db_config:
 # minio_bucket         | MinIO storage service bucket name.                         | String     | milvus-bucket   |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 storage_config:
-  enable: false
+  minio_enable: false
   minio_address: 127.0.0.1
   minio_port: 9000
   minio_access_key: minioadmin
