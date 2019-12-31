@@ -17,36 +17,35 @@
 
 #pragma once
 
-#include <atomic>
-#include <vector>
-#include <memory>
+#include "codecs/VectorsFormat.h"
+#include "segment/Vectors.h"
 
-namespace faiss {
+namespace milvus {
+namespace codec {
 
-class ConcurrentBitset {
+class DefaultVectorsFormat : public VectorsFormat {
  public:
-    using id_type_t = int64_t;
+    DefaultVectorsFormat() = default;
 
-    ConcurrentBitset(id_type_t size);
-
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
-
-    bool
-    test(id_type_t id);
+    segment::Vectors
+    read(store::DirectoryPtr directory_ptr) override;
 
     void
-    set(id_type_t id);
+    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) override;
 
-    void
-    clear(id_type_t id);
+    // No copy and move
+    DefaultVectorsFormat(const DefaultVectorsFormat&) = delete;
+    DefaultVectorsFormat(DefaultVectorsFormat&&) = delete;
+
+    DefaultVectorsFormat&
+    operator=(const DefaultVectorsFormat&) = delete;
+    DefaultVectorsFormat&
+    operator=(DefaultVectorsFormat&&) = delete;
 
  private:
-    std::vector<std::atomic<id_type_t>> bitset_;
-    id_type_t size_;
+    const std::string raw_vector_extension_ = "rv";
+    const std::string user_id_extension_ = "uid";
 };
 
-using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
-
-}  // namespace faiss
+}  // namespace codec
+}  // namespace milvus

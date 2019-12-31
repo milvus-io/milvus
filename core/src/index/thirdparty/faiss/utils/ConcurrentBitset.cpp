@@ -15,38 +15,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include <atomic>
-#include <vector>
-#include <memory>
+#include "faiss/utils/ConcurrentBitset.h"
 
 namespace faiss {
 
-class ConcurrentBitset {
- public:
-    using id_type_t = int64_t;
+ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size) {
+    id_type_t bytes_count = (size >> 3) + 1;
+    bitset_.resize(bytes_count, 0);
+}
 
-    ConcurrentBitset(id_type_t size);
+bool
+ConcurrentBitset::test(id_type_t id) {
+    return bitset_[id >> 3].load() & (0x1 << (id & 0x7));
+}
 
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
+void
+ConcurrentBitset::set(id_type_t id) {
+    bitset_[id >> 3].fetch_or(0x1 << (id & 0x7));
+}
 
-    bool
-    test(id_type_t id);
-
-    void
-    set(id_type_t id);
-
-    void
-    clear(id_type_t id);
-
- private:
-    std::vector<std::atomic<id_type_t>> bitset_;
-    id_type_t size_;
-};
-
-using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
+void
+ConcurrentBitset::clear(id_type_t id) {
+    bitset_[id >> 3].fetch_and(0x1 << (id & 0x7));
+}
 
 }  // namespace faiss

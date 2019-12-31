@@ -17,36 +17,37 @@
 
 #pragma once
 
-#include <atomic>
-#include <vector>
 #include <memory>
+#include <string>
+#include <vector>
 
-namespace faiss {
+namespace milvus {
+namespace store {
 
-class ConcurrentBitset {
+class Directory {
  public:
-    using id_type_t = int64_t;
+    explicit Directory(const std::string& dir_path);
 
-    ConcurrentBitset(id_type_t size);
-
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
+    void
+    ListAll(std::vector<std::string>& file_paths);
 
     bool
-    test(id_type_t id);
+    DeleteFile(const std::string& file_path);
 
     void
-    set(id_type_t id);
+    GetDirPath(std::string& dir_path);
 
-    void
-    clear(id_type_t id);
+    // TODO:
+    //  open(), sync(), close()
+    //  function that opens a stream for reading file
+    //  function that creates a new, empty file and returns an stream for appending data to this file
+    //  function that creates a new, empty, temporary file and returns an stream for appending data to this file
 
  private:
-    std::vector<std::atomic<id_type_t>> bitset_;
-    id_type_t size_;
+    const std::string dir_path_;
 };
 
-using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
+using DirectoryPtr = std::shared_ptr<Directory>;
 
-}  // namespace faiss
+}  // namespace store
+}  // namespace milvus

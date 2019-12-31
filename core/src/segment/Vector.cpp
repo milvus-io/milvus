@@ -15,38 +15,56 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "Vector.h"
 
-#include <atomic>
-#include <vector>
-#include <memory>
+#include "Vectors.h"
 
-namespace faiss {
+namespace milvus {
+namespace segment {
 
-class ConcurrentBitset {
- public:
-    using id_type_t = int64_t;
+Vector::Vector(void* data, size_t nbytes, int64_t* uids) : data_(data), nbytes_(nbytes), uids_(uids) {
+}
 
-    ConcurrentBitset(id_type_t size);
+Vector::Vector() {
+}
 
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
 
-    bool
-    test(id_type_t id);
+void
+Vector::SetData(void* data) {
+    data_ = data;
+}
+void
+Vector::SetNbytes(size_t nbytes) {
+    nbytes_ = nbytes;
+}
+void
+Vector::SetUids(int64_t* uids) {
+    uids_ = uids;
+}
+void
+Vector::SetCount(size_t count) {
+    count_ = count;
+}
 
-    void
-    set(id_type_t id);
+void*
+Vector::GetData() const {
+    return data_;
+}
 
-    void
-    clear(id_type_t id);
+size_t
+Vector::GetNumBytes() const {
+    return nbytes_;
+}
 
- private:
-    std::vector<std::atomic<id_type_t>> bitset_;
-    id_type_t size_;
-};
+int64_t*
+Vector::GetUids() const {
+    return uids_;
+}
 
-using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
+size_t
+Vector::GetCount() const {
+    return count_;
+}
 
-}  // namespace faiss
+}  // namespace segment
+}  // namespace milvus

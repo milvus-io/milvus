@@ -17,17 +17,19 @@
 
 #pragma once
 
-namespace milvus {
+#include "segment/Vectors.h"
+#include "store/Directory.h"
 
+namespace milvus {
 namespace codec {
 
 class VectorsFormat {
  public:
-    virtual Vectors
-    read() = 0;
+    virtual segment::Vectors
+    read(store::DirectoryPtr directory_ptr) = 0;
 
     virtual void
-    write(Vectors vectors) = 0;
+    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) = 0;
 };
 
 }  // namespace codec
