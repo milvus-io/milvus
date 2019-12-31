@@ -29,22 +29,14 @@ set(util_files
 
 add_executable(test_storage
         ${test_files}
-        ${storage_s3_files}
         ${util_files}
         ${common_files}
-        )
-
-set(s3_client_libs
-        aws-cpp-sdk-s3
-        aws-cpp-sdk-core
         )
 
 target_link_libraries(test_storage
         stdc++
         knowhere
-        ${s3_client_libs}
         ${unittest_libs}
-        curl
-        crypto)
+        )
 
 install(TARGETS test_storage DESTINATION bin)
