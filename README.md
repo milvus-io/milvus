@@ -29,7 +29,7 @@ To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/
 
 ### Try your first Milvus program
 
-Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples). 
+Try running a program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples). 
 
 
 ## Contribution guidelines
@@ -72,7 +72,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 - [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [Milvus FAQ](https://www.milvus.io/docs/en/faq/operational_faq/)
+- [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
