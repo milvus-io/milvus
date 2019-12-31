@@ -76,15 +76,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "SDK version: " << version << std::endl;
     }
 
-    {  // sdk version
-        std::string gpu_enable;
-        stat = conn->GetConfig("gpu_resource_config.enable", gpu_enable);
-        std::cout << "GetConfig function call status: " << stat.message() << std::endl;
-
-        stat = conn->SetConfig("gpu_resource_config.enable", "true");
-        std::cout << "SetConfig function call status: " << stat.message() << std::endl;
-    }
-
     {  // show tables
         std::vector<std::string> tables;
         stat = conn->ShowTables(tables);
