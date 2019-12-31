@@ -26,10 +26,10 @@ namespace segment {
 
 class LiveDocs {
  public:
-    LiveDocs(faiss::ConcurrentBitset bitset);
+    LiveDocs(faiss::ConcurrentBitsetPtr bitset);
 
     void
-    GetBitset(faiss::ConcurrentBitset& bitset);
+    GetBitset(faiss::ConcurrentBitsetPtr& bitset);
 
     // No copy and move
     LiveDocs(const LiveDocs&) = delete;
@@ -41,7 +41,7 @@ class LiveDocs {
     operator=(LiveDocs&&) = delete;
 
  private:
-    faiss::ConcurrentBitset bitset_;
+    faiss::ConcurrentBitsetPtr bitset_;
 };
 
 using LiveDocsPtr = std::shared_ptr<LiveDocs>;

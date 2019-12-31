@@ -15,38 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "segment/LiveDocs.h"
 
-#include <atomic>
-#include <vector>
-#include <memory>
+namespace milvus {
+namespace segment {
 
-namespace faiss {
+LiveDocs::LiveDocs(faiss::ConcurrentBitsetPtr bitset) : bitset_(bitset) {
+}
 
-class ConcurrentBitset {
- public:
-    using id_type_t = int64_t;
+void
+LiveDocs::GetBitset(faiss::ConcurrentBitsetPtr& bitset) {
+    bitset = bitset_;
+}
 
-    ConcurrentBitset(id_type_t size);
-
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
-
-    bool
-    test(id_type_t id);
-
-    void
-    set(id_type_t id);
-
-    void
-    clear(id_type_t id);
-
- private:
-    std::vector<std::atomic<id_type_t>> bitset_;
-    id_type_t size_;
-};
-
-using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
-
-}  // namespace faiss
+}
+}  // namespace milvus
