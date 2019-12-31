@@ -22,6 +22,10 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
+MXLogMetaHandler::MXLogMetaHandler() {
+    wal_lsn_ = wal_file_no_ = 0;
+}
+
 void
 MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn, uint32_t &wal_file_no) {
     auto meta_file_size = wal_meta_.GetFileSize();

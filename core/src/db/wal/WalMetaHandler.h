@@ -29,6 +29,8 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
+static const char* WAL_META_FILE_NAME = "mxlog.meta";
+
 class MXLogMetaHandler {
  public:
     MXLogMetaHandler();
@@ -40,7 +42,8 @@ class MXLogMetaHandler {
 
  private:
     MXLogFileHandler wal_meta_;
-    std::string wal_meta_file_name_;
+    uint64_t wal_lsn_;
+    uint32_t wal_file_no_;
 };
 
 

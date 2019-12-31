@@ -34,6 +34,7 @@ bool reader_is_waiting;
 bool is_recoverying;
 
 #define WAL_BUFFER_MIN_SIZE 64
+#define LSN_OFFSET_MASK 0x00000000ffffffff
 #define WAL_META_AMOUNT 2
 #define offsetof(type, field) ((long) &((type *)0)->field)
 
@@ -67,7 +68,7 @@ struct MXLogRecord{
 
 struct MXLogConfiguration {
     uint32_t record_size;
-    uint64_t buffer_size;
+    uint32_t buffer_size;
     std::string mxlog_path;
 };
 

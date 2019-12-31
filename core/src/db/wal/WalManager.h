@@ -55,12 +55,9 @@ class WalManager {
     //not support right now
     void UpdateById(const std::string& table_id, const float* vectors, const milvus::engine::IDNumbers& vector_ids);
     void Flush(const std::string& table_id = "");
+    void Apply(const uint64_t& apply_lsn);
 
     void Recovery();
-
-    void UpdateFlushedLsn(const uint64_t& flushed_lsn);
-    void UpdateappliedLsn(const uint64_t& flushed_lsn);
-    uint64_t GenerateNextLsn();
 
  private:
 

@@ -32,7 +32,7 @@ using BufferPtr = std::shared_ptr<char>;
 
 class MXLogBuffer {
  public:
-    MXLogBuffer();
+    MXLogBuffer(const std::string& mxlog_path, const uint32_t& buffer_size);
     ~MXLogBuffer();
 
     bool Append(const std::string &table_id,
@@ -54,10 +54,11 @@ class MXLogBuffer {
     bool Next();
     void Flush(const std::string& table_id);
     void SwitchBuffer(MXLogBufferHandler &handler);//switch buffer
-    void SetTableMeta(TableMetaPtr& p_table_meta);
     uint32_t GetWriterFileNo();
     void SetWriterFileNo(const uint32_t& file_no);
     void ReSet();
+    bool LoadForRecovery(const uint64_t& lsn);
+    bool NextInfo(std::string& table_id, uint64_t& next_lsn);
 
  private:
     bool Init();
@@ -68,13 +69,12 @@ class MXLogBuffer {
 
 
  private:
-    uint64_t mxlog_buffer_size_;//from config
+    uint32_t mxlog_buffer_size_;//from config
     std::string mxlog_path_;//from config
     BufferPtr buf_[2];
     std::mutex lock_;
     MXLogBufferHandler mxlog_buffer_reader_, mxlog_buffer_writer_;
     MXLogFileHandler mxlog_writer_;
-    TableMetaPtr& p_table_meta_;
 };
 
 using MXLogBufferPtr = std::shared_ptr<MXLogBuffer>;

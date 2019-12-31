@@ -23,12 +23,13 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogBuffer::MXLogBuffer(uint64_t &buffer_size, const std::string &mxlog_path, const std::string &file_no, const std::string& mode)
+MXLogBuffer::MXLogBuffer(const std::string &mxlog_path,
+const uint32_t &buffer_size)
 : mxlog_buffer_size_(buffer_size)
-, mxlog_writer_(mxlog_path, file_no, mode)
+, mxlog_writer_(mxlog_path)
 {
     __glibcxx_assert(mxlog_buffer_size_ >= 0);
-    mxlog_buffer_size_ = std::max(mxlog_buffer_size_, (uint64_t)WAL_BUFFER_MIN_SIZE * 1024 * 1024);
+    mxlog_buffer_size_ = std::max(mxlog_buffer_size_, (uint32_t)WAL_BUFFER_MIN_SIZE * 1024 * 1024);
     if (Init()) {
         //todo: init fail, print error log
         return;
@@ -248,9 +249,46 @@ void
 MXLogBuffer::Flush(const std::string &table_id) {
 }
 
-void
-MXLogBuffer::SetTableMeta(TableMetaPtr& p_table_meta) {
-    p_table_meta_ = p_table_meta;
+bool
+MXLogBuffer::LoadForRecovery(const uint64_t &lsn) {
+    mxlog_writer_.SetFileName(std::to_string(lsn>>32) + ".wal");
+    mxlog_writer_.SetFileOpenMode("r");
+    if (!mxlog_writer_.FileExists()) {
+        return false;
+    }
+    mxlog_writer_.Load(buf_[mxlog_buffer_reader_.buf_idx].get());
+    mxlog_buffer_reader_.buf_offset = (uint32_t)(lsn & LSN_OFFSET_MASK);
+    mxlog_buffer_reader_.file_no = (uint32_t)(lsn >> 32);
+}
+
+bool
+MXLogBuffer::NextInfo(std::string &table_id, uint64_t &next_lsn) {
+    if (mxlog_buffer_reader_.buf_offset == mxlog_writer_.GetFileSize()) {
+        mxlog_writer_.CloseFile();
+        mxlog_writer_.DeleteFile();
+        mxlog_buffer_reader_.file_no ++;
+        next_lsn = mxlog_buffer_reader_.file_no;
+        next_lsn <<= 32;
+        if (LoadForRecovery(next_lsn)) {
+            return false;
+        }
+        uint16_t table_id_len;
+        char *p_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
+        memcpy((char*)&table_id_len, p_buf + mxlog_buffer_reader_.buf_offset + offsetof(MXLogRecord, vector_num), 2);
+        table_id.resize((size_t)table_id_len);
+        for (auto idx = mxlog_buffer_reader_.buf_offset + (uint32_t)offsetof(MXLogRecord, mxl_type); idx < table_id_len; ++ idx)
+            table_id += *(p_buf + idx);
+    } else {
+        uint16_t table_id_len;
+        char *p_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
+        memcpy((char*)&table_id_len, p_buf + mxlog_buffer_reader_.buf_offset + offsetof(MXLogRecord, vector_num), 2);
+        table_id.resize((size_t)table_id_len);
+        for (auto idx = mxlog_buffer_reader_.buf_offset + (uint32_t)offsetof(MXLogRecord, mxl_type); idx < table_id_len; ++ idx)
+            table_id += *(p_buf + idx);
+        uint32_t current_record_len;
+        memcpy((char*)&current_record_len, p_buf + mxlog_buffer_reader_.buf_offset, 4);
+        return true;
+    }
 }
 
 uint32_t

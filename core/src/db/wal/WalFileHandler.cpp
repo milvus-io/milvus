@@ -16,20 +16,17 @@
 // under the License.
 
 #include <sys/stat.h>
+#include <unistd.h>
 #include "WalFileHandler.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path,
-                                   const std::string& file_number,
-                                   const std::string& mode)
+MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path)
 : file_path_(mxlog_path)
-  , file_name_(file_number + ".wal")
-  , file_mode_(mode)
 {
-    OpenFile();
+//    OpenFile();
     file_size_ = 0;
 }
 
@@ -109,6 +106,29 @@ MXLogFileHandler::GetFileSize() {
     stat(file_name_.c_str(), &statbuf);
     file_size_ = (uint64_t)statbuf.st_size;
     return file_size_;
+}
+
+void
+MXLogFileHandler::DeleteFile() {
+    remove(((file_path_ + file_name_) + ".wal").c_str());
+    p_file_ = NULL;
+    file_size_ = 0;
+    file_name_ = "";
+}
+
+bool
+MXLogFileHandler::FileExists() {
+    return access(((file_path_ + file_name_) + ".wal").c_str(), 0) != -1;
+}
+
+void
+MXLogFileHandler::SetFileOpenMode(const std::string& open_mode) {
+    file_mode_ = open_mode;
+}
+
+void
+MXLogFileHandler::SetFileName(const std::string& file_name) {
+    file_mode_ = file_name;
 }
 
 } // wal
