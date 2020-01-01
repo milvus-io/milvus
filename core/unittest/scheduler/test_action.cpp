@@ -14,38 +14,28 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+#include <fiu-local.h>
+#include <fiu-control.h>
 #include <gtest/gtest.h>
+#include <src/scheduler/task/BuildIndexTask.h>
+#include <src/scheduler/task/SearchTask.h>
+#include <src/scheduler/optimizer/FaissIVFFlatPass.h>
 
-#include "scheduler/job/Job.h"
-#include "scheduler/job/BuildIndexJob.h"
-#include "scheduler/job/DeleteJob.h"
-#include "scheduler/job/SearchJob.h"
+#include "scheduler/optimizer/BuildIndexPass.h"
+#include "scheduler/optimizer/FaissFlatPass.h"
+#include "scheduler/optimizer/FaissIVFPQPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8HPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8Pass.h"
 
 namespace milvus {
 namespace scheduler {
-class TestJob : public Job {
- public:
-    TestJob() : Job(JobType::INVALID) {}
-};
 
-TEST(JobTest, TestJob) {
-    engine::DBOptions options;
-    auto build_index_ptr = std::make_shared<BuildIndexJob>(nullptr, options);
-    build_index_ptr->Dump();
-    build_index_ptr->AddToIndexFiles(nullptr);
+#ifdef MILVUS_GPU_VERSION
+TEST(Action_Test, TESTACTION) {
 
-    TestJob test_job;
-    test_job.Dump();
-
-    auto delete_ptr = std::make_shared<DeleteJob>("table_id", nullptr, 1);
-    delete_ptr->Dump();
-
-    float vectors;
-    auto search_ptr = std::make_shared<SearchJob>(nullptr, 1, 1, 1, &vectors);
-    search_ptr->Dump();
-    search_ptr->AddIndexFile(nullptr);
 }
+
+#endif
 
 }  // namespace scheduler
 }  // namespace milvus

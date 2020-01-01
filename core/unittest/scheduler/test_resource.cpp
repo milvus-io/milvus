@@ -275,8 +275,7 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     }
 
     test_resource_->TaskAvgCost();
-    std::cout << test_resource_->Dump() <<" "<< test_resource_->NumOfTaskToExec()<<std::endl;
-
+    std::cout << test_resource_->Dump() << "  " << test_resource_->NumOfTaskToExec() << std::endl;
     auto null_resource = ResourceFactory::Create("invalid", "invalid", 0);
     ASSERT_EQ(null_resource, nullptr);
 }
