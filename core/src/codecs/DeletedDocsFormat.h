@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "segment/DeletedDocs.h"
 #include "store/Directory.h"
 
@@ -31,6 +33,8 @@ class DeletedDocsFormat {
     virtual void
     write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocs& deleted_docs) = 0;
 };
+
+using DeletedDocsFormatPtr = std::shared_ptr<DeletedDocsFormat>;
 
 }  // namespace codec
 }  // namespace milvus

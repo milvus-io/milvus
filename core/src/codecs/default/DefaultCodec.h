@@ -17,24 +17,27 @@
 
 #pragma once
 
-#include <memory>
-
-#include "segment/Vectors.h"
-#include "store/Directory.h"
+#include "DefaultDeletedDocsFormat.h"
+#include "DefaultVectorsFormat.h"
+#include "codecs/Codec.h"
 
 namespace milvus {
 namespace codec {
 
-class VectorsFormat {
+class DefaultCodec : public Codec {
  public:
-    virtual void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
+    DefaultCodec();
 
-    virtual void
-    write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) = 0;
+    VectorsFormatPtr
+    GetVectorsFormat() override;
+
+    DeletedDocsFormatPtr
+    GetDeletedDocsFormat() override;
+
+ private:
+    VectorsFormatPtr vectors_format_ptr_;
+    DeletedDocsFormatPtr deleted_docs_format_ptr_;
 };
-
-using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;
 
 }  // namespace codec
 }  // namespace milvus
