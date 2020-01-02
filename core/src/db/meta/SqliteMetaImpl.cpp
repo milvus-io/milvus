@@ -143,7 +143,7 @@ SqliteMetaImpl::Initialize() {
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_INVALID_PATH, msg);
+            throw Exception(DB_INVALID_PATH, msg);
         }
     }
 
