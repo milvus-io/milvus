@@ -17,31 +17,39 @@
 
 #pragma once
 
+#include "AttrsFormat.h"
+#include "AttrsIndexFormat.h"
+#include "DeletedDocsFormat.h"
+#include "IdBloomFilterFormat.h"
+#include "IdIndexFormat.h"
+#include "VectorsFormat.h"
+#include "VectorsIndexFormat.h"
+
 namespace milvus {
 namespace codec {
 
 class Codec {
  public:
-    virtual VectorsFormat
-    vectorsFormat() = 0;
+    virtual VectorsFormatPtr
+    GetVectorsFormat() = 0;
 
     virtual AttrsFormat
-    attrsFormat() = 0;
+    GetAttrsFormat() = 0;
 
     virtual VectorsIndexFormat
-    vectorsIndexFormat() = 0;
+    GetVectorsIndexFormat() = 0;
 
     virtual AttrsIndexFormat
-    attrsIndexFormat() = 0;
+    GetAttrsIndexFormat() = 0;
 
     virtual IdIndexFormat
-    idIndexFormat() = 0;
-
-    virtual LiveDocsFormat
-    LiveDocsFormat() = 0;
+    GetIdIndexFormat() = 0;
 
     virtual IdBloomFilterFormat
-    idBloomFilterFormat() = 0;
+    GetIdBloomFilterFormat() = 0;
+
+    virtual DeletedDocsFormatPtr
+    GetDeletedDocsFormat() = 0;
 };
 
 }  // namespace codec

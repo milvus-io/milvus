@@ -18,13 +18,13 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
-#include "src/index/thirdparty/faiss/utils/ConcurrentBitset.h"
+#include "Types.h"
 
 namespace milvus {
 namespace segment {
 
-using doc_id_t = int64_t;
 // using DeletedDocList = std::vector<id_type_t>;
 
 class DeletedDocs {

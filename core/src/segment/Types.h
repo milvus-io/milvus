@@ -17,24 +17,10 @@
 
 #pragma once
 
-#include <memory>
-
-#include "segment/Vectors.h"
-#include "store/Directory.h"
-
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class VectorsFormat {
- public:
-    virtual void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
+typedef int64_t doc_id_t;
 
-    virtual void
-    write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) = 0;
-};
-
-using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;
-
-}  // namespace codec
+}  // namespace segment
 }  // namespace milvus

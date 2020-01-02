@@ -15,26 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "DefaultCodec.h"
 
 #include <memory>
-
-#include "segment/Vectors.h"
-#include "store/Directory.h"
 
 namespace milvus {
 namespace codec {
 
-class VectorsFormat {
- public:
-    virtual void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
+DefaultCodec::DefaultCodec() {
+    vectors_format_ptr_ = std::make_shared<DefaultVectorsFormat>();
+    deleted_docs_format_ptr_ = std::make_shared<DefaultDeletedDocsFormat>();
+}
 
-    virtual void
-    write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) = 0;
-};
+VectorsFormatPtr
+DefaultCodec::GetVectorsFormat() {
+    return vectors_format_ptr_;
+}
 
-using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;
+DeletedDocsFormatPtr
+DefaultCodec::GetDeletedDocsFormat() {
+    return deleted_docs_format_ptr_;
+}
 
 }  // namespace codec
 }  // namespace milvus

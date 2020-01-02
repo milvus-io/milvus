@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 
 #include "Vector.h"
@@ -27,6 +28,8 @@ namespace segment {
 struct Vectors {
     std::unordered_map<std::string, VectorPtr> vectors;
 };
+
+using VectorsPtr = std::shared_ptr<Vectors>;
 
 }  // namespace segment
 }  // namespace milvus
