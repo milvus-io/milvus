@@ -15,18 +15,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "segment/LiveDocs.h"
+#include "segment/DeletedDocs.h"
 
 namespace milvus {
 namespace segment {
 
-LiveDocs::LiveDocs(faiss::ConcurrentBitsetPtr bitset) : bitset_(bitset) {
+DeletedDocs::DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids) : deleted_doc_ids_(deleted_doc_ids) {
 }
 
-void
-LiveDocs::GetBitset(faiss::ConcurrentBitsetPtr& bitset) {
-    bitset = bitset_;
+const std::vector<doc_id_t>&
+DeletedDocs::GetDeletedDocs() const {
+    return deleted_doc_ids_;
 }
 
+const std::string&
+DeletedDocs::GetName() const {
+    return name_;
 }
+
+size_t
+DeletedDocs::GetSize() const {
+    return deleted_doc_ids_.size();
+}
+
+}  // namespace segment
 }  // namespace milvus

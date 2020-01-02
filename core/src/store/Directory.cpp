@@ -50,9 +50,9 @@ Directory::DeleteFile(const std::string& file_path) {
     return boost::filesystem::remove(file_path);
 }
 
-void
-Directory::GetDirPath(std::string& dir_path) {
-    dir_path = dir_path_;
+const std::string&
+Directory::GetDirPath() const {
+    return dir_path_;
 }
 
 }  // namespace store

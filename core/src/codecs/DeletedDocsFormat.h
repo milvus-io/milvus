@@ -17,16 +17,19 @@
 
 #pragma once
 
+#include "segment/DeletedDocs.h"
+#include "store/Directory.h"
+
 namespace milvus {
 namespace codec {
 
-class LiveDocsFormat {
+class DeletedDocsFormat {
  public:
-    virtual LiveDocs
-    read(store::DirectoryPtr directory_ptr) = 0;
+    virtual void
+    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocs& deleted_docs) = 0;
 
     virtual void
-    write(store::DirectoryPtr directory_ptr, LiveDocs live_docs) = 0;
+    write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocs& deleted_docs) = 0;
 };
 
 }  // namespace codec

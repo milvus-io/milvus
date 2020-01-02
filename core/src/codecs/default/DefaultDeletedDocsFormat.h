@@ -17,34 +17,33 @@
 
 #pragma once
 
-#include <memory>
-
-#include "index/thirdparty/faiss/utils/ConcurrentBitset.h"
+#include "codecs/DeletedDocsFormat.h"
 
 namespace milvus {
-namespace segment {
+namespace codec {
 
-class LiveDocs {
+class DefaultDeletedDocsFormat : public DeletedDocsFormat {
  public:
-    LiveDocs(faiss::ConcurrentBitsetPtr bitset);
+    DefaultDeletedDocsFormat() = default;
 
     void
-    GetBitset(faiss::ConcurrentBitsetPtr& bitset);
+    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocs& deleted_docs) override;
+
+    void
+    write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocs& deleted_docs) override;
 
     // No copy and move
-    LiveDocs(const LiveDocs&) = delete;
-    LiveDocs(LiveDocs&&) = delete;
+    DefaultDeletedDocsFormat(const DefaultDeletedDocsFormat&) = delete;
+    DefaultDeletedDocsFormat(DefaultDeletedDocsFormat&&) = delete;
 
-    LiveDocs&
-    operator=(const LiveDocs&) = delete;
-    LiveDocs&
-    operator=(LiveDocs&&) = delete;
+    DefaultDeletedDocsFormat&
+    operator=(const DefaultDeletedDocsFormat&) = delete;
+    DefaultDeletedDocsFormat&
+    operator=(DefaultDeletedDocsFormat&&) = delete;
 
  private:
-    faiss::ConcurrentBitsetPtr bitset_;
+    const std::string deleted_docs_extension_ = "del";
 };
 
-using LiveDocsPtr = std::shared_ptr<LiveDocs>;
-
-}  // namespace segment
+}  // namespace codec
 }  // namespace milvus

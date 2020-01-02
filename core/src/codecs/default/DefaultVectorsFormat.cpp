@@ -29,10 +29,10 @@
 namespace milvus {
 namespace codec {
 
-segment::Vectors
-DefaultVectorsFormat::read(store::DirectoryPtr directory_ptr) {
-    std::string dir_path;
-    directory_ptr->GetDirPath(dir_path);
+void
+DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) {
+
+    std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         ENGINE_LOG_ERROR << err_msg;
@@ -66,8 +66,8 @@ DefaultVectorsFormat::read(store::DirectoryPtr directory_ptr) {
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
-            size_t file_size = boost::filesystem::file_size(path);
-            int64_t* uids = (int64_t*)(malloc(file_size / sizeof(int64_t)));
+            auto file_size = boost::filesystem::file_size(path);
+            auto* uids = (int64_t*)(malloc(file_size / sizeof(int64_t)));
             ::read(uid_fd, uids, file_size);
             vectors[path.stem().string()]->SetCount(file_size / sizeof(int64_t));
             vectors[path.stem().string()]->SetUids(uids);
@@ -76,9 +76,8 @@ DefaultVectorsFormat::read(store::DirectoryPtr directory_ptr) {
 }
 
 void
-DefaultVectorsFormat::write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) {
-    std::string dir_path;
-    directory_ptr->GetDirPath(dir_path);
+DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) {
+    std::string dir_path = directory_ptr->GetDirPath();
     for (auto& it : vectors.vectors) {
         const std::string rv_file_path = dir_path + "/" + it.first + "." + raw_vector_extension_;
         const std::string uid_file_path = dir_path + "/" + it.first + "." + user_id_extension_;
