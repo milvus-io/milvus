@@ -17,149 +17,105 @@
 
 #pragma once
 
+#include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <typeindex>
 #include <utility>
-#include <vector>
-
-#include "Array.h"
-#include "Buffer.h"
-#include "Config.h"
-#include "Schema.h"
-#include "Tensor.h"
-#include "knowhere/adapter/ArrowAdapter.h"
 
 namespace knowhere {
 
-class Dataset;
+struct BaseValue;
+using BasePtr = std::unique_ptr<BaseValue>;
+struct BaseValue {
+    virtual ~BaseValue() = default;
 
-using DatasetPtr = std::shared_ptr<Dataset>;
+    //    virtual BasePtr
+    //    Clone() const = 0;
+};
+
+template <typename T>
+struct AnyValue : public BaseValue {
+    T data_;
+
+    template <typename U>
+    explicit AnyValue(U&& value) : data_(std::forward<U>(value)) {
+    }
+
+    //    BasePtr
+    //    Clone() const {
+    //        return BasePtr(data_);
+    //    }
+};
+
+struct Value {
+    std::type_index type_;
+    BasePtr data_;
+
+    template <typename U,
+              class = typename std::enable_if<!std::is_same<typename std::decay<U>::type, Value>::value, U>::type>
+    explicit Value(U&& value)
+        : data_(new AnyValue<typename std::decay<U>::type>(std::forward<U>(value))),
+          type_(std::type_index(typeid(typename std::decay<U>::type))) {
+    }
+
+    template <typename U>
+    bool
+    Is() const {
+        return type_ == std::type_index(typeid(U));
+    }
+
+    template <typename U>
+    U&
+    AnyCast() {
+        if (!Is<U>()) {
+            std::stringstream ss;
+            ss << "Can't cast t " << type_.name() << " to " << typeid(U).name();
+            throw std::logic_error(ss.str());
+        }
+
+        auto derived = dynamic_cast<AnyValue<U>*>(data_.get());
+        return derived->data_;
+    }
+};
+using ValuePtr = std::shared_ptr<Value>;
 
 class Dataset {
  public:
     Dataset() = default;
 
-    Dataset(std::vector<ArrayPtr>&& array, SchemaPtr array_schema, std::vector<TensorPtr>&& tensor,
-            SchemaPtr tensor_schema)
-        : array_(std::move(array)),
-          array_schema_(std::move(array_schema)),
-          tensor_(std::move(tensor)),
-          tensor_schema_(std::move(tensor_schema)) {
+    template <typename T>
+    void
+    Set(const std::string& k, T&& v) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        auto value = std::make_shared<Value>(std::forward<T>(v));
+        data_[k] = value;
     }
 
-    Dataset(std::vector<ArrayPtr> array, SchemaPtr array_schema)
-        : array_(std::move(array)), array_schema_(std::move(array_schema)) {
-    }
-
-    Dataset(std::vector<TensorPtr> tensor, SchemaPtr tensor_schema)
-        : tensor_(std::move(tensor)), tensor_schema_(std::move(tensor_schema)) {
-    }
-
-    Dataset(void* ids, void* dists) : ids_(ids), dists_(dists) {
-    }
-
-    Dataset(const Dataset&) = delete;
-    Dataset&
-    operator=(const Dataset&) = delete;
-
-    DatasetPtr
-    Clone() {
-        auto dataset = std::make_shared<Dataset>();
-
-        std::vector<ArrayPtr> clone_array;
-        for (auto& array : array_) {
-            clone_array.emplace_back(CopyArray(array));
+    template <typename T>
+    T
+    Get(const std::string& k) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        auto finder = data_.find(k);
+        if (finder != data_.end()) {
+            return finder->second->AnyCast<T>();
+        } else {
+            throw std::logic_error("Can't find this key");
         }
-        dataset->set_array(clone_array);
-
-        std::vector<TensorPtr> clone_tensor;
-        for (auto& tensor : tensor_) {
-            auto buffer = tensor->data();
-            std::shared_ptr<Buffer> copy_buffer;
-            // TODO: checkout copy success;
-            buffer->Copy(0, buffer->size(), &copy_buffer);
-            auto copy = std::make_shared<Tensor>(tensor->type(), copy_buffer, tensor->shape());
-            clone_tensor.emplace_back(copy);
-        }
-        dataset->set_tensor(clone_tensor);
-
-        if (array_schema_)
-            dataset->set_array_schema(CopySchema(array_schema_));
-        if (tensor_schema_)
-            dataset->set_tensor_schema(CopySchema(tensor_schema_));
-
-        return dataset;
     }
 
- public:
-    const std::vector<ArrayPtr>&
-    array() const {
-        return array_;
+    const std::map<std::string, ValuePtr>&
+    data() const {
+        return data_;
     }
-
-    void
-    set_array(std::vector<ArrayPtr> array) {
-        array_ = std::move(array);
-    }
-
-    const std::vector<TensorPtr>&
-    tensor() const {
-        return tensor_;
-    }
-
-    void
-    set_tensor(std::vector<TensorPtr> tensor) {
-        tensor_ = std::move(tensor);
-    }
-
-    SchemaConstPtr
-    array_schema() const {
-        return array_schema_;
-    }
-
-    void
-    set_array_schema(SchemaPtr array_schema) {
-        array_schema_ = std::move(array_schema);
-    }
-
-    SchemaConstPtr
-    tensor_schema() const {
-        return tensor_schema_;
-    }
-
-    void
-    set_tensor_schema(SchemaPtr tensor_schema) {
-        tensor_schema_ = std::move(tensor_schema);
-    }
-
-    void*
-    ids() {
-        return ids_;
-    }
-
-    void*
-    dist() {
-        return dists_;
-    }
-
-    // const Config &
-    // meta() const { return meta_; }
-
-    // void
-    // set_meta(Config meta) {
-    //    meta_ = std::move(meta);
-    //}
 
  private:
-    std::vector<ArrayPtr> array_;
-    SchemaPtr array_schema_;
-    std::vector<TensorPtr> tensor_;
-    SchemaPtr tensor_schema_;
-    // TODO(yukun): using smart pointer
-    void* ids_;
-    void* dists_;
-    // Config meta_;
+    std::mutex mutex_;
+    std::map<std::string, ValuePtr> data_;
 };
-
 using DatasetPtr = std::shared_ptr<Dataset>;
 
 }  // namespace knowhere

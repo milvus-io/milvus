@@ -26,6 +26,7 @@
 #undef mkdir
 
 #include "knowhere/adapter/SptagAdapter.h"
+#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
@@ -88,42 +89,6 @@ CPUSPTAGRNG::Serialize() {
     binary_set.Append("config", config, length);
     binary_set.Append("graph", graph, index_blobs[2].Length());
 
-    //        MemoryIOWriter writer;
-    //        size_t len = 0;
-    //        for (int i = 0; i < 6; ++i) {
-    //            len = index_blobs[i].Length();
-    //            assert(len != 0);
-    //            writer(&len, sizeof(size_t), 1);
-    //            writer(index_blobs[i].Data(), len, 1);
-    //            len = 0;
-    //        }
-    //        writer(&length, sizeof(size_t), 1);
-    //        writer(cstr, length, 1);
-    //        auto data = std::make_shared<uint8_t>();
-    //        data.reset(writer.data_);
-    //        BinarySet binary_set;
-    //        binary_set.Append("sptag", data, writer.total);
-
-    //        MemoryIOWriter writer;
-    //        size_t len = 0;
-    //        for (int i = 0; i < 6; ++i) {
-    //            if (i == 2) continue;
-    //            len = index_blobs[i].Length();
-    //            assert(len != 0);
-    //            writer(&len, sizeof(size_t), 1);
-    //            writer(index_blobs[i].Data(), len, 1);
-    //            len = 0;
-    //        }
-    //        writer(&length, sizeof(size_t), 1);
-    //        writer(cstr, length, 1);
-    //        auto data = std::make_shared<uint8_t>();
-    //        data.reset(writer.data_);
-    //        BinarySet binary_set;
-    //        binary_set.Append("sptag", data, writer.total);
-    //        auto graph = std::make_shared<uint8_t>();
-    //        graph.reset(static_cast<uint8_t*>(index_blobs[2].Data()));
-    //        binary_set.Append("graph", graph, index_blobs[2].Length());
-
     return binary_set;
 }
 
@@ -153,52 +118,6 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
     auto config = binary_set.GetByName("config");
     index_config = reinterpret_cast<char*>(config->data.get());
 
-    //        std::vector<SPTAG::ByteArray> index_blobs;
-    //        auto data = binary_set.GetByName("sptag");
-    //        MemoryIOReader reader;
-    //        reader.total = data->size;
-    //        reader.data_ = data->data.get();
-    //        size_t len = 0;
-    //        for (int i = 0; i < 6; ++i) {
-    //            reader(&len, sizeof(size_t), 1);
-    //            assert(len != 0);
-    //            auto binary = new uint8_t[len];
-    //            reader(binary, len, 1);
-    //            index_blobs.emplace_back(SPTAG::ByteArray(binary, len, true));
-    //            len = 0;
-    //        }
-    //        reader(&len, sizeof(size_t), 1);
-    //        assert(len != 0);
-    //        auto config = new char[len];
-    //        reader(config, len, 1);
-    //        std::string index_config = config;
-    //        delete[] config;
-
-    //        std::vector<SPTAG::ByteArray> index_blobs;
-    //        auto data = binary_set.GetByName("sptag");
-    //        MemoryIOReader reader;
-    //        reader.total = data->size;
-    //        reader.data_ = data->data.get();
-    //        size_t len = 0;
-    //        for (int i = 0; i < 6; ++i) {
-    //            if (i == 2) {
-    //                auto graph = binary_set.GetByName("graph");
-    //                index_blobs.emplace_back(SPTAG::ByteArray(graph->data.get(), graph->size, false));
-    //                continue;
-    //            }
-    //            reader(&len, sizeof(size_t), 1);
-    //            assert(len != 0);
-    //            auto binary = new uint8_t[len];
-    //            reader(binary, len, 1);
-    //            index_blobs.emplace_back(SPTAG::ByteArray(binary, len, true));
-    //            len = 0;
-    //        }
-    //        reader(&len, sizeof(size_t), 1);
-    //        assert(len != 0);
-    //        auto config = new char[len];
-    //        reader(config, len, 1);
-    //        std::string index_config = config;
-    //        delete[] config;
     index_ptr_->LoadIndex(index_config, index_blobs);
 }
 
@@ -213,7 +132,8 @@ CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     if (train_config != nullptr) {
         train_config->CheckValid();  // throw exception
     }
-    DatasetPtr dataset = origin->Clone();
+
+    DatasetPtr dataset = origin;  // TODO(linxj): copy or reference?
 
     // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
     //    && preprocessor_) {
@@ -301,11 +221,11 @@ CPUSPTAGRNG::Search(const DatasetPtr& dataset, const Config& config) {
     if (config != nullptr) {
         config->CheckValid();  // throw exception
     }
-    auto tensor = dataset->tensor()[0];
-    auto p = (float*)tensor->raw_mutable_data();
+
+    auto p_data = dataset->Get<const float*>(meta::TENSOR);
     for (auto i = 0; i < 10; ++i) {
         for (auto j = 0; j < 10; ++j) {
-            std::cout << p[i * 10 + j] << " ";
+            std::cout << p_data[i * 10 + j] << " ";
         }
         std::cout << std::endl;
     }

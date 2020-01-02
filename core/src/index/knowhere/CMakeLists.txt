@@ -22,8 +22,7 @@ endif ()
 
 set(external_srcs
         knowhere/adapter/SptagAdapter.cpp
-        knowhere/adapter/Structure.cpp
-        knowhere/adapter/ArrowAdapter.cpp
+        knowhere/adapter/VectorAdapter.cpp
         knowhere/common/Exception.cpp
         knowhere/common/Timer.cpp
         )
@@ -49,8 +48,6 @@ set(index_srcs
 set(depend_libs
         SPTAGLibStatic
         faiss
-        arrow
-        ${ARROW_LIB_DIR}/libjemalloc_pic.a
         gomp
         gfortran
         pthread
@@ -65,8 +62,9 @@ if (FAISS_WITH_MKL)
             )
 else ()
     set(depend_libs ${depend_libs}
-            lapack
-            openblas)
+            ${BLAS_LIBRARIES}
+            ${LAPACK_LIBRARIES}
+            )
 endif ()
 
 if (KNOWHERE_GPU_VERSION)

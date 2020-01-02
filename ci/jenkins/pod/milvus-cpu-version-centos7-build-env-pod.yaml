@@ -9,6 +9,7 @@ spec:
   containers:
   - name: milvus-cpu-build-env
     image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.7.0-centos7
+    imagePullPolicy: Always
     env:
     - name: POD_IP
       valueFrom:
@@ -24,7 +25,7 @@ spec:
     resources:
       limits:
         memory: "12Gi"
-        cpu: "8.0"
+        cpu: "6.0"
       requests:
         memory: "8Gi"
         cpu: "4.0"

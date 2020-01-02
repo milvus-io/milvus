@@ -128,6 +128,7 @@ set(unittest_libs
         gfortran
         opentracing
         opentracing_mocktracer
+        fiu
         )
 if (MILVUS_WITH_PROMETHEUS)
     set(unittest_libs ${unittest_libs}

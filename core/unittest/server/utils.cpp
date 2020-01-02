@@ -52,7 +52,7 @@ static const char* VALID_CONFIG_STR =
     "    port: 8080                      # port prometheus uses to fetch metrics\n"
     "\n"
     "cache_config:\n"
-    "  cpu_cache_capacity: 16            # GB, CPU memory used for cache\n"
+    "  cpu_cache_capacity: 4            # GB, CPU memory used for cache\n"
     "  cpu_cache_threshold: 0.85         \n"
     "  cache_insert_data: false          # whether to load inserted data into cache\n"
     "\n"

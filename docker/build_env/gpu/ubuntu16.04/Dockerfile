@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget && \
     git flex bison gfortran lsb-core ccache \
     curl libtool automake libboost1.58-all-dev libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
     clang-format-6.0 clang-tidy-6.0 \
-    lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281 && \
+    lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281 libopenblas-dev liblapack3 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 

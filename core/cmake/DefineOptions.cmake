@@ -87,6 +87,8 @@ define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
 define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
 
+define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
+
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 

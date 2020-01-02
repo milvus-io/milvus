@@ -8,7 +8,6 @@ if (KNOWHERE_GPU_VERSION)
 
     set(depend_libs
             faiss
-            arrow ${ARROW_LIB_DIR}/libjemalloc_pic.a
             )
     if (FAISS_WITH_MKL)
         set(depend_libs ${depend_libs}
@@ -20,8 +19,10 @@ if (KNOWHERE_GPU_VERSION)
                 )
     else ()
         set(depend_libs ${depend_libs}
-                lapack
-                openblas)
+                ${BLAS_LIBRARIES}
+                ${LAPACK_LIBRARIES}
+                )
+
     endif ()
 
     set(basic_libs
