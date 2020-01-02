@@ -28,8 +28,11 @@ class S3IOWriter : public IOWriter {
     explicit S3IOWriter(const std::string& name);
     ~S3IOWriter();
 
-    size_t
+    void
     write(void* ptr, size_t size) override;
+
+    size_t
+    length() override;
 
  public:
     std::string buffer_;

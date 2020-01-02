@@ -28,9 +28,15 @@ FileIOWriter::~FileIOWriter() {
     fs_.close();
 }
 
-size_t
+void
 FileIOWriter::write(void* ptr, size_t size) {
     fs_.write(reinterpret_cast<char*>(ptr), size);
+    len_ += size;
+}
+
+size_t
+FileIOWriter::length() {
+    return len_;
 }
 
 }  // namespace storage

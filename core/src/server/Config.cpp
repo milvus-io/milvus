@@ -110,6 +110,7 @@ Config::ValidateConfig() {
     /* storage config */
     bool storage_minio_enable;
     CONFIG_CHECK(GetStorageConfigMinioEnable(storage_minio_enable));
+    std::cout << "MinIO " << (storage_minio_enable ? "ENABLED !" : "DISABLED !") << std::endl;
 
     std::string storage_minio_address;
     CONFIG_CHECK(GetStorageConfigMinioAddress(storage_minio_address));
@@ -162,8 +163,8 @@ Config::ValidateConfig() {
 #ifdef MILVUS_GPU_VERSION
     bool gpu_resource_enable;
     CONFIG_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
-
     std::cout << "GPU resources " << (gpu_resource_enable ? "ENABLED !" : "DISABLED !") << std::endl;
+
     if (gpu_resource_enable) {
         int64_t resource_cache_capacity;
         CONFIG_CHECK(GetGpuResourceConfigCacheCapacity(resource_cache_capacity));

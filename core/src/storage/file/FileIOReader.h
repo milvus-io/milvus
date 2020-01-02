@@ -35,7 +35,7 @@ class FileIOReader : public IOReader {
     void
     seekg(size_t pos) override;
 
-    int64_t
+    size_t
     length() override;
 
  public:

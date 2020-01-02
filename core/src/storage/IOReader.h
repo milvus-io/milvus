@@ -34,7 +34,7 @@ struct IOReader {
     virtual void
     seekg(size_t pos) = 0;
 
-    virtual int64_t
+    virtual size_t
     length() = 0;
 
  public:

@@ -29,9 +29,15 @@ S3IOWriter::~S3IOWriter() {
     S3ClientWrapper::GetInstance().PutObjectStr(name_, buffer_);
 }
 
-size_t
+void
 S3IOWriter::write(void* ptr, size_t size) {
     buffer_ += std::string(reinterpret_cast<char*>(ptr), size);
+    len_ += size;
+}
+
+size_t
+S3IOWriter::length() {
+    return len_;
 }
 
 }  // namespace storage

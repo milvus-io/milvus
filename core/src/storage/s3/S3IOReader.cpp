@@ -38,7 +38,7 @@ S3IOReader::seekg(size_t pos) {
     pos_ = pos;
 }
 
-int64_t
+size_t
 S3IOReader::length() {
     return buffer_.length();
 }

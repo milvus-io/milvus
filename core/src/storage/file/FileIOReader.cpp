@@ -38,7 +38,7 @@ FileIOReader::seekg(size_t pos) {
     fs_.seekg(pos);
 }
 
-int64_t
+size_t
 FileIOReader::length() {
     fs_.seekg(0, fs_.end);
     return fs_.tellg();

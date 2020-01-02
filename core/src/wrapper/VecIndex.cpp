@@ -31,6 +31,7 @@
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -212,6 +213,7 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 
 VecIndexPtr
 read_index(const std::string& location) {
+    TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
     bool minio_enable = false;
@@ -224,7 +226,10 @@ read_index(const std::string& location) {
     } else {
         reader_ptr = std::make_shared<storage::FileIOReader>(location);
     }
-    int64_t length = reader_ptr->length();
+
+    recorder.RecordSection("Start");
+
+    size_t length = reader_ptr->length();
     if (length <= 0) {
         return nullptr;
     }
@@ -264,12 +269,18 @@ read_index(const std::string& location) {
         delete[] meta;
     }
 
+    double span = recorder.RecordSection("End");
+    double rate = length * 1000000.0 / span / 1024 / 1024;
+    STORAGE_LOG_DEBUG << "read_index(" << location << ") rate " << rate << "MB/s";
+
     return LoadVecIndex(current_type, load_data_list, length);
 }
 
 Status
 write_index(VecIndexPtr index, const std::string& location) {
     try {
+        TimeRecorder recorder("write_index");
+
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
@@ -283,6 +294,9 @@ write_index(VecIndexPtr index, const std::string& location) {
         } else {
             writer_ptr = std::make_shared<storage::FileIOWriter>(location);
         }
+
+        recorder.RecordSection("Start");
+
         writer_ptr->write(&index_type, sizeof(IndexType));
 
         for (auto& iter : binaryset.binary_map_) {
@@ -296,6 +310,10 @@ write_index(VecIndexPtr index, const std::string& location) {
             writer_ptr->write(&binary_length, sizeof(binary_length));
             writer_ptr->write((void*)binary->data.get(), binary_length);
         }
+
+        double span = recorder.RecordSection("End");
+        double rate = writer_ptr->length() * 1000000.0 / span / 1024 / 1024;
+        STORAGE_LOG_DEBUG << "write_index(" << location << ") rate " << rate << "MB/s";
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
