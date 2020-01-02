@@ -46,6 +46,7 @@ class MXLogBuffer {
                 uint64_t& lsn);
 
     bool Next(std::string &table_id,
+              MXLogType& mxl_type,
               size_t &n,
               size_t &dim,
               float *vectors,

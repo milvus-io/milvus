@@ -114,9 +114,10 @@ bool MXLogBuffer::Append(const std::string &table_id,
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
     if (SurplusSpace() < record_size) {
-        if (mxlog_buffer_writer_.buf_idx ^ mxlog_buffer_reader_.buf_idx) {//no need to switch buffer
+        if (mxlog_buffer_writer_.buf_idx != mxlog_buffer_reader_.buf_idx) {//no need to switch buffer
             mxlog_buffer_writer_.buf_offset = 0;
             //todo:important! get atomic increase file no from WalManager and update mxlog_buffer_wrter_.file_no
+            mxlog_buffer_writer_.file_no ++;
             mxlog_writer_.ReBorn(mxlog_buffer_writer_.file_no);
         } else { // swith writer buffer
             mxlog_buffer_writer_.buf_idx ^= 1;
@@ -171,6 +172,7 @@ bool MXLogBuffer::Append(const std::string &table_id,
  * @return
  */
 bool MXLogBuffer::Next(std::string &table_id,
+                       MXLogType& mxl_type,
                        size_t &n,
                        size_t &dim,
                        float *vectors,

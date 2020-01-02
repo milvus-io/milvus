@@ -66,9 +66,24 @@ WalManager::Stop() {
 
 void
 WalManager::Run() {
+    std::string table_id;
+    MXLogType mxlog_type;
+    size_t num_of_vectors;
+    size_t vector_dim;
+    float* vectors = NULL;
+    milvus::engine::IDNumbers vector_ids;
+    auto clear = [&]() {
+        table_id = "";
+        num_of_vectors = 0;
+        vector_dim = 0;
+        if (vectors)
+            free(vectors);
+        vector_ids.clear();
+    };
+
     auto work = [&]() {
         while (is_running_) {
-            if (p_buffer_->Next()) {
+            if (p_buffer_->Next(table_id, mxlog_type, num_of_vectors, vector_dim, vectors, vector_ids)) {
                 reader_is_waiting = false;
             } else {
                 reader_is_waiting = true;
