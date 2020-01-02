@@ -86,6 +86,7 @@ MXLogBuffer::ReSet() {
     mxlog_buffer_writer_.buf_idx = mxlog_buffer_reader_.buf_idx = 0;
     mxlog_buffer_writer_.buf_offset = mxlog_buffer_reader_.buf_offset = 0;
     mxlog_buffer_reader_.file_no = 0;//reader file number equals 0 means read from buffer
+    mxlog_buffer_reader_.max_offset = 0;// equals file size, 0 means read from buffer
 }
 
 //buffer writer cares about surplus space of buffer
@@ -110,6 +111,7 @@ bool MXLogBuffer::Append(const std::string &table_id,
                          const milvus::engine::IDNumbers& vector_ids,
                          const size_t& vector_ids_offset,
                          bool update_file_no,
+                         MXLogMetaHandler& meta_handler,
                          uint64_t& lsn) {
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
@@ -117,13 +119,14 @@ bool MXLogBuffer::Append(const std::string &table_id,
         if (mxlog_buffer_writer_.buf_idx != mxlog_buffer_reader_.buf_idx) {//no need to switch buffer
             mxlog_buffer_writer_.buf_offset = 0;
             //todo:important! get atomic increase file no from WalManager and update mxlog_buffer_wrter_.file_no
-            mxlog_buffer_writer_.file_no ++;
-            mxlog_writer_.ReBorn(mxlog_buffer_writer_.file_no);
         } else { // swith writer buffer
             mxlog_buffer_writer_.buf_idx ^= 1;
             mxlog_buffer_writer_.buf_offset = 0;
+            mxlog_buffer_reader_.max_offset = mxlog_buffer_writer_.max_offset;
+            mxlog_buffer_writer_.max_offset = 0;
         }
         mxlog_buffer_writer_.file_no ++;
+        mxlog_writer_.ReBorn(mxlog_buffer_writer_.file_no);
     }
     lsn = mxlog_buffer_writer_.file_no;
     lsn <<= 32;
@@ -143,20 +146,25 @@ bool MXLogBuffer::Append(const std::string &table_id,
     current_write_offset += 2;
     auto op_type = (uint8_t)MXLogType::Insert;
     memcpy(current_write_buf + current_write_offset, (char*)&op_type, 1);
+    current_write_offset ++;
+    memcpy(current_write_buf + current_write_offset, table_id.data(), table_id.size());
+    current_write_offset += table_id.size();
     for (auto i = vector_ids_offset; i < vector_ids.size(); ++ i) {
         memcpy(current_write_buf + current_write_offset, (char*)&vector_ids[i], 8);
         current_write_offset += 8;
     }
-    memcpy(current_write_buf + current_write_offset, table_id.data(), table_id.size());
-    current_write_offset += table_id.size();
     memcpy(current_write_buf + current_write_offset, vectors, (n * dim) << 2);
     current_write_offset += (n * dim) << 2;
-    mxlog_buffer_writer_.buf_offset = current_write_offset;
+    mxlog_buffer_writer_.buf_offset = (uint32_t)current_write_offset;
     mxlog_buffer_writer_.lsn = lsn;
     mxlog_writer_.Write(buf_[mxlog_buffer_writer_.buf_idx].get(), record_size);//default async flush
+    if (update_file_no) {// transaction integrity
+        meta_handler.SetMXLogInternalMeta(lsn, mxlog_buffer_writer_.file_no);
+    }
     if (reader_is_waiting) {
         reader_cv.notify_one();
     }
+    mxlog_buffer_writer_.max_offset = (uint32_t)current_write_offset;
     return true;
 }
 
@@ -177,11 +185,12 @@ bool MXLogBuffer::Next(std::string &table_id,
                        size_t &dim,
                        float *vectors,
                        milvus::engine::IDNumbers &vector_ids,
+                       const uint64_t& last_applied_lsn,
                        uint64_t &lsn) {
 
     //reader catch up to writer, no next record, read fail
     if (mxlog_buffer_reader_.buf_idx == mxlog_buffer_writer_.buf_idx
-      && mxlog_buffer_reader_.lsn == mxlog_buffer_writer_.lsn) {
+      && mxlog_buffer_reader_.lsn == last_applied_lsn) {
         return false;
     }
     //otherwise, it means there must exists next record, in buffer or wal log
@@ -198,43 +207,49 @@ bool MXLogBuffer::Next(std::string &table_id,
     memcpy(&table_id_size, current_read_buf + current_read_offset, 2);
     current_read_offset += 2;
     memcpy(&d, current_read_buf + current_read_offset, 2);
+    dim = d;
     current_read_offset += 2;
-    uint8_t mxl_type;
     memcpy(&mxl_type, current_read_buf + current_read_offset, 1);
     current_read_offset += 1;
+    table_id.resize(table_id_size);
+    for (auto i = 0; i < table_id_size; ++ i) {
+        table_id[i] = *(current_read_buf + current_read_offset);
+        ++ current_read_offset;
+    }
     int64_t tmp_id;
     for (auto i = 0; i < n; ++ i) {
         memcpy(&tmp_id, current_read_buf + current_read_offset, 8);
         vector_ids.emplace_back((int64_t)tmp_id);
         current_read_offset += 8;
     }
-    table_id.resize(table_id_size);
-    for (auto i = 0; i < table_id_size; ++ i) {
-        table_id[i] = *(current_read_buf + current_read_offset);
-        ++ current_read_offset;
-    }
+    vectors = (float*)malloc((n * dim) << 2);
+    __glibcxx_assert(vectors != NULL);
     memcpy(vectors, current_read_buf + current_read_offset, (n * dim) << 2);
     current_read_offset += (n * dim) << 2;
-    mxlog_buffer_reader_.lsn = lsn;
-    if (lsn == mxlog_buffer_reader_.max_offset) {
-        if (lsn + 1 == mxlog_buffer_writer_.min_lsn) {
-            //todo: lock
+    mxlog_buffer_reader_.lsn = lsn;// last consumed record
+    if ((uint32_t)(lsn & LSN_OFFSET_MASK) + record_size == mxlog_buffer_reader_.max_offset) { // last record
+        if ((uint32_t)(lsn >> 32) + 1 == (uint32_t)(last_applied_lsn >> 32)) {
+            //todo: add lock to forbidden buffer_writer switch buffer
             mxlog_buffer_reader_.buf_idx ^= 1;
             mxlog_buffer_reader_.buf_offset = 0;
+            mxlog_buffer_reader_.file_no = mxlog_buffer_writer_.file_no;
+            mxlog_buffer_reader_.max_offset = mxlog_buffer_writer_.max_offset;
         } else {
             //todo: load wal log from disk
-            MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath(), std::to_string(++ mxlog_buffer_reader_.file_no), "r");
+            MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath());
+            mxlog_reader.SetFileName(std::to_string(mxlog_buffer_reader_.file_no + 1) + ".wal");
+            mxlog_reader.SetFileOpenMode("r");
+            mxlog_reader.OpenFile();
             if (mxlog_reader.IsOpen()) {
-                mxlog_buffer_reader_.max_offset = mxlog_reader.GetFileSize();
-                //todo:init maxlsn and minlsn of mxlog_buffer_reader_
                 mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get());
+                mxlog_buffer_reader_.max_offset = (uint32_t)mxlog_reader.GetFileSize();
                 mxlog_buffer_reader_.buf_offset = 0;
+                mxlog_buffer_reader_.file_no ++;
             } else {
                 //todo: log error: wal log open fail
             }
         }
     }
-    //todo: switch(mxl_type), invoke relative interface to memory table, or do it outside buffer
     return true;
 }
 
@@ -253,6 +268,9 @@ MXLogBuffer::Flush(const std::string &table_id) {
 
 bool
 MXLogBuffer::LoadForRecovery(const uint64_t &lsn) {
+    if ((uint32_t)(lsn >> 32) == mxlog_buffer_reader_.file_no) {
+        return true;
+    }
     mxlog_writer_.SetFileName(std::to_string(lsn>>32) + ".wal");
     mxlog_writer_.SetFileOpenMode("r");
     if (!mxlog_writer_.FileExists()) {

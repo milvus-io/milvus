@@ -23,6 +23,8 @@
 #include <bits/shared_ptr.h>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
+#include "WalMetaHandler.h"
+
 
 namespace milvus {
 namespace engine {
@@ -43,6 +45,7 @@ class MXLogBuffer {
                 const milvus::engine::IDNumbers& vector_ids,
                 const size_t& vector_ids_offset,
                 bool update_file_no,
+                MXLogMetaHandler& meta_handler,
                 uint64_t& lsn);
 
     bool Next(std::string &table_id,
@@ -51,6 +54,7 @@ class MXLogBuffer {
               size_t &dim,
               float *vectors,
               milvus::engine::IDNumbers &vector_ids,
+              const uint64_t& last_applied_lsn,
               uint64_t &lsn);
     bool Next();
     void Flush(const std::string& table_id);

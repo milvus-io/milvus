@@ -48,14 +48,22 @@ class WalManager {
     DropTable();
     bool
     Insert(const std::string &table_id,
-                       size_t n,
-                       const float *vectors,
-                       milvus::engine::IDNumbers &vector_ids);
+           size_t n,
+           const float *vectors,
+           milvus::engine::IDNumbers &vector_ids);
     void DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);
     //not support right now
     void UpdateById(const std::string& table_id, const float* vectors, const milvus::engine::IDNumbers& vector_ids);
     void Flush(const std::string& table_id = "");
     void Apply(const uint64_t& apply_lsn);
+    void Dispatch(std::string &table_id,
+                  MXLogType& mxl_type,
+                  size_t &n,
+                  size_t &dim,
+                  float *vectors,
+                  milvus::engine::IDNumbers &vector_ids,
+                  const uint64_t& last_applied_lsn,
+                  uint64_t &lsn);
 
     void Recovery();
 

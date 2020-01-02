@@ -22,8 +22,8 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogMetaHandler::MXLogMetaHandler() {
-    wal_lsn_ = wal_file_no_ = 0;
+MXLogMetaHandler::MXLogMetaHandler() : wal_lsn_(0), wal_file_no_(0) {
+
 }
 
 void
@@ -64,6 +64,11 @@ MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t &wal_lsn, const uint32_t &
 void
 MXLogMetaHandler::GetMXLogExternalMeta(TableMetaPtr global_meta) {
     //todo: wait interfaces from @zhiru
+}
+
+void
+MXLogMetaHandler::SetMXLogInternalMetaFilePath(const std::string &internal_meta_file_path) {
+    wal_meta_.SetFilePath(internal_meta_file_path);
 }
 
 } // wal

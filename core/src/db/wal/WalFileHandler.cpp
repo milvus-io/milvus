@@ -131,6 +131,11 @@ MXLogFileHandler::SetFileName(const std::string& file_name) {
     file_mode_ = file_name;
 }
 
+void
+MXLogFileHandler::SetFilePath(const std::string& file_path) {
+    file_path_ = file_path;
+}
+
 } // wal
 } // engine
 } // milvus

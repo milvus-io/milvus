@@ -26,6 +26,7 @@ namespace wal {
 
 class MXLogFileHandler {
  public:
+    MXLogFileHandler();
     MXLogFileHandler(const std::string& mxlog_path);
     ~MXLogFileHandler();
 
@@ -39,6 +40,7 @@ class MXLogFileHandler {
     void ReBorn(const uint64_t& new_file_no);
     uint64_t GetFileSize();
     void SetFileOpenMode(const std::string& open_mode);
+    void SetFilePath(const std::string& file_path);
     void SetFileName(const std::string& file_name);
     void DeleteFile();
     bool FileExists();

@@ -30,6 +30,7 @@ namespace wal {
 using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
 std::condition_variable reader_cv;
+std::mutex reader_mutex;
 bool reader_is_waiting;
 bool is_recoverying;
 
