@@ -17,19 +17,10 @@
 
 #pragma once
 
-#include <memory>
-#include <unordered_map>
-
-#include "Vector.h"
-
 namespace milvus {
 namespace segment {
 
-struct Vectors {
-    std::unordered_map<std::string, VectorPtr> vectors;
-};
-
-using VectorsPtr = std::shared_ptr<Vectors>;
+typedef int64_t doc_id_t;
 
 }  // namespace segment
 }  // namespace milvus

@@ -22,48 +22,44 @@
 namespace milvus {
 namespace segment {
 
-Vector::Vector(void* data, size_t nbytes, int64_t* uids) : data_(data), nbytes_(nbytes), uids_(uids) {
+Vector::Vector(const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids) : data_(data), uids_(uids) {
 }
 
 Vector::Vector() {
 }
 
-
 void
-Vector::SetData(void* data) {
-    data_ = data;
-}
-void
-Vector::SetNbytes(size_t nbytes) {
-    nbytes_ = nbytes;
-}
-void
-Vector::SetUids(int64_t* uids) {
-    uids_ = uids;
-}
-void
-Vector::SetCount(size_t count) {
-    count_ = count;
+Vector::AddData(const std::vector<uint8_t>& data) {
+    data_.reserve(data_.size() + data.size());
+    // TODO: move?
+    data_.insert(data_.end(), data.begin(), data.end());
 }
 
-void*
+void
+Vector::AddUids(const std::vector<doc_id_t>& uids) {
+    data_.reserve(data_.size() + uids.size());
+    // TODO: move?
+    data_.insert(data_.end(), uids.begin(), uids.end());
+}
+
+const std::vector<uint8_t>&
 Vector::GetData() const {
     return data_;
 }
 
-size_t
-Vector::GetNumBytes() const {
-    return nbytes_;
-}
-
-int64_t*
+const std::vector<doc_id_t>&
 Vector::GetUids() const {
     return uids_;
 }
 
 size_t
-Vector::GetCount() const {
-    return count_;
+Vector::GetCount() {
+    return uids_.size();
+}
+
+size_t
+Vector::GetDimension() {
+    return data_.size() / GetCount();
 }
 
 }  // namespace segment
