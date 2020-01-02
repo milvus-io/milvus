@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <limits>
 #include "db/Options.h"
 #include <fiu-local.h>
+#include <limits>
 #include "utils/Exception.h"
 #include "utils/Log.h"
 

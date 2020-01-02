@@ -96,6 +96,7 @@ INSTANTIATE_TEST_CASE_P(
     std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_CPU, "Default", 64, 1000, 10, 10),
     std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_CPU, "Default", DIM, NB, 10, 10)));
 
+#ifdef MILVUS_GPU_VERSION
 TEST_P(KnowhereWrapperTest, WRAPPER_EXCEPTION_TEST) {
     std::string err_msg = "failed";
     milvus::engine::WrapperException ex(err_msg);
@@ -103,6 +104,7 @@ TEST_P(KnowhereWrapperTest, WRAPPER_EXCEPTION_TEST) {
     std::string msg = ex.what();
     EXPECT_EQ(msg, err_msg);
 }
+#endif
 
 TEST_P(KnowhereWrapperTest, BASE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);

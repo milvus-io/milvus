@@ -241,6 +241,19 @@ TEST_F(DBTest, DB_TEST) {
     stat = db_->GetTableRowCount(TABLE_NAME, count);
     ASSERT_TRUE(stat.ok());
     ASSERT_GT(count, 0);
+
+    // test invalid build db
+    {
+        auto options = GetOptions();
+        options.meta_.backend_uri_ = "dummy";
+        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+
+        options.meta_.backend_uri_ = "mysql://root:123456@127.0.0.1:3306/test";
+        milvus::engine::DBFactory::Build(options);
+
+        options.meta_.backend_uri_ = "dummy://root:123456@127.0.0.1:3306/test";
+        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+    }
 }
 
 TEST_F(DBTest, SEARCH_TEST) {

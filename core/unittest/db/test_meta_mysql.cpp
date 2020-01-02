@@ -30,6 +30,9 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
+const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
+const char* TABLE_ALREADY_EXISTS = "Table already exists and it is in delete state, please wait a second";
+
 TEST_F(MySqlMetaTest, TABLE_TEST) {
     auto table_id = "meta_test_table";
     fiu_init(0);
@@ -57,6 +60,54 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     table.table_id_ = "";
     status = impl_->CreateTable(table);
     //    ASSERT_TRUE(status.ok());
+
+    table.table_id_ = table_id;
+    FIU_ENABLE_FIU("MySQLMetaImpl_CreateTable_NUllConnection");
+    auto stat = impl_->CreateTable(table);
+    ASSERT_FALSE(stat.ok());
+    ASSERT_EQ(stat.message(), FAILED_CONNECT_SQL_SERVER);
+    fiu_disable("MySQLMetaImpl_CreateTable_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_CreateTable_ThrowException");
+    stat = impl_->CreateTable(table);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("MySQLMetaImpl_CreateTable_ThrowException");
+
+    //ensure table exists
+    stat = impl_->CreateTable(table);
+    FIU_ENABLE_FIU("MySQLMetaImpl_CreateTableTable_Schema_TO_DELETE");
+    stat = impl_->CreateTable(table);
+    ASSERT_FALSE(stat.ok());
+    ASSERT_EQ(stat.message(), TABLE_ALREADY_EXISTS);
+    fiu_disable("MySQLMetaImpl_CreateTableTable_Schema_TO_DELETE");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_DescribeTable_NUllConnection");
+    stat = impl_->DescribeTable(table);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("MySQLMetaImpl_DescribeTable_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_DescribeTable_ThrowException");
+    stat = impl_->DescribeTable(table);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("MySQLMetaImpl_DescribeTable_ThrowException");
+
+    bool has_table = false;
+    stat = impl_->HasTable(table_id, has_table);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_TRUE(has_table);
+
+    has_table = false;
+    FIU_ENABLE_FIU("MySQLMetaImpl_HasTable_NUllConnection");
+    stat = impl_->HasTable(table_id, has_table);
+    ASSERT_FALSE(stat.ok());
+    ASSERT_FALSE(has_table);
+    fiu_disable("MySQLMetaImpl_HasTable_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_HasTable_ThrowException");
+    stat = impl_->HasTable(table_id, has_table);
+    ASSERT_FALSE(stat.ok());
+    ASSERT_FALSE(has_table);
+    fiu_disable("MySQLMetaImpl_HasTable_ThrowException");
 
     FIU_ENABLE_FIU("MySQLMetaImpl_DropAll_NUllConnection");
     status = impl_->DropAll();
@@ -266,14 +317,6 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_Archive_ThrowException");
 
-    FIU_ENABLE_FIU("MySQLMetaImpl_Archive_NUllConnection");
-    impl.Archive();
-    fiu_disable("MySQLMetaImpl_Archive_NUllConnection");
-
-    FIU_ENABLE_FIU("MySQLMetaImpl_Archive_ThrowException");
-    impl.Archive();
-    fiu_disable("MySQLMetaImpl_Archive_ThrowException");
-
     impl.Archive();
     int i = 0;
 
@@ -326,6 +369,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
+    fiu_init(0);
     milvus::engine::DBMetaOptions options = GetOptions().meta_;
 
     options.archive_conf_ = milvus::engine::ArchiveConf("delete", "disk:11");
@@ -357,6 +401,14 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
         ids.push_back(table_file.id_);
     }
 
+    FIU_ENABLE_FIU("MySQLMetaImpl_DiscardFiles_NUllConnection");
+    impl.Archive();
+    fiu_disable("MySQLMetaImpl_DiscardFiles_NUllConnection");
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_DiscardFiles_ThrowException");
+    impl.Archive();
+    fiu_disable("MySQLMetaImpl_DiscardFiles_ThrowException");
+
     impl.Archive();
     int i = 0;
 
@@ -383,14 +435,39 @@ TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
 
     FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateDirectory");
     milvus::engine::DBMetaOptions meta = GetOptions().meta_;
+    //delete directory created by SetUp
+    boost::filesystem::remove_all(meta.path_);
     milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_);
     fiu_disable("MySQLMetaImpl_Initialize_FailCreateDirectory");
 
-    meta.backend_uri_ = "null";
-    ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
-
-    meta.backend_uri_ = "notmysql://root:123456@127.0.0.1:3306/test";
-    ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
+    {
+        meta.backend_uri_ = "null";
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
+    }
+    {
+        meta.backend_uri_ = "notmysql://root:123456@127.0.0.1:3306/test";
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
+    }
+    {
+        FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_NullConnection");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        fiu_disable("MySQLMetaImpl_Initialize_NullConnection");
+    }
+    {
+        FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_IsThreadAware");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        fiu_disable("MySQLMetaImpl_Initialize_IsThreadAware");
+    }
+    {
+        FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateTableScheme");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        fiu_disable("MySQLMetaImpl_Initialize_FailCreateTableScheme");
+    }
+    {
+        FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateTableFiles");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        fiu_disable("MySQLMetaImpl_Initialize_FailCreateTableFiles");
+    }
 }
 
 TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {

@@ -138,35 +138,35 @@ class MetaSchema {
 
 // Tables schema
 static const MetaSchema TABLES_SCHEMA(META_TABLES, {
-                                                       MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-                                                       MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
-                                                       MetaField("state", "INT", "NOT NULL"),
-                                                       MetaField("dimension", "SMALLINT", "NOT NULL"),
-                                                       MetaField("created_on", "BIGINT", "NOT NULL"),
-                                                       MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
-                                                       MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
-                                                       MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                       MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
-                                                       MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                       MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
-                                                       MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
-                                                       MetaField("version", "VARCHAR(64)",
-                                                                 std::string("DEFAULT '") + CURRENT_VERSION + "'"),
-                                                   });
+    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+    MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
+    MetaField("state", "INT", "NOT NULL"),
+    MetaField("dimension", "SMALLINT", "NOT NULL"),
+    MetaField("created_on", "BIGINT", "NOT NULL"),
+    MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
+    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+    MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
+    MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
+    MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
+    MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
+    MetaField("version", "VARCHAR(64)",
+              std::string("DEFAULT '") + CURRENT_VERSION + "'"),
+});
 
 // TableFiles schema
 static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
-                                                               MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-                                                               MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
-                                                               MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                               MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
-                                                               MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
-                                                               MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
-                                                               MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
-                                                               MetaField("updated_time", "BIGINT", "NOT NULL"),
-                                                               MetaField("created_on", "BIGINT", "NOT NULL"),
-                                                               MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
-                                                           });
+    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+    MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+    MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
+    MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
+    MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("updated_time", "BIGINT", "NOT NULL"),
+    MetaField("created_on", "BIGINT", "NOT NULL"),
+    MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+});
 
 }  // namespace
 
@@ -300,13 +300,17 @@ MySQLMetaImpl::Initialize() {
     // step 6: try connect mysql server
     mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-    if (connectionPtr == nullptr) {
+    bool is_null_connection{connectionPtr == nullptr};
+    fiu_do_on("MySQLMetaImpl_Initialize_NullConnection", is_null_connection = true);
+    if (is_null_connection) {
         std::string msg = "Failed to connect MySQL meta server: " + uri;
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_INVALID_META_URI, msg);
     }
 
-    if (!connectionPtr->thread_aware()) {
+    bool is_thread_aware = connectionPtr->thread_aware();
+    fiu_do_on("MySQLMetaImpl_Initialize_IsThreadAware", is_thread_aware = false);
+    if (!is_thread_aware) {
         std::string msg =
             "Failed to initialize MySQL meta backend: MySQL client component wasn't built with thread awareness";
         ENGINE_LOG_ERROR << msg;
@@ -320,7 +324,9 @@ MySQLMetaImpl::Initialize() {
 
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-    if (!InitializeQuery.exec()) {
+    bool initialize_query_exec = InitializeQuery.exec();
+    fiu_do_on("MySQLMetaImpl_Initialize_FailCreateTableScheme", initialize_query_exec = false);
+    if (!initialize_query_exec) {
         std::string msg = "Failed to create meta table 'Tables' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
@@ -332,7 +338,9 @@ MySQLMetaImpl::Initialize() {
 
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-    if (!InitializeQuery.exec()) {
+    initialize_query_exec = InitializeQuery.exec();
+    fiu_do_on("MySQLMetaImpl_Initialize_FailCreateTableFiles", initialize_query_exec = false);
+    if (!initialize_query_exec) {
         std::string msg = "Failed to create meta table 'TableFiles' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
@@ -1661,58 +1669,46 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:
-                        raw_count++;
+                    case (int)TableFileSchema::RAW:raw_count++;
                         break;
-                    case (int)TableFileSchema::NEW:
-                        new_count++;
+                    case (int)TableFileSchema::NEW:new_count++;
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:
-                        new_merge_count++;
+                    case (int)TableFileSchema::NEW_MERGE:new_merge_count++;
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:
-                        new_index_count++;
+                    case (int)TableFileSchema::NEW_INDEX:new_index_count++;
                         break;
-                    case (int)TableFileSchema::TO_INDEX:
-                        to_index_count++;
+                    case (int)TableFileSchema::TO_INDEX:to_index_count++;
                         break;
-                    case (int)TableFileSchema::INDEX:
-                        index_count++;
+                    case (int)TableFileSchema::INDEX:index_count++;
                         break;
-                    case (int)TableFileSchema::BACKUP:
-                        backup_count++;
+                    case (int)TableFileSchema::BACKUP:backup_count++;
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
             }
 
             std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:
-                        msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)TableFileSchema::NEW:
-                        msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
+                        msg = msg + " new_merge files:"
+                              + std::to_string(new_merge_count);
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        msg = msg + " new_index files:" + std::to_string(new_index_count);
+                        msg = msg + " new_index files:"
+                              + std::to_string(new_index_count);
                         break;
-                    case (int)TableFileSchema::TO_INDEX:
-                        msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)TableFileSchema::INDEX:
-                        msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)TableFileSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)TableFileSchema::BACKUP:
-                        msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
