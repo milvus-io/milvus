@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +50,7 @@ InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string
 Status
 InsertRequest::OnExecute() {
     try {
+        fiu_do_on("InsertRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(record_size_) +
                           ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
@@ -63,6 +65,7 @@ InsertRequest::OnExecute() {
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
+        fiu_do_on("InsertRequest.OnExecute.id_array_error", id_array_.resize(record_size_ + 1));
         if (!id_array_.empty()) {
             if (id_array_.size() != record_size_) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID,
@@ -74,6 +77,8 @@ InsertRequest::OnExecute() {
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
+        fiu_do_on("InsertRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
+        fiu_do_on("InsertRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
@@ -85,12 +90,16 @@ InsertRequest::OnExecute() {
         // step 3: check table flag
         // all user provide id, or all internal id
         bool user_provide_ids = !id_array_.empty();
+        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id",
+            user_provide_ids = false; table_info.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
                           "Table vector IDs are user-defined. Please provide IDs for all vectors of this table.");
         }
 
+        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2",
+            user_provide_ids = true; table_info.flag_ = engine::meta::FLAG_MASK_NO_USERID);
         // user didn't provided id before, no need to provide user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
@@ -111,6 +120,7 @@ InsertRequest::OnExecute() {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
         }
 
+        fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
         if (data_list_.size() / record_size_ != table_info.dimension_) {
             return Status(SERVER_INVALID_VECTOR_DIMENSION,
                           "The vector dimension must be equal to the table dimension.");
@@ -121,11 +131,13 @@ InsertRequest::OnExecute() {
 
         rc.RecordSection("prepare vectors data");
         status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count, data_list_.data(), id_array_);
+        fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
         auto ids_size = id_array_.size();
+        fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);
         if (ids_size != vec_count) {
             std::string msg =
                 "Add " + std::to_string(vec_count) + " vectors but only return " + std::to_string(ids_size) + " id";

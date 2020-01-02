@@ -283,7 +283,7 @@ TaskTable::TaskToExecute() {
     auto begin = table_.front() + 1;
     for (size_t i = 0; i < table_.size(); ++i) {
         auto index = begin + i;
-        if (table_[index]->state == TaskTableItemState::LOADED) {
+        if (table_[index] && table_[index]->state == TaskTableItemState::LOADED) {
             ++count;
         }
     }

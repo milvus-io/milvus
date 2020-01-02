@@ -14,7 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+#include <fiu-local.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -261,7 +261,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     std::vector<std::string> file_ids;
     TopKQueryResult result;
-
+    fiu_do_on("GrpcRequestHandler.Search.not_empty_file_ids", file_ids.emplace_back("test_file_id"));
     Status status =
         request_handler_.Search(context_map_[context], request->table_name(), request->query_record_array_size(),
                                 record_array, ranges, request->topk(), request->nprobe(), partitions, file_ids, result);
