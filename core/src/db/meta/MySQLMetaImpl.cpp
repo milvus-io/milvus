@@ -254,7 +254,7 @@ MySQLMetaImpl::Initialize() {
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_META_TRANSACTION_FAILED, msg);
+            throw Exception(DB_META_TRANSACTION_FAILED, msg);
         }
     }
 
