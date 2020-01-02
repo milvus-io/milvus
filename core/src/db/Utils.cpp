@@ -17,6 +17,7 @@
 
 #include "db/Utils.h"
 #include "server/Config.h"
+#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -115,6 +116,20 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
         } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
             boost::filesystem::remove_all(table_path);
             ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+        }
+    }
+
+    bool minio_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigMinioEnable(minio_enable);
+
+    if (minio_enable) {
+        std::string table_path = options.path_ + TABLES_FOLDER + table_id;
+
+        auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+        Status stat = storage_inst.DeleteObjects(table_path);
+        if (!stat.ok()) {
+            return stat;
         }
     }
 

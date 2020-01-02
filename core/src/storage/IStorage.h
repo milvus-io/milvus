@@ -39,9 +39,11 @@ class IStorage {
     virtual Status
     GetObjectStr(const std::string& object_name, std::string& content) = 0;
     virtual Status
-    ListObjects(std::vector<std::string>& object_list) = 0;
+    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "") = 0;
     virtual Status
     DeleteObject(const std::string& object_name) = 0;
+    virtual Status
+    DeleteObjects(const std::string& marker) = 0;
 };
 
 }  // namespace storage

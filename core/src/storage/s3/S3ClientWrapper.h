@@ -55,9 +55,11 @@ class S3ClientWrapper : public IStorage {
     Status
     GetObjectStr(const std::string& object_key, std::string& content) override;
     Status
-    ListObjects(std::vector<std::string>& object_list) override;
+    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "") override;
     Status
     DeleteObject(const std::string& object_key) override;
+    Status
+    DeleteObjects(const std::string& marker) override;
 
  private:
     Aws::S3::S3Client* client_ptr_ = nullptr;

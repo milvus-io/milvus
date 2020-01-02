@@ -31,7 +31,7 @@ INITIALIZE_EASYLOGGINGPP
 TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string filename = "/tmp/test_file_in";
     const std::string filename_out = "/tmp/test_file_out";
-    const std::string object_name = "test_obj";
+    const std::string object_name = "/tmp/test_obj";
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     std::string config_path(CONFIG_PATH);
@@ -72,12 +72,7 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    std::vector<std::string> object_list;
-    ASSERT_TRUE(storage_inst.ListObjects(object_list).ok());
-
-    for (const std::string& object_name : object_list) {
-        ASSERT_TRUE(storage_inst.DeleteObject(object_name).ok());
-    }
+    ASSERT_TRUE(storage_inst.DeleteObjects("/tmp").ok());
 
     ASSERT_TRUE(storage_inst.DeleteBucket().ok());
 

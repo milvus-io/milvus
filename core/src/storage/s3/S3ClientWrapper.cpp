@@ -207,9 +207,13 @@ S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& conte
 }
 
 Status
-S3ClientWrapper::ListObjects(std::vector<std::string>& object_list) {
+S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::string& marker) {
     Aws::S3::Model::ListObjectsRequest request;
     request.WithBucket(minio_bucket_);
+
+    if (!marker.empty()) {
+        request.WithMarker(marker);
+    }
 
     auto outcome = client_ptr_->ListObjects(request);
 
@@ -225,7 +229,11 @@ S3ClientWrapper::ListObjects(std::vector<std::string>& object_list) {
         object_list.push_back(s3_object.GetKey());
     }
 
-    STORAGE_LOG_DEBUG << "ListObjects '" << minio_bucket_ << "' successfully!";
+    if (marker.empty()) {
+        STORAGE_LOG_DEBUG << "ListObjects '" << minio_bucket_ << "' successfully!";
+    } else {
+        STORAGE_LOG_DEBUG << "ListObjects '" << minio_bucket_ << ":" << marker << "' successfully!";
+    }
     return Status::OK();
 }
 
@@ -243,6 +251,25 @@ S3ClientWrapper::DeleteObject(const std::string& object_name) {
     }
 
     STORAGE_LOG_DEBUG << "DeleteObject '" << object_name << "' successfully!";
+    return Status::OK();
+}
+
+Status
+S3ClientWrapper::DeleteObjects(const std::string& marker) {
+    std::vector<std::string> object_list;
+
+    Status stat = ListObjects(object_list, marker);
+    if (!stat.ok()) {
+        return stat;
+    }
+
+    for (std::string& obj_name : object_list) {
+        stat = DeleteObject(obj_name);
+        if (!stat.ok()) {
+            return stat;
+        }
+    }
+
     return Status::OK();
 }
 
