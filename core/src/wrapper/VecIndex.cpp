@@ -213,41 +213,50 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 VecIndexPtr
 read_index(const std::string& location) {
     knowhere::BinarySet load_data_list;
-    //storage::FileIOReader reader(location);
-    storage::S3IOReader reader(location);
-    int64_t length = reader.length();
+
+    bool minio_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigMinioEnable(minio_enable);
+
+    std::shared_ptr<storage::IOReader> reader_ptr;
+    if (minio_enable) {
+        reader_ptr = std::make_shared<storage::S3IOReader>(location);
+    } else {
+        reader_ptr = std::make_shared<storage::FileIOReader>(location);
+    }
+    int64_t length = reader_ptr->length();
     if (length <= 0) {
         return nullptr;
     }
 
     size_t rp = 0;
-    reader.seekg(0);
+    reader_ptr->seekg(0);
 
     auto current_type = IndexType::INVALID;
-    reader.read(&current_type, sizeof(current_type));
+    reader_ptr->read(&current_type, sizeof(current_type));
     rp += sizeof(current_type);
-    reader.seekg(rp);
+    reader_ptr->seekg(rp);
 
     while (rp < length) {
         size_t meta_length;
-        reader.read(&meta_length, sizeof(meta_length));
+        reader_ptr->read(&meta_length, sizeof(meta_length));
         rp += sizeof(meta_length);
-        reader.seekg(rp);
+        reader_ptr->seekg(rp);
 
         auto meta = new char[meta_length];
-        reader.read(meta, meta_length);
+        reader_ptr->read(meta, meta_length);
         rp += meta_length;
-        reader.seekg(rp);
+        reader_ptr->seekg(rp);
 
         size_t bin_length;
-        reader.read(&bin_length, sizeof(bin_length));
+        reader_ptr->read(&bin_length, sizeof(bin_length));
         rp += sizeof(bin_length);
-        reader.seekg(rp);
+        reader_ptr->seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        reader.read(bin, bin_length);
+        reader_ptr->read(bin, bin_length);
         rp += bin_length;
-        reader.seekg(rp);
+        reader_ptr->seekg(rp);
 
         auto binptr = std::make_shared<uint8_t>();
         binptr.reset(bin);
@@ -264,20 +273,28 @@ write_index(VecIndexPtr index, const std::string& location) {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
-        //storage::FileIOWriter writer(location);
-        storage::S3IOWriter writer(location);
-        writer.write(&index_type, sizeof(IndexType));
+        bool minio_enable = false;
+        server::Config& config = server::Config::GetInstance();
+        config.GetStorageConfigMinioEnable(minio_enable);
+
+        std::shared_ptr<storage::IOWriter> writer_ptr;
+        if (minio_enable) {
+            writer_ptr = std::make_shared<storage::S3IOWriter>(location);
+        } else {
+            writer_ptr = std::make_shared<storage::FileIOWriter>(location);
+        }
+        writer_ptr->write(&index_type, sizeof(IndexType));
 
         for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
-            writer.write(&meta_length, sizeof(meta_length));
-            writer.write((void*)meta, meta_length);
+            writer_ptr->write(&meta_length, sizeof(meta_length));
+            writer_ptr->write((void*)meta, meta_length);
 
             auto binary = iter.second;
             int64_t binary_length = binary->size;
-            writer.write(&binary_length, sizeof(binary_length));
-            writer.write((void*)binary->data.get(), binary_length);
+            writer_ptr->write(&binary_length, sizeof(binary_length));
+            writer_ptr->write((void*)binary->data.get(), binary_length);
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
