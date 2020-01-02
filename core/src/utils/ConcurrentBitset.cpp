@@ -15,19 +15,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "ConcurrentBitset.h"
 
 namespace milvus {
-namespace codec {
 
-class LiveDocsFormat {
- public:
-    virtual LiveDocs
-    read() = 0;
+ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size) {
+    id_type_t bytes_count = (size >> 3) + 1;
+    bitset_.resize(bytes_count, 0);
+}
 
-    virtual void
-    write(LiveDocs live_docs) = 0;
-};
+bool
+ConcurrentBitset::test(id_type_t id) {
+    return bitset_[id >> 3].load() & (0x1 << (id & 0x7));
+}
 
-}  // namespace codec
+void
+ConcurrentBitset::set(id_type_t id) {
+    bitset_[id >> 3].fetch_or(0x1 << (id & 0x7));
+}
+
+void
+ConcurrentBitset::clear(id_type_t id) {
+    bitset_[id >> 3].fetch_and(0x1 << (id & 0x7));
+}
+
 }  // namespace milvus

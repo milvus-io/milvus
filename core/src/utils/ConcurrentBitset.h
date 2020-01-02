@@ -18,20 +18,20 @@
 #pragma once
 
 #include <atomic>
-#include <vector>
 #include <memory>
+#include <vector>
 
-namespace faiss {
+namespace milvus {
 
 class ConcurrentBitset {
  public:
     using id_type_t = int64_t;
 
-    ConcurrentBitset(id_type_t size);
+    explicit ConcurrentBitset(id_type_t size);
 
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
+    //    ConcurrentBitset(const ConcurrentBitset&) = delete;
+    //    ConcurrentBitset&
+    //    operator=(const ConcurrentBitset&) = delete;
 
     bool
     test(id_type_t id);
@@ -49,4 +49,4 @@ class ConcurrentBitset {
 
 using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
 
-}  // namespace faiss
+}  // namespace milvus

@@ -15,28 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "faiss/utils/ConcurrentBitset.h"
+#pragma once
 
-namespace faiss {
+namespace milvus {
+namespace codec {
 
-ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size) {
-    id_type_t bytes_count = (size >> 3) + 1;
-    bitset_.resize(bytes_count, 0);
-}
+class LiveDocsFormat {
+ public:
+    virtual LiveDocs
+    read(store::DirectoryPtr directory_ptr) = 0;
 
-bool
-ConcurrentBitset::test(id_type_t id) {
-    return bitset_[id >> 3].load() & (0x1 << (id & 0x7));
-}
+    virtual void
+    write(store::DirectoryPtr directory_ptr, LiveDocs live_docs) = 0;
+};
 
-void
-ConcurrentBitset::set(id_type_t id) {
-    bitset_[id >> 3].fetch_or(0x1 << (id & 0x7));
-}
-
-void
-ConcurrentBitset::clear(id_type_t id) {
-    bitset_[id >> 3].fetch_and(0x1 << (id & 0x7));
-}
-
-}  // namespace faiss
+}  // namespace codec
+}  // namespace milvus
