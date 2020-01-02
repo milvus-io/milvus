@@ -15,28 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ConcurrentBitset.h"
+#pragma once
 
-namespace milvus {
+#include <atomic>
+#include <memory>
+#include <vector>
 
-ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size) {
-    id_type_t bytes_count = (size >> 3) + 1;
-    bitset_.resize(bytes_count, 0);
-}
+namespace faiss {
 
-bool
-ConcurrentBitset::test(id_type_t id) {
-    return bitset_[id >> 3].load() & (0x1 << (id & 0x7));
-}
+class ConcurrentBitset {
+ public:
+    using id_type_t = int64_t;
 
-void
-ConcurrentBitset::set(id_type_t id) {
-    bitset_[id >> 3].fetch_or(0x1 << (id & 0x7));
-}
+    explicit ConcurrentBitset(id_type_t size);
 
-void
-ConcurrentBitset::clear(id_type_t id) {
-    bitset_[id >> 3].fetch_and(0x1 << (id & 0x7));
-}
+    //    ConcurrentBitset(const ConcurrentBitset&) = delete;
+    //    ConcurrentBitset&
+    //    operator=(const ConcurrentBitset&) = delete;
 
-}  // namespace milvus
+    bool
+    test(id_type_t id);
+
+    void
+    set(id_type_t id);
+
+    void
+    clear(id_type_t id);
+
+ private:
+    std::vector<std::atomic<char>> bitset_;
+    id_type_t size_;
+};
+
+using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
+
+}  // namespace faiss
