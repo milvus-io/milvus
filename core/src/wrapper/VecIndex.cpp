@@ -59,66 +59,6 @@ VecIndex::set_size(int64_t size) {
     size_ = size;
 }
 
-#if 0
-struct FileIOReader {
-    std::fstream fs;
-    std::string name;
-
-    explicit FileIOReader(const std::string& fname);
-
-    ~FileIOReader();
-
-    size_t
-    operator()(void* ptr, size_t size);
-
-    size_t
-    operator()(void* ptr, size_t size, size_t pos);
-};
-
-FileIOReader::FileIOReader(const std::string& fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::in | std::ios::binary);
-}
-
-FileIOReader::~FileIOReader() {
-    fs.close();
-}
-
-size_t
-FileIOReader::operator()(void* ptr, size_t size) {
-    fs.read(reinterpret_cast<char*>(ptr), size);
-}
-
-size_t
-FileIOReader::operator()(void* ptr, size_t size, size_t pos) {
-    return 0;
-}
-
-struct FileIOWriter {
-    std::fstream fs;
-    std::string name;
-
-    explicit FileIOWriter(const std::string& fname);
-    ~FileIOWriter();
-    size_t
-    operator()(void* ptr, size_t size);
-};
-
-FileIOWriter::FileIOWriter(const std::string& fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::out | std::ios::binary);
-}
-
-FileIOWriter::~FileIOWriter() {
-    fs.close();
-}
-
-size_t
-FileIOWriter::operator()(void* ptr, size_t size) {
-    fs.write(reinterpret_cast<char*>(ptr), size);
-}
-#endif
-
 VecIndexPtr
 GetVecIndexFactory(const IndexType& type, const Config& cfg) {
     std::shared_ptr<knowhere::VectorIndex> index;
