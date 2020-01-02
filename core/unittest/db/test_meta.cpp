@@ -335,33 +335,33 @@ TEST_F(MetaTest, FALID_TEST) {
     {
         FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpShadowFiles_FailCommited");
         status = impl_->CleanUpShadowFiles();
-        ASSERT_EQ(status.code(),milvus::DB_META_TRANSACTION_FAILED);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl_CleanUpShadowFiles_FailCommited");
 
         FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpShadowFiles_ThrowException");
         status = impl_->CleanUpShadowFiles();
-        ASSERT_EQ(status.code(),milvus::DB_META_TRANSACTION_FAILED);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl_CleanUpShadowFiles_ThrowException");
     }
     {
         uint64_t count;
-        status = impl_->Count("notexist",count);
-        ASSERT_EQ(status.code(),milvus::DB_NOT_FOUND);
+        status = impl_->Count("notexist", count);
+        ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
         FIU_ENABLE_FIU("SqliteMetaImpl_Count_ThrowException");
-        status = impl_->Count("notexist",count);
-        ASSERT_EQ(status.code(),milvus::DB_META_TRANSACTION_FAILED);
+        status = impl_->Count("notexist", count);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl_Count_ThrowException");
     }
     {
         FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
-        ASSERT_EQ(status.code(),milvus::DB_META_TRANSACTION_FAILED);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_ThrowException");
 
         FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_FailCommited");
         status = impl_->CleanUpFilesWithTTL(1);
-        ASSERT_EQ(status.code(),milvus::DB_META_TRANSACTION_FAILED);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_FailCommited");
     }
 }
@@ -672,7 +672,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     //Todo(sjh): add file filter
     milvus::engine::OngoingFileChecker filter;
     filter.MarkOngoingFile(table_file);
-    status  = impl_->CleanUpFilesWithTTL(1UL,&filter);
+    status = impl_->CleanUpFilesWithTTL(1UL, &filter);
 }
 
 TEST_F(MetaTest, INDEX_TEST) {

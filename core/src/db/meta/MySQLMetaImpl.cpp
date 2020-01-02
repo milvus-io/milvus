@@ -138,35 +138,35 @@ class MetaSchema {
 
 // Tables schema
 static const MetaSchema TABLES_SCHEMA(META_TABLES, {
-    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-    MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
-    MetaField("state", "INT", "NOT NULL"),
-    MetaField("dimension", "SMALLINT", "NOT NULL"),
-    MetaField("created_on", "BIGINT", "NOT NULL"),
-    MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
-    MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
-    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-    MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
-    MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
-    MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
-    MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
-    MetaField("version", "VARCHAR(64)",
-              std::string("DEFAULT '") + CURRENT_VERSION + "'"),
-});
+                                                       MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                       MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
+                                                       MetaField("state", "INT", "NOT NULL"),
+                                                       MetaField("dimension", "SMALLINT", "NOT NULL"),
+                                                       MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                       MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                       MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
+                                                       MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                       MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
+                                                       MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                       MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("version", "VARCHAR(64)",
+                                                                 std::string("DEFAULT '") + CURRENT_VERSION + "'"),
+                                                   });
 
 // TableFiles schema
 static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
-    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-    MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
-    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-    MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
-    MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
-    MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
-    MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
-    MetaField("updated_time", "BIGINT", "NOT NULL"),
-    MetaField("created_on", "BIGINT", "NOT NULL"),
-    MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
-});
+                                                               MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                               MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                               MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("updated_time", "BIGINT", "NOT NULL"),
+                                                               MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                               MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+                                                           });
 
 }  // namespace
 
@@ -1669,46 +1669,58 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:raw_count++;
+                    case (int)TableFileSchema::RAW:
+                        raw_count++;
                         break;
-                    case (int)TableFileSchema::NEW:new_count++;
+                    case (int)TableFileSchema::NEW:
+                        new_count++;
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:new_merge_count++;
+                    case (int)TableFileSchema::NEW_MERGE:
+                        new_merge_count++;
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:new_index_count++;
+                    case (int)TableFileSchema::NEW_INDEX:
+                        new_index_count++;
                         break;
-                    case (int)TableFileSchema::TO_INDEX:to_index_count++;
+                    case (int)TableFileSchema::TO_INDEX:
+                        to_index_count++;
                         break;
-                    case (int)TableFileSchema::INDEX:index_count++;
+                    case (int)TableFileSchema::INDEX:
+                        index_count++;
                         break;
-                    case (int)TableFileSchema::BACKUP:backup_count++;
+                    case (int)TableFileSchema::BACKUP:
+                        backup_count++;
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
 
             std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)TableFileSchema::RAW:
+                        msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)TableFileSchema::NEW:
+                        msg = msg + " new files:" + std::to_string(new_count);
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        msg = msg + " new_merge files:"
-                              + std::to_string(new_merge_count);
+                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        msg = msg + " new_index files:"
-                              + std::to_string(new_index_count);
+                        msg = msg + " new_index files:" + std::to_string(new_index_count);
                         break;
-                    case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)TableFileSchema::TO_INDEX:
+                        msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)TableFileSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)TableFileSchema::INDEX:
+                        msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)TableFileSchema::BACKUP:
+                        msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
