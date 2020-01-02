@@ -34,8 +34,8 @@ class Directory {
     bool
     DeleteFile(const std::string& file_path);
 
-    void
-    GetDirPath(std::string& dir_path);
+    const std::string&
+    GetDirPath() const;
 
     // TODO:
     //  open(), sync(), close()

@@ -17,35 +17,49 @@
 
 #pragma once
 
-#include "codecs/VectorsFormat.h"
-#include "segment/Vectors.h"
+#include <memory>
+
+#include "src/index/thirdparty/faiss/utils/ConcurrentBitset.h"
 
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class DefaultVectorsFormat : public VectorsFormat {
+using doc_id_t = int64_t;
+// using DeletedDocList = std::vector<id_type_t>;
+
+class DeletedDocs {
  public:
-    DefaultVectorsFormat() = default;
+    explicit DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids);
 
-    void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) override;
+    const std::vector<doc_id_t>&
+    GetDeletedDocs() const;
 
-    void
-    write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) override;
+    // TODO
+    const std::string&
+    GetName() const;
+
+    size_t
+    GetSize() const;
+
+    //    void
+    //    GetBitset(faiss::ConcurrentBitsetPtr& bitset);
 
     // No copy and move
-    DefaultVectorsFormat(const DefaultVectorsFormat&) = delete;
-    DefaultVectorsFormat(DefaultVectorsFormat&&) = delete;
+    DeletedDocs(const DeletedDocs&) = delete;
+    DeletedDocs(DeletedDocs&&) = delete;
 
-    DefaultVectorsFormat&
-    operator=(const DefaultVectorsFormat&) = delete;
-    DefaultVectorsFormat&
-    operator=(DefaultVectorsFormat&&) = delete;
+    DeletedDocs&
+    operator=(const DeletedDocs&) = delete;
+    DeletedDocs&
+    operator=(DeletedDocs&&) = delete;
 
  private:
-    const std::string raw_vector_extension_ = "rv";
-    const std::string user_id_extension_ = "uid";
+    std::vector<doc_id_t> deleted_doc_ids_;
+    //    faiss::ConcurrentBitsetPtr bitset_;
+    const std::string name_ = "deleted_docs";
 };
 
-}  // namespace codec
+using DeletedDocsPtr = std::shared_ptr<DeletedDocs>;
+
+}  // namespace segment
 }  // namespace milvus

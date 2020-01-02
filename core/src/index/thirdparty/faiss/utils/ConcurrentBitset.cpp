@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "faiss/utils/ConcurrentBitset.h"
+#include "ConcurrentBitset.h"
 
 namespace faiss {
 

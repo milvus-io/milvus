@@ -17,34 +17,20 @@
 
 #pragma once
 
-#include <memory>
-
-#include "index/thirdparty/faiss/utils/ConcurrentBitset.h"
+#include "segment/DeletedDocs.h"
+#include "store/Directory.h"
 
 namespace milvus {
-namespace segment {
+namespace codec {
 
-class LiveDocs {
+class DeletedDocsFormat {
  public:
-    LiveDocs(faiss::ConcurrentBitsetPtr bitset);
+    virtual void
+    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocs& deleted_docs) = 0;
 
-    void
-    GetBitset(faiss::ConcurrentBitsetPtr& bitset);
-
-    // No copy and move
-    LiveDocs(const LiveDocs&) = delete;
-    LiveDocs(LiveDocs&&) = delete;
-
-    LiveDocs&
-    operator=(const LiveDocs&) = delete;
-    LiveDocs&
-    operator=(LiveDocs&&) = delete;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_;
+    virtual void
+    write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocs& deleted_docs) = 0;
 };
 
-using LiveDocsPtr = std::shared_ptr<LiveDocs>;
-
-}  // namespace segment
+}  // namespace codec
 }  // namespace milvus

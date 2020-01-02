@@ -17,16 +17,32 @@
 
 #pragma once
 
+#include "codecs/DeletedDocsFormat.h"
+
 namespace milvus {
 namespace codec {
 
-class LiveDocsFormat {
+class DefaultDeletedDocsFormat : public DeletedDocsFormat {
  public:
-    virtual LiveDocs
-    read() = 0;
+    DefaultDeletedDocsFormat() = default;
 
-    virtual void
-    write(LiveDocs live_docs) = 0;
+    void
+    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocs& deleted_docs) override;
+
+    void
+    write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocs& deleted_docs) override;
+
+    // No copy and move
+    DefaultDeletedDocsFormat(const DefaultDeletedDocsFormat&) = delete;
+    DefaultDeletedDocsFormat(DefaultDeletedDocsFormat&&) = delete;
+
+    DefaultDeletedDocsFormat&
+    operator=(const DefaultDeletedDocsFormat&) = delete;
+    DefaultDeletedDocsFormat&
+    operator=(DefaultDeletedDocsFormat&&) = delete;
+
+ private:
+    const std::string deleted_docs_extension_ = "del";
 };
 
 }  // namespace codec

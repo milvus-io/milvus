@@ -18,8 +18,8 @@
 #pragma once
 
 #include <atomic>
-#include <vector>
 #include <memory>
+#include <vector>
 
 namespace faiss {
 
@@ -27,11 +27,11 @@ class ConcurrentBitset {
  public:
     using id_type_t = int64_t;
 
-    ConcurrentBitset(id_type_t size);
+    explicit ConcurrentBitset(id_type_t size);
 
-//    ConcurrentBitset(const ConcurrentBitset&) = delete;
-//    ConcurrentBitset&
-//    operator=(const ConcurrentBitset&) = delete;
+    //    ConcurrentBitset(const ConcurrentBitset&) = delete;
+    //    ConcurrentBitset&
+    //    operator=(const ConcurrentBitset&) = delete;
 
     bool
     test(id_type_t id);
@@ -43,7 +43,7 @@ class ConcurrentBitset {
     clear(id_type_t id);
 
  private:
-    std::vector<std::atomic<id_type_t>> bitset_;
+    std::vector<std::atomic<char>> bitset_;
     id_type_t size_;
 };
 

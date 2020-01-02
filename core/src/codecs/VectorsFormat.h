@@ -25,11 +25,11 @@ namespace codec {
 
 class VectorsFormat {
  public:
-    virtual segment::Vectors
-    read(store::DirectoryPtr directory_ptr) = 0;
+    virtual void
+    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
 
     virtual void
-    write(store::DirectoryPtr directory_ptr, segment::Vectors vectors) = 0;
+    write(const store::DirectoryPtr &directory_ptr, const segment::Vectors& vectors) = 0;
 };
 
 }  // namespace codec
