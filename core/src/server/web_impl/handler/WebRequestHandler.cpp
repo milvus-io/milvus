@@ -295,7 +295,10 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         build_resources_value += res + ",";
     }
     len = build_resources_value.size();
-    build_resources_value.erase(len - 1);
+    if (len > 0) {
+        build_resources_value.erase(len - 1);
+    }
+
     status = config.SetGpuResourceConfigBuildIndexResources(build_resources_value);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -369,13 +372,13 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
                 }
 
                 auto table_fields_dto = TableFieldsDto::createShared();
-                table_fields_dto->table_name = table_info["table_name"].c_str();
-                table_fields_dto->dimension = std::stol(table_info["dimension"]);
-                table_fields_dto->index_file_size = std::stol(table_info["index_file_size"]);
-                table_fields_dto->index = table_info["index"].c_str();
-                table_fields_dto->nlist = std::stol(table_info["nlist"]);
-                table_fields_dto->metric_type = table_info["metric_type"].c_str();
-                table_fields_dto->count = std::stol(table_info["count"]);
+                table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
+                table_fields_dto->dimension = std::stol(table_info[KEY_TABLE_DIMENSION]);
+                table_fields_dto->index_file_size = std::stol(table_info[KEY_TABLE_INDEX_FILE_SIZE]);
+                table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
+                table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
+                table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
+                table_fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
 
                 response_dto->tables->pushBack(table_fields_dto);
             }
@@ -430,7 +433,7 @@ WebRequestHandler::DropIndex(const OString& table_name) {
 StatusDto::ObjectWrapper
 WebRequestHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param) {
     auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
-                                                   param->partition_name->std_str(), param->tag->std_str());
+                                                   param->partition_name->std_str(), param->partition_tag->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -449,10 +452,8 @@ WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size,
                                                                                             : page_size->getValue();
             for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
                 auto partition_dto = PartitionFieldsDto::createShared();
-                partition_dto->schema = partition_dto->schema->createShared();
-                partition_dto->schema->put("partitin_name", partitions.at(i).partition_name_.c_str());
-                partition_dto->schema->put("tag", partitions.at(i).tag_.c_str());
-
+                partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
+                partition_dto->partition_tag = partitions.at(i).tag_.c_str();
                 partition_list_dto->partitions->pushBack(partition_dto);
             }
         }
@@ -469,9 +470,11 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, VectorIdsDto::ObjectWrapper& ids_dto) {
+WebRequestHandler::Insert(const OString& table_name,
+                          const InsertRequestDto::ObjectWrapper& param,
+                          VectorIdsDto::ObjectWrapper& ids_dto) {
     std::vector<int64_t> ids;
-    if (param->ids->count() > 0) {
+    if (nullptr != param->ids.get() && param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
             ids.emplace_back(param->ids->get(i)->getValue());
         }
@@ -479,18 +482,18 @@ WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, VectorId
 
     std::vector<float> datas;
     for (int64_t j = 0; j < param->records->count(); j++) {
-        for (int64_t k = 0; k < param->records->get(j)->record->count(); k++) {
-            datas.emplace_back(param->records->get(j)->record->get(k)->getValue());
+        for (int64_t k = 0; k < param->records->get(j)->count(); k++) {
+            datas.emplace_back(param->records->get(j)->get(k)->getValue());
         }
     }
 
-    auto status = request_handler_.Insert(context_ptr_, param->table_name->std_str(), param->records->count(), datas,
+    auto status = request_handler_.Insert(context_ptr_, table_name->std_str(), param->records->count(), datas,
                                           param->tag->std_str(), ids);
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
         for (auto& id : ids) {
-            ids_dto->ids->pushBack(id);
+            ids_dto->ids->pushBack(std::to_string(id).c_str());
         }
     }
 
@@ -498,30 +501,37 @@ WebRequestHandler::Insert(const InsertRequestDto::ObjectWrapper& param, VectorId
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Search(const OString& table_name, const OInt64& topk, const OInt64& nprobe,
-                          const OQueryParams& query_params, const RecordsDto::ObjectWrapper& records,
-                          ResultDto::ObjectWrapper& results_dto) {
-    int64_t topk_t = topk->getValue();
-    int64_t nprobe_t = nprobe->getValue();
+WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
+                          TopkResultsDto::ObjectWrapper& results_dto) {
+    if (nullptr == search_request->topk.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'topk\' is required in request body"))
+    }
+    int64_t topk_t = search_request->topk->getValue();
+
+    if (nullptr == search_request->nprobe.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'nprobe\' is required in request body"))
+    }
+    int64_t nprobe_t = search_request->nprobe->getValue();
 
     std::vector<std::string> tag_list;
     std::vector<std::string> file_id_list;
 
-    for (auto& param : query_params.getAll()) {
-        std::string key = param.first.std_str();
-        std::string value = param.second.std_str();
+    if (nullptr != search_request->tags.get()) {
+        search_request->tags->forEach([&tag_list](const OString& tag) {
+            tag_list.emplace_back(tag->std_str());
+        });
+    }
 
-        if ("tags" == key) {
-            boost::split(tag_list, value, boost::is_any_of(","), boost::token_compress_on);
-        } else if ("file_ids" == key) {
-            boost::split(file_id_list, value, boost::is_any_of(","), boost::token_compress_on);
-        }
+    if (nullptr != search_request->file_ids.get()) {
+        search_request->file_ids->forEach([&file_id_list](const OInt64& id) {
+            file_id_list.emplace_back(std::to_string(id->getValue()));
+        });
     }
 
     std::vector<float> datas;
-    for (int64_t j = 0; j < records->records->count(); j++) {
-        for (int64_t k = 0; k < records->records->get(j)->record->count(); k++) {
-            datas.emplace_back(records->records->get(j)->record->get(k)->getValue());
+    for (int64_t j = 0; j < search_request->records->count(); j++) {
+        for (int64_t k = 0; k < search_request->records->get(j)->count(); k++) {
+            datas.emplace_back(search_request->records->get(j)->get(k)->getValue());
         }
     }
 
@@ -529,19 +539,35 @@ WebRequestHandler::Search(const OString& table_name, const OInt64& topk, const O
 
     TopKQueryResult result;
     auto context_ptr = GenContextPtr("Web Handler");
-    auto status = request_handler_.Search(context_ptr, table_name->std_str(), records->records->count(), datas,
+    auto status = request_handler_.Search(context_ptr, table_name->std_str(), search_request->records->count(), datas,
                                           range_list, topk_t, nprobe_t, tag_list, file_id_list, result);
 
     if (status.ok()) {
-        results_dto->ids = results_dto->ids->createShared();
-        for (auto& id : result.id_list_) {
-            results_dto->ids->pushBack(id);
-        }
-        results_dto->dits = results_dto->dits->createShared();
-        for (auto& dit : result.distance_list_) {
-            results_dto->dits->pushBack(dit);
-        }
         results_dto->num = result.row_num_;
+        results_dto->results = results_dto->results->createShared();
+        auto step = result.id_list_.size() / result.row_num_;
+//        OList<ResultDto::ObjectWrapper>::createShared();
+        for (size_t i = 0; i < result.row_num_; i++) {
+            auto row_result_dto = OList<ResultDto::ObjectWrapper>::createShared();
+            for (size_t j = 0; j < step; j++) {
+                auto result_dto = ResultDto::createShared();
+                result_dto->id = std::to_string(result.id_list_.at(i * step + j)).c_str();
+                result_dto->dit = std::to_string(result.distance_list_.at(i * step + j)).c_str();
+                row_result_dto->pushBack(result_dto);
+//                results_dto->results->pushBack(result_dto);
+            }
+            results_dto->results->pushBack(row_result_dto);
+//            i += result.id_list_.size() / result.row_num_;
+        }
+
+//        results_dto->ids = results_dto->ids->createShared();
+//        for (auto& id : result.id_list_) {
+//            results_dto->ids->pushBack(id);
+//        }
+//        results_dto->dits = results_dto->dits->createShared();
+//        for (auto& dit : result.distance_list_) {
+//            results_dto->dits->pushBack(dit);
+//        }
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)

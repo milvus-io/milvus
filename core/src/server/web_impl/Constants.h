@@ -45,7 +45,7 @@ static const char * KEY_INDEX_INDEX_TYPE = "index_type";
 static const char * KEY_INDEX_NLIST = "nlist";
 
 static const char * KEY_PARTITION_NAME = "partition_name";
-static const char * KEY_PARTITION_TAG = "tag";
+static const char * KEY_PARTITION_TAG = "partition_tag";
 
 ////////////////////////////////////////////////////
 

@@ -29,14 +29,16 @@ namespace web {
 class PartitionFieldsDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(PartitionFieldsDto, Object)
 
-    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
+//    DTO_FIELD(Fields<String>::ObjectWrapper, schema, "schema");
+    DTO_FIELD(String, partition_name);
+    DTO_FIELD(String, partition_tag);
 };
 
 class PartitionRequestDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(PartitionRequestDto, Object)
 
     DTO_FIELD(String, partition_name);
-    DTO_FIELD(String, tag);
+    DTO_FIELD(String, partition_tag);
 };
 
  class PartitionListDto : public oatpp::data::mapping::type::Object {

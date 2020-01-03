@@ -38,28 +38,52 @@ class RecordsDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
 };
 
+class SearchRequestDto : public OObject {
+    DTO_INIT(SearchRequestDto, Object)
+
+    DTO_FIELD(Int64, topk);
+    DTO_FIELD(Int64, nprobe);
+    DTO_FIELD(List<String>::ObjectWrapper, tags);
+    DTO_FIELD(List<Int64>::ObjectWrapper, file_ids);
+    DTO_FIELD(List<List<Float32>::ObjectWrapper>::ObjectWrapper, records);
+};
+
 
 class InsertRequestDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(InsertRequestDto, Object)
 
-    DTO_FIELD(String, table_name);
+//    DTO_FIELD(String, table_name);
     DTO_FIELD(String, tag) = VALUE_PARTITION_TAG_DEFAULT;
-    DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
+    DTO_FIELD(List<List<Float32>::ObjectWrapper>::ObjectWrapper, records);
     DTO_FIELD(List<Int64>::ObjectWrapper, ids);
 };
 
 class VectorIdsDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(VectorIdsDto, Object)
 
-    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
+//    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
+    DTO_FIELD(List<String>::ObjectWrapper, ids);
 };
 
 class ResultDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(ResultDto, Object)
 
+//    DTO_FIELD(Int64, num);
+    DTO_FIELD(String, id);
+    DTO_FIELD(String, dit, "distance");
+};
+
+class RowResultsDto : public OObject {
+    DTO_INIT(RowResultsDto, Object)
+
+//    DTO_FIELD(List<ResultDto::ObjectWrapper>::ObjectWrapper, );
+};
+
+class TopkResultsDto : public OObject {
+    DTO_INIT(TopkResultsDto, Object);
+
     DTO_FIELD(Int64, num);
-    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
-    DTO_FIELD(List<Float32>::ObjectWrapper, dits);
+    DTO_FIELD(List<List<ResultDto::ObjectWrapper>::ObjectWrapper>::ObjectWrapper, results);
 };
 
 #include OATPP_CODEGEN_END(DTO)

@@ -33,6 +33,8 @@ namespace web {
 using OString = oatpp::data::mapping::type::String;
 using OInt64 = oatpp::data::mapping::type::Int64;
 using OFloat32 = oatpp::data::mapping::type::Float32;
+template <class T>
+using OList = oatpp::data::mapping::type::List<T>;
 
 using OQueryParams = oatpp::web::protocol::http::QueryParams;
 
@@ -64,9 +66,9 @@ enum StatusCode : int {
     OUT_OF_MEMORY = 24,
 
     //
-    PATH_PARAM_LOSS = 51,
-    QUERY_PARAM_LOSS = 52,
-    BODY_FIELD_LOSS = 53,
+    PATH_PARAM_LOSS = 31,
+    QUERY_PARAM_LOSS = 32,
+    BODY_FIELD_LOSS = 33,
 };
 
 static const std::unordered_map<engine::EngineType, std::string> IndexMap = {
