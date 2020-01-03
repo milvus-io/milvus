@@ -16,6 +16,7 @@
 // under the License.
 
 #include "db/insert/VectorSource.h"
+
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"
 #include "metrics/Metrics.h"
@@ -30,8 +31,9 @@ VectorSource::VectorSource(VectorsData& vectors)
 }
 
 Status
-VectorSource::Add(const ExecutionEnginePtr& execution_engine, const meta::TableFileSchema& table_file_schema,
-                  const size_t& num_vectors_to_add, size_t& num_vectors_added) {
+VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
+                  const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add,
+                  size_t& num_vectors_added) {
     uint64_t n = vectors_.vector_count_;
     server::CollectAddMetrics metrics(n, table_file_schema.dimension_);
 
@@ -49,14 +51,24 @@ VectorSource::Add(const ExecutionEnginePtr& execution_engine, const meta::TableF
 
     Status status;
     if (!vectors_.float_data_.empty()) {
+        /*
         status = execution_engine->AddWithIds(
             num_vectors_added, vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
             vector_ids_to_add.data());
+        */
+        std::vector<uint8_t> vectors;
+        auto size = vectors_.float_data_.size() * sizeof(float);
+        vectors.resize(size);
+        memcpy(vectors.data(), vectors_.float_data_.data(), size);
+        status = segment_writer_ptr->AddVectors(vectors_.field_name_, vectors, vector_ids_to_add);
     } else if (!vectors_.binary_data_.empty()) {
+        /*
         status = execution_engine->AddWithIds(
             num_vectors_added,
             vectors_.binary_data_.data() + current_num_vectors_added * SingleVectorSize(table_file_schema.dimension_),
             vector_ids_to_add.data());
+        */
+        status = segment_writer_ptr->AddVectors(vectors_.field_name_, vectors_.binary_data_, vector_ids_to_add);
     }
 
     if (status.ok()) {

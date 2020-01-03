@@ -22,7 +22,7 @@
 namespace milvus {
 namespace segment {
 
-SegmentWriter::SegmentWriter(const std::string& location) : location_(location) {
+SegmentWriter::SegmentWriter(const std::string& directory) : directory_(directory) {
 }
 
 Status
@@ -45,7 +45,7 @@ SegmentWriter::Serialize() {
 }
 
 Status
-SegmentWriter::Flush() {
+SegmentWriter::Cache() {
     // TODO
     return Status::OK();
 }

@@ -16,14 +16,15 @@
 // under the License.
 
 #include "db/Utils.h"
-#include "utils/CommonUtil.h"
-#include "utils/Log.h"
 
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
 #include <regex>
 #include <vector>
+
+#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
@@ -39,7 +40,7 @@ std::mutex index_file_counter_mutex;
 std::string
 ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
-    std::string partition_path = table_path + "/" + std::to_string(table_file.date_);
+    std::string partition_path = table_path + "/" + std::to_string(table_file.date_) + table_file.file_id_;
     return partition_path;
 }
 
@@ -130,6 +131,7 @@ CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
         return status;
     }
 
+    table_file.directory_ = parent_path;
     table_file.location_ = parent_path + "/" + table_file.file_id_;
 
     return Status::OK();

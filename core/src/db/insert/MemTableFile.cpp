@@ -16,13 +16,14 @@
 // under the License.
 
 #include "db/insert/MemTableFile.h"
+
+#include <cmath>
+#include <string>
+
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "utils/Log.h"
-
-#include <cmath>
-#include <string>
 
 namespace milvus {
 namespace engine {
@@ -32,9 +33,10 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
-        execution_engine_ = EngineFactory::Build(
+        /*execution_engine_ = EngineFactory::Build(
             table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
-            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);
+            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);*/
+        segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(table_file_schema_.directory_);
     }
 }
 
@@ -67,7 +69,8 @@ MemTableFile::Add(VectorSourcePtr& source) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
+        auto status = source->Add(/*execution_engine_,*/ segment_writer_ptr_, table_file_schema_, num_vectors_to_add,
+                                  num_vectors_added);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
@@ -97,11 +100,15 @@ MemTableFile::Serialize() {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    execution_engine_->Serialize();
-    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
-    table_file_schema_.row_count_ = execution_engine_->Count();
+    segment_writer_ptr_->Serialize();
 
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
+    //    execution_engine_->Serialize();
+
+    // TODO:
+    //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
+    //    table_file_schema_.row_count_ = execution_engine_->Count();
+
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
         table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
@@ -116,9 +123,12 @@ MemTableFile::Serialize() {
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
 
-    if (options_.insert_cache_immediately_) {
-        execution_engine_->Cache();
-    }
+    // TODO:
+    /*
+        if (options_.insert_cache_immediately_) {
+            execution_engine_->Cache();
+        }
+    */
 
     return status;
 }

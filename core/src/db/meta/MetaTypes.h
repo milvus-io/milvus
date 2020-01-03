@@ -84,7 +84,9 @@ struct TableFileSchema {
     size_t row_count_ = 0;
     DateT date_ = EmptyDate;
     uint16_t dimension_ = 0;
+    // TODO
     std::string location_;
+    std::string directory_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
     int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta

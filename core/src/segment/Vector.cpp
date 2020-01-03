@@ -29,14 +29,14 @@ void
 Vector::AddData(const std::vector<uint8_t>& data) {
     data_.reserve(data_.size() + data.size());
     // TODO: move?
-    data_.insert(data_.end(), data.begin(), data.end());
+    data_.insert(data_.end(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
 }
 
 void
 Vector::AddUids(const std::vector<doc_id_t>& uids) {
     data_.reserve(data_.size() + uids.size());
     // TODO: move?
-    data_.insert(data_.end(), uids.begin(), uids.end());
+    data_.insert(data_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
 }
 
 const std::vector<uint8_t>&

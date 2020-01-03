@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "DeletedDocs.h"
 #include "Vectors.h"
 #include "utils/Status.h"
@@ -26,7 +28,7 @@ namespace segment {
 
 class SegmentWriter {
  public:
-    explicit SegmentWriter(const std::string& location);
+    explicit SegmentWriter(const std::string& directory);
 
     Status
     AddVectors(const std::string& field_name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
@@ -35,13 +37,15 @@ class SegmentWriter {
     Serialize();
 
     Status
-    Flush();
+    Cache();
 
  private:
-    const std::string location_;
+    const std::string directory_;
     VectorsPtr vectors_ptr_;
     DeletedDocsPtr deleted_docs_ptr_;
 };
+
+using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;
 
 }  // namespace segment
 }  // namespace milvus
