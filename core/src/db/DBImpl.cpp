@@ -325,6 +325,8 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
+    // Enter WAL
+
     // if partition is specified, use partition as target table
     Status status;
     std::string target_table_name = table_id;

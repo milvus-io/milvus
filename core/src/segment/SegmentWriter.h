@@ -29,7 +29,7 @@ class SegmentWriter {
     explicit SegmentWriter(const std::string& location);
 
     Status
-    AddVectors(const std::string& field_name, const void* vector, const segment::doc_id_t* doc_ids, size_t count);
+    AddVectors(const std::string& field_name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
 
     Status
     Serialize();

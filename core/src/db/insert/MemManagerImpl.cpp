@@ -39,6 +39,7 @@ MemManagerImpl::GetMemByTable(const std::string& table_id) {
 Status
 MemManagerImpl::InsertVectors(const std::string& table_id_, size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     while (GetCurrentMem() > options_.insert_buffer_size_) {
+        // TODO: force flush instead of stalling
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 

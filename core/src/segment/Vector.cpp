@@ -25,9 +25,6 @@ namespace segment {
 Vector::Vector(const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids) : data_(data), uids_(uids) {
 }
 
-Vector::Vector() {
-}
-
 void
 Vector::AddData(const std::vector<uint8_t>& data) {
     data_.reserve(data_.size() + data.size());

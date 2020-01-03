@@ -29,7 +29,7 @@ class Vector {
  public:
     Vector(const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
 
-    Vector();
+    Vector() = default;
 
     void
     AddData(const std::vector<uint8_t>& data);
