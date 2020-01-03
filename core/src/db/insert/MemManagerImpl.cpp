@@ -63,6 +63,14 @@ MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, VectorsData& ve
 }
 
 Status
+MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
+    MemTablePtr mem = GetMemByTable(table_id);
+
+    auto status = mem->Delete(vector_id);
+    return status;
+}
+
+Status
 MemManagerImpl::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
     MemIdMap temp_map;

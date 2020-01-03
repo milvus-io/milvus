@@ -59,5 +59,10 @@ SegmentWriter::Cache() {
     return Status::OK();
 }
 
+Status
+SegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
+    segment_ptr = segment_ptr_;
+}
+
 }  // namespace segment
 }  // namespace milvus

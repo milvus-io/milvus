@@ -17,14 +17,14 @@
 
 #pragma once
 
-#include "MemTableFile.h"
-#include "VectorSource.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include "MemTableFile.h"
+#include "VectorSource.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -37,6 +37,9 @@ class MemTable {
 
     Status
     Add(VectorSourcePtr& source);
+
+    Status
+    Delete(segment::doc_id_t doc_id);
 
     void
     GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);

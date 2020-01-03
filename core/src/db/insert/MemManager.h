@@ -17,12 +17,12 @@
 
 #pragma once
 
-#include "db/Types.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <set>
 #include <string>
+
+#include "db/Types.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -31,6 +31,9 @@ class MemManager {
  public:
     virtual Status
     InsertVectors(const std::string& table_id, VectorsData& vectors) = 0;
+
+    virtual Status
+    DeleteVector(const std::string& table_id, IDNumber vector_id) = 0;
 
     virtual Status
     Serialize(std::set<std::string>& table_ids) = 0;

@@ -17,11 +17,6 @@
 
 #pragma once
 
-#include "MemManager.h"
-#include "MemTable.h"
-#include "db/meta/Meta.h"
-#include "utils/Status.h"
-
 #include <ctime>
 #include <map>
 #include <memory>
@@ -29,6 +24,11 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#include "MemManager.h"
+#include "MemTable.h"
+#include "db/meta/Meta.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -42,6 +42,9 @@ class MemManagerImpl : public MemManager {
 
     Status
     InsertVectors(const std::string& table_id, VectorsData& vectors) override;
+
+    Status
+    DeleteVector(const std::string& table_id, IDNumber vector_id) override;
 
     Status
     Serialize(std::set<std::string>& table_ids) override;

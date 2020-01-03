@@ -49,6 +49,9 @@ class Vector {
     size_t
     GetDimension();
 
+    void
+    Erase(size_t offset, int vector_type_size);
+
     // No copy and move
     Vector(const Vector&) = delete;
     Vector(Vector&&) = delete;
@@ -60,6 +63,7 @@ class Vector {
 
  private:
     std::vector<uint8_t> data_;
+    // TODO: since all vector fields should correspond to the same set of uids, save them in Vectors instead?
     std::vector<int64_t> uids_;
 };
 

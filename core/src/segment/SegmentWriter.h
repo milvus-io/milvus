@@ -39,9 +39,12 @@ class SegmentWriter {
     Status
     Cache();
 
+    Status
+    GetSegment(SegmentPtr& segment_ptr);
+
  private:
     const std::string directory_;
-    segment::SegmentPtr segment_ptr_;
+    SegmentPtr segment_ptr_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;

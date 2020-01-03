@@ -324,7 +324,7 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    // Enter WAL
+    // TODO:  Enter WAL. They should call mem_mgr_->InsertVectors
 
     // if partition is specified, use partition as target table
     Status status;
@@ -346,8 +346,16 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
 }
 
 Status
-DeleteVector(const std::string& table_id, IDNumber vector_id) {
-    
+DBImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // TODO:  Enter WAL. They should call mem_mgr_->DeleteVector
+
+    auto status = mem_mgr_->DeleteVector(table_id, vector_id);
+
+    return status;
 }
 
 Status

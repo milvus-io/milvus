@@ -23,6 +23,11 @@ namespace segment {
 DeletedDocs::DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids) : deleted_doc_ids_(deleted_doc_ids) {
 }
 
+void
+DeletedDocs::AddDeleteDoc(doc_id_t doc_id) {
+    deleted_doc_ids_.emplace_back(doc_id);
+}
+
 const std::vector<doc_id_t>&
 DeletedDocs::GetDeletedDocs() const {
     return deleted_doc_ids_;

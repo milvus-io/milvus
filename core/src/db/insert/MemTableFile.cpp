@@ -17,13 +17,16 @@
 
 #include "db/insert/MemTableFile.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <string>
 
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "utils/Log.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -79,6 +82,36 @@ MemTableFile::Add(VectorSourcePtr& source) {
     return Status::OK();
 }
 
+Status
+MemTableFile::Delete(segment::doc_id_t doc_id) {
+    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+
+    // TODO: need to know the type of vector we want to delete. Hard code for now
+    int vector_type_size;
+    if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
+        vector_type_size = sizeof(uint8_t);
+    } else {
+        vector_type_size = sizeof(float);
+    }
+
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+    auto vectors_map = segment_ptr->vectors_ptr_->vectors;
+    for (auto& it : vectors_map) {
+        auto uids = it.second->GetUids();
+        auto found = std::find(uids.begin(), uids.end(), doc_id);
+        if (found != uids.end()) {
+            auto offset = std::distance(uids.begin(), found);
+            it.second->Erase(offset, vector_type_size);
+        }
+    }
+
+    // Then add the id to delete queue so it can be applied to segment on disk during the next flush
+    segment_ptr->deleted_docs_ptr_->AddDeleteDoc(doc_id);
+
+    return Status::OK();
+}
+
 size_t
 MemTableFile::GetCurrentMem() {
     return current_mem_;
@@ -123,7 +156,7 @@ MemTableFile::Serialize() {
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
 
-    // TODO:
+    // TODO: cache
     /*
         if (options_.insert_cache_immediately_) {
             execution_engine_->Cache();

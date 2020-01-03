@@ -16,10 +16,11 @@
 // under the License.
 
 #include "db/insert/MemTable.h"
-#include "utils/Log.h"
 
 #include <memory>
 #include <string>
+
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
@@ -54,6 +55,17 @@ MemTable::Add(VectorSourcePtr& source) {
         }
     }
     return Status::OK();
+}
+
+Status
+MemTable::Delete(segment::doc_id_t doc_id) {
+    // Locate which table file the doc id lands in
+    for (auto& table_file : mem_table_file_list_) {
+        // TODO:
+        // Use bloom filter to check whether the id is present in this table file
+        // If present:
+        table_file->Delete(doc_id);
+    }
 }
 
 void

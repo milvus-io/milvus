@@ -39,6 +39,13 @@ Vector::AddUids(const std::vector<doc_id_t>& uids) {
     data_.insert(data_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
 }
 
+void
+Vector::Erase(size_t offset, int vector_type_size) {
+    auto step = offset * GetDimension() * vector_type_size;
+    data_.erase(data_.begin() + step, data_.begin() + step * 2);
+    uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
+}
+
 const std::vector<uint8_t>&
 Vector::GetData() const {
     return data_;
