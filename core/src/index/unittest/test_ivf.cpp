@@ -265,7 +265,7 @@ TEST_P(IVFTest, clone_test) {
 #ifdef MILVUS_GPU_VERSION
 #ifdef CUSTOMIZATION
 TEST_P(IVFTest, gpu_seal_test) {
-    std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
+    std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ"};
     auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
     if (finder == support_idx_vec.cend()) {
         return;
