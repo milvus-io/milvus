@@ -33,7 +33,7 @@ class MemTableFile {
     MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
-    Add(const VectorSourcePtr& source, IDNumbers& vector_ids);
+    Add(VectorSourcePtr& source);
 
     size_t
     GetCurrentMem();

@@ -112,8 +112,8 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
     }
 
     auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (search_cfg != nullptr) {
-        search_cfg->CheckValid();  // throw exception
+    if (search_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("not support this kind of config");
     }
 
     GETTENSOR(dataset)

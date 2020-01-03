@@ -18,6 +18,8 @@
 #include "wrapper/VecIndex.h"
 #include "VecImpl.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+#include "knowhere/index/vector_index/IndexBinaryIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
@@ -27,6 +29,7 @@
 #include "server/Config.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "wrapper/BinVecImpl.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -121,9 +124,17 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::IDMAP>();
             return std::make_shared<BFIndex>(index);
         }
+        case IndexType::FAISS_BIN_IDMAP: {
+            index = std::make_shared<knowhere::BinaryIDMAP>();
+            return std::make_shared<BinBFIndex>(index);
+        }
         case IndexType::FAISS_IVFFLAT_CPU: {
             index = std::make_shared<knowhere::IVF>();
             break;
+        }
+        case IndexType::FAISS_BIN_IVFLAT_CPU: {
+            index = std::make_shared<knowhere::BinaryIVF>();
+            return std::make_shared<BinVecImpl>(index, type);
         }
         case IndexType::FAISS_IVFPQ_CPU: {
             index = std::make_shared<knowhere::IVFPQ>();

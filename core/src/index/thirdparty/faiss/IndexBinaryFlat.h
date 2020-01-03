@@ -31,6 +31,8 @@ struct IndexBinaryFlat : IndexBinary {
 
   explicit IndexBinaryFlat(idx_t d);
 
+  IndexBinaryFlat(idx_t d, MetricType metric);
+
   void add(idx_t n, const uint8_t *x) override;
 
   void reset() override;
