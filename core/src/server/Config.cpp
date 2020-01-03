@@ -155,6 +155,12 @@ Config::ValidateConfig() {
         return s;
     }
 
+    std::string metric_prometheus_ip;
+    s = GetMetricConfigPrometheusIp(metric_prometheus_ip);
+    if (!s.ok()) {
+        return s;
+    }
+
     std::string metric_prometheus_port;
     s = GetMetricConfigPrometheusPort(metric_prometheus_port);
     if (!s.ok()) {
@@ -308,6 +314,11 @@ Config::ResetDefaultConfig() {
     }
 
     s = SetMetricConfigCollector(CONFIG_METRIC_COLLECTOR_DEFAULT);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = SetMetricConfigPrometheusIP(CONFIG_METRIC_PROMETHEUS_IP_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -626,6 +637,16 @@ Config::CheckMetricConfigCollector(const std::string& value) {
         std::string msg =
             "Invalid metric collector: " + value + ". Possible reason: metric_config.collector is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckMetricConfigPrometheusIp(const std::string& value) {
+    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+        std::string msg =
+            "Invalid metric ip: " + value + ". Possible reason: metric_config.prometheus_config.ip is invalid.";
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config prometheus_ip: " + value);
     }
     return Status::OK();
 }
@@ -1045,6 +1066,12 @@ Config::GetMetricConfigCollector(std::string& value) {
 }
 
 Status
+Config::GetMetricConfigPrometheusIp(std::string& value) {
+    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_IP, CONFIG_METRIC_PROMETHEUS_IP_DEFAULT);
+    return Status::OK();
+}
+
+Status
 Config::GetMetricConfigPrometheusPort(std::string& value) {
     value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_PORT, CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT);
     return CheckMetricConfigPrometheusPort(value);
@@ -1366,6 +1393,15 @@ Config::SetMetricConfigCollector(const std::string& value) {
     }
     SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_COLLECTOR, value);
     return Status::OK();
+}
+
+Status
+Config::SetMetricConfigPrometheusIP(const std::string& value) {
+    Status s = CheckMetricConfigPrometheusIp(value);
+    if (!s.ok()) {
+        return s;
+    }
+    SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_IP, value);
 }
 
 Status

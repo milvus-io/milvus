@@ -40,8 +40,12 @@ PrometheusMetrics::Init() {
         }
 
         // Following should be read from config file.
-        std::string bind_address;
-        s = config.GetMetricConfigPrometheusPort(bind_address);
+        std::string push_port, push_ip;
+        s = config.GetMetricConfigPrometheusPort(push_port);
+        if (!s.ok()) {
+            return s.code();
+        }
+        s = config.GetMetricConfigPrometheusIp(push_ip);
         if (!s.ok()) {
             return s.code();
         }
@@ -49,11 +53,16 @@ PrometheusMetrics::Init() {
         const std::string uri = std::string("/metrics");
         const std::size_t num_threads = 2;
 
-        // Init Exposer
-        exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);
+        auto labels = prometheus::Gateway::GetInstanceLabel("pushgateway");
 
-        // Exposer Registry
-        exposer_ptr_->RegisterCollectable(registry_);
+        // Init pushgateway
+        gateway_ = std::make_shared<prometheus::Gateway>(push_ip, push_port, "milvus_metrics", labels);
+
+        // Init Exposer
+        // exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);
+
+        // Pushgateway Registry
+        gateway_->RegisterCollectable(registry_);
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << "Failed to connect prometheus server: " << std::string(ex.what());
         return SERVER_UNEXPECTED_ERROR;

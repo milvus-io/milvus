@@ -203,6 +203,10 @@ class MetricsBase {
     virtual void
     CPUTemperature() {
     }
+
+    virtual void
+    PushToGateway() {
+    }
 };
 
 }  // namespace server
