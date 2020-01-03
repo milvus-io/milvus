@@ -827,7 +827,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         if (use_heap) {
             float *D = new float[k * n];
-            float *c_dis = new float [k * nprobe];
+            float *c_dis = new float [n * nprobe];
             memcpy(c_dis, coarse_dis, sizeof(float) * k * nprobe);
             search_knn_jaccard_heap (*this, n, x, k, idx, c_dis ,
                                      D, labels, store_pairs,
