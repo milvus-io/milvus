@@ -76,36 +76,27 @@ Utils::GenTableName() {
 std::string
 Utils::MetricTypeName(const milvus::MetricType& metric_type) {
     switch (metric_type) {
-        case milvus::MetricType::L2:
-            return "L2 distance";
-        case milvus::MetricType::IP:
-            return "Inner product";
-        default:
-            return "Unknown metric type";
+        case milvus::MetricType::L2:return "L2 distance";
+        case milvus::MetricType::IP:return "Inner product";
+        case milvus::MetricType::HAMMING:return "Hamming distance";
+        case milvus::MetricType::JACCARD:return "Jaccard distance";
+        case milvus::MetricType::TANIMOTO:return "Tanimoto distance";
+        default:return "Unknown metric type";
     }
 }
 
 std::string
 Utils::IndexTypeName(const milvus::IndexType& index_type) {
     switch (index_type) {
-        case milvus::IndexType::FLAT:
-            return "FLAT";
-        case milvus::IndexType::IVFFLAT:
-            return "IVFFLAT";
-        case milvus::IndexType::IVFSQ8:
-            return "IVFSQ8";
-        case milvus::IndexType::RNSG:
-            return "NSG";
-        case milvus::IndexType::IVFSQ8H:
-            return "IVFSQ8H";
-        case milvus::IndexType::IVFPQ:
-            return "IVFPQ";
-        case milvus::IndexType::SPTAGKDT:
-            return "SPTAGKDT";
-        case milvus::IndexType::SPTAGBKT:
-            return "SPTAGBKT";
-        default:
-            return "Unknown index type";
+        case milvus::IndexType::FLAT:return "FLAT";
+        case milvus::IndexType::IVFFLAT:return "IVFFLAT";
+        case milvus::IndexType::IVFSQ8:return "IVFSQ8";
+        case milvus::IndexType::RNSG:return "NSG";
+        case milvus::IndexType::IVFSQ8H:return "IVFSQ8H";
+        case milvus::IndexType::IVFPQ:return "IVFPQ";
+        case milvus::IndexType::SPTAGKDT:return "SPTAGKDT";
+        case milvus::IndexType::SPTAGBKT:return "SPTAGBKT";
+        default:return "Unknown index type";
     }
 }
 
@@ -148,9 +139,9 @@ Utils::BuildVectors(int64_t from, int64_t to, std::vector<milvus::RowRecord>& ve
     record_ids.clear();
     for (int64_t k = from; k < to; k++) {
         milvus::RowRecord record;
-        record.data.resize(dimension);
+        record.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            record.data[i] = (float)(k % (i + 1));
+            record.float_data[i] = (float)(k % (i + 1));
         }
 
         vector_record_array.emplace_back(record);
@@ -189,11 +180,20 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
     for (size_t i = 0; i < nq; i++) {
         const milvus::QueryResult& one_result = topk_query_result[i];
         auto search_id = search_record_array[i].first;
-        int64_t result_id = one_result.ids[0];
-        if (result_id != search_id) {
-            std::cout << "The top 1 result is wrong: " << result_id << " vs. " << search_id << std::endl;
+
+        uint64_t match_index = one_result.ids.size();
+        for (uint64_t index = 0; index < one_result.ids.size(); index++) {
+            if (search_id == one_result.ids[index]) {
+                match_index = index;
+                break;
+            }
+        }
+
+        if (match_index >= one_result.ids.size()) {
+            std::cout << "The topk result is wrong: not return search target in result set" << std::endl;
         } else {
-            std::cout << "No." << i << " Check result successfully" << std::endl;
+            std::cout << "No." << i << " Check result successfully for target: " << search_id << " at top "
+                      << match_index << std::endl;
         }
     }
     BLOCK_SPLITER

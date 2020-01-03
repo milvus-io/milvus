@@ -17,26 +17,30 @@
 
 #pragma once
 
+#include <memory>
+
 #include "db/IDGenerator.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/meta/Meta.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Status.h"
-
-#include <memory>
 
 namespace milvus {
 namespace engine {
 
 class VectorSource {
  public:
-    VectorSource(const size_t& n, const float* vectors);
+    explicit VectorSource(VectorsData& vectors);
 
     Status
-    Add(const ExecutionEnginePtr& execution_engine, const meta::TableFileSchema& table_file_schema,
-        const size_t& num_vectors_to_add, size_t& num_vectors_added, IDNumbers& vector_ids);
+    Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
+        const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
 
     size_t
     GetNumVectorsAdded();
+
+    size_t
+    SingleVectorSize(uint16_t dimension);
 
     bool
     AllAdded();
@@ -45,8 +49,7 @@ class VectorSource {
     GetVectorIds();
 
  private:
-    const size_t n_;
-    const float* vectors_;
+    VectorsData& vectors_;
     IDNumbers vector_ids_;
 
     size_t current_num_vectors_added;

@@ -17,13 +17,15 @@
 
 #pragma once
 
+#include <segment/SegmentWriter.h>
+
+#include <memory>
+#include <string>
+
 #include "VectorSource.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/meta/Meta.h"
 #include "utils/Status.h"
-
-#include <memory>
-#include <string>
 
 namespace milvus {
 namespace engine {
@@ -33,7 +35,10 @@ class MemTableFile {
     MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
-    Add(const VectorSourcePtr& source, IDNumbers& vector_ids);
+    Add(VectorSourcePtr& source);
+
+    Status
+    Delete(segment::doc_id_t doc_id);
 
     size_t
     GetCurrentMem();
@@ -58,7 +63,9 @@ class MemTableFile {
     DBOptions options_;
     size_t current_mem_;
 
-    ExecutionEnginePtr execution_engine_;
+    //    ExecutionEnginePtr execution_engine_;
+    segment::SegmentWriterPtr segment_writer_ptr_;
+
 };  // MemTableFile
 
 using MemTableFilePtr = std::shared_ptr<MemTableFile>;

@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "segment/Types.h"
+
 namespace milvus {
 namespace segment {
 
@@ -25,7 +27,13 @@ class IdBloomFilter {
     IdBloomFilter(BloomFilter bloom_filter);
 
     bool
-    test(int64_t uid);
+    Check(segment::doc_id_t uid);
+
+    void
+    Add(segment::doc_id_t uid);
+
+    void
+    Remove(segment::doc_id_t uid);
 
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;

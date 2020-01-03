@@ -17,16 +17,18 @@
 
 #pragma once
 
+#include "segment/IdBloomFilter.h"
+
 namespace milvus {
 namespace codec {
 
 class IdBloomFilterFormat {
  public:
-    virtual IdBloomFilter
+    virtual segment::IdBloomFilter
     read() = 0;
 
     virtual void
-    write(IdBloomFilter id_bloom_filter) = 0;
+    write(segment::IdBloomFilter id_bloom_filter) = 0;
 };
 
 }  // namespace codec

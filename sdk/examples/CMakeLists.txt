@@ -21,3 +21,4 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/utils util_files)
 
 add_subdirectory(simple)
 add_subdirectory(partition)
+add_subdirectory(binary_vector)

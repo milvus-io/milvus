@@ -19,6 +19,7 @@
 
 set(test_files
         test_knowhere.cpp
+        test_binindex.cpp
         test_wrapper.cpp)
 if (MILVUS_GPU_VERSION)
     set(test_files ${test_files}
