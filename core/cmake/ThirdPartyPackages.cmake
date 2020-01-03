@@ -1059,17 +1059,39 @@ macro(build_aws)
 
     file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
     add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
+    add_library(aws-cpp-sdk-core STATIC IMPORTED)
+
     set_target_properties(aws-cpp-sdk-s3
             PROPERTIES
             IMPORTED_LOCATION "${AWS_CPP_SDK_S3_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+            )
 
-    add_library(aws-cpp-sdk-core STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-core
-            PROPERTIES IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
+            PROPERTIES
+            IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+            )
+
+    if(REDHAT_FOUND)
+        set_target_properties(aws-cpp-sdk-s3
+                PROPERTIES
+                INTERFACE_LINK_LIBRARIES
+                "${AWS_PREFIX}/lib64/libaws-c-event-stream.a;${AWS_PREFIX}/lib64/libaws-checksums.a;${AWS_PREFIX}/lib64/libaws-c-common.a")
+        set_target_properties(aws-cpp-sdk-core
+                PROPERTIES
+                INTERFACE_LINK_LIBRARIES
+                "${AWS_PREFIX}/lib64/libaws-c-event-stream.a;${AWS_PREFIX}/lib64/libaws-checksums.a;${AWS_PREFIX}/lib64/libaws-c-common.a")
+    else()
+        set_target_properties(aws-cpp-sdk-s3
+                PROPERTIES
+                INTERFACE_LINK_LIBRARIES
+                "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+        set_target_properties(aws-cpp-sdk-core
+                PROPERTIES
+                INTERFACE_LINK_LIBRARIES
+                "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+    endif()
 
     add_dependencies(aws-cpp-sdk-s3 aws_ep)
     add_dependencies(aws-cpp-sdk-core aws_ep)
