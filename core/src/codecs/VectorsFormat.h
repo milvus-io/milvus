@@ -31,7 +31,7 @@ class VectorsFormat {
     read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
 
     virtual void
-    write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) = 0;
+    write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) = 0;
 };
 
 using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;

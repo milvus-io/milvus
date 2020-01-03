@@ -346,6 +346,11 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
 }
 
 Status
+DeleteVector(const std::string& table_id, IDNumber vector_id) {
+    
+}
+
+Status
 DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;

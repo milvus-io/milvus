@@ -19,6 +19,10 @@
 
 #include <memory>
 
+#include "Vector.h"
+#include "codecs/default/DefaultCodec.h"
+#include "store/Directory.h"
+
 namespace milvus {
 namespace segment {
 
@@ -28,19 +32,24 @@ SegmentWriter::SegmentWriter(const std::string& directory) : directory_(director
 Status
 SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8_t>& data,
                           const std::vector<doc_id_t>& uids) {
-    auto found = vectors_ptr_->vectors.find(field_name);
-    if (found == vectors_ptr_->vectors.end()) {
-        vectors_ptr_->vectors[field_name] = std::make_shared<Vector>(data, uids);
-    } else {
-        vectors_ptr_->vectors[field_name]->AddData(data);
-        vectors_ptr_->vectors[field_name]->AddUids(uids);
+    auto vectors_ptr = segment_ptr_->vectors_ptr_;
+    auto found = vectors_ptr->vectors.find(field_name);
+    if (found == vectors_ptr->vectors.end()) {
+        vectors_ptr->vectors[field_name] = std::make_shared<Vector>();
     }
+    vectors_ptr->vectors[field_name]->AddData(data);
+    vectors_ptr->vectors[field_name]->AddUids(uids);
+
     return Status::OK();
 }
 
 Status
 SegmentWriter::Serialize() {
     // TODO
+    codec::DefaultCodec default_codec;
+    store::DirectoryPtr directory_ptr = std::make_shared<store::Directory>(directory_);
+    default_codec.GetVectorsFormat()->write(directory_ptr, segment_ptr_->vectors_ptr_);
+    default_codec.GetDeletedDocsFormat()->write(directory_ptr, segment_ptr_->deleted_docs_ptr_);
     return Status::OK();
 }
 

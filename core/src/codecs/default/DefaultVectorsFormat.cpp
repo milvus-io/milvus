@@ -76,9 +76,9 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
 }
 
 void
-DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) {
+DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
     std::string dir_path = directory_ptr->GetDirPath();
-    for (auto& it : vectors.vectors) {
+    for (auto& it : vectors->vectors) {
         const std::string rv_file_path = dir_path + "/" + it.first + "." + raw_vector_extension_;
         const std::string uid_file_path = dir_path + "/" + it.first + "." + user_id_extension_;
 

@@ -27,7 +27,7 @@ namespace segment {
 
 class Vector {
  public:
-    Vector(const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
+    Vector(std::vector<uint8_t> data, std::vector<doc_id_t> uids);
 
     Vector() = default;
 

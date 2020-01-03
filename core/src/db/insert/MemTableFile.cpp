@@ -129,6 +129,9 @@ MemTableFile::Serialize() {
             execution_engine_->Cache();
         }
     */
+    if (options_.insert_cache_immediately_) {
+        segment_writer_ptr_->Cache();
+    }
 
     return status;
 }

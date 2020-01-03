@@ -17,10 +17,22 @@
 
 #pragma once
 
+#include <memory>
+
+#include "segment/DeletedDocs.h"
+#include "segment/Vectors.h"
+
 namespace milvus {
 namespace segment {
 
 typedef int64_t doc_id_t;
+
+struct Segment {
+    VectorsPtr vectors_ptr_;
+    DeletedDocsPtr deleted_docs_ptr_;
+};
+
+using SegmentPtr = std::shared_ptr<Segment>;
 
 }  // namespace segment
 }  // namespace milvus

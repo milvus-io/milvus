@@ -18,9 +18,9 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
-#include "DeletedDocs.h"
-#include "Vectors.h"
+#include "segment/Types.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -41,8 +41,7 @@ class SegmentWriter {
 
  private:
     const std::string directory_;
-    VectorsPtr vectors_ptr_;
-    DeletedDocsPtr deleted_docs_ptr_;
+    segment::SegmentPtr segment_ptr_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;
