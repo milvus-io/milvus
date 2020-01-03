@@ -22,7 +22,7 @@
 namespace milvus {
 namespace storage {
 
-struct IOReader {
+class IOReader {
  public:
     explicit IOReader(const std::string& name) : name_(name) {
     }
