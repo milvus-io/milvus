@@ -50,7 +50,7 @@ GPUIVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
         host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
         return std::make_shared<IVFIndexModel>(host_index);
     } else {
-        KNOWHERE_THROW_MSG("Build IVFSQ can't get gpu resource");
+        KNOWHERE_THROW_MSG("Build IVFPQ can't get gpu resource");
     }
 }
 
