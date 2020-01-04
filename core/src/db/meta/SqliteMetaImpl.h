@@ -17,12 +17,12 @@
 
 #pragma once
 
-#include "Meta.h"
-#include "db/Options.h"
-
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include "Meta.h"
+#include "db/Options.h"
 
 namespace milvus {
 namespace engine {
@@ -68,6 +68,12 @@ class SqliteMetaImpl : public Meta {
 
     Status
     UpdateTableFlag(const std::string& table_id, int64_t flag) override;
+
+    Status
+    UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) override;
+
+    Status
+    GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) override;
 
     Status
     UpdateTableFile(TableFileSchema& file_schema) override;

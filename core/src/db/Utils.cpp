@@ -16,14 +16,17 @@
 // under the License.
 
 #include "db/Utils.h"
-#include "utils/CommonUtil.h"
-#include "utils/Log.h"
 
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
 #include <regex>
 #include <vector>
+
+#include "server/Config.h"
+#include "storage/s3/S3ClientWrapper.h"
+#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
@@ -36,14 +39,14 @@ const char* TABLES_FOLDER = "/tables/";
 uint64_t index_file_counter = 0;
 std::mutex index_file_counter_mutex;
 
-std::string
+static std::string
 ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
-    std::string partition_path = table_path + "/" + std::to_string(table_file.date_);
+    std::string partition_path = table_path + "/" + table_file.file_id_;
     return partition_path;
 }
 
-std::string
+static std::string
 GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSchema& table_file) {
     uint64_t path_count = options.slave_paths_.size() + 1;
     std::string target_path = options.path_;
@@ -117,6 +120,20 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
         }
     }
 
+    bool minio_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigMinioEnable(minio_enable);
+
+    if (minio_enable) {
+        std::string table_path = options.path_ + TABLES_FOLDER + table_id;
+
+        auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+        Status stat = storage_inst.DeleteObjects(table_path);
+        if (!stat.ok()) {
+            return stat;
+        }
+    }
+
     return Status::OK();
 }
 
@@ -130,6 +147,7 @@ CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
         return status;
     }
 
+    table_file.directory_ = parent_path;
     table_file.location_ = parent_path + "/" + table_file.file_id_;
 
     return Status::OK();
@@ -139,6 +157,16 @@ Status
 GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
+
+    bool minio_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigMinioEnable(minio_enable);
+    if (minio_enable) {
+        /* need not check file existence */
+        table_file.location_ = file_path;
+        return Status::OK();
+    }
+
     if (boost::filesystem::exists(file_path)) {
         table_file.location_ = file_path;
         return Status::OK();

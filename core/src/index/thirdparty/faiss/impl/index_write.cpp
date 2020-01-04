@@ -245,12 +245,17 @@ void write_InvertedLists (const InvertedLists *ils, IOWriter *f) {
         WRITE1 (oa->nlist);
         WRITE1 (oa->code_size);
         WRITEVECTOR(oa->readonly_length);
+#ifdef USE_CPU
+        size_t n = oa->readonly_ids.size();
+        WRITE1(n);
+        WRITEANDCHECK(oa->readonly_ids.data(), n);
+        WRITEANDCHECK(oa->readonly_codes.data(), n * oa->code_size);
+#else
         size_t n = oa->pin_readonly_ids->size() / sizeof(InvertedLists::idx_t);
         WRITE1(n);
-//        WRITEANDCHECK(oa->readonly_ids.data(), n);
-//        WRITEANDCHECK(oa->readonly_codes.data(), n * oa->code_size);
         WRITEANDCHECK((InvertedLists::idx_t *) oa->pin_readonly_ids->data, n);
         WRITEANDCHECK((uint8_t *) oa->pin_readonly_codes->data, n * oa->code_size);
+#endif
     } else if (const auto & od =
                dynamic_cast<const OnDiskInvertedLists *>(ils)) {
         uint32_t h = fourcc ("ilod");

@@ -49,6 +49,29 @@ class DataGen {
     knowhere::DatasetPtr query_dataset = nullptr;
 };
 
+class BinaryDataGen {
+ protected:
+    void
+    Init_with_binary_default();
+
+    void
+    Generate(const int& dim, const int& nb, const int& nq);
+
+    knowhere::DatasetPtr
+    GenQuery(const int& nq);
+
+ protected:
+    int nb = 10000;
+    int nq = 10;
+    int dim = 512;
+    int k = 10;
+    std::vector<uint8_t> xb;
+    std::vector<uint8_t> xq;
+    std::vector<int64_t> ids;
+    knowhere::DatasetPtr base_dataset = nullptr;
+    knowhere::DatasetPtr query_dataset = nullptr;
+};
+
 extern void
 GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
        std::vector<float>& xq);
@@ -57,7 +80,17 @@ extern void
 GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq);
 
 extern void
+GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
+             const int64_t& nq, std::vector<uint8_t>& xq);
+
+extern void
+GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, const int64_t& nq, uint8_t* xq);
+
+extern void
 GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids);
+
+extern void
+GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids);
 
 extern void
 InitLog();
@@ -66,7 +99,13 @@ knowhere::DatasetPtr
 generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids);
 
 knowhere::DatasetPtr
+generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids);
+
+knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, const float* xb);
+
+knowhere::DatasetPtr
+generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb);
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);

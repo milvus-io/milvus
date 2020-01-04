@@ -42,6 +42,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -94,10 +95,27 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/store store_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -106,10 +124,16 @@ set(engine_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+        ${db_wal_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
+        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
@@ -137,6 +161,11 @@ set(boost_lib
         libboost_serialization.a
         )
 
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        )
+
 set(third_party_libs
         sqlite
         ${grpc_lib}
@@ -145,6 +174,9 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
+        ${s3_client_lib}
+        curl
+        crypto
         )
 
 if (MILVUS_GPU_VERSION)

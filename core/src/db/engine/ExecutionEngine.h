@@ -37,18 +37,27 @@ enum class EngineType {
     FAISS_PQ,
     SPTAG_KDT,
     SPTAG_BKT,
-    MAX_VALUE = SPTAG_BKT,
+    FAISS_BIN_IDMAP,
+    FAISS_BIN_IVFFLAT,
+    MAX_VALUE = FAISS_BIN_IVFFLAT,
 };
 
 enum class MetricType {
-    L2 = 1,
-    IP = 2,
+    L2 = 1,        // Euclidean Distance
+    IP = 2,        // Cosine Similarity
+    HAMMING = 3,   // Hamming Distance
+    JACCARD = 4,   // Jaccard Distance
+    TANIMOTO = 5,  // Tanimoto Distance
+    MAX_VALUE = TANIMOTO,
 };
 
 class ExecutionEngine {
  public:
     virtual Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) = 0;
+
+    virtual Status
+    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) = 0;
 
     virtual size_t
     Count() const = 0;
@@ -85,6 +94,10 @@ class ExecutionEngine {
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels, bool hybrid) = 0;
+
+    virtual Status
+    Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+           bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;

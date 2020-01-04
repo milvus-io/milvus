@@ -17,15 +17,15 @@
 
 #pragma once
 
-#include "MetaTypes.h"
-#include "db/Options.h"
-#include "db/Types.h"
-#include "utils/Status.h"
-
 #include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "MetaTypes.h"
+#include "db/Options.h"
+#include "db/Types.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -59,6 +59,12 @@ class Meta {
 
     virtual Status
     UpdateTableFlag(const std::string& table_id, int64_t flag) = 0;
+
+    virtual Status
+    UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) = 0;
+
+    virtual Status
+    GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) = 0;
 
     virtual Status
     DropTable(const std::string& table_id) = 0;

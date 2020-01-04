@@ -37,9 +37,9 @@ namespace engine {
 #endif
 
 void
-ConfAdapter::MatchBase(knowhere::Config conf) {
+ConfAdapter::MatchBase(knowhere::Config conf, knowhere::METRICTYPE default_metric) {
     if (conf->metric_type == knowhere::DEFAULT_TYPE)
-        conf->metric_type = knowhere::METRICTYPE::L2;
+        conf->metric_type = default_metric;
 }
 
 knowhere::Config
@@ -63,7 +63,7 @@ ConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
 knowhere::Config
 IVFConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
@@ -74,13 +74,13 @@ IVFConfAdapter::Match(const TempMetaConf& metaconf) {
 static constexpr float TYPICAL_COUNT = 1000000.0;
 
 int64_t
-IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
-    if (size <= TYPICAL_COUNT / 16384 + 1) {
+IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist, const int64_t& per_nlist) {
+    if (size <= TYPICAL_COUNT / per_nlist + 1) {
         // handle less row count, avoid nlist set to 0
         return 1;
     } else if (int(size / TYPICAL_COUNT) * nlist <= 0) {
         // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
-        return int(size / TYPICAL_COUNT * 16384);
+        return int(size / TYPICAL_COUNT * per_nlist);
     }
     return nlist;
 }
@@ -112,7 +112,7 @@ IVFConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type)
 knowhere::Config
 IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFSQCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
@@ -207,7 +207,7 @@ IVFPQConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
 knowhere::Config
 NSGConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::NSGCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
@@ -266,5 +266,26 @@ SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& 
     return conf;
 }
 
+knowhere::Config
+BinIDMAPConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    conf->gpu_id = metaconf.gpu_id;
+    conf->k = metaconf.k;
+    MatchBase(conf, knowhere::METRICTYPE::HAMMING);
+    return conf;
+}
+
+knowhere::Config
+BinIVFConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::IVFBinCfg>();
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 2048);
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    conf->gpu_id = metaconf.gpu_id;
+    MatchBase(conf, knowhere::METRICTYPE::HAMMING);
+    return conf;
+}
 }  // namespace engine
 }  // namespace milvus

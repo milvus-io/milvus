@@ -107,9 +107,11 @@ DBImpl::Stop() {
 
     shutting_down_.store(true, std::memory_order_release);
 
-    // makesure all memory data serialized
-    std::set<std::string> sync_table_ids;
-    SyncMemData(sync_table_ids);
+    // make sure all memory data are serialized
+    //    std::set<std::string> sync_table_ids;
+    //    SyncMemData(sync_table_ids);
+    // TODO(zhiru): ?
+    auto status = Flush();
 
     // wait compaction/buildindex finish
     bg_timer_thread_.join();
@@ -318,12 +320,13 @@ DBImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchem
 }
 
 Status
-DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,
-                      IDNumbers& vector_ids) {
+DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) {
     //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
+
+    // TODO(zhiru): Enter WAL. They should call mem_mgr_->InsertVectors
 
     // if partition is specified, use partition as target table
     Status status;
@@ -338,10 +341,98 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     }
 
     // insert vectors into target table
-    milvus::server::CollectInsertMetrics metrics(n, status);
-    status = mem_mgr_->InsertVectors(target_table_name, n, vectors, vector_ids);
+    milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
+    status = mem_mgr_->InsertVectors(target_table_name, vectors);
 
     return status;
+}
+
+Status
+DBImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // TODO(zhiru): Enter WAL. They should call mem_mgr_->DeleteVector
+
+    auto status = mem_mgr_->DeleteVector(table_id, vector_id);
+
+    return status;
+}
+
+Status
+DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // TODO(zhiru): Enter WAL. They should call mem_mgr_->DeleteVectors
+
+    auto status = mem_mgr_->DeleteVectors(table_id, vector_ids);
+
+    return status;
+}
+
+Status
+DBImpl::Flush(const std::string& table_id) {
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // TODO(zhiru): Enter WAL. They should call mem_mgr_->Flush and provide a LSN
+    uint64_t wal_lsn = 0;
+    auto status = mem_mgr_->Flush(table_id, wal_lsn);
+    std::set<std::string> table_ids{table_id};
+    AddCompactionTask(table_ids);
+}
+
+Status
+DBImpl::Flush() {
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // TODO(zhiru): Enter WAL. They should call mem_mgr_->Flush and provide a LSN
+    uint64_t wal_lsn = 0;
+    std::set<std::string> table_ids;
+    auto status = mem_mgr_->Flush(table_ids, wal_lsn);
+    AddCompactionTask(table_ids);
+}
+
+void
+DBImpl::AddCompactionTask(const std::set<std::string>& table_ids) {
+    // compaction finished?
+    {
+        std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        if (!compact_thread_results_.empty()) {
+            std::chrono::milliseconds span(10);
+            if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                compact_thread_results_.pop_back();
+            }
+        }
+    }
+
+    // add new compaction task
+    {
+        std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        if (compact_thread_results_.empty()) {
+            // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
+            // 1. other tables may still has un-merged files
+            // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
+            if (compact_table_ids_.empty()) {
+                std::vector<meta::TableSchema> table_schema_array;
+                meta_ptr_->AllTables(table_schema_array);
+                for (auto& schema : table_schema_array) {
+                    compact_table_ids_.insert(schema.table_id_);
+                }
+            }
+
+            // start merge file thread
+            compact_thread_results_.push_back(
+                compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
+            compact_table_ids_.clear();
+        }
+    }
 }
 
 Status
@@ -351,8 +442,10 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     }
 
     // serialize memory data
-    std::set<std::string> sync_table_ids;
-    auto status = SyncMemData(sync_table_ids);
+    //    std::set<std::string> sync_table_ids;
+    //    auto status = SyncMemData(sync_table_ids);
+    // TODO(zhiru): ?
+    auto status = Flush();
 
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
@@ -408,23 +501,21 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-              const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+              ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result =
-        Query(context, table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
+    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors, dates, result_ids, result_distances);
     return result;
 }
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-              const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-              ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+              const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (shutting_down_.load(std::memory_order_acquire)) {
@@ -461,7 +552,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -471,9 +562,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
-                      const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-                      ResultDistances& result_distances) {
+                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+                      const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (shutting_down_.load(std::memory_order_acquire)) {
@@ -502,7 +592,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -524,11 +614,11 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
                    ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
-    server::CollectQueryMetrics metrics(nq);
+    server::CollectQueryMetrics metrics(vectors.vector_count_);
 
     TimeRecorder rc("");
 
@@ -536,7 +626,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     auto status = ongoing_files_checker_.MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nq, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nprobe, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -577,7 +667,7 @@ DBImpl::BackgroundTimerTask() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
         StartMetricTask();
-        StartCompactionTask();
+        //        StartCompactionTask();
         StartBuildIndexTask();
     }
 }
@@ -633,67 +723,6 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().CPUTemperature();
 
     // ENGINE_LOG_TRACE << "Metric task finished";
-}
-
-Status
-DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
-    std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
-    std::set<std::string> temp_table_ids;
-    mem_mgr_->Serialize(temp_table_ids);
-    for (auto& id : temp_table_ids) {
-        sync_table_ids.insert(id);
-    }
-
-    if (!temp_table_ids.empty()) {
-        SERVER_LOG_DEBUG << "Insert cache serialized";
-    }
-
-    return Status::OK();
-}
-
-void
-DBImpl::StartCompactionTask() {
-    static uint64_t compact_clock_tick = 0;
-    compact_clock_tick++;
-    if (compact_clock_tick % COMPACT_ACTION_INTERVAL != 0) {
-        return;
-    }
-
-    // serialize memory data
-    SyncMemData(compact_table_ids_);
-
-    // compactiong has been finished?
-    {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (!compact_thread_results_.empty()) {
-            std::chrono::milliseconds span(10);
-            if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
-                compact_thread_results_.pop_back();
-            }
-        }
-    }
-
-    // add new compaction task
-    {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (compact_thread_results_.empty()) {
-            // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
-            // 1. other tables may still has un-merged files
-            // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
-            if (compact_table_ids_.empty()) {
-                std::vector<meta::TableSchema> table_schema_array;
-                meta_ptr_->AllTables(table_schema_array);
-                for (auto& schema : table_schema_array) {
-                    compact_table_ids_.insert(schema.table_id_);
-                }
-            }
-
-            // start merge file thread
-            compact_thread_results_.push_back(
-                compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
-            compact_table_ids_.clear();
-        }
-    }
 }
 
 Status

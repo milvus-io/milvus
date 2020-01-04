@@ -16,10 +16,11 @@
 // under the License.
 
 #include "db/insert/MemTable.h"
-#include "utils/Log.h"
 
 #include <memory>
 #include <string>
+
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
@@ -29,7 +30,7 @@ MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const
 }
 
 Status
-MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
+MemTable::Add(VectorSourcePtr& source) {
     while (!source->AllAdded()) {
         MemTableFilePtr current_mem_table_file;
         if (!mem_table_file_list_.empty()) {
@@ -39,12 +40,12 @@ MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
             MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
-            status = new_mem_table_file->Add(source, vector_ids);
+            status = new_mem_table_file->Add(source);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
             }
         } else {
-            status = current_mem_table_file->Add(source, vector_ids);
+            status = current_mem_table_file->Add(source);
         }
 
         if (!status.ok()) {
@@ -54,6 +55,17 @@ MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
         }
     }
     return Status::OK();
+}
+
+Status
+MemTable::Delete(segment::doc_id_t doc_id) {
+    // Locate which table file the doc id lands in
+    for (auto& table_file : mem_table_file_list_) {
+        // TODO(zhiru):
+        // Use bloom filter to check whether the id is present in this table file
+        // If present:
+        table_file->Delete(doc_id);
+    }
 }
 
 void
@@ -67,7 +79,7 @@ MemTable::GetTableFileCount() {
 }
 
 Status
-MemTable::Serialize() {
+MemTable::Serialize(uint64_t wal_lsn) {
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize();
         if (!status.ok()) {
@@ -75,8 +87,17 @@ MemTable::Serialize() {
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        }
+        // Update flush lsn
+        status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
+            ENGINE_LOG_ERROR << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
     }
     return Status::OK();
 }

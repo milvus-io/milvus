@@ -16,11 +16,12 @@
 // under the License.
 
 #include "db/insert/MemManagerImpl.h"
+
+#include <thread>
+
 #include "VectorSource.h"
 #include "db/Constants.h"
 #include "utils/Log.h"
-
-#include <thread>
 
 namespace milvus {
 namespace engine {
@@ -37,29 +38,94 @@ MemManagerImpl::GetMemByTable(const std::string& table_id) {
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& table_id_, size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+MemManagerImpl::InsertVectors(const std::string& table_id, VectorsData& vectors) {
     while (GetCurrentMem() > options_.insert_buffer_size_) {
+        // TODO: force flush instead of stalling
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);
+    return InsertVectorsNoLock(table_id, vectors);
 }
 
 Status
-MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, size_t n, const float* vectors,
-                                    IDNumbers& vector_ids) {
+MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, VectorsData& vectors) {
     MemTablePtr mem = GetMemByTable(table_id);
-    VectorSourcePtr source = std::make_shared<VectorSource>(n, vectors);
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors);
 
-    auto status = mem->Add(source, vector_ids);
+    auto status = mem->Add(source);
     if (status.ok()) {
-        if (vector_ids.empty()) {
-            vector_ids = source->GetVectorIds();
+        if (vectors.id_array_.empty()) {
+            vectors.id_array_ = source->GetVectorIds();
         }
     }
     return status;
+}
+
+Status
+MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
+    MemTablePtr mem = GetMemByTable(table_id);
+
+    auto status = mem->Delete(vector_id);
+    return status;
+}
+
+Status
+MemManagerImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
+    MemTablePtr mem = GetMemByTable(table_id);
+
+    // TODO(zhiru): loop for now
+    for (auto& id : vector_ids) {
+        auto status = mem->Delete(id);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+MemManagerImpl::Flush(const std::string& table_id, uint64_t wal_lsn) {
+    auto status = ToImmutable(table_id);
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
+    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    for (auto& mem : immu_mem_list_) {
+        mem->Serialize(wal_lsn);
+    }
+    immu_mem_list_.clear();
+    return Status::OK();
+}
+
+Status
+MemManagerImpl::Flush(std::set<std::string>& table_ids, uint64_t wal_lsn) {
+    ToImmutable();
+    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    table_ids.clear();
+    for (auto& mem : immu_mem_list_) {
+        mem->Serialize(wal_lsn);
+        table_ids.insert(mem->GetTableId());
+    }
+    immu_mem_list_.clear();
+    return Status::OK();
+}
+
+Status
+MemManagerImpl::ToImmutable(const std::string& table_id) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    auto memIt = mem_id_map_.find(table_id);
+    if (memIt == mem_id_map_.end()) {
+        std::string err_msg = "Could not find table = " + table_id + " to flush";
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_NOT_FOUND, err_msg);
+    }
+    mem_id_map_.erase(memIt);
+    immu_mem_list_.push_back(memIt->second);
+
+    return Status::OK();
 }
 
 Status
@@ -76,19 +142,6 @@ MemManagerImpl::ToImmutable() {
     }
 
     mem_id_map_.swap(temp_map);
-    return Status::OK();
-}
-
-Status
-MemManagerImpl::Serialize(std::set<std::string>& table_ids) {
-    ToImmutable();
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
-    table_ids.clear();
-    for (auto& mem : immu_mem_list_) {
-        mem->Serialize();
-        table_ids.insert(mem->GetTableId());
-    }
-    immu_mem_list_.clear();
     return Status::OK();
 }
 
