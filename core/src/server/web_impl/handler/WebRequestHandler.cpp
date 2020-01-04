@@ -116,11 +116,11 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto lamd = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
+    auto getgb = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
-    devices_dto->cpu->memory = lamd(system_info.GetPhysicalMemory());
+    devices_dto->cpu->memory = getgb(system_info.GetPhysicalMemory());
 
     devices_dto->gpus = devices_dto->gpus->createShared();
     size_t count = system_info.num_device();
@@ -132,7 +132,7 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
-        device_dto->memory = lamd(device_mems.at(i));
+        device_dto->memory = getgb(device_mems.at(i));
         devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 
@@ -325,6 +325,22 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema) {
+    if (nullptr == table_schema->table_name.get()) {
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'table_name\' is missing")
+    }
+
+    if (nullptr == table_schema->dimension.get()) {
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'dimension\' is missing")
+    }
+
+    if (nullptr == table_schema->index_file_size.get()) {
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'index_file_size\' is missing")
+    }
+
+    if (nullptr == table_schema->metric_type.get()) {
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'metric_type\' is missing")
+    }
+
     auto status =
         request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(), table_schema->dimension,
                                      table_schema->index_file_size, table_schema->metric_type);

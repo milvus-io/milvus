@@ -45,17 +45,26 @@ namespace milvus {
 namespace server {
 namespace web {
 
-#define ASSIGN_RETURN_STATUS_DTO(STATUS)                     \
-    do {                                                     \
-        auto status_dto = StatusDto::createShared();         \
-        if (0 != (STATUS).code()) {                          \
-            status_dto->code = WebErrorMap((STATUS).code()); \
-        } else {                                             \
-            status_dto->code = 0;                            \
-        }                                                    \
-        status_dto->message = (STATUS).message().c_str();    \
-        return status_dto;                                   \
+#define RETURN_STATUS_DTO(STATUS_CODE, MESSAGE)         \
+    do {                                                \
+        auto status_dto = StatusDto::createShared();    \
+        status_dto->code = (STATUS_CODE);               \
+        status_dto->message = (MESSAGE);                \
+        return status_dto;                              \
+    } while(false);
+
+
+#define ASSIGN_RETURN_STATUS_DTO(STATUS)                                \
+    do {                                                                \
+        int code;                                                       \
+        if (0 != (STATUS).code()) {                                     \
+            code = WebErrorMap((STATUS).code());                        \
+        } else {                                                        \
+            code = 0;                                                   \
+        }                                                               \
+        RETURN_STATUS_DTO(code, (STATUS).message().c_str())             \
     } while (false);
+
 
 StatusCode
 WebErrorMap(ErrorCode code);
