@@ -119,7 +119,6 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::string config_path(CONFIG_PATH);
     milvus::server::Config& config = milvus::server::Config::GetInstance();
-    milvus::Status s;
     std::string str_val;
     int64_t int64_val;
     float float_val;
@@ -127,159 +126,152 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 
     /* server config */
     std::string server_addr = "192.168.1.155";
-    s = config.SetServerConfigAddress(server_addr);
-    ASSERT_TRUE(s.ok());
-    s = config.GetServerConfigAddress(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetServerConfigAddress(server_addr).ok());
+    ASSERT_TRUE(config.GetServerConfigAddress(str_val).ok());
     ASSERT_TRUE(str_val == server_addr);
 
     std::string server_port = "12345";
-    s = config.SetServerConfigPort(server_port);
-    ASSERT_TRUE(s.ok());
-    s = config.GetServerConfigPort(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetServerConfigPort(server_port).ok());
+    ASSERT_TRUE(config.GetServerConfigPort(str_val).ok());
     ASSERT_TRUE(str_val == server_port);
 
     std::string server_mode = "cluster_readonly";
-    s = config.SetServerConfigDeployMode(server_mode);
-    ASSERT_TRUE(s.ok());
-    s = config.GetServerConfigDeployMode(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetServerConfigDeployMode(server_mode).ok());
+    ASSERT_TRUE(config.GetServerConfigDeployMode(str_val).ok());
     ASSERT_TRUE(str_val == server_mode);
 
     std::string server_time_zone = "UTC+6";
-    s = config.SetServerConfigTimeZone(server_time_zone);
-    ASSERT_TRUE(s.ok());
-    s = config.GetServerConfigTimeZone(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetServerConfigTimeZone(server_time_zone).ok());
+    ASSERT_TRUE(config.GetServerConfigTimeZone(str_val).ok());
     ASSERT_TRUE(str_val == server_time_zone);
 
     /* db config */
     std::string db_primary_path = "/home/zilliz";
-    s = config.SetDBConfigPrimaryPath(db_primary_path);
-    ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigPrimaryPath(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetDBConfigPrimaryPath(db_primary_path).ok());
+    ASSERT_TRUE(config.GetDBConfigPrimaryPath(str_val).ok());
     ASSERT_TRUE(str_val == db_primary_path);
 
     std::string db_secondary_path = "/home/zilliz";
-    s = config.SetDBConfigSecondaryPath(db_secondary_path);
-    ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigSecondaryPath(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetDBConfigSecondaryPath(db_secondary_path).ok());
+    ASSERT_TRUE(config.GetDBConfigSecondaryPath(str_val).ok());
     ASSERT_TRUE(str_val == db_secondary_path);
 
     std::string db_backend_url = "mysql://root:123456@127.0.0.1:19530/milvus";
-    s = config.SetDBConfigBackendUrl(db_backend_url);
-    ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigBackendUrl(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetDBConfigBackendUrl(db_backend_url).ok());
+    ASSERT_TRUE(config.GetDBConfigBackendUrl(str_val).ok());
     ASSERT_TRUE(str_val == db_backend_url);
 
     int64_t db_archive_disk_threshold = 100;
-    s = config.SetDBConfigArchiveDiskThreshold(std::to_string(db_archive_disk_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigArchiveDiskThreshold(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetDBConfigArchiveDiskThreshold(std::to_string(db_archive_disk_threshold)).ok());
+    ASSERT_TRUE(config.GetDBConfigArchiveDiskThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == db_archive_disk_threshold);
 
     int64_t db_archive_days_threshold = 365;
-    s = config.SetDBConfigArchiveDaysThreshold(std::to_string(db_archive_days_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigArchiveDaysThreshold(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetDBConfigArchiveDaysThreshold(std::to_string(db_archive_days_threshold)).ok());
+    ASSERT_TRUE(config.GetDBConfigArchiveDaysThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == db_archive_days_threshold);
 
     int64_t db_insert_buffer_size = 2;
-    s = config.SetDBConfigInsertBufferSize(std::to_string(db_insert_buffer_size));
-    ASSERT_TRUE(s.ok());
-    s = config.GetDBConfigInsertBufferSize(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetDBConfigInsertBufferSize(std::to_string(db_insert_buffer_size)).ok());
+    ASSERT_TRUE(config.GetDBConfigInsertBufferSize(int64_val).ok());
     ASSERT_TRUE(int64_val == db_insert_buffer_size);
+
+    /* storage config */
+    bool storage_minio_enable = false;
+    ASSERT_TRUE(config.SetStorageConfigMinioEnable(std::to_string(storage_minio_enable)).ok());
+    ASSERT_TRUE(config.GetStorageConfigMinioEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == storage_minio_enable);
+
+    std::string storage_minio_addr = "192.168.1.100";
+    ASSERT_TRUE(config.SetStorageConfigMinioAddress(storage_minio_addr).ok());
+    ASSERT_TRUE(config.GetStorageConfigMinioAddress(str_val).ok());
+    ASSERT_TRUE(str_val == storage_minio_addr);
+
+    std::string storage_minio_port = "12345";
+    ASSERT_TRUE(config.SetStorageConfigMinioPort(storage_minio_port).ok());
+    ASSERT_TRUE(config.GetStorageConfigMinioPort(str_val).ok());
+    ASSERT_TRUE(str_val == storage_minio_port);
+
+    std::string storage_minio_access_key = "minioadmin";
+    ASSERT_TRUE(config.SetStorageConfigMinioAccessKey(storage_minio_access_key).ok());
+    ASSERT_TRUE(config.GetStorageConfigMinioAccessKey(str_val).ok());
+    ASSERT_TRUE(str_val == storage_minio_access_key);
+
+    std::string storage_minio_secret_key = "minioadmin";
+    ASSERT_TRUE(config.SetStorageConfigMinioSecretKey(storage_minio_secret_key).ok());
+    ASSERT_TRUE(config.GetStorageConfigMinioSecretKey(str_val).ok());
+    ASSERT_TRUE(str_val == storage_minio_secret_key);
+
+    std::string storage_minio_bucket = "miniobucket";
+    ASSERT_TRUE(config.SetStorageConfigMinioBucket(storage_minio_bucket).ok());
+    ASSERT_TRUE(config.GetStorageConfigMinioBucket(str_val).ok());
+    ASSERT_TRUE(str_val == storage_minio_bucket);
 
     /* metric config */
     bool metric_enable_monitor = false;
-    s = config.SetMetricConfigEnableMonitor(std::to_string(metric_enable_monitor));
-    ASSERT_TRUE(s.ok());
-    s = config.GetMetricConfigEnableMonitor(bool_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetMetricConfigEnableMonitor(std::to_string(metric_enable_monitor)).ok());
+    ASSERT_TRUE(config.GetMetricConfigEnableMonitor(bool_val).ok());
     ASSERT_TRUE(bool_val == metric_enable_monitor);
 
     std::string metric_collector = "prometheus";
-    s = config.SetMetricConfigCollector(metric_collector);
-    ASSERT_TRUE(s.ok());
-    s = config.GetMetricConfigCollector(str_val);
+    ASSERT_TRUE(config.SetMetricConfigCollector(metric_collector).ok());
+    ASSERT_TRUE(config.GetMetricConfigCollector(str_val).ok());
     ASSERT_TRUE(str_val == metric_collector);
 
     std::string metric_prometheus_port = "2222";
-    s = config.SetMetricConfigPrometheusPort(metric_prometheus_port);
-    ASSERT_TRUE(s.ok());
-    s = config.GetMetricConfigPrometheusPort(str_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetMetricConfigPrometheusPort(metric_prometheus_port).ok());
+    ASSERT_TRUE(config.GetMetricConfigPrometheusPort(str_val).ok());
     ASSERT_TRUE(str_val == metric_prometheus_port);
 
     /* cache config */
     int64_t cache_cpu_cache_capacity = 1;
-    s = config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_capacity));
-    ASSERT_TRUE(s.ok());
-    s = config.GetCacheConfigCpuCacheCapacity(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_capacity)).ok());
+    ASSERT_TRUE(config.GetCacheConfigCpuCacheCapacity(int64_val).ok());
     ASSERT_TRUE(int64_val == cache_cpu_cache_capacity);
 
     float cache_cpu_cache_threshold = 0.1;
-    s = config.SetCacheConfigCpuCacheThreshold(std::to_string(cache_cpu_cache_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetCacheConfigCpuCacheThreshold(float_val);
+    ASSERT_TRUE(config.SetCacheConfigCpuCacheThreshold(std::to_string(cache_cpu_cache_threshold)).ok());
+    ASSERT_TRUE(config.GetCacheConfigCpuCacheThreshold(float_val).ok());
     ASSERT_TRUE(float_val == cache_cpu_cache_threshold);
 
     bool cache_insert_data = true;
-    s = config.SetCacheConfigCacheInsertData(std::to_string(cache_insert_data));
-    ASSERT_TRUE(s.ok());
-    s = config.GetCacheConfigCacheInsertData(bool_val);
+    ASSERT_TRUE(config.SetCacheConfigCacheInsertData(std::to_string(cache_insert_data)).ok());
+    ASSERT_TRUE(config.GetCacheConfigCacheInsertData(bool_val).ok());
     ASSERT_TRUE(bool_val == cache_insert_data);
 
     /* engine config */
     int64_t engine_use_blas_threshold = 50;
-    s = config.SetEngineConfigUseBlasThreshold(std::to_string(engine_use_blas_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetEngineConfigUseBlasThreshold(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetEngineConfigUseBlasThreshold(std::to_string(engine_use_blas_threshold)).ok());
+    ASSERT_TRUE(config.GetEngineConfigUseBlasThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == engine_use_blas_threshold);
 
     int64_t engine_omp_thread_num = 1;
-    s = config.SetEngineConfigOmpThreadNum(std::to_string(engine_omp_thread_num));
-    ASSERT_TRUE(s.ok());
-    s = config.GetEngineConfigOmpThreadNum(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetEngineConfigOmpThreadNum(std::to_string(engine_omp_thread_num)).ok());
+    ASSERT_TRUE(config.GetEngineConfigOmpThreadNum(int64_val).ok());
     ASSERT_TRUE(int64_val == engine_omp_thread_num);
 
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
-    s = config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetEngineConfigGpuSearchThreshold(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold)).ok());
+    ASSERT_TRUE(config.GetEngineConfigGpuSearchThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == engine_gpu_search_threshold);
+#endif
 
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     bool resource_enable_gpu = true;
-    s = config.SetGpuResourceConfigEnable(std::to_string(resource_enable_gpu));
-    ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigEnable(bool_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetGpuResourceConfigEnable(std::to_string(resource_enable_gpu)).ok());
+    ASSERT_TRUE(config.GetGpuResourceConfigEnable(bool_val).ok());
     ASSERT_TRUE(bool_val == resource_enable_gpu);
 
     int64_t gpu_cache_capacity = 1;
-    s = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_cache_capacity));
-    ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigCacheCapacity(int64_val);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_cache_capacity)).ok());
+    ASSERT_TRUE(config.GetGpuResourceConfigCacheCapacity(int64_val).ok());
     ASSERT_TRUE(int64_val == gpu_cache_capacity);
 
     float gpu_cache_threshold = 0.2;
-    s = config.SetGpuResourceConfigCacheThreshold(std::to_string(gpu_cache_threshold));
-    ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigCacheThreshold(float_val);
+    ASSERT_TRUE(config.SetGpuResourceConfigCacheThreshold(std::to_string(gpu_cache_threshold)).ok());
+    ASSERT_TRUE(config.GetGpuResourceConfigCacheThreshold(float_val).ok());
     ASSERT_TRUE(float_val == gpu_cache_threshold);
 
     std::vector<std::string> search_resources = {"gpu0"};
@@ -287,10 +279,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::string search_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
         search_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, search_res_str);
-    s = config.SetGpuResourceConfigSearchResources(search_res_str);
-    ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigSearchResources(search_res_vec);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetGpuResourceConfigSearchResources(search_res_str).ok());
+    ASSERT_TRUE(config.GetGpuResourceConfigSearchResources(search_res_vec).ok());
     for (size_t i = 0; i < search_resources.size(); i++) {
         ASSERT_TRUE(std::stoll(search_resources[i].substr(3)) == search_res_vec[i]);
     }
@@ -300,10 +290,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     std::string build_index_res_str;
     milvus::server::StringHelpFunctions::MergeStringWithDelimeter(
         build_index_resources, milvus::server::CONFIG_GPU_RESOURCE_DELIMITER, build_index_res_str);
-    s = config.SetGpuResourceConfigBuildIndexResources(build_index_res_str);
-    ASSERT_TRUE(s.ok());
-    s = config.GetGpuResourceConfigBuildIndexResources(build_index_res_vec);
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.SetGpuResourceConfigBuildIndexResources(build_index_res_str).ok());
+    ASSERT_TRUE(config.GetGpuResourceConfigBuildIndexResources(build_index_res_vec).ok());
     for (size_t i = 0; i < build_index_resources.size(); i++) {
         ASSERT_TRUE(std::stoll(build_index_resources[i].substr(3)) == build_index_res_vec[i]);
     }
@@ -353,6 +341,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string metric_enable_monitor = "false";
     get_cmd = gen_get_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR);
     set_cmd = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, metric_enable_monitor);
+    s = config.ProcessConfigCli(dummy, set_cmd);
+    ASSERT_FALSE(s.ok());
+    s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
+
+    /* storage config */
+    std::string storage_minio_enable = "true";
+    get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_MINIO_ENABLE);
+    set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_MINIO_ENABLE, storage_minio_enable);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_FALSE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -412,8 +409,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_gpu_search_threshold);
+#endif
 
     /* gpu resource config */
+#ifdef MILVUS_GPU_VERSION
     std::string resource_enable_gpu = "true";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_ENABLE);
     set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_ENABLE, resource_enable_gpu);
@@ -466,138 +465,110 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s;
 
-    s = config.LoadConfigFile("");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.LoadConfigFile("").ok());
 
-    s = config.LoadConfigFile(config_path + INVALID_CONFIG_FILE);
-    ASSERT_FALSE(s.ok());
-    s = config.LoadConfigFile(config_path + "dummy.yaml");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.LoadConfigFile(config_path + INVALID_CONFIG_FILE).ok());
+    ASSERT_FALSE(config.LoadConfigFile(config_path + "dummy.yaml").ok());
 
     /* server config */
-    s = config.SetServerConfigAddress("0.0.0");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigAddress("0.0.0.256");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetServerConfigAddress("0.0.0").ok());
+    ASSERT_FALSE(config.SetServerConfigAddress("0.0.0.256").ok());
 
-    s = config.SetServerConfigPort("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigPort("99999");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetServerConfigPort("a").ok());
+    ASSERT_FALSE(config.SetServerConfigPort("99999").ok());
 
-    s = config.SetServerConfigDeployMode("cluster");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetServerConfigDeployMode("cluster").ok());
 
-    s = config.SetServerConfigTimeZone("GM");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigTimeZone("GMT8");
-    ASSERT_FALSE(s.ok());
-    s = config.SetServerConfigTimeZone("UTCA");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetServerConfigTimeZone("GM").ok());
+    ASSERT_FALSE(config.SetServerConfigTimeZone("GMT8").ok());
+    ASSERT_FALSE(config.SetServerConfigTimeZone("UTCA").ok());
 
     /* db config */
-    s = config.SetDBConfigPrimaryPath("");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetDBConfigPrimaryPath("").ok());
 
-    //    s = config.SetDBConfigSecondaryPath("");
-    //    ASSERT_FALSE(s.ok());
+    // ASSERT_FALSE(config.SetDBConfigSecondaryPath("").ok());
 
-    s = config.SetDBConfigBackendUrl("http://www.google.com");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigBackendUrl("sqlite://:@:");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigBackendUrl("mysql://root:123456@127.0.0.1/milvus");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetDBConfigBackendUrl("http://www.google.com").ok());
+    ASSERT_FALSE(config.SetDBConfigBackendUrl("sqlite://:@:").ok());
+    ASSERT_FALSE(config.SetDBConfigBackendUrl("mysql://root:123456@127.0.0.1/milvus").ok());
 
-    s = config.SetDBConfigArchiveDiskThreshold("0x10");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetDBConfigArchiveDiskThreshold("0x10").ok());
 
-    s = config.SetDBConfigArchiveDaysThreshold("0x10");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetDBConfigArchiveDaysThreshold("0x10").ok());
 
-    s = config.SetDBConfigInsertBufferSize("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigInsertBufferSize("0");
-    ASSERT_FALSE(s.ok());
-    s = config.SetDBConfigInsertBufferSize("2048");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetDBConfigInsertBufferSize("a").ok());
+    ASSERT_FALSE(config.SetDBConfigInsertBufferSize("0").ok());
+    ASSERT_FALSE(config.SetDBConfigInsertBufferSize("2048").ok());
+
+    /* storage config */
+    ASSERT_FALSE(config.SetStorageConfigMinioEnable("10").ok());
+
+    ASSERT_FALSE(config.SetStorageConfigMinioAddress("127.0.0").ok());
+
+    ASSERT_FALSE(config.SetStorageConfigMinioPort("100").ok());
+    ASSERT_FALSE(config.SetStorageConfigMinioPort("100000").ok());
+
+    ASSERT_FALSE(config.SetStorageConfigMinioAccessKey("").ok());
+
+    ASSERT_FALSE(config.SetStorageConfigMinioSecretKey("").ok());
+
+    ASSERT_FALSE(config.SetStorageConfigMinioBucket("").ok());
 
     /* metric config */
-    s = config.SetMetricConfigEnableMonitor("Y");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
 
-    s = config.SetMetricConfigCollector("zilliz");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetMetricConfigCollector("zilliz").ok());
 
-    s = config.SetMetricConfigPrometheusPort("0xff");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetMetricConfigPrometheusPort("0xff").ok());
 
     /* cache config */
-    s = config.SetCacheConfigCpuCacheCapacity("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheCapacity("0");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheCapacity("2048");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("a").ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("0").ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("2048").ok());
 
-    s = config.SetCacheConfigCpuCacheThreshold("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetCacheConfigCpuCacheThreshold("1.0");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheThreshold("a").ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheThreshold("1.0").ok());
 
-    s = config.SetCacheConfigCacheInsertData("N");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetCacheConfigCacheInsertData("N").ok());
 
     /* engine config */
-    s = config.SetEngineConfigUseBlasThreshold("0xff");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetEngineConfigUseBlasThreshold("0xff").ok());
 
-    s = config.SetEngineConfigOmpThreadNum("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetEngineConfigOmpThreadNum("10000");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("a").ok());
+    ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("10000").ok());
 
 #ifdef MILVUS_GPU_VERSION
-    s = config.SetEngineConfigGpuSearchThreshold("-1");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetEngineConfigGpuSearchThreshold("-1").ok());
+#endif
 
     /* gpu resource config */
-    s = config.SetGpuResourceConfigEnable("ok");
-    ASSERT_FALSE(s.ok());
+#ifdef MILVUS_GPU_VERSION
+    ASSERT_FALSE(config.SetGpuResourceConfigEnable("ok").ok());
 
-    s = config.SetGpuResourceConfigCacheCapacity("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetGpuResourceConfigCacheCapacity("128");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("a").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("128").ok());
 
-    s = config.SetGpuResourceConfigCacheThreshold("a");
-    ASSERT_FALSE(s.ok());
-    s = config.SetGpuResourceConfigCacheThreshold("1.0");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("a").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("1.0").ok());
 
-    s = config.SetGpuResourceConfigSearchResources("gpu10");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigSearchResources("gpu10").ok());
 
-    s = config.SetGpuResourceConfigBuildIndexResources("gup2");
-    ASSERT_FALSE(s.ok());
-    s = config.SetGpuResourceConfigBuildIndexResources("gpu16");
-    ASSERT_FALSE(s.ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gup2").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gpu16").ok());
 #endif
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
     std::string config_path(CONFIG_PATH);
     milvus::server::Config& config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
-    ASSERT_TRUE(s.ok());
 
-    s = config.ValidateConfig();
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.LoadConfigFile(config_path + VALID_CONFIG_FILE).ok());
+
+    ASSERT_TRUE(config.ValidateConfig().ok());
 
     std::string config_json_str;
     config.GetConfigJsonStr(config_json_str);
     std::cout << config_json_str << std::endl;
 
-    s = config.ResetDefaultConfig();
-    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(config.ResetDefaultConfig().ok());
 }

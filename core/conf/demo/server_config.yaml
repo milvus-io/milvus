@@ -66,6 +66,29 @@ db_config:
   preload_table:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# Storage Config       | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_enable         | Enable MinIO storage or not.                               | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_address        | MinIO storage service IP address.                          | String     | 127.0.0.1       |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_port           | MinIO storage service port. Port range (1024, 65535)       | Integer    | 9000            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_access_key     | MinIO storage service access key.                          | String     | minioadmin      |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_secret_key     | MinIO storage service secret key.                          | String     | minioadmin      |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_bucket         | MinIO storage service bucket name.                         | String     | milvus-bucket   |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+storage_config:
+  minio_enable: false
+  minio_address: 127.0.0.1
+  minio_port: 9000
+  minio_access_key: minioadmin
+  minio_secret_key: minioadmin
+  minio_bucket: milvus-bucket
+
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # enable_monitor       | Enable monitoring function or not.                         | Boolean    | false           |
