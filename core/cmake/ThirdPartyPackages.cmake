@@ -1034,8 +1034,8 @@ macro(build_oatpp)
     set(OATPP_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF
-            -DOATPP_BUILD_TESTS=OFF)
+            -DBUILD_SHARED_LIBS=OFF)
+#            -DOATPP_BUILD_TESTS=OFF)
 
     externalproject_add(oatpp_ep
             URL

@@ -23,8 +23,9 @@
 #include <random>
 #include <unistd.h>
 
-//#include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
+#include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
+#include <oatpp/core/macro/component.hpp>
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp-test/UnitTest.hpp>
 
@@ -68,6 +69,57 @@ using OOutputStream = oatpp::data::stream::BufferOutputStream;
 using StatusCode = milvus::server::web::StatusCode;
 
 using namespace milvus::server::web;
+
+namespace {
+
+OList<OFloat32>::ObjectWrapper
+RandomRowRecordDto(int64_t dim) {
+    auto row_record_dto = OList<OFloat32>::createShared();
+
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
+    for (size_t i = 0; i < dim; i++) {
+        row_record_dto->pushBack(u(e));
+    }
+
+    return row_record_dto;
+}
+
+OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper
+RandomRecordsDto(int64_t dim, int64_t num) {
+    auto records_dto = OList<OList<OFloat32>::ObjectWrapper>::createShared();
+    for (size_t i = 0; i < num; i++) {
+        records_dto->pushBack(RandomRowRecordDto(dim));
+    }
+
+    return records_dto;
+}
+
+std::string
+RandomName() {
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::default_random_engine e(seed);
+    std::uniform_int_distribution<unsigned> u(0, 1000000);
+
+    size_t name_len = u(e) % 16 + 3;
+
+    char* name = new char[name_len + 1];
+    name[name_len] = '\0';
+
+    for (size_t i = 0; i < name_len; i++) {
+        unsigned random_i = u(e);
+        char remainder = static_cast<char>(random_i % 26);
+        name[i] = (random_i % 2 == 0) ? 'A' + remainder : 'a' + remainder;
+    }
+
+    std::string random_name(name);
+
+    delete[] name;
+
+    return random_name;
+}
+
+}
 
 namespace {
 
@@ -127,56 +179,6 @@ class WebHandlerTest : public testing::Test {
     std::shared_ptr<milvus::server::web::WebRequestHandler> handler;
     std::shared_ptr<milvus::server::Context> dummy_context;
 };
-
-milvus::server::web::RowRecordDto::ObjectWrapper
-RandomRowRecordDto(int64_t dim) {
-    auto record_dto = milvus::server::web::RowRecordDto::createShared();
-    record_dto->record = record_dto->record->createShared();
-
-    std::default_random_engine e;
-    std::uniform_real_distribution<float> u(0, 1);
-    for (size_t i = 0; i < dim; i++) {
-        record_dto->record->pushBack(u(e));
-    }
-
-    return record_dto;
-}
-
-milvus::server::web::RecordsDto::ObjectWrapper
-RandomRecordsDto(int64_t dim, int64_t num) {
-    auto records_dto = milvus::server::web::RecordsDto::createShared();
-    records_dto->records = records_dto->records->createShared();
-
-    for (size_t i = 0; i < num; i++) {
-        records_dto->records->pushBack(RandomRowRecordDto(dim));
-    }
-
-    return records_dto;
-}
-
-std::string
-RandomName() {
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::default_random_engine e(seed);
-    std::uniform_int_distribution<unsigned> u(0, 1000000);
-
-    size_t name_len = u(e) % 16 + 3;
-
-    char* name = new char[name_len + 1];
-    name[name_len] = '\0';
-
-    for (size_t i = 0; i < name_len; i++) {
-        unsigned random_i = u(e);
-        char remainder = static_cast<char>(random_i % 26);
-        name[i] = (random_i % 2 == 0) ? 'A' + remainder : 'a' + remainder;
-    }
-
-    std::string random_name(name);
-
-    delete[] name;
-
-    return random_name;
-}
 
 } // namespace
 
@@ -246,7 +248,6 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
     auto insert_request_dto = milvus::server::web::InsertRequestDto::createShared();
-    insert_request_dto->table_name = milvus::server::web::OString(TABLE_NAME);
     insert_request_dto->records = insert_request_dto->records->createShared();
     for (size_t i = 0; i < 1000; i++) {
         insert_request_dto->records->pushBack(RandomRowRecordDto(TABLE_DIM));
@@ -255,7 +256,7 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
 
     auto ids_dto = milvus::server::web::VectorIdsDto::createShared();
 
-    auto status_dto = handler->Insert(insert_request_dto, ids_dto);
+    auto status_dto = handler->Insert(TABLE_NAME, insert_request_dto, ids_dto);
 
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ(1000, ids_dto->ids->count());
@@ -331,12 +332,15 @@ TEST_F(WebHandlerTest, SEARCH) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
     milvus::server::web::OString table_name(TABLE_NAME);
-    milvus::server::web::OQueryParams query_params;
-    auto records_dto = RandomRecordsDto(TABLE_DIM, 10);
 
-    auto result_dto = milvus::server::web::ResultDto::createShared();
+    auto search_request_dto = SearchRequestDto::createShared();
+    search_request_dto->records = RandomRecordsDto(TABLE_DIM, 10);
+    search_request_dto->topk = 1;
+    search_request_dto->nprobe = 1;
 
-    auto status_dto = handler->Search(table_name, 1, 1, query_params, records_dto, result_dto);
+    auto results_dto = milvus::server::web::TopkResultsDto::createShared();
+
+    auto status_dto = handler->Search(table_name, search_request_dto, results_dto);
     ASSERT_EQ(0, status_dto->code->getValue()) << status_dto->message->std_str();
 }
 
@@ -361,30 +365,91 @@ TEST_F(WebHandlerTest, CMD) {
 namespace {
 static const char* CONTROLLER_TEST_TABLE_NAME = "controller_unit_test";
 
- class TestClient : public oatpp::web::client::ApiClient {
-  public:
+class TestClientComponent {
+ private:
+    int32_t m_port;
+ public:
+    TestClientComponent(int32_t port)
+    : m_port(port) {}
+
+ public:
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider)([this] {
+        return std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
+            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", this->m_port)
+//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", this->m_port)
+        );
+    }());
+};
+
+
+class TestClient : public oatpp::web::client::ApiClient {
+
+ public:
+
 #include OATPP_CODEGEN_BEGIN(ApiClient)
-     API_CALL_ASYNC("GET", "/state", getState)
-     API_CALL_ASYNC("GET", "/devices", getDevices)
-     API_CALL_ASYNC("GET", "/config/advanced", getAdvanced)
-     API_CALL_ASYNC("PUT", "/config/advanced", setAdvanced)
-     API_CALL_ASYNC("GET", "/config/gpu_resources", getGPUConfig)
-     API_CALL_ASYNC("PUT", "/config/gpu_resources", setGPUConfig)
-     API_CALL_ASYNC("POST", "/tables", createTable, BODY_DTO(TableRequestDto::ObjectWrapper, body))
-     API_CALL_ASYNC("GET", "/tables", showTables, QUERY(Int64, offset), QUERY(Int64, page_size))
-     API_CALL_ASYNC("GET", "/tables/{table_name}", getTable, PATH(String, table_name, "table_name"))
-     API_CALL_ASYNC("DELETE", "/tables/{table_name}", dropTable, PATH(String, table_name, "table_name"))
-     API_CALL_ASYNC("POST", "/tables/{table_name}/indexes", createIndex, PATH(String, table_name, "table_name"), BODY_DTO(IndexRequestDto::ObjectWrapper, body))
-     API_CALL_ASYNC("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
-     API_CALL_ASYNC("DELETE", "/tables/{table_name}/indexes", dropIndex, PATH(String, table_name, "table_name"))
-     API_CALL_ASYNC("POST", "/tables/{table_name}/partitions", createPartition, PATH(String, table_name, "table_name"), BODY_DTO(PartitionRequestDto::ObjectWrapper, body))
-     API_CALL_ASYNC("GET", "/tables/{table_name}/parittions", showPartitions, PATH(String, table_name, "table_name"))
-     API_CALL_ASYNC("DELETE", "/tables/{table_name}/parittions/{partition_tag}", dropPartition, PATH(String, table_name, "table_name"), PATH(String, partition_tag))
-     API_CALL_ASYNC("POST", "/tables/{tables_name}/vectors", insert, PATH(String, table_name, "table_name"), BODY_DTO(InsertRequestDto::ObjectWrapper, body))
-     API_CALL_ASYNC("PUT", "/tables/{table_name}/vectors", search, PATH(String, table_name, "table_name"), BODY_DTO(SearchRequestDto::ObjectWrapper, body))
-     API_CALL_ASYNC("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str, "cmd_str"))
+
+    API_CLIENT_INIT(TestClient)
+
+    API_CALL("GET", "/state", getState)
+
+    API_CALL("GET", "/devices", getDevices)
+
+    API_CALL("GET", "/config/advanced", getAdvanced)
+
+    API_CALL("PUT", "/config/advanced", setAdvanced)
+
+    API_CALL("GET", "/config/gpu_resources", getGPUConfig)
+
+    API_CALL("PUT", "/config/gpu_resources", setGPUConfig)
+
+    API_CALL("POST", "/tables", createTable, BODY_DTO(TableRequestDto::ObjectWrapper, body))
+
+    API_CALL("GET", "/tables", showTables, QUERY(Int64, offset), QUERY(Int64, page_size))
+
+    API_CALL("GET", "/tables/{table_name}", getTable, PATH(String, table_name, "table_name"))
+
+    API_CALL("DELETE", "/tables/{table_name}", dropTable, PATH(String, table_name, "table_name"))
+
+    API_CALL("POST",
+             "/tables/{table_name}/indexes",
+             createIndex,
+             PATH(String, table_name, "table_name"),
+             BODY_DTO(IndexRequestDto::ObjectWrapper, body))
+
+    API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
+
+    API_CALL("DELETE", "/tables/{table_name}/indexes", dropIndex, PATH(String, table_name, "table_name"))
+
+    API_CALL("POST",
+             "/tables/{table_name}/partitions",
+             createPartition,
+             PATH(String, table_name, "table_name"),
+             BODY_DTO(PartitionRequestDto::ObjectWrapper, body))
+
+    API_CALL("GET", "/tables/{table_name}/parittions", showPartitions, PATH(String, table_name, "table_name"))
+
+    API_CALL("DELETE",
+             "/tables/{table_name}/parittions/{partition_tag}",
+             dropPartition,
+             PATH(String, table_name, "table_name"),
+             PATH(String, partition_tag))
+
+    API_CALL("POST",
+             "/tables/{tables_name}/vectors",
+             insert,
+             PATH(String, table_name, "table_name"),
+             BODY_DTO(InsertRequestDto::ObjectWrapper, body))
+
+    API_CALL("PUT",
+             "/tables/{table_name}/vectors",
+             search,
+             PATH(String, table_name, "table_name"),
+             BODY_DTO(SearchRequestDto::ObjectWrapper, body))
+
+    API_CALL("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str, "cmd_str"))
+
 #include OATPP_CODEGEN_END(ApiClient)
- };
+};
 
 class WebControllerTest : public testing::Test {
  protected:
@@ -414,19 +479,28 @@ class WebControllerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
+
         milvus::server::DBWrapper::GetInstance().StartService();
 
         milvus::server::Config::GetInstance().SetServerConfigWebPort("29999");
 
         WebServer::GetInstance().Start();
 
+        // wait for 10 second until server launched
+        sleep(10);
+
+        TestClientComponent clientComponent(29999);
+
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
 
         auto requestExecutor = oatpp::web::client::HttpRequestExecutor::createShared(clientConnectionProvider);
-        auto client = TestClient::createShared(requestExecutor, objectMapper);
+//        client_ptr = std::shared_ptr<TestClient>(dynamic_cast<TestClient*>(TestClient::createShared(requestExecutor,
+//                                                                                                    objectMapper).get()));
+        client_ptr = TestClient::createShared(requestExecutor, objectMapper);
 
-        conncetion_ptr = client->getConnection();
+        conncetion_ptr = client_ptr->getConnection();
+        ASSERT_NE(nullptr, conncetion_ptr);
 
 //        auto response = controller->GetTable(CONTROLLER_TEST_TABLE_NAME, query_params);
 //        if (OStatus::CODE_200.code == response->getStatus().code ||
@@ -446,6 +520,14 @@ class WebControllerTest : public testing::Test {
     void
     TearDown() override {
         WebServer::GetInstance().Stop();
+
+        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, connectionProvider);
+        connectionProvider->getConnection();
+
+        OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor);
+        executor->waitTasksFinished();
+        executor->join();
+
         milvus::server::DBWrapper::GetInstance().StopService();
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
@@ -455,6 +537,7 @@ class WebControllerTest : public testing::Test {
 
  protected:
     std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle> conncetion_ptr;
+    std::shared_ptr<TestClient> client_ptr;
 
  protected:
     void GenTable(const std::string& table_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
@@ -464,7 +547,7 @@ class WebControllerTest : public testing::Test {
         table_dto->index_file_size = index_file_size;
         table_dto->metric_type = metric_type;
 
-        auto response = controller->CreateTable(table_dto);
+        client_ptr->createTable(table_dto, conncetion_ptr);
     }
 };
 
@@ -472,19 +555,21 @@ class WebControllerTest : public testing::Test {
 
 TEST_F(WebControllerTest, CREATE_TABLE) {
     auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = "web_controller_test";
+    table_dto->table_name = "web_test_create_table" + OString(RandomName().c_str());
     table_dto->dimension = 128;
     table_dto->index_file_size = 100;
     table_dto->metric_type = 1;
 
-    auto response = controller->CreateTable(table_dto);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatus().code);
+    auto response = client_ptr->createTable(table_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // invalid table name
     table_dto->table_name = "9090&*&()";
-    response = controller->CreateTable(table_dto);
-    ASSERT_EQ(OStatus::CODE_400.code, response->getStatus().code);
+    response = client_ptr->createTable(table_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
+
+#if false
 
 TEST_F(WebControllerTest, GET_TABLE) {
     OString table_name(CONTROLLER_TEST_TABLE_NAME);
@@ -760,3 +845,4 @@ TEST_F(WebControllerTest, DEVICESCONFIG) {
 //    web_server.Stop();
 //    std::cout << "";
 //}
+#endif
