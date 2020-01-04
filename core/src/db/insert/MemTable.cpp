@@ -87,8 +87,17 @@ MemTable::Serialize(uint64_t wal_lsn) {
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        }
+        // Update flush lsn
+        status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
+            ENGINE_LOG_ERROR << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
     }
     return Status::OK();
 }

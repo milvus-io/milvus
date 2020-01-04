@@ -110,7 +110,7 @@ DBImpl::Stop() {
     // make sure all memory data are serialized
     //    std::set<std::string> sync_table_ids;
     //    SyncMemData(sync_table_ids);
-    // TODO(zhiru): LSN?
+    // TODO(zhiru): ?
     auto status = Flush();
 
     // wait compaction/buildindex finish
@@ -444,7 +444,7 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     // serialize memory data
     //    std::set<std::string> sync_table_ids;
     //    auto status = SyncMemData(sync_table_ids);
-    // TODO(zhiru): LSN?
+    // TODO(zhiru): ?
     auto status = Flush();
 
     {

@@ -134,7 +134,7 @@ MemTableFile::IsFull() {
 }
 
 Status
-MemTableFile::Serialize() {
+MemTableFile::Serialize(uint64_t wal_lsn) {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
@@ -156,10 +156,14 @@ MemTableFile::Serialize() {
         table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
     }
 
+    // Set table file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
+    // GetTableFilesByFlushLSN() in meta.
+    table_file_schema_.flush_lsn_ = wal_lsn;
+
     auto status = meta_->UpdateTableFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
+                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
     // TODO(zhiru): cache
     /*

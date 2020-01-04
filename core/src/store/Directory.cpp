@@ -26,11 +26,14 @@ namespace milvus {
 namespace store {
 
 Directory::Directory(const std::string& dir_path) : dir_path_(dir_path) {
-    if (!boost::filesystem::is_directory(dir_path)) {
-        auto ret = boost::filesystem::create_directory(dir_path);
+}
+
+void
+Directory::Create() {
+    if (!boost::filesystem::is_directory(dir_path_)) {
+        auto ret = boost::filesystem::create_directory(dir_path_);
         if (!ret) {
-            // TODO(zhiru): hard to catch exception
-            std::string err_msg = "Failed to create directory: " + dir_path;
+            std::string err_msg = "Failed to create directory: " + dir_path_;
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);
         }

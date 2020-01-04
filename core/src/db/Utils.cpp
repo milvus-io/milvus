@@ -16,10 +16,6 @@
 // under the License.
 
 #include "db/Utils.h"
-#include "server/Config.h"
-#include "storage/s3/S3ClientWrapper.h"
-#include "utils/CommonUtil.h"
-#include "utils/Log.h"
 
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -27,6 +23,8 @@
 #include <regex>
 #include <vector>
 
+#include "server/Config.h"
+#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -44,7 +42,7 @@ std::mutex index_file_counter_mutex;
 static std::string
 ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
-    std::string partition_path = table_path + "/" + std::to_string(table_file.date_) + table_file.file_id_;
+    std::string partition_path = table_path + "/" + table_file.file_id_;
     return partition_path;
 }
 

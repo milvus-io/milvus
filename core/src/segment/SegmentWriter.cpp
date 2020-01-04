@@ -51,6 +51,7 @@ SegmentWriter::Serialize() {
     // TODO(zhiru)
     codec::DefaultCodec default_codec;
     try {
+        directory_ptr_->Create();
         default_codec.GetVectorsFormat()->write(directory_ptr_, segment_ptr_->vectors_ptr_);
         default_codec.GetDeletedDocsFormat()->write(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (Exception& e) {

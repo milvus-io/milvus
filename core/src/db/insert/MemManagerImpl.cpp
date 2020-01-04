@@ -145,21 +145,6 @@ MemManagerImpl::ToImmutable() {
     return Status::OK();
 }
 
-/*
-Status
-MemManagerImpl::Serialize(std::set<std::string>& table_ids) {
-    ToImmutable();
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
-    table_ids.clear();
-    for (auto& mem : immu_mem_list_) {
-        mem->Serialize();
-        table_ids.insert(mem->GetTableId());
-    }
-    immu_mem_list_.clear();
-    return Status::OK();
-}
-*/
-
 Status
 MemManagerImpl::EraseMemVector(const std::string& table_id) {
     {  // erase MemVector from rapid-insert cache

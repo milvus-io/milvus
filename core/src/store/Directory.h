@@ -28,6 +28,8 @@ class Directory {
  public:
     explicit Directory(const std::string& dir_path);
 
+    void Create();
+
     void
     ListAll(std::vector<std::string>& file_paths);
 
