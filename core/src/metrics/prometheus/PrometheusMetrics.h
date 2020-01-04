@@ -26,8 +26,8 @@
 #include <vector>
 
 #include "metrics/MetricBase.h"
-#include "utils/Error.h"
 #include "utils/Log.h"
+#include "utils/Status.h"
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
 //#define server::Metrics::GetInstance() server::GetInstance()
@@ -44,7 +44,7 @@ class PrometheusMetrics : public MetricsBase {
         return instance;
     }
 
-    ErrorCode
+    Status
     Init();
 
  private:

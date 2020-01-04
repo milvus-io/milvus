@@ -27,27 +27,27 @@
 namespace milvus {
 namespace server {
 
-ErrorCode
+Status
 PrometheusMetrics::Init() {
     try {
         Config& config = Config::GetInstance();
         Status s = config.GetMetricConfigEnableMonitor(startup_);
         if (!s.ok()) {
-            return s.code();
+            return s;
         }
         if (!startup_) {
-            return SERVER_SUCCESS;
+            return Status::OK();
         }
 
         // Following should be read from config file.
         std::string push_port, push_ip;
         s = config.GetMetricConfigPrometheusPort(push_port);
         if (!s.ok()) {
-            return s.code();
+            return s;
         }
         s = config.GetMetricConfigPrometheusIp(push_ip);
         if (!s.ok()) {
-            return s.code();
+            return s;
         }
 
         const std::string uri = std::string("/metrics");
@@ -65,10 +65,10 @@ PrometheusMetrics::Init() {
         gateway_->RegisterCollectable(registry_);
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << "Failed to connect prometheus server: " << std::string(ex.what());
-        return SERVER_UNEXPECTED_ERROR;
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 void
