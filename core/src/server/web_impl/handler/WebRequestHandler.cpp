@@ -177,22 +177,34 @@ StatusDto::ObjectWrapper
 WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
     Config& config = Config::GetInstance();
 
+    if (nullptr == advanced_config->cpu_cache_capacity.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'cpu_cache_capacity\' miss."));
+    }
     auto status =
         config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    if (nullptr == advanced_config->cache_insert_data.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'cache_insert_data\' miss."));
+    }
     status = config.SetCacheConfigCacheInsertData(std::to_string(advanced_config->cache_insert_data->getValue()));
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    if (nullptr == advanced_config->use_blas_threshold.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'use_blas_threshold\' miss."));
+    }
     status = config.SetEngineConfigUseBlasThreshold(std::to_string(advanced_config->use_blas_threshold->getValue()));
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    if (nullptr == advanced_config->gpu_search_threshold.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'gpu_search_threshold\' miss."));
+    }
     status =
         config.SetEngineConfigGpuSearchThreshold(std::to_string(advanced_config->gpu_search_threshold->getValue()));
     if (!status.ok()) {
@@ -254,16 +266,25 @@ StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     Config& config = Config::GetInstance();
 
+    if (nullptr == gpu_config_dto->enable.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'enable\' miss"))
+    }
     auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
     if (!status.ok() || !gpu_config_dto->enable->getValue()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
+    if (nullptr == gpu_config_dto->cache_capacity.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'cache_capacity\' miss"))
+    }
     status = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_config_dto->cache_capacity->getValue()));
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
+    if (nullptr == gpu_config_dto->search_resources.get()) {
+        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'search_resources\' miss"))
+    }
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
         [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
@@ -334,6 +355,7 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
     fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
     fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
     fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
+    fields_dto->index_file_size = std::stol(table_info[KEY_TABLE_INDEX_FILE_SIZE]);
     fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
 
     ASSIGN_RETURN_STATUS_DTO(status);
@@ -411,7 +433,7 @@ WebRequestHandler::GetIndex(const OString& table_name, IndexDto::ObjectWrapper& 
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
 
     if (status.ok()) {
-        index_dto->index_type = param.index_type_;
+        index_dto->index_type = IndexMap.at(engine::EngineType(param.index_type_)).c_str();//;
         index_dto->nlist = param.nlist_;
     }
 
@@ -516,7 +538,7 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     if (nullptr != search_request->file_ids.get()) {
         search_request->file_ids->forEach(
-            [&file_id_list](const OInt64& id) { file_id_list.emplace_back(std::to_string(id->getValue())); });
+            [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
     }
 
     std::vector<float> datas;

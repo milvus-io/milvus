@@ -44,7 +44,7 @@ class SearchRequestDto : public OObject {
     DTO_FIELD(Int64, topk);
     DTO_FIELD(Int64, nprobe);
     DTO_FIELD(List<String>::ObjectWrapper, tags);
-    DTO_FIELD(List<Int64>::ObjectWrapper, file_ids);
+    DTO_FIELD(List<String>::ObjectWrapper, file_ids);
     DTO_FIELD(List<List<Float32>::ObjectWrapper>::ObjectWrapper, records);
 };
 

@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <cmake-build-debug/oatpp_ep-prefix/src/oatpp_ep/include/oatpp-0.19.11/oatpp/oatpp/web/client/HttpRequestExecutor.hpp>
-#include <oatpp-swagger/AsyncController.hpp>
 #include <oatpp/network/server/Server.hpp>
+#include <oatpp/web/client/HttpRequestExecutor.hpp>
+#include <oatpp-swagger/AsyncController.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/SwaggerComponent.hpp"

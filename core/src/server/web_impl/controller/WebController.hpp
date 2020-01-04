@@ -703,7 +703,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
 
-    ENDPOINT_ASYNC("GET", "/tables/{tableName}/partitions", ShowPartitions) {
+    ENDPOINT_ASYNC("GET", "/tables/{table_name}/partitions", ShowPartitions) {
      ENDPOINT_ASYNC_INIT(ShowPartitions);
         Action
         act() override {
