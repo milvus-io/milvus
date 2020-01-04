@@ -25,8 +25,13 @@
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "server/Config.h"
+#include "storage/file/FileIOReader.h"
+#include "storage/file/FileIOWriter.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -52,64 +57,6 @@ VecIndex::Size() {
 void
 VecIndex::set_size(int64_t size) {
     size_ = size;
-}
-
-struct FileIOReader {
-    std::fstream fs;
-    std::string name;
-
-    explicit FileIOReader(const std::string& fname);
-
-    ~FileIOReader();
-
-    size_t
-    operator()(void* ptr, size_t size);
-
-    size_t
-    operator()(void* ptr, size_t size, size_t pos);
-};
-
-FileIOReader::FileIOReader(const std::string& fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::in | std::ios::binary);
-}
-
-FileIOReader::~FileIOReader() {
-    fs.close();
-}
-
-size_t
-FileIOReader::operator()(void* ptr, size_t size) {
-    fs.read(reinterpret_cast<char*>(ptr), size);
-}
-
-size_t
-FileIOReader::operator()(void* ptr, size_t size, size_t pos) {
-    return 0;
-}
-
-struct FileIOWriter {
-    std::fstream fs;
-    std::string name;
-
-    explicit FileIOWriter(const std::string& fname);
-    ~FileIOWriter();
-    size_t
-    operator()(void* ptr, size_t size);
-};
-
-FileIOWriter::FileIOWriter(const std::string& fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::out | std::ios::binary);
-}
-
-FileIOWriter::~FileIOWriter() {
-    fs.close();
-}
-
-size_t
-FileIOWriter::operator()(void* ptr, size_t size) {
-    fs.write(reinterpret_cast<char*>(ptr), size);
 }
 
 VecIndexPtr
@@ -206,39 +153,55 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 
 VecIndexPtr
 read_index(const std::string& location) {
+    TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
-    FileIOReader reader(location);
-    reader.fs.seekg(0, reader.fs.end);
-    int64_t length = reader.fs.tellg();
+
+    bool minio_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigMinioEnable(minio_enable);
+
+    std::shared_ptr<storage::IOReader> reader_ptr;
+    if (minio_enable) {
+        reader_ptr = std::make_shared<storage::S3IOReader>(location);
+    } else {
+        reader_ptr = std::make_shared<storage::FileIOReader>(location);
+    }
+
+    recorder.RecordSection("Start");
+
+    size_t length = reader_ptr->length();
     if (length <= 0) {
         return nullptr;
     }
 
-    reader.fs.seekg(0);
-
     size_t rp = 0;
+    reader_ptr->seekg(0);
+
     auto current_type = IndexType::INVALID;
-    reader(&current_type, sizeof(current_type));
+    reader_ptr->read(&current_type, sizeof(current_type));
     rp += sizeof(current_type);
+    reader_ptr->seekg(rp);
+
     while (rp < length) {
         size_t meta_length;
-        reader(&meta_length, sizeof(meta_length));
+        reader_ptr->read(&meta_length, sizeof(meta_length));
         rp += sizeof(meta_length);
-        reader.fs.seekg(rp);
+        reader_ptr->seekg(rp);
 
         auto meta = new char[meta_length];
-        reader(meta, meta_length);
+        reader_ptr->read(meta, meta_length);
         rp += meta_length;
-        reader.fs.seekg(rp);
+        reader_ptr->seekg(rp);
 
         size_t bin_length;
-        reader(&bin_length, sizeof(bin_length));
+        reader_ptr->read(&bin_length, sizeof(bin_length));
         rp += sizeof(bin_length);
-        reader.fs.seekg(rp);
+        reader_ptr->seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        reader(bin, bin_length);
+        reader_ptr->read(bin, bin_length);
         rp += bin_length;
+        reader_ptr->seekg(rp);
 
         auto binptr = std::make_shared<uint8_t>();
         binptr.reset(bin);
@@ -246,28 +209,51 @@ read_index(const std::string& location) {
         delete[] meta;
     }
 
+    double span = recorder.RecordSection("End");
+    double rate = length * 1000000.0 / span / 1024 / 1024;
+    STORAGE_LOG_DEBUG << "read_index(" << location << ") rate " << rate << "MB/s";
+
     return LoadVecIndex(current_type, load_data_list, length);
 }
 
 Status
 write_index(VecIndexPtr index, const std::string& location) {
     try {
+        TimeRecorder recorder("write_index");
+
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
-        FileIOWriter writer(location);
-        writer(&index_type, sizeof(IndexType));
+        bool minio_enable = false;
+        server::Config& config = server::Config::GetInstance();
+        config.GetStorageConfigMinioEnable(minio_enable);
+
+        std::shared_ptr<storage::IOWriter> writer_ptr;
+        if (minio_enable) {
+            writer_ptr = std::make_shared<storage::S3IOWriter>(location);
+        } else {
+            writer_ptr = std::make_shared<storage::FileIOWriter>(location);
+        }
+
+        recorder.RecordSection("Start");
+
+        writer_ptr->write(&index_type, sizeof(IndexType));
+
         for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
-            writer(&meta_length, sizeof(meta_length));
-            writer((void*)meta, meta_length);
+            writer_ptr->write(&meta_length, sizeof(meta_length));
+            writer_ptr->write((void*)meta, meta_length);
 
             auto binary = iter.second;
             int64_t binary_length = binary->size;
-            writer(&binary_length, sizeof(binary_length));
-            writer((void*)binary->data.get(), binary_length);
+            writer_ptr->write(&binary_length, sizeof(binary_length));
+            writer_ptr->write((void*)binary->data.get(), binary_length);
         }
+
+        double span = recorder.RecordSection("End");
+        double rate = writer_ptr->length() * 1000000.0 / span / 1024 / 1024;
+        STORAGE_LOG_DEBUG << "write_index(" << location << ") rate " << rate << "MB/s";
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
