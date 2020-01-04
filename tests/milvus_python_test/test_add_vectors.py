@@ -1296,6 +1296,18 @@ class TestAddAdvance:
         assert len(ids) == nb
         assert status.OK()
 
+    def test_insert_much_hamming(self, connect, ham_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(ham_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
 
 class TestNameInvalid(object):
     """
@@ -1365,3 +1377,10 @@ class TestAddTableVectorsInvalid(object):
         tmp_vectors[1][1] = gen_vector
         with pytest.raises(Exception) as e:
             status, result = connect.add_vectors(jac_table, tmp_vectors)
+
+    @pytest.mark.level(2)
+    def test_add_vectors_with_invalid_vectors_hamming(self, connect, ham_table, gen_vector):
+        tmp_vectors = copy.deepcopy(self.vectors)
+        tmp_vectors[1][1] = gen_vector
+        with pytest.raises(Exception) as e:
+            status, result = connect.add_vectors(ham_table, tmp_vectors)
