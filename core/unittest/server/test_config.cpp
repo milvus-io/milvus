@@ -305,12 +305,14 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 #endif
 }
 
-std::string gen_get_command(const std::string& parent_node, const std::string& child_node) {
+std::string
+gen_get_command(const std::string& parent_node, const std::string& child_node) {
     std::string cmd = "get_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
     return cmd;
 }
 
-std::string gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
+std::string
+gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
     std::string cmd = "set_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
     return cmd;
 }
@@ -525,9 +527,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
 
     ASSERT_FALSE(config.SetMetricConfigCollector("zilliz").ok());
-    
+
     ASSERT_FALSE(config.SetMetricConfigPrometheusIP("127.0.0").ok());
-    
+
     ASSERT_FALSE(config.SetMetricConfigPrometheusPort("0xff").ok());
 
     /* cache config */

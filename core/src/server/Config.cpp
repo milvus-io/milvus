@@ -135,10 +135,7 @@ Config::ValidateConfig() {
     CONFIG_CHECK(GetMetricConfigCollector(metric_collector));
 
     std::string metric_prometheus_ip;
-    s = GetMetricConfigPrometheusIp(metric_prometheus_ip);
-    if (!s.ok()) {
-        return s;
-    }
+    CONFIG_CHECK(GetMetricConfigPrometheusIp(metric_prometheus_ip));
 
     std::string metric_prometheus_port;
     CONFIG_CHECK(GetMetricConfigPrometheusPort(metric_prometheus_port));
