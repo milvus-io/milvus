@@ -109,10 +109,7 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
     // 2. Add the id to delete docs so it can be applied to segment on disk during the next flush
     segment_ptr->deleted_docs_ptr_->AddDeletedDoc(doc_id);
 
-    // 3. Update bitset in memory
-    if (!segment_ptr->concurrent_bitset_ptr_->test(doc_id)) {
-        segment_ptr->concurrent_bitset_ptr_->set(doc_id);
-    }
+    // TODO: 3. Update bitset in cache
 
     return Status::OK();
 }
