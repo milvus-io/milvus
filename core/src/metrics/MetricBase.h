@@ -34,6 +34,7 @@ class MetricsBase {
 
     virtual Status
     Init() {
+        return Status::OK();
     }
 
     virtual void

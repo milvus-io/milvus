@@ -45,7 +45,7 @@ class PrometheusMetrics : public MetricsBase {
     }
 
     Status
-    Init();
+    Init() override;
 
  private:
     std::shared_ptr<prometheus::Gateway> gateway_;
