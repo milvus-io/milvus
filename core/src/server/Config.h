@@ -28,6 +28,14 @@
 namespace milvus {
 namespace server {
 
+#define CONFIG_CHECK(func) \
+    do {                   \
+        Status s = func;   \
+        if (!s.ok()) {     \
+            return s;      \
+        }                  \
+    } while (false)
+
 static const char* CONFIG_NODE_DELIMITER = ".";
 static const char* CONFIG_VERSION = "version";
 
@@ -46,10 +54,6 @@ static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
-static const char* CONFIG_DB_PRIMARY_PATH = "primary_path";
-static const char* CONFIG_DB_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
-static const char* CONFIG_DB_SECONDARY_PATH = "secondary_path";
-static const char* CONFIG_DB_SECONDARY_PATH_DEFAULT = "";
 static const char* CONFIG_DB_BACKEND_URL = "backend_url";
 static const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
@@ -60,6 +64,25 @@ static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+
+/* storage config */
+static const char* CONFIG_STORAGE = "storage_config";
+static const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
+static const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
+static const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
+static const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
+static const char* CONFIG_STORAGE_MINIO_ENABLE = "minio_enable";
+static const char* CONFIG_STORAGE_MINIO_ENABLE_DEFAULT = "false";
+static const char* CONFIG_STORAGE_MINIO_ADDRESS = "minio_address";
+static const char* CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_STORAGE_MINIO_PORT = "minio_port";
+static const char* CONFIG_STORAGE_MINIO_PORT_DEFAULT = "9000";
+static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY = "minio_access_key";
+static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_MINIO_SECRET_KEY = "minio_secret_key";
+static const char* CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_MINIO_BUCKET = "minio_bucket";
+static const char* CONFIG_STORAGE_MINIO_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -161,10 +184,6 @@ class Config {
 
     /* db config */
     Status
-    CheckDBConfigPrimaryPath(const std::string& value);
-    Status
-    CheckDBConfigSecondaryPath(const std::string& value);
-    Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
@@ -172,6 +191,24 @@ class Config {
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
     Status
     CheckDBConfigInsertBufferSize(const std::string& value);
+
+    /* storage config */
+    Status
+    CheckStorageConfigPrimaryPath(const std::string& value);
+    Status
+    CheckStorageConfigSecondaryPath(const std::string& value);
+    Status
+    CheckStorageConfigMinioEnable(const std::string& value);
+    Status
+    CheckStorageConfigMinioAddress(const std::string& value);
+    Status
+    CheckStorageConfigMinioPort(const std::string& value);
+    Status
+    CheckStorageConfigMinioAccessKey(const std::string& value);
+    Status
+    CheckStorageConfigMinioSecretKey(const std::string& value);
+    Status
+    CheckStorageConfigMinioBucket(const std::string& value);
 
     /* metric config */
     Status
@@ -235,10 +272,6 @@ class Config {
 
     /* db config */
     Status
-    GetDBConfigPrimaryPath(std::string& value);
-    Status
-    GetDBConfigSecondaryPath(std::string& value);
-    Status
     GetDBConfigBackendUrl(std::string& value);
     Status
     GetDBConfigArchiveDiskThreshold(int64_t& value);
@@ -248,6 +281,24 @@ class Config {
     GetDBConfigInsertBufferSize(int64_t& value);
     Status
     GetDBConfigPreloadTable(std::string& value);
+
+    /* storage config */
+    Status
+    GetStorageConfigPrimaryPath(std::string& value);
+    Status
+    GetStorageConfigSecondaryPath(std::string& value);
+    Status
+    GetStorageConfigMinioEnable(bool& value);
+    Status
+    GetStorageConfigMinioAddress(std::string& value);
+    Status
+    GetStorageConfigMinioPort(std::string& value);
+    Status
+    GetStorageConfigMinioAccessKey(std::string& value);
+    Status
+    GetStorageConfigMinioSecretKey(std::string& value);
+    Status
+    GetStorageConfigMinioBucket(std::string& value);
 
     /* metric config */
     Status
@@ -307,10 +358,6 @@ class Config {
 
     /* db config */
     Status
-    SetDBConfigPrimaryPath(const std::string& value);
-    Status
-    SetDBConfigSecondaryPath(const std::string& value);
-    Status
     SetDBConfigBackendUrl(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
@@ -318,6 +365,24 @@ class Config {
     SetDBConfigArchiveDaysThreshold(const std::string& value);
     Status
     SetDBConfigInsertBufferSize(const std::string& value);
+
+    /* storage config */
+    Status
+    SetStorageConfigPrimaryPath(const std::string& value);
+    Status
+    SetStorageConfigSecondaryPath(const std::string& value);
+    Status
+    SetStorageConfigMinioEnable(const std::string& value);
+    Status
+    SetStorageConfigMinioAddress(const std::string& value);
+    Status
+    SetStorageConfigMinioPort(const std::string& value);
+    Status
+    SetStorageConfigMinioAccessKey(const std::string& value);
+    Status
+    SetStorageConfigMinioSecretKey(const std::string& value);
+    Status
+    SetStorageConfigMinioBucket(const std::string& value);
 
     /* metric config */
     Status

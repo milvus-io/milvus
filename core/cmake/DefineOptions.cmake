@@ -89,6 +89,8 @@ define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
 
 define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
 
+define_option(MILVUS_WITH_AWS "Build with aws" ON)
+
 define_option(MILVUS_WITH_OATPP "Build with oatpp" ON)
 
 define_option(MILVUS_WITH_OATPP_SWAGGER "Build with oatpp-swagger" ON)

@@ -103,6 +103,14 @@ set(web_server_files
         ${web_controller_files}
         ${web_dto_files}
         ${web_impl_files}
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -118,6 +126,7 @@ set(engine_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
@@ -148,6 +157,11 @@ set(boost_lib
         libboost_serialization.a
         )
 
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        )
+
 set(third_party_libs
         sqlite
         ${grpc_lib}
@@ -156,6 +170,9 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
+        ${s3_client_lib}
+        curl
+        crypto
         )
 
 if (MILVUS_GPU_VERSION)
