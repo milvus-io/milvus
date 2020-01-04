@@ -61,7 +61,7 @@ Status
 MemTable::Delete(segment::doc_id_t doc_id) {
     // Locate which table file the doc id lands in
     for (auto& table_file : mem_table_file_list_) {
-        // TODO:
+        // TODO(zhiru):
         // Use bloom filter to check whether the id is present in this table file
         // If present:
         table_file->Delete(doc_id);
@@ -79,7 +79,7 @@ MemTable::GetTableFileCount() {
 }
 
 Status
-MemTable::Serialize() {
+MemTable::Serialize(uint64_t wal_lsn) {
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize();
         if (!status.ok()) {
@@ -87,8 +87,17 @@ MemTable::Serialize() {
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        }
+        // Update flush lsn
+        status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
+            ENGINE_LOG_ERROR << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
     }
     return Status::OK();
 }

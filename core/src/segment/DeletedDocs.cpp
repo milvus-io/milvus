@@ -24,7 +24,7 @@ DeletedDocs::DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids) : deleted
 }
 
 void
-DeletedDocs::AddDeleteDoc(doc_id_t doc_id) {
+DeletedDocs::AddDeletedDoc(doc_id_t doc_id) {
     deleted_doc_ids_.emplace_back(doc_id);
 }
 

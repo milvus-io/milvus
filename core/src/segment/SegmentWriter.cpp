@@ -22,11 +22,14 @@
 #include "Vector.h"
 #include "codecs/default/DefaultCodec.h"
 #include "store/Directory.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace segment {
 
-SegmentWriter::SegmentWriter(const std::string& directory) : directory_(directory) {
+SegmentWriter::SegmentWriter(const std::string& directory) {
+    directory_ptr_ = std::make_shared<store::Directory>(directory);
 }
 
 Status
@@ -45,11 +48,17 @@ SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8
 
 Status
 SegmentWriter::Serialize() {
-    // TODO
+    // TODO(zhiru)
     codec::DefaultCodec default_codec;
-    store::DirectoryPtr directory_ptr = std::make_shared<store::Directory>(directory_);
-    default_codec.GetVectorsFormat()->write(directory_ptr, segment_ptr_->vectors_ptr_);
-    default_codec.GetDeletedDocsFormat()->write(directory_ptr, segment_ptr_->deleted_docs_ptr_);
+    try {
+        directory_ptr_->Create();
+        default_codec.GetVectorsFormat()->write(directory_ptr_, segment_ptr_->vectors_ptr_);
+        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to serialize segment. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
     return Status::OK();
 }
 

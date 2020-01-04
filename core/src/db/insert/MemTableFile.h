@@ -50,7 +50,7 @@ class MemTableFile {
     IsFull();
 
     Status
-    Serialize();
+    Serialize(uint64_t wal_lsn);
 
  private:
     Status

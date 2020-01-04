@@ -16,18 +16,11 @@
 // under the License.
 
 #include "db/meta/MySQLMetaImpl.h"
-#include "MetaConsts.h"
-#include "db/IDGenerator.h"
-#include "db/Utils.h"
-#include "metrics/Metrics.h"
-#include "utils/CommonUtil.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
-#include "utils/StringHelpFunctions.h"
 
 #include <mysql++/mysql++.h>
 #include <string.h>
 #include <unistd.h>
+
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
@@ -39,6 +32,15 @@
 #include <sstream>
 #include <string>
 #include <thread>
+
+#include "MetaConsts.h"
+#include "db/IDGenerator.h"
+#include "db/Utils.h"
+#include "metrics/Metrics.h"
+#include "utils/CommonUtil.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus {
 namespace engine {
@@ -151,6 +153,7 @@ static const MetaSchema TABLES_SCHEMA(META_TABLES, {
                                                        MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("version", "VARCHAR(64)",
                                                                  std::string("DEFAULT '") + CURRENT_VERSION + "'"),
+                                                       MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
                                                    });
 
 // TableFiles schema
@@ -165,6 +168,7 @@ static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
                                                                MetaField("updated_time", "BIGINT", "NOT NULL"),
                                                                MetaField("created_on", "BIGINT", "NOT NULL"),
                                                                MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+                                                               MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
                                                            });
 
 }  // namespace
@@ -881,6 +885,107 @@ MySQLMetaImpl::UpdateTableFlag(const std::string& table_id, int64_t flag) {
     }
 
     return Status::OK();
+}
+
+Status
+MySQLMetaImpl::UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) {
+    try {
+        server::MetricCollector metric;
+
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            if (connectionPtr == nullptr) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query updateTableFlagQuery = connectionPtr->query();
+            updateTableFlagQuery << "UPDATE " << META_TABLES << " SET flush_lsn = " << flush_lsn
+                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlushLSN: " << updateTableFlagQuery.str();
+
+            if (!updateTableFlagQuery.exec()) {
+                return HandleException("QUERY ERROR WHEN UPDATING TABLE FLUSH_LSN", updateTableFlagQuery.error());
+            }
+        }  // Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Successfully update table flush_lsn, table id = " << table_id;
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLUSH_LSN", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) {
+    table_files.clear();
+
+    try {
+        server::MetricCollector metric;
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            if (connectionPtr == nullptr) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query filesToIndexQuery = connectionPtr->query();
+            filesToIndexQuery
+                << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << " FROM " << META_TABLEFILES << " WHERE flush_lsn = " << flush_lsn << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
+
+            res = filesToIndexQuery.store();
+        }  // Scoped Connection
+
+        Status ret;
+        std::map<std::string, TableSchema> groups;
+        TableFileSchema table_file;
+        for (auto& resRow : res) {
+            table_file.id_ = resRow["id"];  // implicit conversion
+            resRow["table_id"].to_string(table_file.table_id_);
+            table_file.engine_type_ = resRow["engine_type"];
+            resRow["file_id"].to_string(table_file.file_id_);
+            table_file.file_type_ = resRow["file_type"];
+            table_file.file_size_ = resRow["file_size"];
+            table_file.row_count_ = resRow["row_count"];
+            table_file.date_ = resRow["date"];
+            table_file.created_on_ = resRow["created_on"];
+
+            auto groupItr = groups.find(table_file.table_id_);
+            if (groupItr == groups.end()) {
+                TableSchema table_schema;
+                table_schema.table_id_ = table_file.table_id_;
+                auto status = DescribeTable(table_schema);
+                if (!status.ok()) {
+                    return status;
+                }
+                groups[table_file.table_id_] = table_schema;
+            }
+            table_file.dimension_ = groups[table_file.table_id_].dimension_;
+            table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
+            table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
+
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if (!status.ok()) {
+                ret = status;
+            }
+
+            table_files.push_back(table_file);
+        }
+
+        if (res.size() > 0) {
+            ENGINE_LOG_DEBUG << "Collect " << res.size() << " files with flush_lsn = " << flush_lsn;
+        }
+        return ret;
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES BY LSN", e.what());
+    }
 }
 
 // ZR: this function assumes all fields in file_schema have value

@@ -38,12 +38,6 @@ server_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # DataBase Config      | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# primary_path         | Primary directory used to save meta data, vector data and  | Path       | /var/lib/milvus |
-#                      | index data.                                                |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
-#                      | to save vector data and index data.                        |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # backend_url          | URL for metadata storage, using SQLite (for single server  | URL        | sqlite://:@:/   |
 #                      | Milvus) or MySQL (for distributed cluster Milvus).         |            |                 |
 #                      | Format: dialect://username:password@host:port/database     |            |                 |
@@ -59,11 +53,40 @@ server_config:
 #                      | '*' means preload all existing tables.                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
-  primary_path: @MILVUS_DB_PATH@
-  secondary_path:
   backend_url: sqlite://:@:/
   insert_buffer_size: 1
   preload_table:
+
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Storage Config       | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# primary_path         | Primary directory used to save meta data, vector data and  | Path       | /var/lib/milvus |
+#                      | index data.                                                |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
+#                      | to save vector data and index data.                        |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_enable         | Enable MinIO storage or not.                               | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_address        | MinIO storage service IP address.                          | String     | 127.0.0.1       |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_port           | MinIO storage service port. Port range (1024, 65535)       | Integer    | 9000            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_access_key     | MinIO storage service access key.                          | String     | minioadmin      |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_secret_key     | MinIO storage service secret key.                          | String     | minioadmin      |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# minio_bucket         | MinIO storage service bucket name.                         | String     | milvus-bucket   |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+storage_config:
+  primary_path: @MILVUS_DB_PATH@
+  secondary_path:
+  minio_enable: false
+  minio_address: 127.0.0.1
+  minio_port: 9000
+  minio_access_key: minioadmin
+  minio_secret_key: minioadmin
+  minio_bucket: milvus-bucket
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |

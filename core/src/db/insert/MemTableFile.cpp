@@ -84,9 +84,9 @@ MemTableFile::Add(VectorSourcePtr& source) {
 
 Status
 MemTableFile::Delete(segment::doc_id_t doc_id) {
-    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    // 1. Check wither the doc_id is present, if yes, delete it's corresponding buffer
 
-    // TODO: need to know the type of vector we want to delete. Hard code for now
+    // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
     int vector_type_size;
     if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
         vector_type_size = sizeof(uint8_t);
@@ -106,8 +106,13 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
         }
     }
 
-    // Then add the id to delete queue so it can be applied to segment on disk during the next flush
-    segment_ptr->deleted_docs_ptr_->AddDeleteDoc(doc_id);
+    // 2. Add the id to delete docs so it can be applied to segment on disk during the next flush
+    segment_ptr->deleted_docs_ptr_->AddDeletedDoc(doc_id);
+
+    // 3. Update bitset in memory
+    if (!segment_ptr->concurrent_bitset_ptr_->test(doc_id)) {
+        segment_ptr->concurrent_bitset_ptr_->set(doc_id);
+    }
 
     return Status::OK();
 }
@@ -129,7 +134,7 @@ MemTableFile::IsFull() {
 }
 
 Status
-MemTableFile::Serialize() {
+MemTableFile::Serialize(uint64_t wal_lsn) {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
@@ -137,7 +142,7 @@ MemTableFile::Serialize() {
 
     //    execution_engine_->Serialize();
 
-    // TODO:
+    // TODO(zhiru):
     //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     //    table_file_schema_.row_count_ = execution_engine_->Count();
 
@@ -151,12 +156,16 @@ MemTableFile::Serialize() {
         table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
     }
 
+    // Set table file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
+    // GetTableFilesByFlushLSN() in meta.
+    table_file_schema_.flush_lsn_ = wal_lsn;
+
     auto status = meta_->UpdateTableFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
+                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
-    // TODO: cache
+    // TODO(zhiru): cache
     /*
         if (options_.insert_cache_immediately_) {
             execution_engine_->Cache();
