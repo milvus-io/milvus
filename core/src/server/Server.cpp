@@ -27,6 +27,7 @@
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "src/version.h"
+#include "storage/s3/S3ClientWrapper.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
@@ -263,10 +264,12 @@ Server::StartService() {
     scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcServer::GetInstance().Start();
+    storage::S3ClientWrapper::GetInstance().StartService();
 }
 
 void
 Server::StopService() {
+    storage::S3ClientWrapper::GetInstance().StopService();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();
