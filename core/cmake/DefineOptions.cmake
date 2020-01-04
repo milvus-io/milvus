@@ -45,7 +45,7 @@ set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
-define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
+define_option(CUSTOMIZATION "Build with customized FAISS library" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
@@ -84,6 +84,12 @@ endif ()
 define_option(MILVUS_WITH_GRPC "Build with GRPC" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
+
+define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
+
+define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
+
+define_option(MILVUS_WITH_AWS "Build with aws" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")

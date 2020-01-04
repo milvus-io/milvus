@@ -15,6 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <gtest/gtest.h>
+
+#include <boost/filesystem.hpp>
+#include <random>
+#include <thread>
+
 #include "cache/CpuCacheMgr.h"
 #include "db/Constants.h"
 #include "db/DB.h"
@@ -25,11 +31,6 @@
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
 
-#include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
-#include <random>
-#include <thread>
-
 namespace {
 
 static const char* TABLE_NAME = "test_group";
@@ -38,6 +39,7 @@ static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
+
 
 milvus::engine::meta::TableSchema
 BuildTableSchema() {
@@ -189,13 +191,13 @@ TEST_F(DBTest, DB_TEST) {
             START_TIMER;
 
             std::vector<std::string> tags;
-            stat = db_->Query(TABLE_NAME, tags, k, qb, 10, qxb.data(), result_ids, result_distances);
+            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, qb, 10, qxb.data(), result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
             for (auto i = 0; i < qb; ++i) {
-                ASSERT_EQ(result_ids[i*k], target_ids[i]);
+                ASSERT_EQ(result_ids[i * k], target_ids[i]);
                 ss.str("");
                 ss << "Result [" << i << "]:";
                 for (auto t = 0; t < k; t++) {
@@ -289,9 +291,9 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -302,9 +304,9 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -315,9 +317,9 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -329,9 +331,9 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        stat = db_->Query(TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 #endif
@@ -347,7 +349,21 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_distances);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
+                                  result_distances);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+
+    {
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, nq, 10, xq.data(), result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -362,23 +378,30 @@ TEST_F(DBTest, SEARCH_TEST) {
     {
         result_ids.clear();
         result_dists.clear();
-        stat = db_->Query(TABLE_NAME, partition_tag, k, nq, 10, xq.data(), result_ids, result_dists);
+        stat = db_->Query(dummy_context_, TABLE_NAME, partition_tag, k, nq, 10, xq.data(), result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
     {
         result_ids.clear();
         result_dists.clear();
-        stat = db_->Query(TABLE_NAME, partition_tag, k, 200, 10, xq.data(), result_ids, result_dists);
+        stat = db_->Query(dummy_context_, TABLE_NAME, partition_tag, k, 200, 10, xq.data(), result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
     {  // search by specify index file
         milvus::engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
+        std::vector<std::string> file_ids;
+        // sometimes this case run fast to merge file and build index, old file will be deleted immediately,
+        // so the QueryByFileID cannot get files to search
+        // input 100 files ids to avoid random failure of this case
+        for (int i = 0; i < 100; i++) {
+            file_ids.push_back(std::to_string(i));
+        }
         result_ids.clear();
         result_dists.clear();
-        stat = db_->QueryByFileID(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids, result_dists);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
+                                  result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -453,10 +476,12 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     milvus::engine::meta::DatesT dates;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(table_info.table_id_, tags, 1, 1, 1, nullptr, dates, result_ids, result_distances);
+    stat =
+        db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, 1, nullptr, dates, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
-    stat = db_->QueryByFileID(table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, result_ids, result_distances);
+    stat = db_->QueryByFileID(dummy_context_, table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, result_ids,
+                              result_distances);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->DropTable(table_info.table_id_, dates);
@@ -486,9 +511,11 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
 
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
+#endif
 #endif
 
     milvus::engine::TableIndex index_out;
@@ -531,14 +558,14 @@ TEST_F(DBTest, PARTITION_TEST) {
         milvus::engine::IDNumbers vector_ids;
         vector_ids.resize(INSERT_BATCH);
         for (int64_t k = 0; k < INSERT_BATCH; k++) {
-            vector_ids[k] = i*INSERT_BATCH + k;
+            vector_ids[k] = i * INSERT_BATCH + k;
         }
 
         db_->InsertVectors(table_name, partition_tag, INSERT_BATCH, xb.data(), vector_ids);
         ASSERT_EQ(vector_ids.size(), INSERT_BATCH);
     }
 
-    //duplicated partition is not allowed
+    // duplicated partition is not allowed
     stat = db_->CreatePartition(table_name, "", "0");
     ASSERT_FALSE(stat.ok());
 
@@ -550,20 +577,20 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_EQ(partition_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
     }
 
-    { // build index
+    {  // build index
         milvus::engine::TableIndex index;
-        index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFFLAT;
-        index.metric_type_ = (int) milvus::engine::MetricType::L2;
+        index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+        index.metric_type_ = (int)milvus::engine::MetricType::L2;
         stat = db_->CreateIndex(table_info.table_id_, index);
         ASSERT_TRUE(stat.ok());
 
         uint64_t row_count = 0;
         stat = db_->GetTableRowCount(TABLE_NAME, row_count);
         ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(row_count, INSERT_BATCH*PARTITION_COUNT);
+        ASSERT_EQ(row_count, INSERT_BATCH * PARTITION_COUNT);
     }
 
-    { // search
+    {  // search
         const int64_t nq = 5;
         const int64_t topk = 10;
         const int64_t nprobe = 10;
@@ -574,25 +601,25 @@ TEST_F(DBTest, PARTITION_TEST) {
         std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(result_ids.size()/topk, nq);
+        ASSERT_EQ(result_ids.size() / topk, nq);
 
         // search in whole table
         tags.clear();
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(result_ids.size()/topk, nq);
+        ASSERT_EQ(result_ids.size() / topk, nq);
 
         // search in all partitions(tag regex match)
         tags.push_back("\\d");
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        ASSERT_EQ(result_ids.size()/topk, nq);
+        ASSERT_EQ(result_ids.size() / topk, nq);
     }
 
     stat = db_->DropPartition(table_name + "_0");

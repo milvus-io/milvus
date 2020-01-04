@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: milvus-gpu-build-env
+  labels:
+    app: milvus
+    componet: gpu-build-env
+spec:
+  containers:
+  - name: milvus-gpu-build-env
+    image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.7.0-ubuntu18.04
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: OS_NAME
+      value: "ubuntu18.04"
+    - name: BUILD_ENV_IMAGE_ID
+      value: "da9023b0f858f072672f86483a869aa87e90a5140864f89e5a012ec766d96dea"
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "12Gi"
+        cpu: "6.0"
+        nvidia.com/gpu: 1
+      requests:
+        memory: "8Gi"
+        cpu: "4.0"
+  - name: milvus-mysql
+    image: mysql:5.6
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: 123456
+    ports:
+    - containerPort: 3306
+      name: mysql

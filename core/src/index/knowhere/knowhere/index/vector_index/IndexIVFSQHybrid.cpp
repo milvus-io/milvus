@@ -19,6 +19,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 #include <utility>
 
@@ -76,6 +77,13 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
 
     faiss::Index* device_index = index_.get();
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+
+    if (auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(host_index)) {
+        if (ivf_index != nullptr) {
+            ivf_index->to_readonly();
+        }
+        ivf_index->backup_quantizer();
+    }
 
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
@@ -287,68 +295,36 @@ IVFSQHybrid::set_index_model(IndexModelPtr model) {
     }
 }
 
+BinarySet
+IVFSQHybrid::SerializeImpl() {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    if (gpu_mode == 0) {
+        MemoryIOWriter writer;
+        faiss::write_index(index_.get(), &writer);
+
+        auto data = std::make_shared<uint8_t>();
+        data.reset(writer.data_);
+
+        BinarySet res_set;
+        res_set.Append("IVF", data, writer.rp);
+
+        return res_set;
+    } else if (gpu_mode == 2) {
+        return GPUIVF::SerializeImpl();
+    } else {
+        KNOWHERE_THROW_MSG("Can't serialize IVFSQ8Hybrid");
+    }
+}
+
 FaissIVFQuantizer::~FaissIVFQuantizer() {
     if (quantizer != nullptr) {
         delete quantizer;
         quantizer = nullptr;
     }
     // else do nothing
-}
-
-#else
-
-QuantizerPtr
-IVFSQHybrid::LoadQuantizer(const Config& conf) {
-    return knowhere::QuantizerPtr();
-}
-
-void
-IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
-}
-
-void
-IVFSQHybrid::UnsetQuantizer() {
-}
-
-VectorIndexPtr
-IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
-    return nullptr;
-}
-
-std::pair<VectorIndexPtr, QuantizerPtr>
-IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config) {
-    KNOWHERE_THROW_MSG("Not yet implemented");
-}
-
-IndexModelPtr
-IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
-    return GPUIVFSQ::Train(dataset, config);
-}
-
-VectorIndexPtr
-IVFSQHybrid::CopyGpuToCpu(const Config& config) {
-    return GPUIVFSQ::CopyGpuToCpu(config);
-}
-
-VectorIndexPtr
-IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
-    return IVF::CopyCpuToGpu(device_id, config);
-}
-
-void
-IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
-                         const Config& cfg) {
-    GPUIVF::search_impl(n, data, k, distances, labels, cfg);
-}
-
-void
-IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
-    GPUIVF::LoadImpl(index_binary);
-}
-
-void
-IVFSQHybrid::set_index_model(IndexModelPtr model) {
-    GPUIVF::set_index_model(model);
 }
 
 #endif

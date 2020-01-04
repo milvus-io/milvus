@@ -36,7 +36,6 @@ struct FaissIVFQuantizer : public Quantizer {
     ~FaissIVFQuantizer() override;
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
-#endif
 
 class IVFSQHybrid : public GPUIVFSQ {
  public:
@@ -82,6 +81,9 @@ class IVFSQHybrid : public GPUIVFSQ {
     VectorIndexPtr
     CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
 
+    BinarySet
+    SerializeImpl();
+
  protected:
     void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
@@ -93,5 +95,6 @@ class IVFSQHybrid : public GPUIVFSQ {
     int64_t gpu_mode = 0;  // 0,1,2
     int64_t quantizer_gpu_id_ = -1;
 };
+#endif
 
 }  // namespace knowhere

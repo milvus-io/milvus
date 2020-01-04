@@ -147,7 +147,7 @@ StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::stri
     // regex match
     std::regex pattern(pattern_str);
     std::smatch results;
-    if (std::regex_search(target_str, results, pattern)) {
+    if (std::regex_match(target_str, results, pattern)) {
         return true;
     } else {
         return false;

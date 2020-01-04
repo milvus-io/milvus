@@ -16,18 +16,20 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <opentracing/mocktracer/tracer.h>
+
 #include <boost/filesystem.hpp>
 #include <thread>
 
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
-#include "server/grpc_impl/GrpcRequestScheduler.h"
-#include "server/grpc_impl/request/GrpcBaseRequest.h"
+#include "server/delivery/RequestScheduler.h"
+#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/RequestHandler.h"
 #include "src/version.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
-
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
@@ -43,10 +45,11 @@ static constexpr int64_t VECTOR_COUNT = 1000;
 static constexpr int64_t INSERT_LOOP = 10;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
-void CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) {
+void
+CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) {
     auto vector_data = target->mutable_vector_data();
     vector_data->Resize(static_cast<int>(src.size()), 0.0);
-    memcpy(vector_data->mutable_data(), src.data(), src.size()* sizeof(float));
+    memcpy(vector_data->mutable_data(), src.data(), src.size() * sizeof(float));
 }
 
 class RpcHandlerTest : public testing::Test {
@@ -55,9 +58,9 @@ class RpcHandlerTest : public testing::Test {
     SetUp() override {
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
-        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
-        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, true));
-        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
+        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
+        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
+        res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0));
 
         auto default_conn = milvus::scheduler::Connection("IO", 500.0);
         auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
@@ -88,14 +91,23 @@ class RpcHandlerTest : public testing::Test {
         milvus::server::DBWrapper::GetInstance().StartService();
 
         // initialize handler, create table
-        handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>();
+        handler = std::make_shared<milvus::server::grpc::GrpcRequestHandler>(opentracing::Tracer::Global());
+        dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
+        opentracing::mocktracer::MockTracerOptions tracer_options;
+        auto mock_tracer =
+            std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+        auto mock_span = mock_tracer->StartSpan("mock_span");
+        auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+        dummy_context->SetTraceContext(trace_context);
         ::grpc::ServerContext context;
+        handler->SetContext(&context, dummy_context);
         ::milvus::grpc::TableSchema request;
         ::milvus::grpc::Status status;
         request.set_table_name(TABLE_NAME);
         request.set_dimension(TABLE_DIM);
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
+        handler->SetContext(&context, dummy_context);
         ::grpc::Status grpc_status = handler->CreateTable(&context, &request, &status);
     }
 
@@ -110,6 +122,7 @@ class RpcHandlerTest : public testing::Test {
 
  protected:
     std::shared_ptr<milvus::server::grpc::GrpcRequestHandler> handler;
+    std::shared_ptr<milvus::server::Context> dummy_context;
 };
 
 void
@@ -149,6 +162,8 @@ CurrentTmDate(int64_t offset_day = 0) {
 
 TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableName request;
     ::milvus::grpc::BoolReply reply;
     ::grpc::Status status = handler->HasTable(&context, &request, &reply);
@@ -161,6 +176,8 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = handler->CreateIndex(&context, &request, &response);
@@ -197,6 +214,8 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
 
 TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::InsertParam request;
     ::milvus::grpc::Status response;
 
@@ -210,13 +229,22 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     }
     handler->Insert(&context, &request, &vector_ids);
     ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+
+    // insert vectors with wrong dim
+    std::vector<float > record_wrong_dim(TABLE_DIM - 1, 0.5f);
+    ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
+    CopyRowRecord(grpc_record, record_wrong_dim);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_EQ(vector_ids.status().error_code(), ::milvus::grpc::ILLEGAL_ROWRECORD);
 }
 
 TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResult response;
-    //test null input
+    // test null input
     handler->Search(&context, nullptr, &response);
 
     // test invalid table name
@@ -277,6 +305,8 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
 
 TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableSchema tableschema;
     ::milvus::grpc::Status response;
     std::string tablename = "tbl";
@@ -313,7 +343,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::VectorIds vector_ids;
-    for (int64_t i = 0; i <  VECTOR_COUNT; i++) {
+    for (int64_t i = 0; i < VECTOR_COUNT; i++) {
         vector_ids.add_vector_id_array(i);
     }
     // Insert vectors
@@ -379,6 +409,8 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
 
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::TableSchema table_schema;
     ::milvus::grpc::Status response;
     std::string str_table_name = "tbl_partition";
@@ -417,6 +449,8 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::Command command;
     command.set_cmd("version");
     ::milvus::grpc::StringReply reply;
@@ -431,6 +465,8 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
 
 TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     ::grpc::ServerContext context;
+    handler->SetContext(&context, dummy_context);
+    handler->RegisterRequestHandler(milvus::server::RequestHandler());
     ::milvus::grpc::DeleteByDateParam request;
     ::milvus::grpc::Status status;
     handler->DeleteByDate(&context, nullptr, &status);
@@ -455,20 +491,21 @@ TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
 
 //////////////////////////////////////////////////////////////////////
 namespace {
-class DummyRequest : public milvus::server::grpc::GrpcBaseRequest {
+class DummyRequest : public milvus::server::BaseRequest {
  public:
     milvus::Status
     OnExecute() override {
         return milvus::Status::OK();
     }
 
-    static milvus::server::grpc::BaseRequestPtr
+    static milvus::server::BaseRequestPtr
     Create(std::string& dummy) {
-        return std::shared_ptr<milvus::server::grpc::GrpcBaseRequest>(new DummyRequest(dummy));
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
     }
 
  public:
-    explicit DummyRequest(std::string& dummy) : GrpcBaseRequest(dummy) {
+    explicit DummyRequest(std::string& dummy)
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id"), dummy) {
     }
 };
 
@@ -489,15 +526,14 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto status = request_ptr->Execute();
     ASSERT_TRUE(status.ok());
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().Start();
-    ::milvus::grpc::Status grpc_status;
+    milvus::server::RequestScheduler::GetInstance().Start();
     std::string dummy = "dql";
-    milvus::server::grpc::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecRequest(base_task_ptr, &grpc_status);
+    milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
+    milvus::server::RequestScheduler::GetInstance().ExecRequest(base_task_ptr);
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
     request_ptr = nullptr;
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
 
-    milvus::server::grpc::GrpcRequestScheduler::GetInstance().Stop();
+    milvus::server::RequestScheduler::GetInstance().Stop();
 }

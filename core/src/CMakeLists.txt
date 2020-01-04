@@ -74,16 +74,37 @@ set(thirdparty_files
         ${thirdparty_nlohmann_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request delivery_request_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery delivery_files)
+set(server_files
+        ${server_service_files}
+        ${delivery_request_files}
+        ${delivery_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
 set(grpc_server_files
         ${grpc_request_files}
         ${grpc_impl_files}
+        ${grpc_interceptor_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -93,6 +114,7 @@ set(engine_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
@@ -103,7 +125,7 @@ if (MILVUS_WITH_PROMETHEUS)
             ${metrics_prometheus_files})
 endif ()
 
-set(client_grpc_lib
+set(grpc_lib
         grpcpp_channelz
         grpc++
         grpc
@@ -123,13 +145,22 @@ set(boost_lib
         libboost_serialization.a
         )
 
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        )
+
 set(third_party_libs
         sqlite
-        ${client_grpc_lib}
+        ${grpc_lib}
         yaml-cpp
         mysqlpp
         zlib
+        fiu
         ${boost_lib}
+        ${s3_client_lib}
+        curl
+        crypto
         )
 
 if (MILVUS_GPU_VERSION)
@@ -201,9 +232,20 @@ endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
+add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
+set(tracing_lib
+        opentracing
+        opentracing_mocktracer
+        ${grpc_lib}
+        pthread
+        z
+        )
+target_link_libraries(tracing ${tracing_lib})
+
 set(server_libs
         milvus_engine
         metrics
+        tracing
         )
 
 add_executable(milvus_server
@@ -213,7 +255,9 @@ add_executable(milvus_server
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${server_context_files}
         ${utils_files}
+        ${tracing_files}
         )
 
 target_link_libraries(milvus_server
@@ -226,6 +270,7 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
+        ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+        ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.1.00
         DESTINATION lib)
-
-add_subdirectory(sdk)

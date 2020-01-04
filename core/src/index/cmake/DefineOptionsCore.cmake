@@ -49,7 +49,7 @@ else ()
     define_option(KNOWHERE_GPU_VERSION "Build GPU version" OFF)
 endif ()
 
-define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
+define_option(CUSTOMIZATION "Build with customized FAISS library" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
@@ -73,9 +73,7 @@ Note that this requires linking Boost statically" OFF)
 
 define_option(KNOWHERE_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
 
-define_option(KNOWHERE_WITH_ARROW "Build with ARROW" ON)
-
-define_option(KNOWHERE_WITH_LAPACK "Build with LAPACK library" ON)
+define_option(KNOWHERE_WITH_ARROW "Build with ARROW" OFF)
 
 define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 

@@ -66,15 +66,32 @@ set(thirdparty_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/request grpc_request_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
 set(grpc_server_files
-        ${grpc_request_files}
         ${grpc_impl_files}
+        ${grpc_interceptor_files}
         )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
+set(server_delivery_files
+        ${server_delivery_impl_files}
+        ${server_delivery_request_files})
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
 
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
@@ -100,7 +117,10 @@ set(common_files
         ${thirdparty_files}
         ${scheduler_files}
         ${wrapper_files}
+        ${storage_files}
         ${helper_files}
+        ${server_context_files}
+        ${tracing_files}
         )
 
 set(unittest_libs
@@ -116,6 +136,13 @@ set(unittest_libs
         pthread
         metrics
         gfortran
+        opentracing
+        opentracing_mocktracer
+        fiu
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        curl
+        crypto
         )
 if (MILVUS_WITH_PROMETHEUS)
     set(unittest_libs ${unittest_libs}
@@ -148,3 +175,4 @@ add_subdirectory(wrapper)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)
+add_subdirectory(storage)

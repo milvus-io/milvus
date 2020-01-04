@@ -16,6 +16,18 @@
 // under the License.
 
 #include "db/DBImpl.h"
+
+#include <assert.h>
+
+#include <algorithm>
+#include <boost/filesystem.hpp>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <set>
+#include <thread>
+#include <utility>
+
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
@@ -32,16 +44,6 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
-
-#include <assert.h>
-#include <algorithm>
-#include <boost/filesystem.hpp>
-#include <chrono>
-#include <cstring>
-#include <iostream>
-#include <set>
-#include <thread>
-#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -171,7 +173,18 @@ DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->AllTables(table_schema_array);
+    std::vector<meta::TableSchema> all_tables;
+    auto status = meta_ptr_->AllTables(all_tables);
+
+    // only return real tables, dont return partition tables
+    table_schema_array.clear();
+    for (auto& schema : all_tables) {
+        if (schema.owner_table_.empty()) {
+            table_schema_array.push_back(schema);
+        }
+    }
+
+    return status;
 }
 
 Status
@@ -394,21 +407,26 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-              uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+              const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result = Query(table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
+    Status result =
+        Query(context, table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
     return result;
 }
 
 Status
-DBImpl::Query(const std::string& table_id, const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq,
-              uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
+              const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
               ResultDistances& result_distances) {
+    auto query_ctx = context->Child("Query");
+
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -443,15 +461,21 @@ DBImpl::Query(const std::string& table_id, const std::vector<std::string>& parti
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
+
     return status;
 }
 
 Status
-DBImpl::QueryByFileID(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
-                      uint64_t nprobe, const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
+DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
+                      const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
                       ResultDistances& result_distances) {
+    auto query_ctx = context->Child("Query by file id");
+
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -478,8 +502,11 @@ DBImpl::QueryByFileID(const std::string& table_id, const std::vector<std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
+
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
+
     return status;
 }
 
@@ -496,8 +523,11 @@ DBImpl::Size(uint64_t& result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
-                   uint64_t nprobe, const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+                   ResultIds& result_ids, ResultDistances& result_distances) {
+    auto query_async_ctx = context->Child("Query Async");
+
     server::CollectQueryMetrics metrics(nq);
 
     TimeRecorder rc("");
@@ -506,7 +536,7 @@ DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& fi
     auto status = ongoing_files_checker_.MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(k, nq, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nq, nprobe, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -525,6 +555,8 @@ DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& fi
     result_ids = job->GetResultIds();
     result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
+
+    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }

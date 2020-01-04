@@ -1,0 +1,94 @@
+name: Core
+
+on:
+  push:
+    paths:
+      - 'ci/**'
+      - 'core/**'
+  pull_request:
+    paths:
+      - 'ci/**'
+      - 'core/**'
+
+jobs:
+  ubuntu:
+    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [18.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures ubuntu-core
+      - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build ubuntu-core
+      - name: Docker Run
+        run: |
+          docker-compose run --use-aliases -d db
+          docker-compose run ubuntu-core
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push ubuntu-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          name: ${{ matrix.ubuntu }}-unittests
+          yml: ./codecov.yaml
+
+  centos:
+    name: AMD64 CentOS ${{ matrix.centos }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        centos: [7]
+    env:
+      CENTOS: ${{ matrix.centos }}
+    steps:
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures centos-core
+      - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build centos-core
+      - name: Docker Run
+        run: |
+          docker-compose run --use-aliases -d db
+          docker-compose run centos-core
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push centos-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          name: ${{ matrix.centos }}-unittests
+          yml: ./codecov.yaml

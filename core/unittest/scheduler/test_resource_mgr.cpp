@@ -16,6 +16,7 @@
 // under the License.
 
 #include <gtest/gtest.h>
+
 #include "scheduler/ResourceMgr.h"
 #include "scheduler/resource/CpuResource.h"
 #include "scheduler/resource/DiskResource.h"
@@ -33,9 +34,9 @@ class ResourceMgrBaseTest : public testing::Test {
     SetUp() override {
         empty_mgr_ = std::make_shared<ResourceMgr>();
         mgr1_ = std::make_shared<ResourceMgr>();
-        disk_res = std::make_shared<DiskResource>("disk", 0, true, false);
-        cpu_res = std::make_shared<CpuResource>("cpu", 1, true, false);
-        gpu_res = std::make_shared<GpuResource>("gpu", 2, true, true);
+        disk_res = std::make_shared<DiskResource>("disk", 0, false);
+        cpu_res = std::make_shared<CpuResource>("cpu", 1, false);
+        gpu_res = std::make_shared<GpuResource>("gpu", 2, true);
         mgr1_->Add(ResourcePtr(disk_res));
         mgr1_->Add(ResourcePtr(cpu_res));
         mgr1_->Add(ResourcePtr(gpu_res));
@@ -53,20 +54,20 @@ class ResourceMgrBaseTest : public testing::Test {
 };
 
 TEST_F(ResourceMgrBaseTest, ADD) {
-    auto resource = std::make_shared<TestResource>("test", 0, true, true);
+    auto resource = std::make_shared<TestResource>("test", 0, true);
     auto ret = empty_mgr_->Add(ResourcePtr(resource));
     ASSERT_EQ(ret.lock(), resource);
 }
 
 TEST_F(ResourceMgrBaseTest, ADD_DISK) {
-    auto resource = std::make_shared<DiskResource>("disk", 0, true, true);
+    auto resource = std::make_shared<DiskResource>("disk", 0, true);
     auto ret = empty_mgr_->Add(ResourcePtr(resource));
     ASSERT_EQ(ret.lock(), resource);
 }
 
 TEST_F(ResourceMgrBaseTest, CONNECT) {
-    auto resource1 = std::make_shared<TestResource>("resource1", 0, true, true);
-    auto resource2 = std::make_shared<TestResource>("resource2", 2, true, true);
+    auto resource1 = std::make_shared<TestResource>("resource1", 0, true);
+    auto resource2 = std::make_shared<TestResource>("resource2", 2, true);
     empty_mgr_->Add(resource1);
     empty_mgr_->Add(resource2);
     Connection io("io", 500.0);
@@ -74,8 +75,8 @@ TEST_F(ResourceMgrBaseTest, CONNECT) {
 }
 
 TEST_F(ResourceMgrBaseTest, INVALID_CONNECT) {
-    auto resource1 = std::make_shared<TestResource>("resource1", 0, true, true);
-    auto resource2 = std::make_shared<TestResource>("resource2", 2, true, true);
+    auto resource1 = std::make_shared<TestResource>("resource1", 0, true);
+    auto resource2 = std::make_shared<TestResource>("resource2", 2, true);
     empty_mgr_->Add(resource1);
     empty_mgr_->Add(resource2);
     Connection io("io", 500.0);
@@ -164,8 +165,8 @@ class ResourceMgrAdvanceTest : public testing::Test {
     void
     SetUp() override {
         mgr1_ = std::make_shared<ResourceMgr>();
-        disk_res = std::make_shared<DiskResource>("disk", 0, true, false);
-        cpu_res = std::make_shared<CpuResource>("cpu", 0, true, true);
+        disk_res = std::make_shared<DiskResource>("disk", 0, false);
+        cpu_res = std::make_shared<CpuResource>("cpu", 0, true);
         mgr1_->Add(ResourcePtr(disk_res));
         mgr1_->Add(ResourcePtr(cpu_res));
         mgr1_->Start();
@@ -186,7 +187,8 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     auto callback = [&](EventPtr event) { flag = true; };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
-    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, nullptr));
+    disk_res->task_table().Put(
+        std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, nullptr));
     sleep(1);
     ASSERT_TRUE(flag);
 }

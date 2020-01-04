@@ -47,6 +47,9 @@ class Tables(db.Model):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     table_id = Column(String(50), unique=True)
+    owner_table = Column(String(50))
+    partition_tag = Column(String(50))
+    version = Column(String(50))
     state = Column(Integer)
     dimension = Column(Integer)
     created_on = Column(Integer)
@@ -72,5 +75,4 @@ class Tables(db.Model):
 
         files = self.files.filter(cond)
 
-        logger.debug('DATE_RANGE: {}'.format(date_range))
         return files

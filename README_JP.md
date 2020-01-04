@@ -16,32 +16,21 @@
 
 Milvusは世界中一番早い特徴ベクトルにむかう類似性検索エンジンです。不均質な計算アーキテクチャーに基づいて効率を最大化出来ます。数十億のベクタの中に目標を検索できるまで数ミリ秒しかかからず、最低限の計算資源だけが必要です。
 
-Milvusは安定的な[Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java)又は [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) APIsを提供します。
+Milvusは安定的な[Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java)又は [C++](https://github.com/milvus-io/milvus/tree/master/sdk) SDKを提供します。
 
-Milvus [リリースノート](https://milvus.io/docs/en/release/v0.5.3/)を読んで最新バージョンや更新情報を手に入れます。
+Milvus [リリースノート](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0.md)を読んで最新バージョンや更新情報を手に入れます。
 
 
 ## はじめに
 
-DockerでMilvusをインストールすることは簡単です。[Milvusインストール案内](https://milvus.io/docs/en/userguide/install_milvus/) を参考してください。ソースからMilvusを構築するために、[ソースから構築する](install.md)を参考してください。
+DockerでMilvusをインストールすることは簡単です。[Milvusインストール案内](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) を参考してください。ソースからMilvusを構築するために、[ソースから構築する](install.md)を参考してください。
 
-Milvusをコンフィグするために、[Milvusコンフィグ](https://github.com/milvus-io/docs/blob/master/reference/milvus_config.md)を読んでください。
+Milvusをコンフィグするために、[Milvusコンフィグ](https://www.milvus.io/docs/reference/milvus_config.md)を読んでください。
 
 ### 初めてのMilvusプログラムを試す
 
-[Python](https://www.milvus.io/docs/en/userguide/example_code/)や[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)などのサンプルコードを使ってMilvusプログラムを試す。
+[Python](https://www.milvus.io/docs/guides/get_started/example_code.md)、[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)、または[C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples)などのサンプルコードを使ってMilvusプログラムを試す。
 
-C++サンプルコードを実行するために、次のコマンドをつかってください。
-
-```shell
- # Run Milvus C++ example
- $ cd [Milvus root path]/core/milvus/bin
- $ ./sdk_simple
-```
-
-## Milvusロードマップ
-
-[ロードマップ](https://milvus.io/docs/en/roadmap/)を読んで、追加する予定の特性が分かります。
 
 ## 貢献規約
 
@@ -62,7 +51,7 @@ C++サンプルコードを実行するために、次のコマンドをつか�
 
 - [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [Milvusのよくある質問](https://www.milvus.io/docs/en/faq/operational_faq/)
+- [Milvusのよくある質問](https://www.milvus.io/docs/faq/operational_faq.md)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 

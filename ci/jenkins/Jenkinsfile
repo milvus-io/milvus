@@ -2,7 +2,6 @@
 
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "H 0 * * * " : ""
-cron_string =  BRANCH_NAME == "0.6.0" ? "H 1 * * * " : cron_string
 
 pipeline {
     agent none
@@ -20,7 +19,7 @@ pipeline {
         choice choices: ['Release', 'Debug'], description: 'Build Type', name: 'BUILD_TYPE'
         string defaultValue: 'registry.zilliz.com', description: 'DOCKER REGISTRY URL', name: 'DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
-        string defaultValue: 'http://192.168.1.202/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
+        string defaultValue: 'http://192.168.1.201/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
         string defaultValue: '1a527823-d2b7-44fd-834b-9844350baf14', description: 'JFROG CREDENTIALS ID', name: 'JFROG_CREDENTIALS_ID', trim: true
     }
 
@@ -34,275 +33,152 @@ pipeline {
     }
 
     stages {
-        stage("Ubuntu 18.04 x86_64") {
-            environment {
-                OS_NAME = "ubuntu18.04"
-                CPU_ARCH = "amd64"
-            }
-
-            parallel {
-                stage ("GPU Version") {
-                    environment {
-                        BINRARY_VERSION = "gpu"
-                        PACKAGE_VERSION = VersionNumber([
-                            versionNumberString : '${SEMVER}-gpu-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
-                        ]);
-                        DOCKER_VERSION = "${SEMVER}-gpu-${OS_NAME}-${LOWER_BUILD_TYPE}"
+        stage ('Milvus Build and Test') {
+            matrix {
+                agent none
+                axes {
+                    axis {
+                        name 'OS_NAME'
+                        values 'ubuntu18.04', 'centos7'
                     }
 
-                    stages {
-                        stage("Run Build") {
-                            agent {
-                                kubernetes {
-                                    label "${env.BINRARY_VERSION}-build"
-                                    defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/milvus-gpu-version-build-env-pod.yaml'
-                                }
-                            }
+                    axis {
+                        name 'CPU_ARCH'
+                        values 'amd64'
+                    }
 
-                            stages {
-                                stage('Build') {
-                                    steps {
-                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                                stage('Code Coverage') {
-                                    steps {
-                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                                stage('Upload Package') {
-                                    steps {
-                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        stage("Publish docker images") {
-                            agent {
-                                kubernetes {
-                                    label "${env.BINRARY_VERSION}-publish"
-                                    defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/docker-pod.yaml'
-                                }
-                            }
-
-                            stages {
-                                stage('Publish') {
-                                    steps {
-                                        container('publish-images') {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        stage("Deploy to Development") {
-                            environment {
-                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-")
-                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
-                            }
-
-                            agent {
-                                kubernetes {
-                                    label "${env.BINRARY_VERSION}-dev-test"
-                                    defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
-                                }
-                            }
-
-                            stages {
-                                stage("Deploy to Dev") {
-                                    steps {
-                                        container('milvus-test-env') {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/deploySingle2Dev.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-
-                                stage("Dev Test") {
-                                    steps {
-                                        container('milvus-test-env') {
-                                            script {
-                                                boolean isNightlyTest = isTimeTriggeredBuild()
-                                                if (isNightlyTest) {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
-                                                } else {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                stage ("Cleanup Dev") {
-                                    steps {
-                                        container('milvus-test-env') {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            post {
-                                unsuccessful {
-                                    container('milvus-test-env') {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    axis {
+                        name 'BINARY_VERSION'
+                        values 'gpu', 'cpu'
                     }
                 }
 
-                stage ("CPU Version") {
-                    environment {
-                        BINRARY_VERSION = "cpu"
-                        PACKAGE_VERSION = VersionNumber([
-                            versionNumberString : '${SEMVER}-cpu-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
-                        ]);
-                        DOCKER_VERSION = "${SEMVER}-cpu-${OS_NAME}-${LOWER_BUILD_TYPE}"
-                    }
-
-                    stages {
-                        stage("Run Build") {
-                            agent {
-                                kubernetes {
-                                    label "${env.BINRARY_VERSION}-build"
-                                    defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/milvus-cpu-version-build-env-pod.yaml'
-                                }
-                            }
-
-                            stages {
-                                stage('Build') {
-                                    steps {
-                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                                stage('Code Coverage') {
-                                    steps {
-                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                                stage('Upload Package') {
-                                    steps {
-                                        container("milvus-${env.BINRARY_VERSION}-build-env") {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                stages {
+                    stage("Milvus CI") {
+                        environment {
+                            PACKAGE_VERSION = VersionNumber([
+                                versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
+                            ]);
+                            DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
                         }
 
-                        stage("Publish docker images") {
-                            agent {
-                                kubernetes {
-                                    label "${env.BINRARY_VERSION}-publish"
-                                    defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/docker-pod.yaml'
+                        stages {
+                            stage('Run Build') {
+                                agent {
+                                    kubernetes {
+                                        label "${OS_NAME}-${BINARY_VERSION}-build-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                                        defaultContainer 'jnlp'
+                                        yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
+                                    }
                                 }
-                            }
 
-                            stages {
-                                stage('Publish') {
-                                    steps {
-                                        container('publish-images'){
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+                                stages {
+                                    stage('Build') {
+                                        steps {
+                                            container("milvus-${BINARY_VERSION}-build-env") {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    stage('Code Coverage') {
+                                        steps {
+                                            container("milvus-${BINARY_VERSION}-build-env") {
+                                                script {
+                                                    if ("${BINARY_VERSION}" == "gpu") {
+                                                        load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                                    } else {
+                                                        echo "Skip Code Coverage"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    stage('Upload Package') {
+                                        steps {
+                                            container("milvus-${BINARY_VERSION}-build-env") {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        stage("Deploy to Development") {
-                            environment {
-                                FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-")
-                                HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${env.BINRARY_VERSION}".toLowerCase()
-                            }
-
-                            agent {
-                                kubernetes {
-                                    label "${env.BINRARY_VERSION}-dev-test"
-                                    defaultContainer 'jnlp'
-                                    yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                            stage('Publish docker images') {
+                                agent {
+                                    kubernetes {
+                                        label "${OS_NAME}-${BINARY_VERSION}-publish-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                                        defaultContainer 'jnlp'
+                                        yamlFile 'ci/jenkins/pod/docker-pod.yaml'
+                                    }
                                 }
-                            }
 
-                            stages {
-                                stage("Deploy to Dev") {
-                                    steps {
-                                        container('milvus-test-env') {
-                                            script {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/deploySingle2Dev.groovy"
+                                stages {
+                                    stage('Publish') {
+                                        steps {
+                                            container('publish-images') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+                                                }
                                             }
                                         }
                                     }
                                 }
+                            }
 
-                                stage("Dev Test") {
-                                    steps {
-                                        container('milvus-test-env') {
-                                            script {
-                                                boolean isNightlyTest = isTimeTriggeredBuild()
-                                                if (isNightlyTest) {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
-                                                } else {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                            stage('Deploy to Development') {
+                                environment {
+                                    FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
+                                    FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
+                                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                                }
+
+                                agent {
+                                    kubernetes {
+                                        label "${OS_NAME}-${BINARY_VERSION}-dev-test-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                                        defaultContainer 'jnlp'
+                                        yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                                    }
+                                }
+
+                                stages {
+                                    stage('Deploy to Dev') {
+                                        steps {
+                                            container('milvus-test-env') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkins/step/deploySingle2Dev.groovy"
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    stage('Dev Test') {
+                                        steps {
+                                            container('milvus-test-env') {
+                                                script {
+                                                    boolean isNightlyTest = isTimeTriggeredBuild()
+                                                    if (isNightlyTest) {
+                                                        load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
+                                                    } else {
+                                                        load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
 
-                                stage ("Cleanup Dev") {
-                                    steps {
+                                post {
+                                    cleanup {
                                         container('milvus-test-env') {
                                             script {
                                                 load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                            post {
-                                unsuccessful {
-                                    container('milvus-test-env') {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
                                         }
                                     }
                                 }

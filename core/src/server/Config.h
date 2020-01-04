@@ -28,6 +28,15 @@
 namespace milvus {
 namespace server {
 
+#define CONFIG_CHECK(func) \
+    do {                   \
+        Status s = func;   \
+        if (!s.ok()) {     \
+            return s;      \
+        }                  \
+    } while (false)
+
+static const char* CONFIG_NODE_DELIMITER = ".";
 static const char* CONFIG_VERSION = "version";
 
 /* server config */
@@ -54,13 +63,29 @@ static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "4";
+static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
+static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+
+/* storage config */
+static const char* CONFIG_STORAGE = "storage_config";
+static const char* CONFIG_STORAGE_MINIO_ENABLE = "minio_enable";
+static const char* CONFIG_STORAGE_MINIO_ENABLE_DEFAULT = "false";
+static const char* CONFIG_STORAGE_MINIO_ADDRESS = "minio_address";
+static const char* CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_STORAGE_MINIO_PORT = "minio_port";
+static const char* CONFIG_STORAGE_MINIO_PORT_DEFAULT = "9000";
+static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY = "minio_access_key";
+static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_MINIO_SECRET_KEY = "minio_secret_key";
+static const char* CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_MINIO_BUCKET = "minio_bucket";
+static const char* CONFIG_STORAGE_MINIO_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
-static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "16";
+static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
@@ -79,7 +104,7 @@ static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
 /* engine config */
 static const char* CONFIG_ENGINE = "engine_config";
 static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
-static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "20";
+static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
@@ -94,7 +119,7 @@ static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
-static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "4";
+static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1";
 static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
 static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_GPU_RESOURCE_DELIMITER = ",";
@@ -102,6 +127,11 @@ static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES = "search_resources";
 static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
+
+// TODO:
+/* tracing config */
+static const char* CONFIG_TRACING = "tracing_config";
+static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 class Config {
  public:
@@ -114,19 +144,25 @@ class Config {
     Status
     ResetDefaultConfig();
     void
-    PrintAll();
+    GetConfigJsonStr(std::string& result);
+    Status
+    ProcessConfigCli(std::string& result, const std::string& cmd);
 
  private:
     ConfigNode&
     GetConfigRoot();
     ConfigNode&
     GetConfigNode(const std::string& name);
+    bool
+    ConfigNodeValid(const std::string& parent_key, const std::string& child_key);
     Status
     GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value);
-    void
+    Status
     SetConfigValueInMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
-    void
-    PrintConfigSection(const std::string& config_node_name);
+    Status
+    GetConfigCli(std::string& value, const std::string& parent_key, const std::string& child_key);
+    Status
+    SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
     ///////////////////////////////////////////////////////////////////////////
     Status
@@ -155,6 +191,20 @@ class Config {
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
     Status
     CheckDBConfigInsertBufferSize(const std::string& value);
+
+    /* storage config */
+    Status
+    CheckStorageConfigMinioEnable(const std::string& value);
+    Status
+    CheckStorageConfigMinioAddress(const std::string& value);
+    Status
+    CheckStorageConfigMinioPort(const std::string& value);
+    Status
+    CheckStorageConfigMinioAccessKey(const std::string& value);
+    Status
+    CheckStorageConfigMinioSecretKey(const std::string& value);
+    Status
+    CheckStorageConfigMinioBucket(const std::string& value);
 
     /* metric config */
     Status
@@ -230,6 +280,20 @@ class Config {
     Status
     GetDBConfigPreloadTable(std::string& value);
 
+    /* storage config */
+    Status
+    GetStorageConfigMinioEnable(bool& value);
+    Status
+    GetStorageConfigMinioAddress(std::string& value);
+    Status
+    GetStorageConfigMinioPort(std::string& value);
+    Status
+    GetStorageConfigMinioAccessKey(std::string& value);
+    Status
+    GetStorageConfigMinioSecretKey(std::string& value);
+    Status
+    GetStorageConfigMinioBucket(std::string& value);
+
     /* metric config */
     Status
     GetMetricConfigEnableMonitor(bool& value);
@@ -269,6 +333,10 @@ class Config {
     GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value);
 #endif
 
+    /* tracing config */
+    Status
+    GetTracingConfigJsonConfigPath(std::string& value);
+
  public:
     /* server config */
     Status
@@ -293,6 +361,20 @@ class Config {
     SetDBConfigArchiveDaysThreshold(const std::string& value);
     Status
     SetDBConfigInsertBufferSize(const std::string& value);
+
+    /* storage config */
+    Status
+    SetStorageConfigMinioEnable(const std::string& value);
+    Status
+    SetStorageConfigMinioAddress(const std::string& value);
+    Status
+    SetStorageConfigMinioPort(const std::string& value);
+    Status
+    SetStorageConfigMinioAccessKey(const std::string& value);
+    Status
+    SetStorageConfigMinioSecretKey(const std::string& value);
+    Status
+    SetStorageConfigMinioBucket(const std::string& value);
 
     /* metric config */
     Status

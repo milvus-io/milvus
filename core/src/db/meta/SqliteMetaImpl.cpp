@@ -143,7 +143,7 @@ SqliteMetaImpl::Initialize() {
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_INVALID_PATH, msg);
+            throw Exception(DB_INVALID_PATH, msg);
         }
     }
 
@@ -734,8 +734,7 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
         ConnectorPtr->update_all(
             set(
                 c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE,
-                c(&TableSchema::nlist_) = DEFAULT_NLIST,
-                c(&TableSchema::metric_type_) = DEFAULT_METRIC_TYPE),
+                c(&TableSchema::nlist_) = DEFAULT_NLIST),
             where(
                 c(&TableSchema::table_id_) == table_id));
 

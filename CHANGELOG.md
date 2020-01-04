@@ -1,7 +1,35 @@
 # Changelog
 
-Please mark all change in change log and use the ticket from JIRA.
-# Milvus 0.6.0 (TODO)
+Please mark all change in change log and use the issue from GitHub
+
+# Milvus 0.7.0 (TBD)
+
+## Bug
+- \#715 - Milvus crash when searching and building index simultaneously using SQ8H
+- \#744 - Don't return partition table for show_tables
+- \#770 - Server unittest run failed on low-end server
+- \#805 - IVFTest.gpu_seal_test unittest failed
+- \#831 - Judge branch error in CommonUtil.cpp
+
+## Feature
+- \#216 - Add CLI to get server info
+- \#343 - Add Opentracing
+- \#665 - Support get/set config via CLI
+- \#766 - If partition tag is similar, wrong partition is searched
+- \#771 - Add server build commit info interface
+- \#759 - Put C++ sdk out of milvus/core
+- \#815 - Support MinIO storage
+
+## Improvement
+- \#738 - Use Openblas / lapack from apt install
+- \#758 - Enhance config description
+- \#791 - Remove Arrow
+- \#834 - add cpu mode for built-in Faiss
+- \#848 - Add ready-to-use config files to the Milvus repo for enhanced user experince
+
+## Task
+
+# Milvus 0.6.0 (2019-12-07)
 
 ## Bug
 - \#228 - memory usage increased slowly during searching vectors
@@ -52,6 +80,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#658 - Milvus error out when building SQ8H index without GPU resources
 - \#668 - Update badge of README
 - \#670 - Random failure of unittest db_test::SEARCH_TEST
+- \#674 - Server down in stability test
+- \#696 - Metric_type changed from IP to L2
+- \#705 - Fix search SQ8H crash without GPU resource
 
 ## Feature
 - \#12 - Pure CPU version for Milvus
@@ -66,6 +97,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#560 - Add version in server config file
 - \#605 - Print more messages when server start
 - \#644 - Add a new rpc command to get milvus build version whether cpu or gpu
+- \#709 - Show last commit id when server start
 
 ## Improvement
 - \#255 - Add ivfsq8 test report detailed version
@@ -88,6 +120,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#584 - Intergrate internal FAISS
 - \#611 - Remove MILVUS_CPU_VERSION
 - \#634 - FAISS GPU version is compiled with O0
+- \#737 - Refactor server module to separate Grpc from server handler and scheduler
 
 ## Task
 

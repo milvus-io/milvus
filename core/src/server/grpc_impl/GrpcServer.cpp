@@ -16,11 +16,16 @@
 // under the License.
 
 #include "server/grpc_impl/GrpcServer.h"
-#include "GrpcRequestHandler.h"
-#include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "server/Config.h"
-#include "server/DBWrapper.h"
-#include "utils/Log.h"
+
+#include <grpc++/grpc++.h>
+#include <grpc++/server.h>
+#include <grpc++/server_builder.h>
+#include <grpc++/server_context.h>
+#include <grpc/grpc.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/credentials.h>
 
 #include <chrono>
 #include <iostream>
@@ -28,13 +33,15 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
-#include <grpc/grpc.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/client_context.h>
-#include <grpcpp/create_channel.h>
-#include <grpcpp/security/credentials.h>
+#include "GrpcRequestHandler.h"
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "server/Config.h"
+#include "server/DBWrapper.h"
+#include "server/grpc_impl/interceptor/SpanInterceptor.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace server {
@@ -95,10 +102,22 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
-    GrpcRequestHandler service;
+    RequestHandler handler;
+    GrpcRequestHandler service(opentracing::Tracer::Global());
+    service.RegisterRequestHandler(handler);
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+
+    // Add gRPC interceptor
+    using InterceptorI = ::grpc::experimental::ServerInterceptorFactoryInterface;
+    using InterceptorIPtr = std::unique_ptr<InterceptorI>;
+    std::vector<InterceptorIPtr> creators;
+
+    creators.push_back(
+        std::unique_ptr<::grpc::experimental::ServerInterceptorFactoryInterface>(new SpanInterceptorFactory(&service)));
+
+    builder.experimental().SetInterceptorCreators(std::move(creators));
 
     server_ptr_ = builder.BuildAndStart();
     server_ptr_->Wait();

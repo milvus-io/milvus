@@ -1,7 +1,6 @@
 #!/bin/bash
 
-OS_NAME="linux"
-CODE_NAME=$(lsb_release -sc)
+OS_NAME="${OS_NAME}"
 BUILD_ENV_DOCKER_IMAGE_ID="${BUILD_ENV_IMAGE_ID}"
 BRANCH_NAMES=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's=[a-zA-Z]*\/==g' | awk -F", " '{$1=""; print $0}')
 ARTIFACTORY_URL=""
@@ -43,13 +42,14 @@ fi
 
 check_ccache() {
     BRANCH=$1
-    echo "fetching ${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
-    wget -q --method HEAD "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    PACKAGE_FILE="ccache-${OS_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+    echo "fetching ${BRANCH}/${PACKAGE_FILE}"
+    wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
     if [[ $? == 0 ]];then
-        wget -q "${ARTIFACTORY_URL}/${BRANCH}/ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz" && \
+        wget -q "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}" && \
         mkdir -p ${CCACHE_DIRECTORY} && \
-        tar zxf ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz -C ${CCACHE_DIRECTORY} && \
-        rm ccache-${OS_NAME}-${CODE_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz
+        tar zxf ${PACKAGE_FILE} -C ${CCACHE_DIRECTORY} && \
+        rm ${PACKAGE_FILE}
         if [[ $? == 0 ]];then
             echo "found cache"
             exit 0
@@ -57,8 +57,8 @@ check_ccache() {
     fi
 }
 
-if [[ -n "${CHANGE_BRANCH}" && "${BRANCH_NAME}" =~ "PR-" ]];then
-    check_ccache ${CHANGE_BRANCH}
+if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]];then
+    check_ccache ${CHANGE_TARGET}
     check_ccache ${BRANCH_NAME}
 fi
 

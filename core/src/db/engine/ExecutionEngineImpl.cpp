@@ -120,6 +120,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             if (gpu_resource_enable) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
@@ -128,6 +129,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             }
             break;
         }
+#endif
 #endif
         case EngineType::FAISS_PQ: {
 #ifdef MILVUS_GPU_VERSION
@@ -400,10 +402,11 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
+    // the ToIndexData is only a placeholder, cpu-copy-to-gpu action is performed in
     gpu_num_ = device_id;
     auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
-    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
+    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_ + "_placeholder", obj);
 #endif
     return Status::OK();
 }
@@ -603,7 +606,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     }
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Search error";
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
     }
     return status;
 }
@@ -634,6 +637,7 @@ ExecutionEngineImpl::Init() {
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     if (!s.ok()) {
         gpu_num_ = knowhere::INVALID_VALUE;
+        return s;
     }
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {

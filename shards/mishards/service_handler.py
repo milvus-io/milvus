@@ -107,6 +107,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                   topk,
                   nprobe,
                   range_array=None,
+                  partition_tags=None,
                   **kwargs):
         metadata = kwargs.get('metadata', None)
         range_array = [
@@ -119,6 +120,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         with self.tracer.start_span('get_routing', child_of=p_span):
             routing = self.router.routing(table_id,
                                           range_array=range_array,
+                                          partition_tags=partition_tags,
                                           metadata=metadata)
         logger.info('Routing: {}'.format(routing))
 
@@ -209,6 +211,40 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return milvus_pb2.BoolReply(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
             bool_reply=_bool)
+
+    @mark_grpc_method
+    def CreatePartition(self, request, context):
+        _table_name, _partition_name, _tag  = Parser.parse_proto_PartitionParam(request)
+        _status = self.router.connection().create_partition(_table_name, _partition_name, _tag)
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
+    @mark_grpc_method
+    def DropPartition(self, request, context):
+        _table_name, _partition_name, _tag  = Parser.parse_proto_PartitionParam(request)
+
+        _status = self.router.connection().drop_partition(_table_name, _tag)
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
+    @mark_grpc_method
+    def ShowPartitions(self, request, context):
+        _status, _table_name = Parser.parse_proto_TableName(request)
+        if not _status.OK():
+            return milvus_pb2.PartitionList(status=status_pb2.Status(
+                error_code=_status.code, reason=_status.message),
+                partition_array=[])
+
+        logger.info('ShowPartitions {}'.format(_table_name))
+
+        _status, partition_array = self.router.connection().show_partitions(_table_name)
+
+        return milvus_pb2.PartitionList(status=status_pb2.Status(
+            error_code=_status.code, reason=_status.message),
+            partition_array=[milvus_pb2.PartitionParam(table_name=param.table_name,
+                                                       tag=param.tag,
+                                                       partition_name=param.partition_name)
+                                                       for param in partition_array])
 
     def _delete_table(self, table_name):
         return self.router.connection().delete_table(table_name)
@@ -315,6 +351,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                          topk,
                                                          nprobe,
                                                          query_range_array,
+                                                         partition_tags=getattr(request, "partition_tag_array", []),
                                                          metadata=metadata)
 
         now = time.time()

@@ -16,17 +16,20 @@
 // under the License.
 
 #include "scheduler/task/SearchTask.h"
+
+#include <src/scheduler/SchedInst.h>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-
-#include <src/scheduler/SchedInst.h>
-#include <algorithm>
-#include <string>
-#include <thread>
-#include <utility>
 
 namespace milvus {
 namespace scheduler {
@@ -97,8 +100,8 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label)
-    : Task(TaskType::SearchTask, std::move(label)), file_(file) {
+XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
+    : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
         if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
             metric_l2 = false;
@@ -110,6 +113,8 @@ XSearchTask::XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label)
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
+    auto load_ctx = context_->Follower("XSearchTask::Load " + std::to_string(file_->id_));
+
     TimeRecorder rc("");
     Status stat = Status::OK();
     std::string error_msg;
@@ -125,7 +130,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
                 hybrid = true;
             }
             stat = index_engine_->CopyToGpu(device_id, hybrid);
-            type_str = "CPU2GPU";
+            type_str = "CPU2GPU:" + std::to_string(device_id);
         } else if (type == LoadType::GPU2CPU) {
             stat = index_engine_->CopyToCpu();
             type_str = "GPU2CPU";
@@ -160,7 +165,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
     size_t file_size = index_engine_->PhysicalSize();
 
-    std::string info = "Load file id:" + std::to_string(file_->id_) +
+    std::string info = "Search task load file id:" + std::to_string(file_->id_) + " " + type_str +
                        " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                        " bytes from location: " + file_->location_ + " totally cost";
     double span = rc.ElapseFromBegin(info);
@@ -174,10 +179,14 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     index_id_ = file_->id_;
     index_type_ = file_->file_type_;
     //    search_contexts_.swap(search_contexts_);
+
+    load_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void
 XSearchTask::Execute() {
+    auto execute_ctx = context_->Follower("XSearchTask::Execute " + std::to_string(index_id_));
+
     if (index_engine_ == nullptr) {
         return;
     }
@@ -246,6 +255,8 @@ XSearchTask::Execute() {
 
     // release index in resource
     index_engine_ = nullptr;
+
+    execute_ctx->GetTraceContext()->GetSpan()->Finish();
 }
 
 void

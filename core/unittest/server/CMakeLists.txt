@@ -47,6 +47,7 @@ set(server_test_files
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${server_delivery_files}
         ${util_files}
         ${entry_file}
         ${test_files}
@@ -54,7 +55,7 @@ set(server_test_files
 
 add_executable(test_server ${server_test_files})
 
-set(client_grpc_lib
+set(grpc_lib
         grpcpp_channelz
         grpc++
         grpc
@@ -64,7 +65,7 @@ set(client_grpc_lib
 target_link_libraries(test_server
         knowhere
         stdc++
-        ${client_grpc_lib}
+        ${grpc_lib}
         ${unittest_libs}
         )
 

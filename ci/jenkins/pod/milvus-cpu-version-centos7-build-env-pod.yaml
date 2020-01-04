@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: milvus-cpu-build-env
+  labels:
+    app: milvus
+    componet: cpu-build-env
+spec:
+  containers:
+  - name: milvus-cpu-build-env
+    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.7.0-centos7
+    imagePullPolicy: Always
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: OS_NAME
+      value: "centos7"
+    - name: BUILD_ENV_IMAGE_ID
+      value: "225b4d9c26d67b70b476964b4dd6e216de4b464d7a973a8c0c7ed1313c4d81ad"
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "12Gi"
+        cpu: "6.0"
+      requests:
+        memory: "8Gi"
+        cpu: "4.0"
+  - name: milvus-mysql
+    image: mysql:5.6
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: 123456
+    ports:
+    - containerPort: 3306
+      name: mysql
