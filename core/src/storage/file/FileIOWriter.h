@@ -17,44 +17,27 @@
 
 #pragma once
 
-#include <memory>
-#include <set>
+#include <fstream>
 #include <string>
-
-#include "db/Types.h"
-#include "utils/Status.h"
+#include "storage/IOWriter.h"
 
 namespace milvus {
-namespace engine {
+namespace storage {
 
-class MemManager {
+class FileIOWriter : public IOWriter {
  public:
-    virtual Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) = 0;
+    explicit FileIOWriter(const std::string& name);
+    ~FileIOWriter();
 
-    virtual Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) = 0;
+    void
+    write(void* ptr, size_t size) override;
 
-    virtual Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) = 0;
+    size_t
+    length() override;
 
-    virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
+ public:
+    std::fstream fs_;
+};
 
-    virtual Status
-    EraseMemVector(const std::string& table_id) = 0;
-
-    virtual size_t
-    GetCurrentMutableMem() = 0;
-
-    virtual size_t
-    GetCurrentImmutableMem() = 0;
-
-    virtual size_t
-    GetCurrentMem() = 0;
-};  // MemManagerAbstract
-
-using MemManagerPtr = std::shared_ptr<MemManager>;
-
-}  // namespace engine
+}  // namespace storage
 }  // namespace milvus

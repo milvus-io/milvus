@@ -95,7 +95,10 @@ class DBImpl : public DB {
     InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) override ;
+    DeleteVector(const std::string& table_id, IDNumber vector_id) override;
+
+    Status
+    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) override;
 
     Status
     CreateIndex(const std::string& table_id, const TableIndex& index) override;

@@ -359,6 +359,19 @@ DBImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
 }
 
 Status
+DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
+    if (shutting_down_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // TODO:  Enter WAL. They should call mem_mgr_->DeleteVectors
+
+    auto status = mem_mgr_->DeleteVectors(table_id, vector_ids);
+
+    return status;
+}
+
+Status
 DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;

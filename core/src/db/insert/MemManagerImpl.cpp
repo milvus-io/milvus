@@ -16,11 +16,12 @@
 // under the License.
 
 #include "db/insert/MemManagerImpl.h"
+
+#include <thread>
+
 #include "VectorSource.h"
 #include "db/Constants.h"
 #include "utils/Log.h"
-
-#include <thread>
 
 namespace milvus {
 namespace engine {
@@ -68,6 +69,21 @@ MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
 
     auto status = mem->Delete(vector_id);
     return status;
+}
+
+Status
+MemManagerImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
+    MemTablePtr mem = GetMemByTable(table_id);
+
+    // TODO: loop for now
+    for (auto& id : vector_ids) {
+        auto status = mem->Delete(id);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    return Status::OK();
 }
 
 Status

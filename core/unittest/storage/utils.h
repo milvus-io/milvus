@@ -15,33 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "segment/DeletedDocs.h"
+#pragma once
 
-namespace milvus {
-namespace segment {
+#include <gtest/gtest.h>
 
-DeletedDocs::DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids) : deleted_doc_ids_(deleted_doc_ids) {
-}
+static const char* CONFIG_PATH = "/tmp/milvus_test/";
+static const char* CONFIG_FILE = "server_config.yaml";
 
-void
-DeletedDocs::AddDeletedDoc(doc_id_t doc_id) {
-    deleted_doc_ids_.emplace_back(doc_id);
-}
-
-const std::vector<doc_id_t>&
-DeletedDocs::GetDeletedDocs() const {
-    return deleted_doc_ids_;
-}
-
-const std::string&
-DeletedDocs::GetName() const {
-    return name_;
-}
-
-size_t
-DeletedDocs::GetSize() const {
-    return deleted_doc_ids_.size();
-}
-
-}  // namespace segment
-}  // namespace milvus
+class StorageTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};

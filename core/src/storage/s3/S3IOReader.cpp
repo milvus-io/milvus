@@ -15,46 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include <memory>
-#include <set>
-#include <string>
-
-#include "db/Types.h"
-#include "utils/Status.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3ClientWrapper.h"
 
 namespace milvus {
-namespace engine {
+namespace storage {
 
-class MemManager {
- public:
-    virtual Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) = 0;
+S3IOReader::S3IOReader(const std::string& name) : IOReader(name), pos_(0) {
+    S3ClientWrapper::GetInstance().GetObjectStr(name_, buffer_);
+}
 
-    virtual Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) = 0;
+S3IOReader::~S3IOReader() {
+}
 
-    virtual Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) = 0;
+void
+S3IOReader::read(void* ptr, size_t size) {
+    memcpy(ptr, buffer_.data() + pos_, size);
+}
 
-    virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
+void
+S3IOReader::seekg(size_t pos) {
+    pos_ = pos;
+}
 
-    virtual Status
-    EraseMemVector(const std::string& table_id) = 0;
+size_t
+S3IOReader::length() {
+    return buffer_.length();
+}
 
-    virtual size_t
-    GetCurrentMutableMem() = 0;
-
-    virtual size_t
-    GetCurrentImmutableMem() = 0;
-
-    virtual size_t
-    GetCurrentMem() = 0;
-};  // MemManagerAbstract
-
-using MemManagerPtr = std::shared_ptr<MemManager>;
-
-}  // namespace engine
+}  // namespace storage
 }  // namespace milvus

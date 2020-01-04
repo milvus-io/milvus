@@ -17,44 +17,34 @@
 
 #pragma once
 
-#include <memory>
-#include <set>
 #include <string>
-
-#include "db/Types.h"
+#include <vector>
 #include "utils/Status.h"
 
 namespace milvus {
-namespace engine {
+namespace storage {
 
-class MemManager {
+class IStorage {
  public:
     virtual Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) = 0;
-
+    CreateBucket() = 0;
     virtual Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) = 0;
-
+    DeleteBucket() = 0;
     virtual Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) = 0;
-
+    PutObjectFile(const std::string& object_name, const std::string& file_path) = 0;
     virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
-
+    PutObjectStr(const std::string& object_name, const std::string& content) = 0;
     virtual Status
-    EraseMemVector(const std::string& table_id) = 0;
+    GetObjectFile(const std::string& object_name, const std::string& file_path) = 0;
+    virtual Status
+    GetObjectStr(const std::string& object_name, std::string& content) = 0;
+    virtual Status
+    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "") = 0;
+    virtual Status
+    DeleteObject(const std::string& object_name) = 0;
+    virtual Status
+    DeleteObjects(const std::string& marker) = 0;
+};
 
-    virtual size_t
-    GetCurrentMutableMem() = 0;
-
-    virtual size_t
-    GetCurrentImmutableMem() = 0;
-
-    virtual size_t
-    GetCurrentMem() = 0;
-};  // MemManagerAbstract
-
-using MemManagerPtr = std::shared_ptr<MemManager>;
-
-}  // namespace engine
+}  // namespace storage
 }  // namespace milvus

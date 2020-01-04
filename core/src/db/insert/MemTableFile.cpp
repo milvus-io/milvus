@@ -84,9 +84,9 @@ MemTableFile::Add(VectorSourcePtr& source) {
 
 Status
 MemTableFile::Delete(segment::doc_id_t doc_id) {
-    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    // 1. Check wither the doc_id is present, if yes, delete it's corresponding buffer
 
-    // TODO: need to know the type of vector we want to delete. Hard code for now
+    // TODO: need to know the type of vector we want to delete from meta (cache). Hard code for now
     int vector_type_size;
     if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
         vector_type_size = sizeof(uint8_t);
@@ -106,8 +106,10 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
         }
     }
 
-    // Then add the id to delete queue so it can be applied to segment on disk during the next flush
-    segment_ptr->deleted_docs_ptr_->AddDeleteDoc(doc_id);
+    // 2. Add the id to delete docs so it can be applied to segment on disk during the next flush
+    segment_ptr->deleted_docs_ptr_->AddDeletedDoc(doc_id);
+
+    // TODO: 3. Update bitset in memory
 
     return Status::OK();
 }

@@ -15,46 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include <memory>
-#include <set>
-#include <string>
-
-#include "db/Types.h"
-#include "utils/Status.h"
+#include "storage/file/FileIOWriter.h"
 
 namespace milvus {
-namespace engine {
+namespace storage {
 
-class MemManager {
- public:
-    virtual Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) = 0;
+FileIOWriter::FileIOWriter(const std::string& name) : IOWriter(name) {
+    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
+}
 
-    virtual Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) = 0;
+FileIOWriter::~FileIOWriter() {
+    fs_.close();
+}
 
-    virtual Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) = 0;
+void
+FileIOWriter::write(void* ptr, size_t size) {
+    fs_.write(reinterpret_cast<char*>(ptr), size);
+    len_ += size;
+}
 
-    virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
+size_t
+FileIOWriter::length() {
+    return len_;
+}
 
-    virtual Status
-    EraseMemVector(const std::string& table_id) = 0;
-
-    virtual size_t
-    GetCurrentMutableMem() = 0;
-
-    virtual size_t
-    GetCurrentImmutableMem() = 0;
-
-    virtual size_t
-    GetCurrentMem() = 0;
-};  // MemManagerAbstract
-
-using MemManagerPtr = std::shared_ptr<MemManager>;
-
-}  // namespace engine
+}  // namespace storage
 }  // namespace milvus

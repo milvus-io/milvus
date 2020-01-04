@@ -47,6 +47,9 @@ class MemManagerImpl : public MemManager {
     DeleteVector(const std::string& table_id, IDNumber vector_id) override;
 
     Status
+    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) override;
+
+    Status
     Serialize(std::set<std::string>& table_ids) override;
 
     Status
