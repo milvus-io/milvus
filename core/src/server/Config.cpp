@@ -89,12 +89,6 @@ Config::ValidateConfig() {
     CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
 
     /* db config */
-    std::string db_primary_path;
-    CONFIG_CHECK(GetDBConfigPrimaryPath(db_primary_path));
-
-    std::string db_secondary_path;
-    CONFIG_CHECK(GetDBConfigSecondaryPath(db_secondary_path));
-
     std::string db_backend_url;
     CONFIG_CHECK(GetDBConfigBackendUrl(db_backend_url));
 
@@ -108,6 +102,12 @@ Config::ValidateConfig() {
     CONFIG_CHECK(GetDBConfigInsertBufferSize(db_insert_buffer_size));
 
     /* storage config */
+    std::string storage_primary_path;
+    CONFIG_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
+
+    std::string storage_secondary_path;
+    CONFIG_CHECK(GetStorageConfigSecondaryPath(storage_secondary_path));
+
     bool storage_minio_enable;
     CONFIG_CHECK(GetStorageConfigMinioEnable(storage_minio_enable));
     std::cout << "MinIO " << (storage_minio_enable ? "ENABLED !" : "DISABLED !") << std::endl;
@@ -196,14 +196,14 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
 
     /* db config */
-    CONFIG_CHECK(SetDBConfigPrimaryPath(CONFIG_DB_PRIMARY_PATH_DEFAULT));
-    CONFIG_CHECK(SetDBConfigSecondaryPath(CONFIG_DB_SECONDARY_PATH_DEFAULT));
     CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigInsertBufferSize(CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT));
 
     /* storage config */
+    CONFIG_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigSecondaryPath(CONFIG_STORAGE_SECONDARY_PATH_DEFAULT));
     CONFIG_CHECK(SetStorageConfigMinioEnable(CONFIG_STORAGE_MINIO_ENABLE_DEFAULT));
     CONFIG_CHECK(SetStorageConfigMinioAddress(CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT));
     CONFIG_CHECK(SetStorageConfigMinioPort(CONFIG_STORAGE_MINIO_PORT_DEFAULT));
@@ -406,19 +406,6 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 
 /* DB config */
 Status
-Config::CheckDBConfigPrimaryPath(const std::string& value) {
-    if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "db_config.db_path is empty.");
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckDBConfigSecondaryPath(const std::string& value) {
-    return Status::OK();
-}
-
-Status
 Config::CheckDBConfigBackendUrl(const std::string& value) {
     if (!ValidationUtil::ValidateDbURI(value).ok()) {
         std::string msg =
@@ -475,6 +462,19 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
 }
 
 /* storage config */
+Status
+Config::CheckStorageConfigPrimaryPath(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.db_path is empty.");
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigSecondaryPath(const std::string& value) {
+    return Status::OK();
+}
+
 Status
 Config::CheckStorageConfigMinioEnable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
@@ -894,18 +894,6 @@ Config::GetServerConfigTimeZone(std::string& value) {
 
 /* DB config */
 Status
-Config::GetDBConfigPrimaryPath(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRIMARY_PATH, CONFIG_DB_PRIMARY_PATH_DEFAULT);
-    return CheckDBConfigPrimaryPath(value);
-}
-
-Status
-Config::GetDBConfigSecondaryPath(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_DB_SECONDARY_PATH, CONFIG_DB_SECONDARY_PATH_DEFAULT);
-    return Status::OK();
-}
-
-Status
 Config::GetDBConfigBackendUrl(std::string& value) {
     value = GetConfigStr(CONFIG_DB, CONFIG_DB_BACKEND_URL, CONFIG_DB_BACKEND_URL_DEFAULT);
     return CheckDBConfigBackendUrl(value);
@@ -944,6 +932,18 @@ Config::GetDBConfigPreloadTable(std::string& value) {
 }
 
 /* storage config */
+Status
+Config::GetStorageConfigPrimaryPath(std::string& value) {
+    value = GetConfigStr(CONFIG_DB, CONFIG_STORAGE_PRIMARY_PATH, CONFIG_STORAGE_PRIMARY_PATH_DEFAULT);
+    return CheckStorageConfigPrimaryPath(value);
+}
+
+Status
+Config::GetStorageConfigSecondaryPath(std::string& value) {
+    value = GetConfigStr(CONFIG_DB, CONFIG_STORAGE_SECONDARY_PATH, CONFIG_STORAGE_SECONDARY_PATH_DEFAULT);
+    return CheckStorageConfigSecondaryPath(value);
+}
+
 Status
 Config::GetStorageConfigMinioEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ENABLE, CONFIG_STORAGE_MINIO_ENABLE_DEFAULT);
@@ -1187,18 +1187,6 @@ Config::SetServerConfigTimeZone(const std::string& value) {
 
 /* db config */
 Status
-Config::SetDBConfigPrimaryPath(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigPrimaryPath(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRIMARY_PATH, value);
-}
-
-Status
-Config::SetDBConfigSecondaryPath(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigSecondaryPath(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_SECONDARY_PATH, value);
-}
-
-Status
 Config::SetDBConfigBackendUrl(const std::string& value) {
     CONFIG_CHECK(CheckDBConfigBackendUrl(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
@@ -1223,6 +1211,18 @@ Config::SetDBConfigInsertBufferSize(const std::string& value) {
 }
 
 /* storage config */
+Status
+Config::SetStorageConfigPrimaryPath(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigPrimaryPath(value));
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_STORAGE_PRIMARY_PATH, value);
+}
+
+Status
+Config::SetStorageConfigSecondaryPath(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigSecondaryPath(value));
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_STORAGE_SECONDARY_PATH, value);
+}
+
 Status
 Config::SetStorageConfigMinioEnable(const std::string& value) {
     CONFIG_CHECK(CheckStorageConfigMinioEnable(value));
