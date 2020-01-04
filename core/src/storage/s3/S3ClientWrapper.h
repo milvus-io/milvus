@@ -19,6 +19,7 @@
 
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
+#include <memory>
 #include <string>
 #include <vector>
 #include "storage/IStorage.h"
@@ -39,7 +40,7 @@ class S3ClientWrapper : public IStorage {
 
     Status
     StartService();
-    Status
+    void
     StopService();
 
     Status
@@ -62,7 +63,7 @@ class S3ClientWrapper : public IStorage {
     DeleteObjects(const std::string& marker) override;
 
  private:
-    Aws::S3::S3Client* client_ptr_ = nullptr;
+    std::shared_ptr<Aws::S3::S3Client> client_ptr_;
     Aws::SDKOptions options_;
 
     std::string minio_address_;

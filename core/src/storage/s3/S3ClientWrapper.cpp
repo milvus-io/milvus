@@ -52,29 +52,24 @@ S3ClientWrapper::StartService() {
     CONFIG_CHECK(config.GetStorageConfigMinioBucket(minio_bucket_));
 
     Aws::InitAPI(options_);
-    Aws::Client::ClientConfiguration cfg;
 
+    Aws::Client::ClientConfiguration cfg;
     cfg.endpointOverride = minio_address_ + ":" + minio_port_;
     cfg.scheme = Aws::Http::Scheme::HTTP;
     cfg.verifySSL = false;
-    client_ptr_ = new Aws::S3::S3Client(Aws::Auth::AWSCredentials(minio_access_key_, minio_secret_key_), cfg,
-                                        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
-    if (client_ptr_ == nullptr) {
-        std::string str = "Cannot connect S3 server.";
-        return milvus::Status(SERVER_UNEXPECTED_ERROR, str);
-    }
+    client_ptr_ =
+        std::make_shared<Aws::S3::S3Client>(Aws::Auth::AWSCredentials(minio_access_key_, minio_secret_key_), cfg,
+                                            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
 
     return CreateBucket();
 }
 
-Status
+void
 S3ClientWrapper::StopService() {
     if (client_ptr_ != nullptr) {
-        delete client_ptr_;
         client_ptr_ = nullptr;
     }
     Aws::ShutdownAPI(options_);
-    return Status::OK();
 }
 
 Status

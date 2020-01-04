@@ -76,6 +76,6 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
 
     ASSERT_TRUE(storage_inst.DeleteBucket().ok());
 
-    ASSERT_TRUE(storage_inst.StopService().ok());
+    storage_inst.StopService();
 }
 
