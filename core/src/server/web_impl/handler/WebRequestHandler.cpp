@@ -116,9 +116,7 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto lamd = [](uint64_t x) -> uint64_t {
-        return x / 1024 / 1024 / 1024;
-    };
+    auto lamd = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
@@ -254,7 +252,6 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-
     Config& config = Config::GetInstance();
 
     auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
@@ -268,9 +265,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
 
     std::vector<std::string> search_resources;
-    gpu_config_dto->search_resources->forEach([&search_resources](const OString& res) {
-        search_resources.emplace_back(res->toLowerCase()->std_str());
-    });
+    gpu_config_dto->search_resources->forEach(
+        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string search_resources_value;
     for (auto& res : search_resources) {
@@ -286,9 +282,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
 
     std::vector<std::string> build_resources;
-    gpu_config_dto->build_index_resources->forEach([&build_resources](const OString& res) {
-        build_resources.emplace_back(res->toLowerCase()->std_str());
-    });
+    gpu_config_dto->build_index_resources->forEach(
+        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string build_resources_value;
     for (auto& res : build_resources) {
@@ -470,8 +465,7 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Insert(const OString& table_name,
-                          const InsertRequestDto::ObjectWrapper& param,
+WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
                           VectorIdsDto::ObjectWrapper& ids_dto) {
     std::vector<int64_t> ids;
     if (nullptr != param->ids.get() && param->ids->count() > 0) {
@@ -517,15 +511,12 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     std::vector<std::string> file_id_list;
 
     if (nullptr != search_request->tags.get()) {
-        search_request->tags->forEach([&tag_list](const OString& tag) {
-            tag_list.emplace_back(tag->std_str());
-        });
+        search_request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
     }
 
     if (nullptr != search_request->file_ids.get()) {
-        search_request->file_ids->forEach([&file_id_list](const OInt64& id) {
-            file_id_list.emplace_back(std::to_string(id->getValue()));
-        });
+        search_request->file_ids->forEach(
+            [&file_id_list](const OInt64& id) { file_id_list.emplace_back(std::to_string(id->getValue())); });
     }
 
     std::vector<float> datas;

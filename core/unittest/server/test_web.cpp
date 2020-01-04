@@ -65,10 +65,13 @@ using OString = milvus::server::web::OString;
 using OQueryParams = milvus::server::web::OQueryParams;
 using OChunkedBuffer = oatpp::data::stream::ChunkedBuffer;
 using OOutputStream = oatpp::data::stream::BufferOutputStream;
+using OFloat32 = milvus::server::web::OFloat32;
+template<class T>
+using OList = milvus::server::web::OList<T>;
 
 using StatusCode = milvus::server::web::StatusCode;
 
-using namespace milvus::server::web;
+//using namespace milvus::server::web;
 
 namespace {
 
@@ -119,7 +122,7 @@ RandomName() {
     return random_name;
 }
 
-}
+} // namespace
 
 namespace {
 
@@ -333,7 +336,7 @@ TEST_F(WebHandlerTest, SEARCH) {
 
     milvus::server::web::OString table_name(TABLE_NAME);
 
-    auto search_request_dto = SearchRequestDto::createShared();
+    auto search_request_dto = milvus::server::web::SearchRequestDto::createShared();
     search_request_dto->records = RandomRecordsDto(TABLE_DIM, 10);
     search_request_dto->topk = 1;
     search_request_dto->nprobe = 1;
@@ -365,30 +368,10 @@ TEST_F(WebHandlerTest, CMD) {
 namespace {
 static const char* CONTROLLER_TEST_TABLE_NAME = "controller_unit_test";
 
-//class TestClientComponent {
-// private:
-//    int32_t m_port;
-// public:
-//    TestClientComponent(int32_t port)
-//    : m_port(port) {}
-//
-// public:
-//    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider)([this] {
-//        return std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
-//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", this->m_port)
-//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", this->m_port)
-//        );
-//    }());
-//};
-
-
 class TestClient : public oatpp::web::client::ApiClient {
-
  public:
-
 #include OATPP_CODEGEN_BEGIN(ApiClient)
-
-    API_CLIENT_INIT(TestClient)
+ API_CLIENT_INIT(TestClient)
 
     API_CALL("GET", "/state", getState)
 
@@ -396,13 +379,15 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("GET", "/config/advanced", getAdvanced)
 
-    API_CALL("PUT", "/config/advanced", setAdvanced, BODY_DTO(AdvancedConfigDto::ObjectWrapper, body))
+    API_CALL("PUT", "/config/advanced", setAdvanced,
+             BODY_DTO(milvus::server::web::AdvancedConfigDto::ObjectWrapper, body))
 
     API_CALL("GET", "/config/gpu_resources", getGPUConfig)
 
-    API_CALL("PUT", "/config/gpu_resources", setGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, body))
+    API_CALL("PUT", "/config/gpu_resources", setGPUConfig,
+             BODY_DTO(milvus::server::web::GPUConfigDto::ObjectWrapper, body))
 
-    API_CALL("POST", "/tables", createTable, BODY_DTO(TableRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables", createTable, BODY_DTO(milvus::server::web::TableRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables", showTables, QUERY(Int64, offset), QUERY(Int64, page_size))
 
@@ -414,7 +399,7 @@ class TestClient : public oatpp::web::client::ApiClient {
              "/tables/{table_name}/indexes",
              createIndex,
              PATH(String, table_name, "table_name"),
-             BODY_DTO(IndexRequestDto::ObjectWrapper, body))
+             BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
 
@@ -424,9 +409,14 @@ class TestClient : public oatpp::web::client::ApiClient {
              "/tables/{table_name}/partitions",
              createPartition,
              PATH(String, table_name, "table_name"),
-             BODY_DTO(PartitionRequestDto::ObjectWrapper, body))
+             BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET", "/tables/{table_name}/parittions", showPartitions, PATH(String, table_name, "table_name"), QUERY(Int64, offset), QUERY(Int64, page_size))
+    API_CALL("GET",
+             "/tables/{table_name}/parittions",
+             showPartitions,
+             PATH(String, table_name, "table_name"),
+             QUERY(Int64, offset),
+             QUERY(Int64, page_size))
 
     API_CALL("DELETE",
              "/tables/{table_name}/parittions/{partition_tag}",
@@ -438,13 +428,13 @@ class TestClient : public oatpp::web::client::ApiClient {
              "/tables/{table_name}/vectors",
              insert,
              PATH(String, table_name, "table_name"),
-             BODY_DTO(InsertRequestDto::ObjectWrapper, body))
+             BODY_DTO(milvus::server::web::InsertRequestDto::ObjectWrapper, body))
 
     API_CALL("PUT",
              "/tables/{table_name}/vectors",
              search,
              PATH(String, table_name, "table_name"),
-             BODY_DTO(SearchRequestDto::ObjectWrapper, body))
+             BODY_DTO(milvus::server::web::SearchRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str, "cmd_str"))
 
@@ -479,16 +469,14 @@ class WebControllerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
-
         milvus::server::DBWrapper::GetInstance().StartService();
 
         milvus::server::Config::GetInstance().SetServerConfigWebPort("29999");
 
-        WebServer::GetInstance().Start();
+        milvus::server::web::WebServer::GetInstance().Start();
 
         // wait for 10 second until server launched
         sleep(5);
-
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
@@ -518,7 +506,7 @@ class WebControllerTest : public testing::Test {
 
     void
     TearDown() override {
-        WebServer::GetInstance().Stop();
+        milvus::server::web::WebServer::GetInstance().Stop();
 
         milvus::server::DBWrapper::GetInstance().StopService();
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
@@ -562,7 +550,6 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
-
 TEST_F(WebControllerTest, GET_TABLE) {
     OString table_name = CONTROLLER_TEST_TABLE_NAME;
     OQueryParams params;
@@ -572,7 +559,7 @@ TEST_F(WebControllerTest, GET_TABLE) {
     auto response = client_ptr->getTable(table_name, conncetion_ptr);
 
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    auto result_dto = response->readBodyToDto<TableFieldsDto>(object_mapper.get());
+    auto result_dto = response->readBodyToDto<milvus::server::web::TableFieldsDto>(object_mapper.get());
 
     response = client_ptr->getTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -581,12 +568,12 @@ TEST_F(WebControllerTest, GET_TABLE) {
     table_name = "57474dgdfhdfhdh  dgd";
     response = client_ptr->getTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    auto status_sto = response->readBodyToDto<StatusDto>(object_mapper.get());
+    auto status_sto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
 
     table_name = "test_table_not_found_0000000001110101010020202030203030435";
     response = client_ptr->getTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
-    status_sto = response->readBodyToDto<StatusDto>(object_mapper.get());
+    status_sto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
 }
 
 TEST_F(WebControllerTest, SHOW_TABLES) {
@@ -619,7 +606,6 @@ TEST_F(WebControllerTest, DROP_TABLE) {
     response = client_ptr->dropTable(table_dto->table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
-
 
 TEST_F(WebControllerTest, INSERT) {
     OString INSERT_TABLE_NAME = "test_insert_table_test" + OString(RandomName().c_str());
@@ -698,7 +684,6 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
-
 TEST_F(WebControllerTest, PARTITION) {
     const OString PARTITION_TEST_TABLE_NAME = "test_partition_" + OString(RandomName().c_str());
     auto table_dto = milvus::server::web::TableRequestDto::createShared();
@@ -762,7 +747,8 @@ TEST_F(WebControllerTest, SEARCH) {
     par_param->partition_name = "partition" + OString(RandomName().c_str());
     par_param->partition_tag = "tag" + OString(RandomName().c_str());
     response = client_ptr->createPartition(SEARCH_TEST_TABLE_NAME.c_str(), par_param);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode()) << "Error: " << response->getStatusDescription()->std_str();
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
+                        << "Error: " << response->getStatusDescription()->std_str();
 
     insert_dto->tag = par_param->partition_tag;
     response = client_ptr->insert(SEARCH_TEST_TABLE_NAME.c_str(), insert_dto, conncetion_ptr);
@@ -770,7 +756,7 @@ TEST_F(WebControllerTest, SEARCH) {
     sleep(10);
 
     // Test search
-    auto search_request_dto = SearchRequestDto::createShared();
+    auto search_request_dto = milvus::server::web::SearchRequestDto::createShared();
     search_request_dto->nprobe = 1;
     search_request_dto->topk = 1;
     search_request_dto->records = RandomRecordsDto(64, 10);
@@ -827,7 +813,3 @@ TEST_F(WebControllerTest, DEVICESCONFIG) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
-
-#if false
-
-#endif

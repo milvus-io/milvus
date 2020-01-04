@@ -766,6 +766,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
@@ -895,6 +896,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     return Status::OK();
 }
+
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1145,6 +1147,7 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     std::string str =
@@ -1261,6 +1264,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     }
     return Status::OK();
 }
+
 #endif
 
 /* tracing config */
@@ -1271,7 +1275,7 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         std::ifstream tracer_config(value);
         Status s = tracer_config.good() ? Status::OK()
                                         : Status(SERVER_INVALID_ARGUMENT, "Failed to open tracer config file " + value +
-                                                                          ": " + std::strerror(errno));
+                                                                              ": " + std::strerror(errno));
         tracer_config.close();
         return s;
     }
@@ -1475,6 +1479,7 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 /* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {

@@ -131,10 +131,12 @@ class WebRequestHandler {
     DropPartition(const OString& table_name, const OString& tag);
 
     StatusDto::ObjectWrapper
-    Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param, VectorIdsDto::ObjectWrapper& ids_dto);
+    Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
+           VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
-    Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request, TopkResultsDto::ObjectWrapper& results_dto);
+    Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
+           TopkResultsDto::ObjectWrapper& results_dto);
 
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);

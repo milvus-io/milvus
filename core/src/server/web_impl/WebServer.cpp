@@ -15,13 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <cmake-build-debug/oatpp_ep-prefix/src/oatpp_ep/include/oatpp-0.19.11/oatpp/oatpp/web/client/HttpRequestExecutor.hpp>
 #include <oatpp-swagger/AsyncController.hpp>
 #include <oatpp/network/server/Server.hpp>
-#include <cmake-build-debug/oatpp_ep-prefix/src/oatpp_ep/include/oatpp-0.19.11/oatpp/oatpp/web/client/HttpRequestExecutor.hpp>
 
 #include "server/web_impl/WebServer.h"
-#include "server/web_impl/controller/WebController.hpp"
 #include "server/web_impl/component/SwaggerComponent.hpp"
+#include "server/web_impl/controller/WebController.hpp"
 
 #include "server/Config.h"
 #include "utils/Log.h"
@@ -53,10 +53,10 @@ WebServer::StartService() {
 
     status = config.GetServerConfigWebPort(port);
 
-//    oatpp::base::Environment::init();
+    //    oatpp::base::Environment::init();
 
     {
-//    components_ = std::make_shared<AppComponent>(std::stoi(port));
+        //    components_ = std::make_shared<AppComponent>(std::stoi(port));
         AppComponent components = AppComponent(std::stoi(port));
         SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
@@ -92,7 +92,7 @@ WebServer::StartService() {
         executor->join();
     }
 
-//    oatpp::base::Environment::destroy();
+    //    oatpp::base::Environment::destroy();
 
     return Status::OK();
 }
@@ -104,18 +104,18 @@ WebServer::StopService() {
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
         client_provider->getConnection();
-//        requestExecutor->getConnection();
+        //        requestExecutor->getConnection();
         //
-//        Config& config = Config::GetInstance();
-//        std::string port;
-//
-//        config.GetServerConfigWebPort(port);
-//
-//        auto client_provider = std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
-//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", std::stoi(port))
-//        );
+        //        Config& config = Config::GetInstance();
+        //        std::string port;
+        //
+        //        config.GetServerConfigWebPort(port);
+        //
+        //        auto client_provider = std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
+        //            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", std::stoi(port))
+        //        );
 
-//        client_provider->getConnection();
+        //        client_provider->getConnection();
     }
     return Status::OK();
 }

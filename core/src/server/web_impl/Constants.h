@@ -23,38 +23,38 @@ namespace server {
 namespace web {
 ////////////////////////////////////////////////////
 
-static const char * NAME_ENGINE_TYPE_FLAT = "FLAT";
-static const char * NAME_ENGINE_TYPE_IVFFLAT = "IVFFLAT";
-static const char * NAME_ENGINE_TYPE_IVFSQ8 = "IVFSQ8";
-static const char * NAME_ENGINE_TYPE_IVFSQ8H = "IVFSQ8H";
-static const char * NAME_ENGINE_TYPE_RNSG = "RNSG";
-static const char * NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
+static const char* NAME_ENGINE_TYPE_FLAT = "FLAT";
+static const char* NAME_ENGINE_TYPE_IVFFLAT = "IVFFLAT";
+static const char* NAME_ENGINE_TYPE_IVFSQ8 = "IVFSQ8";
+static const char* NAME_ENGINE_TYPE_IVFSQ8H = "IVFSQ8H";
+static const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
+static const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
 
-static const char * NAME_METRIC_TYPE_L2 = "L2";
-static const char * NAME_METRIC_TYPE_IP = "IP";
+static const char* NAME_METRIC_TYPE_L2 = "L2";
+static const char* NAME_METRIC_TYPE_IP = "IP";
 
 ////////////////////////////////////////////////////
 
-static const char * KEY_TABLE_TABLE_NAME = "table_name";
-static const char * KEY_TABLE_DIMENSION = "dimension";
-static const char * KEY_TABLE_INDEX_FILE_SIZE = "index_file_size";
-static const char * KEY_TABLE_INDEX_METRIC_TYPE = "metric_type";
-static const char * KEY_TABLE_COUNT = "count";
+static const char* KEY_TABLE_TABLE_NAME = "table_name";
+static const char* KEY_TABLE_DIMENSION = "dimension";
+static const char* KEY_TABLE_INDEX_FILE_SIZE = "index_file_size";
+static const char* KEY_TABLE_INDEX_METRIC_TYPE = "metric_type";
+static const char* KEY_TABLE_COUNT = "count";
 
-static const char * KEY_INDEX_INDEX_TYPE = "index_type";
-static const char * KEY_INDEX_NLIST = "nlist";
+static const char* KEY_INDEX_INDEX_TYPE = "index_type";
+static const char* KEY_INDEX_NLIST = "nlist";
 
-static const char * KEY_PARTITION_NAME = "partition_name";
-static const char * KEY_PARTITION_TAG = "partition_tag";
+static const char* KEY_PARTITION_NAME = "partition_name";
+static const char* KEY_PARTITION_TAG = "partition_tag";
 
 ////////////////////////////////////////////////////
 
 static const int64_t VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT = 1024;
 static const int64_t VALUE_TABLE_METRIC_TYPE_DEFAULT = 1;
 
-static const char * VALUE_PARTITION_TAG_DEFAULT = "";
+static const char* VALUE_PARTITION_TAG_DEFAULT = "";
 
-static const char * VALUE_INDEX_INDEX_TYPE_DEFAULT = NAME_ENGINE_TYPE_FLAT;
+static const char* VALUE_INDEX_INDEX_TYPE_DEFAULT = NAME_ENGINE_TYPE_FLAT;
 static const int64_t VALUE_INDEX_NLIST_DEFAULT = 16384;
 
 }  // namespace web
