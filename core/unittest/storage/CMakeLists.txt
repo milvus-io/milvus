@@ -18,39 +18,27 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
-        test_knowhere.cpp
-        test_wrapper.cpp)
-if (MILVUS_GPU_VERSION)
-    set(test_files ${test_files}
-            test_hybrid_index.cpp)
-endif ()
-
-set(wrapper_files
-        ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/VecImpl.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/VecIndex.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_s3_client.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
         )
 
-set(storage_files
-        ${MILVUS_ENGINE_SRC}/storage/file/FileIOReader.cpp
-        ${MILVUS_ENGINE_SRC}/storage/file/FileIOWriter.cpp
-        )
+include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
+link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 set(util_files
-        utils.cpp
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
+        ${MILVUS_ENGINE_SRC}/utils/Status.cpp)
+
+add_executable(test_storage
+        ${test_files}
+        ${util_files}
+        ${common_files}
         )
 
-add_executable(test_wrapper
-        ${test_files}
-        ${wrapper_files}
-        ${storage_files}
-        ${util_files}
-        ${common_files})
-
-target_link_libraries(test_wrapper
+target_link_libraries(test_storage
+        stdc++
         knowhere
-        ${unittest_libs})
+        ${unittest_libs}
+        )
 
-install(TARGETS test_wrapper DESTINATION unittest)
+install(TARGETS test_storage DESTINATION bin)
