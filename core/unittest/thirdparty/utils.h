@@ -17,43 +17,38 @@
 
 #pragma once
 
-#include "AttrsFormat.h"
-#include "AttrsIndexFormat.h"
-#include "DeletedDocsFormat.h"
-#include "IdBloomFilterFormat.h"
-#include "IdIndexFormat.h"
-#include "VectorsFormat.h"
-#include "VectorsIndexFormat.h"
+#include <gtest/gtest.h>
 
-namespace milvus {
-namespace codec {
+#define CAPACITY 1000000
+#define ERROR_RATE .05
 
-class Codec {
- public:
-    virtual VectorsFormatPtr
-    GetVectorsFormat() = 0;
+static const char* bloom_file = "/tmp/bloom_file.bin";
 
-    virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() = 0;
-
-    // TODO(zhiru)
-    /*
-    virtual AttrsFormat
-    GetAttrsFormat() = 0;
-
-    virtual VectorsIndexFormat
-    GetVectorsIndexFormat() = 0;
-
-    virtual AttrsIndexFormat
-    GetAttrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    GetIdIndexFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    GetIdBloomFilterFormat() = 0;
-    */
+struct stats {
+    int true_positives;
+    int true_negatives;
+    int false_positives;
+    int false_negatives;
 };
 
-}  // namespace codec
-}  // namespace milvus
+enum {
+    TEST_PASS,
+    TEST_WARN,
+    TEST_FAIL,
+};
+
+class DabloomsTest : public ::testing::Test {
+protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+
+    static void
+    bloom_score(int positive,
+                int should_positive,
+                struct stats *stats);
+
+    static int
+    print_results(struct stats *stats);
+};

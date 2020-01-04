@@ -28,7 +28,7 @@ class DefaultVectorsFormat : public VectorsFormat {
     DefaultVectorsFormat() = default;
 
     void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) override;
+    read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) override;
 
     void
     write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) override;

@@ -16,6 +16,11 @@
 // under the License.
 
 #include "db/engine/ExecutionEngineImpl.h"
+
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "knowhere/common/Config.h"
@@ -26,16 +31,11 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/ValidationUtil.h"
-
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
 #include "wrapper/VecIndex.h"
-
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
 //#define ON_SEARCH
 namespace milvus {
@@ -355,6 +355,9 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
+    // TODO(zhiru): I WANT TO GET RID OF THIS BUT IT SEEMS IMPOSSIBLE TO DO RIGHT NOW
+    
+
     index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {

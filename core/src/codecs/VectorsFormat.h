@@ -28,7 +28,7 @@ namespace codec {
 class VectorsFormat {
  public:
     virtual void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
+    read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) = 0;
 
     virtual void
     write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) = 0;

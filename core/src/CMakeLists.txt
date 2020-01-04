@@ -70,9 +70,11 @@ set(scheduler_files
 
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
 set(thirdparty_files
         ${thirdparty_easyloggingpp_files}
         ${thirdparty_nlohmann_files}
+        ${thirdparty_dablooms_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)

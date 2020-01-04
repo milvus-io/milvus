@@ -17,11 +17,13 @@
 
 #pragma once
 
-#include "ExecutionEngine.h"
-#include "wrapper/VecIndex.h"
+#include <src/segment/SegmentReader.h>
 
 #include <memory>
 #include <string>
+
+#include "ExecutionEngine.h"
+#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace engine {

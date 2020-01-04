@@ -31,6 +31,8 @@ class DeletedDocs {
  public:
     explicit DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids);
 
+    DeletedDocs() = default;
+
     void AddDeletedDoc(doc_id_t doc_id);
 
     const std::vector<doc_id_t>&
