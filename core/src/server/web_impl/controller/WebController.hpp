@@ -139,6 +139,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
+    ENDPOINT_INFO(GetDevices) {
+        info->summary = "Obtain system devices info";
+
+        info->addResponse<DevicesDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+    }
+
     ENDPOINT_ASYNC("GET", "/devices", GetDevices) {
      ENDPOINT_ASYNC_INIT(GetDevices);
 
@@ -152,7 +159,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             if (0 == status_dto->code->getValue()) {
                 response = controller->createDtoResponse(Status::CODE_200, devices_dto);
             } else {
-                response = controller->createDtoResponse(Status::CODE_200, status_dto);
+                response = controller->createDtoResponse(Status::CODE_400, status_dto);
             }
 
             CORS_SUPPORT(response)
@@ -173,7 +180,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     };
 
     ENDPOINT_INFO(GetAdvancedConfig) {
-        info->summary = "";
+        info->summary = "Obtain cache config and enging config";
 
         info->addResponse<AdvancedConfigDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
@@ -201,7 +208,9 @@ class WebController : public oatpp::web::server::api::ApiController {
     };
 
     ENDPOINT_INFO(SetAdvancedConfig) {
-        info->summary = "";
+        info->summary = "Modify cache config and enging config";
+
+        info->addConsumes<AdvancedConfigDto::ObjectWrapper>("application/json");
 
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
@@ -210,7 +219,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_ASYNC("PUT",
                    "/config/advanced",
                    SetAdvancedConfig) {
-//                   BODY_DTO(AdvancedConfigDto::ObjectWrapper, config_dto)) {
      ENDPOINT_ASYNC_INIT(SetAdvancedConfig);
 
         Action
@@ -246,6 +254,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
+    ENDPOINT_INFO(GetGPUConfig) {
+        info->summary = "Obtain GPU resources config info";
+
+        info->addResponse<GPUConfigDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+    }
+
     ENDPOINT_ASYNC("GET", "config/gpu_resources", GetGPUConfig) {
      ENDPOINT_ASYNC_INIT(GetGPUConfig);
 
@@ -269,8 +284,15 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
+    ENDPOINT_INFO(SetGPUConfig) {
+        info->summary = "Set GPU resources config";
+        info->addConsumes<GPUConfigDto::ObjectWrapper>("application/json");
+
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+    }
+
     ENDPOINT_ASYNC("PUT", "config/gpu_resources", SetGPUConfig) {
-//    BODY_DTO(GPUConfigDto::ObjectWrapper, gpu_config_dto)) {
      ENDPOINT_ASYNC_INIT(SetGPUConfig);
         Action
         act() override {
@@ -409,13 +431,11 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(GetTable) {
         info->summary = "Get table";
-        info->description = "";
 
-        // OK.
+        info->pathParams.add<String>("table_name");
+
         info->addResponse<TableFieldsDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        // Error occurred.
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        // Table not exists.
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
@@ -455,6 +475,9 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(DropTable) {
         info->summary = "Drop table";
+
+        info->pathParams.add<String>("table_name");
+
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
@@ -497,6 +520,9 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(CreateIndex) {
         info->summary = "Create index";
+
+        info->pathParams.add<String>("table_name");
+
         info->addConsumes<IndexRequestDto::ObjectWrapper>("application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
@@ -531,6 +557,9 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(GetIndex) {
         info->summary = "Describe index";
+
+        info->pathParams.add<String>("table_name");
+
         info->addResponse<IndexDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
@@ -564,6 +593,9 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(DropIndex) {
         info->summary = "Drop index";
+
+        info->pathParams.add<String>("table_name");
+
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
@@ -612,6 +644,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(CreatePartition) {
         info->summary = "Create partition";
 
+        info->pathParams.add<String>("table_name");
+
         info->addConsumes<PartitionRequestDto::ObjectWrapper>("application/json");
 
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
@@ -621,9 +655,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_ASYNC("POST",
                    "/tables/{table_name}/partitions",
                    CreatePartition) {
-//             PATH(String, table_name),
-//             BODY_DTO(PartitionRequestDto::ObjectWrapper, partition_param)) {
-
      ENDPOINT_ASYNC_INIT(CreatePartition);
 
         Action
@@ -658,6 +689,11 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(ShowPartitions) {
         info->summary = "Show partitions";
 
+        info->pathParams.add<String>("table_name");
+
+        info->queryParams.add<Int64>("offset");
+        info->queryParams.add<Int64>("page_size");
+
         //
         info->addResponse<PartitionListDto::ObjectWrapper>(Status::CODE_200, "application/json");
         // Error occurred.
@@ -666,7 +702,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(ShowPartitions)
 
     ENDPOINT_ASYNC("GET", "/tables/{tableName}/partitions", ShowPartitions) {
      ENDPOINT_ASYNC_INIT(ShowPartitions);
@@ -708,13 +743,15 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(DropPartition) {
         info->summary = "Drop partition";
 
+        info->pathParams.add<String>("table_name");
+        info->pathParams.add<String>("partition_tag");
+
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/partition/{partition_tag}", DropPartition) {
-//             QUERY(String, table_name), QUERY(String, tag)) {
      ENDPOINT_ASYNC_INIT(DropPartition);
 
         Action
@@ -836,12 +873,13 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(Cmd) {
         info->summary = "Command";
+
+        info->pathParams.add<String>("cmd_str");
+
         info->addResponse<CommandDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
-
-    ADD_CORS(Cmd)
 
     ENDPOINT_ASYNC("GET", "/cmd/{cmd_str}", Cmd) {
      ENDPOINT_ASYNC_INIT(Cmd);

@@ -545,8 +545,11 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     if (status.ok()) {
         results_dto->num = result.row_num_;
         results_dto->results = results_dto->results->createShared();
+        if (0 == result.row_num_) {
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
+
         auto step = result.id_list_.size() / result.row_num_;
-//        OList<ResultDto::ObjectWrapper>::createShared();
         for (size_t i = 0; i < result.row_num_; i++) {
             auto row_result_dto = OList<ResultDto::ObjectWrapper>::createShared();
             for (size_t j = 0; j < step; j++) {
@@ -554,20 +557,9 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
                 result_dto->id = std::to_string(result.id_list_.at(i * step + j)).c_str();
                 result_dto->dit = std::to_string(result.distance_list_.at(i * step + j)).c_str();
                 row_result_dto->pushBack(result_dto);
-//                results_dto->results->pushBack(result_dto);
             }
             results_dto->results->pushBack(row_result_dto);
-//            i += result.id_list_.size() / result.row_num_;
         }
-
-//        results_dto->ids = results_dto->ids->createShared();
-//        for (auto& id : result.id_list_) {
-//            results_dto->ids->pushBack(id);
-//        }
-//        results_dto->dits = results_dto->dits->createShared();
-//        for (auto& dit : result.distance_list_) {
-//            results_dto->dits->pushBack(dit);
-//        }
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)

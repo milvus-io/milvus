@@ -17,22 +17,18 @@
 
 #include <oatpp-swagger/AsyncController.hpp>
 #include <oatpp/network/server/Server.hpp>
+#include <cmake-build-debug/oatpp_ep-prefix/src/oatpp_ep/include/oatpp-0.19.11/oatpp/oatpp/web/client/HttpRequestExecutor.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/controller/WebController.hpp"
 #include "server/web_impl/component/SwaggerComponent.hpp"
 
 #include "server/Config.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace server {
 namespace web {
-
-WebServer::WebServer() {
-}
-
-WebServer::~WebServer() {
-}
 
 void
 WebServer::Start() {
@@ -56,28 +52,47 @@ WebServer::StartService() {
     Status status;
 
     status = config.GetServerConfigWebPort(port);
-    AppComponent components = AppComponent(std::stoi(port));
-    SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
-    /* create ApiControllers and add endpoints to router */
-    auto router = components.http_router_.getObject();
+//    oatpp::base::Environment::init();
 
-    auto doc_endpoints = oatpp::swagger::AsyncController::Endpoints::createShared();
+    {
+//    components_ = std::make_shared<AppComponent>(std::stoi(port));
+        AppComponent components = AppComponent(std::stoi(port));
+        SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
-    auto user_controller = WebController::createShared();
-    user_controller->addEndpointsToRouter(router);
+        /* create ApiControllers and add endpoints to router */
+        auto router = components.http_router_.getObject();
 
-    doc_endpoints->pushBackAll(user_controller->getEndpoints());
+        auto doc_endpoints = oatpp::swagger::AsyncController::Endpoints::createShared();
 
-    auto swaggerController = oatpp::swagger::AsyncController::createShared(doc_endpoints);
-    swaggerController->addEndpointsToRouter(router);
+        auto user_controller = WebController::createShared();
+        user_controller->addEndpointsToRouter(router);
 
-    /* create server */
-    server_ptr_ = std::make_unique<oatpp::network::server::Server>(components.server_connection_provider_.getObject(),
-                                                                   components.server_connection_handler_.getObject());
+        doc_endpoints->pushBackAll(user_controller->getEndpoints());
 
-    // start synchronously
-    server_ptr_->run();
+        auto swaggerController = oatpp::swagger::AsyncController::createShared(doc_endpoints);
+        swaggerController->addEndpointsToRouter(router);
+
+        /* Get connection handler component */
+        OATPP_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, connection_handler);
+
+        /* Get connection provider component */
+        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, connection_provider);
+
+        /* create server */
+        server_ptr_ = std::make_unique<oatpp::network::server::Server>(connection_provider, connection_handler);
+
+        // start synchronously
+        server_ptr_->run();
+
+        connection_handler->stop();
+
+        OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor);
+        executor->waitTasksFinished();
+        executor->join();
+    }
+
+//    oatpp::base::Environment::destroy();
 
     return Status::OK();
 }
@@ -86,6 +101,21 @@ Status
 WebServer::StopService() {
     if (server_ptr_ != nullptr) {
         server_ptr_->stop();
+
+        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
+        client_provider->getConnection();
+//        requestExecutor->getConnection();
+        //
+//        Config& config = Config::GetInstance();
+//        std::string port;
+//
+//        config.GetServerConfigWebPort(port);
+//
+//        auto client_provider = std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
+//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", std::stoi(port))
+//        );
+
+//        client_provider->getConnection();
     }
     return Status::OK();
 }

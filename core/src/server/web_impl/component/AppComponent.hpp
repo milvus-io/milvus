@@ -24,6 +24,7 @@
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/parser/json/mapping/ObjectMapper.hpp>
 #include <oatpp/core/macro/component.hpp>
+#include <cmake-build-debug/oatpp_ep-prefix/src/oatpp_ep/include/oatpp-0.19.11/oatpp/oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
@@ -46,7 +47,7 @@ class AppComponent {
     explicit AppComponent(int port) : port_(port) {
     }
 
-    ~AppComponent() = default;
+//    ~AppComponent() = default;
 
  private:
     const int port_;
@@ -73,10 +74,15 @@ class AppComponent {
      */
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)
     ([this] {
-//        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
         return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
-//        return oatpp::network::ServerConnectionPoo;
-//        return oatpp::network::server::ConnectionHandler
+    }());
+
+
+    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_connection_provider_)([this] {
+//        return std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
+//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("localhost", this->port_)
+//        );
+        return oatpp::network::client::SimpleTCPConnectionProvider::createShared("localhost", this->port_);
     }());
 
     /**
@@ -93,7 +99,6 @@ class AppComponent {
         OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router); // get Router component
         OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor); // get Async executor component
         return oatpp::web::server::AsyncHttpConnectionHandler::createShared(router, executor);
-//        return oatpp::web::server::AsyncHttpConnectionHandler::createShared(router);
     }());
 
     /**
@@ -107,6 +112,7 @@ class AppComponent {
                                                                                      deserializerConfig);
         return objectMapper;
     }());
+
 
 //    /**
 //     *  Create Demo-Database component which stores information about users

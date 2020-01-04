@@ -46,8 +46,8 @@ class WebServer {
     Stop();
 
  private:
-    WebServer();
-    ~WebServer();
+    WebServer() = default;
+    ~WebServer() = default;
 
     Status
     StartService();
@@ -55,6 +55,7 @@ class WebServer {
     StopService();
 
  private:
+//    std::shared_ptr<AppComponent> components_;
     std::unique_ptr<oatpp::network::server::Server> server_ptr_;
     std::shared_ptr<std::thread> thread_ptr_;
 };
