@@ -17,43 +17,33 @@
 
 #pragma once
 
-#include "AttrsFormat.h"
-#include "AttrsIndexFormat.h"
-#include "DeletedDocsFormat.h"
-#include "IdBloomFilterFormat.h"
-#include "IdIndexFormat.h"
-#include "VectorsFormat.h"
-#include "VectorsIndexFormat.h"
+#include <string>
+
+#include "segment/Types.h"
+#include "store/Directory.h"
+#include "utils/Status.h"
 
 namespace milvus {
-namespace codec {
+namespace segment {
 
-class Codec {
+class SegmentReader {
  public:
-    virtual VectorsFormatPtr
-    GetVectorsFormat() = 0;
-
-    virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() = 0;
+    explicit SegmentReader(const std::string& directory);
 
     // TODO(zhiru)
-    /*
-    virtual AttrsFormat
-    GetAttrsFormat() = 0;
+    Status
+    LoadCache(bool& in_cache);
 
-    virtual VectorsIndexFormat
-    GetVectorsIndexFormat() = 0;
+    Status
+    LoadFromDisk();
 
-    virtual AttrsIndexFormat
-    GetAttrsIndexFormat() = 0;
+    Status
+    GetSegment(SegmentPtr& segment_ptr);
 
-    virtual IdIndexFormat
-    GetIdIndexFormat() = 0;
-
-    virtual IdBloomFilterFormat
-    GetIdBloomFilterFormat() = 0;
-    */
+ private:
+    store::DirectoryPtr directory_ptr_;
+    SegmentPtr segment_ptr_;
 };
 
-}  // namespace codec
+}  // namespace segment
 }  // namespace milvus

@@ -30,14 +30,14 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) {
+DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
     std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
-    std::unordered_map<std::string, segment::VectorPtr> vectors;
+
     for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
         const auto& path = it.path();
         if (path.extension().string() == raw_vector_extension_) {
@@ -51,12 +51,12 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
             std::vector<uint8_t> vector_list(num_bytes);
             ::read(rv_fd, vector_list.data(), num_bytes);
 
-            auto found = vectors.find(path.stem().string());
-            if (found == vectors.end()) {
-                vectors[path.stem().string()] = std::make_shared<segment::Vector>();
+            auto found = vectors_read->vectors.find(path.stem().string());
+            if (found == vectors_read->vectors.end()) {
+                vectors_read->vectors[path.stem().string()] = std::make_shared<segment::Vector>();
             }
 
-            vectors[path.stem().string()]->AddData(vector_list);
+            vectors_read->vectors[path.stem().string()]->AddData(vector_list);
         }
         if (path.extension().string() == user_id_extension_) {
             int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
@@ -70,7 +70,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
             std::vector<segment::doc_id_t> uids(count);
             ::read(uid_fd, uids.data(), file_size);
 
-            vectors[path.stem().string()]->AddUids(uids);
+            vectors_read->vectors[path.stem().string()]->AddUids(uids);
         }
     }
 }

@@ -28,7 +28,7 @@ namespace codec {
 class DeletedDocsFormat {
  public:
     virtual void
-    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocs& deleted_docs) = 0;
+    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) = 0;
 
     virtual void
     write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) = 0;
