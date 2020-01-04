@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "segment/Types.h"
+#include "store/Directory.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -43,8 +44,8 @@ class SegmentWriter {
     GetSegment(SegmentPtr& segment_ptr);
 
  private:
-    const std::string directory_;
-    SegmentPtr segment_ptr_;
+    store::DirectoryPtr directory_ptr_;
+    const SegmentPtr segment_ptr_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;

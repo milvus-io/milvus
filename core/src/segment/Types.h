@@ -19,6 +19,7 @@
 
 #include <memory>
 
+#include "faiss/utils/ConcurrentBitset.h"
 #include "segment/DeletedDocs.h"
 #include "segment/Vectors.h"
 
@@ -30,6 +31,8 @@ typedef int64_t doc_id_t;
 struct Segment {
     VectorsPtr vectors_ptr_;
     DeletedDocsPtr deleted_docs_ptr_;
+    // TODO: bitset here?
+    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr_;
 };
 
 using SegmentPtr = std::shared_ptr<Segment>;
