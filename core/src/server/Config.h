@@ -110,6 +110,14 @@ static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 static const char* CONFIG_TRACING = "tracing_config";
 static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
+/* wal config */
+static const char* CONFIG_WAL = "wal_config";
+static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
+static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "128";
+static const char* CONFIG_WAL_RECORD_SIZE = "record_size";
+static const char* CONFIG_WAL_RECORD_SIZE_DEFAULT = "2";
+static const char* CONFIG_WAL_WAL_PATH = "wal_path";
+
 class Config {
  public:
     static Config&
@@ -190,6 +198,12 @@ class Config {
     CheckEngineConfigUseBlasThreshold(const std::string& value);
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
+
+    /* wal config */
+    Status
+    CheckWalConfigBufferSize(const std::string& value);
+    Status
+    CheckWalConfigRecordSize(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -285,6 +299,16 @@ class Config {
     /* tracing config */
     Status
     GetTracingConfigJsonConfigPath(std::string& value);
+
+    /* wal config */
+    Status
+    GetWalConfigBufferSize(uint32_t& buffer_size);
+
+    Status
+    GetWalConfigRecordSize(uint32_t& record_size);
+
+    Status
+    GetWalConfigWalPath(std::string& wal_path);
 
  public:
     /* server config */

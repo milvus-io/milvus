@@ -42,6 +42,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -112,14 +113,15 @@ set(engine_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+        ${db_wal_files}
         ${metrics_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
-        ${codecs_files}
-        ${codecs_default_files}
-        ${segment_files}
-        ${store_files}
+#        ${codecs_files}
+#        ${codecs_default_files}
+#        ${segment_files}
+#        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
