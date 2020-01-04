@@ -24,9 +24,6 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-#find_package(oatpp          0.19.10 REQUIRED)
-#find_package(oatpp-swagger  0.19.10 REQUIRED)
-
 add_subdirectory(index)
 if (FAISS_WITH_MKL)
     add_compile_definitions("WITH_MKL")
