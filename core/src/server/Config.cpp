@@ -669,6 +669,28 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::CheckWalConfigBufferSize(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid wal buffer size: " + value +
+                          ". Possible reason: wal_config.buffer_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigRecordSize(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid wal record size: " + value +
+                          ". Possible reason: wal_config.record_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
+    return Status::OK();
+}
+
 #ifdef MILVUS_GPU_VERSION
 Status
 Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
@@ -1156,6 +1178,29 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         tracer_config.close();
         return s;
     }
+    return Status::OK();
+}
+
+/* wal config */
+Status
+Config::GetWalConfigBufferSize(uint32_t& buffer_size) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
+    Status s = CheckWalConfigBufferSize(str);
+    if (!s.ok()) {
+        return s;
+    }
+    buffer_size = (uint32_t)std::stoul(str);
+    return Status::OK();
+}
+
+Status
+Config::GetWalConfigRecordSize(uint32_t& record_size) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECORD_SIZE, CONFIG_WAL_RECORD_SIZE_DEFAULT);
+    Status s = CheckWalConfigRecordSize(str);
+    if (!s.ok()) {
+        return s;
+    }
+    record_size = (uint32_t)std::stoul(str);
     return Status::OK();
 }
 
