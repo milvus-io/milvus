@@ -29,6 +29,7 @@ Directory::Directory(const std::string& dir_path) : dir_path_(dir_path) {
     if (!boost::filesystem::is_directory(dir_path)) {
         auto ret = boost::filesystem::create_directory(dir_path);
         if (!ret) {
+            // TODO(zhiru): hard to catch exception
             std::string err_msg = "Failed to create directory: " + dir_path;
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);

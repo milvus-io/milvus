@@ -39,7 +39,13 @@ class MemManager {
     DeleteVectors(const std::string& table_id, IDNumbers vector_ids) = 0;
 
     virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
+    Flush(const std::string& table_id, uint64_t wal_lsn) = 0;
+
+    virtual Status
+    Flush(std::set<std::string>& table_ids, uint64_t wal_lsn) = 0;
+
+    //    virtual Status
+    //    Serialize(std::set<std::string>& table_ids) = 0;
 
     virtual Status
     EraseMemVector(const std::string& table_id) = 0;

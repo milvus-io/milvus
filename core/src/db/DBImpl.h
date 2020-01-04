@@ -101,6 +101,12 @@ class DBImpl : public DB {
     DeleteVectors(const std::string& table_id, IDNumbers vector_ids) override;
 
     Status
+    Flush(const std::string& table_id) override;
+
+    Status
+    Flush() override;
+
+    Status
     CreateIndex(const std::string& table_id, const TableIndex& index) override;
 
     Status
@@ -143,22 +149,29 @@ class DBImpl : public DB {
     void
     StartMetricTask();
 
+    /*
     void
     StartCompactionTask();
+    */
+
     Status
     MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files);
     Status
     BackgroundMergeFiles(const std::string& table_id);
     void
     BackgroundCompaction(std::set<std::string> table_ids);
+    void
+    AddCompactionTask(const std::set<std::string>& table_ids);
 
     void
     StartBuildIndexTask(bool force = false);
     void
     BackgroundBuildIndex();
 
+    /*
     Status
     SyncMemData(std::set<std::string>& sync_table_ids);
+    */
 
     Status
     GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>& file_types,

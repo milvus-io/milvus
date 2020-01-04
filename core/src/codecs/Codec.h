@@ -33,6 +33,10 @@ class Codec {
     virtual VectorsFormatPtr
     GetVectorsFormat() = 0;
 
+    virtual DeletedDocsFormatPtr
+    GetDeletedDocsFormat() = 0;
+
+    // TODO(zhiru)
     virtual AttrsFormat
     GetAttrsFormat() = 0;
 
@@ -47,9 +51,6 @@ class Codec {
 
     virtual IdBloomFilterFormat
     GetIdBloomFilterFormat() = 0;
-
-    virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() = 0;
 };
 
 }  // namespace codec

@@ -28,6 +28,8 @@
 namespace milvus {
 namespace engine {
 
+// TODO(zhiru): this class needs to be refactored once attributes are added
+
 class VectorSource {
  public:
     explicit VectorSource(VectorsData& vectors);

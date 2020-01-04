@@ -31,7 +31,7 @@ typedef int64_t doc_id_t;
 struct Segment {
     VectorsPtr vectors_ptr_;
     DeletedDocsPtr deleted_docs_ptr_;
-    // TODO: bitset here?
+    // TODO(zhiru): bitset here?
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr_;
 };
 

@@ -48,7 +48,7 @@ SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8
 
 Status
 SegmentWriter::Serialize() {
-    // TODO
+    // TODO(zhiru)
     codec::DefaultCodec default_codec;
     try {
         default_codec.GetVectorsFormat()->write(directory_ptr_, segment_ptr_->vectors_ptr_);

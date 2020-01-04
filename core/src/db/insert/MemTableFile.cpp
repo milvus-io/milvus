@@ -86,7 +86,7 @@ Status
 MemTableFile::Delete(segment::doc_id_t doc_id) {
     // 1. Check wither the doc_id is present, if yes, delete it's corresponding buffer
 
-    // TODO: need to know the type of vector we want to delete from meta (cache). Hard code for now
+    // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
     int vector_type_size;
     if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
         vector_type_size = sizeof(uint8_t);
@@ -142,7 +142,7 @@ MemTableFile::Serialize() {
 
     //    execution_engine_->Serialize();
 
-    // TODO:
+    // TODO(zhiru):
     //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     //    table_file_schema_.row_count_ = execution_engine_->Count();
 
@@ -161,7 +161,7 @@ MemTableFile::Serialize() {
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
 
-    // TODO: cache
+    // TODO(zhiru): cache
     /*
         if (options_.insert_cache_immediately_) {
             execution_engine_->Cache();

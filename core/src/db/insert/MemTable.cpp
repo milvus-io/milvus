@@ -61,7 +61,7 @@ Status
 MemTable::Delete(segment::doc_id_t doc_id) {
     // Locate which table file the doc id lands in
     for (auto& table_file : mem_table_file_list_) {
-        // TODO:
+        // TODO(zhiru):
         // Use bloom filter to check whether the id is present in this table file
         // If present:
         table_file->Delete(doc_id);
@@ -79,7 +79,7 @@ MemTable::GetTableFileCount() {
 }
 
 Status
-MemTable::Serialize() {
+MemTable::Serialize(uint64_t wal_lsn) {
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize();
         if (!status.ok()) {
