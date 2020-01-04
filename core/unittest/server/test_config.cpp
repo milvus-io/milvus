@@ -146,16 +146,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(str_val == server_time_zone);
 
     /* db config */
-    std::string db_primary_path = "/home/zilliz";
-    ASSERT_TRUE(config.SetDBConfigPrimaryPath(db_primary_path).ok());
-    ASSERT_TRUE(config.GetDBConfigPrimaryPath(str_val).ok());
-    ASSERT_TRUE(str_val == db_primary_path);
-
-    std::string db_secondary_path = "/home/zilliz";
-    ASSERT_TRUE(config.SetDBConfigSecondaryPath(db_secondary_path).ok());
-    ASSERT_TRUE(config.GetDBConfigSecondaryPath(str_val).ok());
-    ASSERT_TRUE(str_val == db_secondary_path);
-
     std::string db_backend_url = "mysql://root:123456@127.0.0.1:19530/milvus";
     ASSERT_TRUE(config.SetDBConfigBackendUrl(db_backend_url).ok());
     ASSERT_TRUE(config.GetDBConfigBackendUrl(str_val).ok());
@@ -177,6 +167,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(int64_val == db_insert_buffer_size);
 
     /* storage config */
+    std::string storage_primary_path = "/home/zilliz";
+    ASSERT_TRUE(config.SetStorageConfigPrimaryPath(storage_primary_path).ok());
+    ASSERT_TRUE(config.GetStorageConfigPrimaryPath(str_val).ok());
+    ASSERT_TRUE(str_val == storage_primary_path);
+
+    std::string storage_secondary_path = "/home/zilliz";
+    ASSERT_TRUE(config.SetStorageConfigSecondaryPath(storage_secondary_path).ok());
+    ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
+    ASSERT_TRUE(str_val == storage_secondary_path);
+
     bool storage_minio_enable = false;
     ASSERT_TRUE(config.SetStorageConfigMinioEnable(std::to_string(storage_minio_enable)).ok());
     ASSERT_TRUE(config.GetStorageConfigMinioEnable(bool_val).ok());
@@ -329,9 +329,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
 
     /* db config */
-    std::string db_primary_path = "/home/zilliz";
-    get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_PRIMARY_PATH);
-    set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_PRIMARY_PATH, db_primary_path);
+    std::string db_insert_buffer_size = "4";
+    get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_INSERT_BUFFER_SIZE);
+    set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_INSERT_BUFFER_SIZE, db_insert_buffer_size);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_FALSE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -484,10 +484,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetServerConfigTimeZone("UTCA").ok());
 
     /* db config */
-    ASSERT_FALSE(config.SetDBConfigPrimaryPath("").ok());
-
-    // ASSERT_FALSE(config.SetDBConfigSecondaryPath("").ok());
-
     ASSERT_FALSE(config.SetDBConfigBackendUrl("http://www.google.com").ok());
     ASSERT_FALSE(config.SetDBConfigBackendUrl("sqlite://:@:").ok());
     ASSERT_FALSE(config.SetDBConfigBackendUrl("mysql://root:123456@127.0.0.1/milvus").ok());
@@ -501,6 +497,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetDBConfigInsertBufferSize("2048").ok());
 
     /* storage config */
+    ASSERT_FALSE(config.SetStorageConfigPrimaryPath("").ok());
+
+    // ASSERT_FALSE(config.SetStorageConfigSecondaryPath("").ok());
+
     ASSERT_FALSE(config.SetStorageConfigMinioEnable("10").ok());
 
     ASSERT_FALSE(config.SetStorageConfigMinioAddress("127.0.0").ok());
