@@ -66,15 +66,12 @@ macro(build_dependency DEPENDENCY_NAME)
         build_opentracing()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
         build_fiu()
-<<<<<<< HEAD
     elseif ("${DEPENDENCY_NAME}" STREQUAL "oatpp")
         build_oatpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "oatpp-swagger")
         build_oatpp_swagger()
-=======
     elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
         build_aws()
->>>>>>> main/master
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -339,7 +336,6 @@ else ()
                        "https://gitee.com/quicksilver/libfiu/repository/archive/${FIU_VERSION}.zip")
 endif ()
 
-<<<<<<< HEAD
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(MILVUS_OATPP_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
@@ -350,12 +346,12 @@ if (DEFINED ENV{MILVUS_OATPP_SWAGGER_URL})
     set(MILVUS_OATPP_SWAGGER_URL "$ENV{MILVUS_OATPP_SWAGGER_URL}")
 else ()
     set(OATPP_SWAGGER_SOURCE_URL "https://github.com/oatpp/oatpp-swagger/archive/${OATPP_VERSION}.tar.gz")
-=======
+endif ()
+
 if (DEFINED ENV{MILVUS_AWS_URL})
     set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
 else ()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
->>>>>>> main/master
 endif ()
 
 # ----------------------------------------------------------------------
@@ -1047,8 +1043,8 @@ macro(build_oatpp)
     set(OATPP_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF)
-#            -DOATPP_BUILD_TESTS=OFF)
+            -DBUILD_SHARED_LIBS=OFF
+            -DOATPP_BUILD_TESTS=OFF)
 
     externalproject_add(oatpp_ep
             URL
