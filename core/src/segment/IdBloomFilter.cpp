@@ -15,50 +15,45 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include "dablooms/dablooms.h"
-#include "segment/Types.h"
+#include "IdBloomFilter.h"
 
 namespace milvus {
 namespace segment {
 
-class IdBloomFilter {
- public:
-    IdBloomFilter(scaling_bloom_t* bloom_filter);
+IdBloomFilter::IdBloomFilter(scaling_bloom_t* bloom_filter) : bloom_filter_(bloom_filter) {
+}
 
-    ~IdBloomFilter();
+IdBloomFilter::~IdBloomFilter() {
+    free_scaling_bloom(bloom_filter_);
+}
 
-    scaling_bloom_t*
-    GetBloomFilter();
+scaling_bloom_t*
+IdBloomFilter::GetBloomFilter() {
+    return bloom_filter_;
+}
 
-    bool
-    Check(segment::doc_id_t uid);
+bool
+IdBloomFilter::Check(segment::doc_id_t uid) {
+    std::string s = std::to_string(uid);
+    return scaling_bloom_check(bloom_filter_, s.c_str(), s.size());
+}
 
-    void
-    Add(segment::doc_id_t uid);
+void
+IdBloomFilter::Add(segment::doc_id_t uid) {
+    std::string s = std::to_string(uid);
+    scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid);
+}
 
-    void
-    Remove(segment::doc_id_t uid);
+void
+IdBloomFilter::Remove(segment::doc_id_t uid) {
+    std::string s = std::to_string(uid);
+    scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid);
+}
 
-    const std::string&
-    GetName() const;
-
-    // No copy and move
-    IdBloomFilter(const IdBloomFilter&) = delete;
-    IdBloomFilter(IdBloomFilter&&) = delete;
-
-    IdBloomFilter&
-    operator=(const IdBloomFilter&) = delete;
-    IdBloomFilter&
-    operator=(IdBloomFilter&&) = delete;
-
- private:
-    scaling_bloom_t* bloom_filter_;
-    const std::string name_ = "bloom_filter";
-};
-
-using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
+const std::string&
+IdBloomFilter::GetName() const {
+    return name_;
+}
 
 }  // namespace segment
 }  // namespace milvus
