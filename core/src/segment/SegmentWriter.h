@@ -35,6 +35,12 @@ class SegmentWriter {
     AddVectors(const std::string& field_name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
 
     Status
+    WriteVectors();
+
+    Status
+    WriteDeletedDocs();
+
+    Status
     Serialize();
 
     Status

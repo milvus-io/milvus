@@ -66,7 +66,7 @@ MemTable::Delete(segment::doc_id_t doc_id) {
         // If present:
         table_file->Delete(doc_id);
     }
-    // TODO(zhiru): Add the id to delete list (should it be on table level?) 
+    // TODO(zhiru): Add the id to delete list (should it be on table level?)
     // so it can be applied to other segments on disk during the next flush
 }
 
@@ -82,17 +82,19 @@ MemTable::GetTableFileCount() {
 
 Status
 MemTable::Serialize(uint64_t wal_lsn) {
-
     // TODO(zhiru): applying deletes to other segments on disk
     // Foreach id in delete list:
     //     Foreach segment in table:
     //         Load its bloom filter
-    //         If present:
-    //             Load its uids. If present, add the offset to deletedDoc
-    //     Serialize segment's deletedDoc (append directly to previous file or make a new file and merge them after written to meta?)
+    //         If present, add the uid to segment's uid list
+    // Foreach segment
+    //     Load its uids file.
+    //     Scan the uids, if any uid in segment's uid list exists, add its offset to deletedDoc
+    //     Serialize segment's deletedDoc (append directly to previous file or make a new file and merge them after
+    //     written to meta?)
 
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
-        auto status = (*mem_table_file)->Serialize();
+        auto status = (*mem_table_file)->Serialize(wal_lsn);
         if (!status.ok()) {
             std::string err_msg = "Insert data serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
