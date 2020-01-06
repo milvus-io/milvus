@@ -654,7 +654,32 @@ class TestSearchBase:
         status, result = connect.search_vectors(ham_table, top_k, nprobe, query_vecs)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
-        assert result[0][0].distance == min(distance_0, distance_1).astype(float)
+        assert result[0][0].distance - min(distance_0, distance_1).astype(float) <= epsilon
+
+    def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_table):
+        '''
+        target: search ip_table, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 1
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_table, nb=2)
+        index_params = {
+            "index_type": IndexType.FLAT,
+            "nlist": 16384
+        }
+        connect.create_index(tanimoto_table, index_params)
+        logging.getLogger().info(connect.describe_table(tanimoto_table))
+        logging.getLogger().info(connect.describe_index(tanimoto_table))
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, tanimoto_table, nb=1, insert=False)
+        distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
+        distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
+        status, result = connect.search_vectors(tanimoto_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
 
     def test_search_distance_ip_index_params(self, connect, ip_table, get_index_params):
         '''
