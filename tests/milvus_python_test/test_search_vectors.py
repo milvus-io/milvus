@@ -654,7 +654,7 @@ class TestSearchBase:
         status, result = connect.search_vectors(ham_table, top_k, nprobe, query_vecs)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
-        assert abs(struct.unpack('>i', struct.pack('>f', result[0][0].distance)) - min(distance_0, distance_1)) <= epsilon
+        assert abs(result[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
 
     def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_table):
         '''
