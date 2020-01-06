@@ -55,22 +55,12 @@ class WebController : public oatpp::web::server::api::ApiController {
     WebController(const std::shared_ptr<ObjectMapper>& objectMapper)
         : oatpp::web::server::api::ApiController(objectMapper) {}
 
-// private:
-//
-//    /**
-//     *  Inject web handler
-//     */
-//    OATPP_COMPONENT(std::shared_ptr<WebRequestHandler>, handler_);
  public:
 
     static std::shared_ptr<WebController> createShared(OATPP_COMPONENT(std::shared_ptr<ObjectMapper>,
                                                                        objectMapper)) {
         return std::make_shared<WebController>(objectMapper);
     }
-
-//    std::shared_ptr<WebRequestHandler> GetRequestHandler() {
-//        return handler_;
-//    }
 
     /**
      *  Begin ENDPOINTs generation ('ApiController' codegen)
@@ -163,7 +153,6 @@ class WebController : public oatpp::web::server::api::ApiController {
             }
 
             CORS_SUPPORT(response)
-
             return _return(response);
         }
     };
@@ -216,9 +205,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT_ASYNC("PUT",
-                   "/config/advanced",
-                   SetAdvancedConfig) {
+    ENDPOINT_ASYNC("PUT", "/config/advanced", SetAdvancedConfig) {
      ENDPOINT_ASYNC_INIT(SetAdvancedConfig);
 
         Action
@@ -238,6 +225,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             } else {
                 response = controller->createDtoResponse(Status::CODE_400, status_dto);
             }
+
             CORS_SUPPORT(response)
             return _return(response);
         }
@@ -702,18 +690,31 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-
     ENDPOINT_ASYNC("GET", "/tables/{table_name}/partitions", ShowPartitions) {
      ENDPOINT_ASYNC_INIT(ShowPartitions);
         Action
         act() override {
+            auto status_dto = StatusDto::createShared();
             auto partition_list_dto = PartitionListDto::createShared();
             auto handler = WebRequestHandler();
             handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto table_name = request->getPathVariable("table_name");
+
+            if (nullptr == request->getQueryParameter("page_size").get()) {
+                status_dto->code = StatusCode::QUERY_PARAM_LOSS;
+                status_dto->message = "Query param \'page_size\' is required!";
+                return _return(controller->createDtoResponse(Status::CODE_400, status_dto));
+            }
             Int64 page_size = std::stol(request->getQueryParameter("page_size")->std_str());
+
+            if (nullptr == request->getQueryParameter("offset").get()) {
+                status_dto->code = StatusCode::QUERY_PARAM_LOSS;
+                status_dto->message = "Query param \'offset\' is required!";
+                return _return(controller->createDtoResponse(Status::CODE_400, status_dto));
+            }
             Int64 offset = std::stol(request->getQueryParameter("offset")->std_str());
-            auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
+
+            status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
             int64_t code = status_dto->code->getValue();
             std::shared_ptr<OutgoingResponse> response;
             if (0 == code) {
@@ -729,7 +730,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/partition/{partition_tag}", PartitionOptions) {
+    ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", PartitionOptions) {
      ENDPOINT_ASYNC_INIT(PartitionOptions);
 
         Action
@@ -751,7 +752,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/partition/{partition_tag}", DropPartition) {
+    ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition) {
      ENDPOINT_ASYNC_INIT(DropPartition);
 
         Action

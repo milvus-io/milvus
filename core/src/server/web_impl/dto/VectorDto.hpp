@@ -61,7 +61,6 @@ class InsertRequestDto : public oatpp::data::mapping::type::Object {
 class VectorIdsDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(VectorIdsDto, Object)
 
-//    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
     DTO_FIELD(List<String>::ObjectWrapper, ids);
 };
 

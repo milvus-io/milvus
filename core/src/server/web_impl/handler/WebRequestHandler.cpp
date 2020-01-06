@@ -326,19 +326,19 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema) {
     if (nullptr == table_schema->table_name.get()) {
-        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'table_name\' is missing")
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'table_name\' is missing")
     }
 
     if (nullptr == table_schema->dimension.get()) {
-        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'dimension\' is missing")
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'dimension\' is missing")
     }
 
     if (nullptr == table_schema->index_file_size.get()) {
-        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'index_file_size\' is missing")
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_file_size\' is missing")
     }
 
     if (nullptr == table_schema->metric_type.get()) {
-        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Field \'metric_type\' is missing")
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'metric_type\' is missing")
     }
 
     auto status =
@@ -348,12 +348,6 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-/**
- * fields:
- *  - ALL: request all fields
- *  - COUNT: request number of vectors
- *  - *,*,*...:
- */
 StatusDto::ObjectWrapper
 WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query_params,
                             TableFieldsDto::ObjectWrapper& fields_dto) {
@@ -432,9 +426,16 @@ WebRequestHandler::DropTable(const OString& table_name) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param) {
+    if (nullptr == index_param->index_type.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required")
+    }
     std::string index_type = index_param->index_type->std_str();
     if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
         ASSIGN_RETURN_STATUS_DTO(Status(SERVER_INVALID_INDEX_TYPE, "The index type is invalid."))
+    }
+
+    if (nullptr == index_param->nlist.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'nlist\' is required")
     }
 
     auto status =
@@ -465,6 +466,14 @@ WebRequestHandler::DropIndex(const OString& table_name) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param) {
+    if (nullptr == param->partition_name.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_name\' is required")
+    }
+
+    if (nullptr == param->partition_tag.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_tag\' is required")
+    }
+
     auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
                                                    param->partition_name->std_str(), param->partition_tag->std_str());
 
@@ -512,6 +521,10 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
         }
     }
 
+    if (nullptr == param->records.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'\' is required to fill vectors")
+    }
+
     std::vector<float> datas;
     for (int64_t j = 0; j < param->records->count(); j++) {
         for (int64_t k = 0; k < param->records->get(j)->count(); k++) {
@@ -555,6 +568,10 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     if (nullptr != search_request->file_ids.get()) {
         search_request->file_ids->forEach(
             [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
+    }
+
+    if (nullptr == search_request->records.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill query vectors")
     }
 
     std::vector<float> datas;
