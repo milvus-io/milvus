@@ -18,6 +18,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#766 - If partition tag is similar, wrong partition is searched
 - \#771 - Add server build commit info interface
 - \#759 - Put C++ sdk out of milvus/core
+- \#813 - Add push mode for prometheus monitor
 - \#815 - Support MinIO storage
 - \#910 - Change Milvus c++ standard to c++17
 

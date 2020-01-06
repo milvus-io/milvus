@@ -137,6 +137,7 @@ set(prometheus_lib
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
+        curl
         )
 
 set(boost_lib
