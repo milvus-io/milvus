@@ -17,13 +17,14 @@
 
 #pragma once
 
+#include "codecs/IdBloomFilterFormat.h"
 #include "segment/IdBloomFilter.h"
 #include "store/Directory.h"
 
 namespace milvus {
 namespace codec {
 
-class DefaultIdBloomFilterFormat {
+class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
  public:
     DefaultIdBloomFilterFormat() = default;
 
@@ -32,6 +33,9 @@ class DefaultIdBloomFilterFormat {
 
     void
     write(const store::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+
+    void
+    create(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override ;
 
     // No copy and move
     DefaultIdBloomFilterFormat(const DefaultIdBloomFilterFormat&) = delete;

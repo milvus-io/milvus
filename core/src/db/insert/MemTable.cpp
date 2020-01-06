@@ -64,9 +64,6 @@ Status
 MemTable::Delete(segment::doc_id_t doc_id) {
     // Locate which table file the doc id lands in
     for (auto& table_file : mem_table_file_list_) {
-        // TODO(zhiru):
-        // Use bloom filter to check whether the id is present in this table file
-        // If present:
         table_file->Delete(doc_id);
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
@@ -91,7 +88,7 @@ MemTable::Serialize(uint64_t wal_lsn) {
     }
 
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
-        auto status = (*mem_table_file)->Serialize(wal_lsn);
+        status = (*mem_table_file)->Serialize(wal_lsn);
         if (!status.ok()) {
             std::string err_msg = "Insert data serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
@@ -159,8 +156,12 @@ MemTable::ApplyDeletes() {
             std::string segment_dir;
             utils::GetParentPath(table_file.location_, segment_dir);
 
-            // TODO(zhiru): load bloom filter, if present:
-            ids_to_check_map[segment_dir].emplace_back(id);
+            segment::SegmentReader segment_reader(segment_dir);
+            segment::IdBloomFilterPtr id_bloom_filter_ptr;
+            segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+            if (id_bloom_filter_ptr->Check(id)) {
+                ids_to_check_map[segment_dir].emplace_back(id);
+            }
         }
     }
 
@@ -168,6 +169,11 @@ MemTable::ApplyDeletes() {
         segment::SegmentReader segment_reader(kv.first);
         std::vector<segment::doc_id_t> uids;
         status = segment_reader.LoadUids(uids);
+        if (!status.ok()) {
+            break;
+        }
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
             break;
         }
@@ -179,12 +185,17 @@ MemTable::ApplyDeletes() {
         for (size_t i = 0; i < uids.size(); ++i) {
             if (std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]) != ids_to_check.end()) {
                 deleted_docs->AddDeletedDoc(i);
+                id_bloom_filter_ptr->Remove(uids[i]);
             }
         }
 
         segment::Segment tmp_segment;
         segment::SegmentWriter segment_writer(kv.first);
         status = segment_writer.WriteDeletedDocs(deleted_docs);
+        if (!status.ok()) {
+            break;
+        }
+        status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
             break;
         }
@@ -195,6 +206,9 @@ MemTable::ApplyDeletes() {
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
+    doc_ids_to_delete_.clear();
+    
     return Status::OK();
 }
 

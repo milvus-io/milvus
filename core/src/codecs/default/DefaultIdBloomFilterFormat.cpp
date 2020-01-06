@@ -15,10 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//
-// Created by zhiru on 1/6/20.
-//
-
 #include "DefaultIdBloomFilterFormat.h"
 
 #include "utils/Exception.h"
@@ -60,5 +56,23 @@ DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 }
+
+void
+DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
+                                   segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+    std::string dir_path = directory_ptr->GetDirPath();
+    const std::string bloom_filter_file_path =
+        dir_path + "/" + id_bloom_filter_ptr->GetName() + bloom_filter_extension_;
+    auto bloom_filter =
+        new_scaling_bloom(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
+    if (bloom_filter == nullptr) {
+        std::string err_msg =
+            "Failed to read bloom filter from file: " + bloom_filter_file_path + ". " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+    id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
+}
+
 }  // namespace codec
 }  // namespace milvus

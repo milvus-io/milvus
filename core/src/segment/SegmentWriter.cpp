@@ -49,7 +49,12 @@ SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8
 Status
 SegmentWriter::Serialize() {
     // TODO(zhiru)
-    return WriteVectors();
+    auto status = WriteVectors();
+    if (!status.ok()) {
+        return status;
+    }
+    status = WriteBloomFilter();
+    return status;
 }
 
 Status
@@ -67,13 +72,51 @@ SegmentWriter::WriteVectors() {
 }
 
 Status
-SegmentWriter::WriteDeletedDocs(DeletedDocsPtr& deleted_docs) {
+SegmentWriter::WriteBloomFilter() {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        IdBloomFilterPtr id_bloom_filter_ptr;
+        default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, id_bloom_filter_ptr);
+        // TODO(zhiru): ?
+        for (auto& kv : segment_ptr_->vectors_ptr_->vectors) {
+            auto& uids = kv.second->GetUids();
+            for (auto& uid : uids) {
+                id_bloom_filter_ptr->Add(uid);
+            }
+        }
+        default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, id_bloom_filter_ptr);
+
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to write vectors. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
         default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs);
     } catch (Exception& e) {
         std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, id_bloom_filter_ptr);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to write bloom filter. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
         return Status(e.code(), err_msg);
     }

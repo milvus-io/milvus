@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include "DefaultDeletedDocsFormat.h"
-#include "DefaultVectorsFormat.h"
 #include "codecs/Codec.h"
 
 namespace milvus {
@@ -34,9 +32,13 @@ class DefaultCodec : public Codec {
     DeletedDocsFormatPtr
     GetDeletedDocsFormat() override;
 
+    IdBloomFilterFormatPtr
+    GetIdBloomFilterFormat() override;
+
  private:
     VectorsFormatPtr vectors_format_ptr_;
     DeletedDocsFormatPtr deleted_docs_format_ptr_;
+    IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
 };
 
 }  // namespace codec

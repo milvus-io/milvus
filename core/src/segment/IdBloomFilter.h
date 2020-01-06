@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include "dablooms/dablooms.h"
 #include "segment/Types.h"
 
@@ -56,6 +58,7 @@ class IdBloomFilter {
  private:
     scaling_bloom_t* bloom_filter_;
     const std::string name_ = "bloom_filter";
+    std::mutex mutex_;
 };
 
 using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
