@@ -64,7 +64,7 @@ class Vector {
  private:
     std::vector<uint8_t> data_;
     // TODO: since all vector fields should correspond to the same set of uids, save them in Vectors instead?
-    std::vector<int64_t> uids_;
+    std::vector<doc_id_t> uids_;
 };
 
 using VectorPtr = std::shared_ptr<Vector>;

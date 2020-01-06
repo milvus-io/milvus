@@ -17,9 +17,12 @@
 
 #include "db/insert/MemTable.h"
 
+#include <src/segment/SegmentReader.h>
+
 #include <memory>
 #include <string>
 
+#include "db/Utils.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -66,8 +69,8 @@ MemTable::Delete(segment::doc_id_t doc_id) {
         // If present:
         table_file->Delete(doc_id);
     }
-    // TODO(zhiru): Add the id to delete list (should it be on table level?)
-    // so it can be applied to other segments on disk during the next flush
+    // Add the id to delete list so it can be applied to other segments on disk during the next flush
+    doc_ids_to_delete_.insert(doc_id);
 }
 
 void
@@ -82,16 +85,10 @@ MemTable::GetTableFileCount() {
 
 Status
 MemTable::Serialize(uint64_t wal_lsn) {
-    // TODO(zhiru): applying deletes to other segments on disk
-    // Foreach id in delete list:
-    //     Foreach segment in table:
-    //         Load its bloom filter
-    //         If present, add the uid to segment's uid list
-    // Foreach segment
-    //     Load its uids file.
-    //     Scan the uids, if any uid in segment's uid list exists, add its offset to deletedDoc
-    //     Serialize segment's deletedDoc (append directly to previous file or make a new file and merge them after
-    //     written to meta?)
+    auto status = ApplyDeletes();
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
 
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize(wal_lsn);
@@ -133,6 +130,72 @@ MemTable::GetCurrentMem() {
         total_mem += mem_table_file->GetCurrentMem();
     }
     return total_mem;
+}
+
+Status
+MemTable::ApplyDeletes() {
+    // Applying deletes to other segments on disk:
+    // For each id in delete list:
+    //     For each segment in table:
+    //         Load its bloom filter
+    //         If present, add the uid to segment's uid list
+    // For each segment
+    //     Load its uids file.
+    //     Scan the uids, if any uid in segment's uid list exists, add its offset to deletedDoc
+    //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
+
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::BACKUP};
+    meta::TableFilesSchema table_files_schema;
+    auto status = meta_->FilesByType(table_id_, file_types, table_files_schema);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to apply deletes: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+    std::unordered_map<std::string, std::vector<segment::doc_id_t>> ids_to_check_map;
+
+    for (auto& id : doc_ids_to_delete_) {
+        for (auto& table_file : table_files_schema) {
+            std::string segment_dir;
+            utils::GetParentPath(table_file.location_, segment_dir);
+
+            // TODO(zhiru): load bloom filter, if present:
+            ids_to_check_map[segment_dir].emplace_back(id);
+        }
+    }
+
+    for (auto& kv : ids_to_check_map) {
+        segment::SegmentReader segment_reader(kv.first);
+        std::vector<segment::doc_id_t> uids;
+        status = segment_reader.LoadUids(uids);
+        if (!status.ok()) {
+            break;
+        }
+
+        auto& ids_to_check = kv.second;
+
+        segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
+
+        for (size_t i = 0; i < uids.size(); ++i) {
+            if (std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]) != ids_to_check.end()) {
+                deleted_docs->AddDeletedDoc(i);
+            }
+        }
+
+        segment::Segment tmp_segment;
+        segment::SegmentWriter segment_writer(kv.first);
+        status = segment_writer.WriteDeletedDocs(deleted_docs);
+        if (!status.ok()) {
+            break;
+        }
+    }
+
+    if (!status.ok()) {
+        std::string err_msg = "Failed to apply deletes: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+    return Status::OK();
 }
 
 }  // namespace engine

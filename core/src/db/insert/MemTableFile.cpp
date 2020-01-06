@@ -23,6 +23,7 @@
 #include <string>
 
 #include "db/Constants.h"
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "utils/Log.h"
@@ -39,7 +40,9 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
         /*execution_engine_ = EngineFactory::Build(
             table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
             (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);*/
-        segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(table_file_schema_.directory_);
+        std::string directory;
+        utils::GetParentPath(table_file_schema_.location_, directory);
+        segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
 }
 

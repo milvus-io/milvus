@@ -38,7 +38,7 @@ class SegmentWriter {
     WriteVectors();
 
     Status
-    WriteDeletedDocs();
+    WriteDeletedDocs(DeletedDocsPtr& deleted_docs);
 
     Status
     Serialize();

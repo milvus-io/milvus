@@ -34,6 +34,7 @@ SegmentReader::SegmentReader(const std::string& directory) {
 
 Status
 SegmentReader::LoadCache(bool& in_cache) {
+    in_cache = false;
     return Status::OK();
 }
 
@@ -45,6 +46,20 @@ SegmentReader::LoadFromDisk() {
         directory_ptr_->Create();
         default_codec.GetVectorsFormat()->read(directory_ptr_, segment_ptr_->vectors_ptr_);
         default_codec.GetDeletedDocsFormat()->read(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to load segment. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        default_codec.GetVectorsFormat()->readUids(directory_ptr_, uids);
     } catch (Exception& e) {
         std::string err_msg = "Failed to load segment. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;

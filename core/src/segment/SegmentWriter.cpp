@@ -67,11 +67,11 @@ SegmentWriter::WriteVectors() {
 }
 
 Status
-SegmentWriter::WriteDeletedDocs() {
+SegmentWriter::WriteDeletedDocs(DeletedDocsPtr& deleted_docs) {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
-        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
+        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs);
     } catch (Exception& e) {
         std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
