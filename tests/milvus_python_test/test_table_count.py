@@ -610,3 +610,49 @@ class TestTableCountHAM:
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
             assert res == nq
+
+
+class TestTableCountTANIMOTO:
+    """
+    params means different nb, the nb value may trigger merge, or not
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=[
+            1,
+            5000,
+            100000,
+        ],
+    )
+    def add_vectors_nb(self, request):
+        yield request.param
+
+    """
+    generate valid create_index params
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_tanimoto_index_params(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    def test_table_rows_count(self, connect, tanimoto_table, add_vectors_nb):
+        '''
+        target: test table rows_count is correct or not
+        method: create table and add vectors in it,
+            assert the value returned by get_table_row_count method is equal to length of vectors
+        expected: the count is equal to the length of vectors
+        '''
+        nb = add_vectors_nb
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        res = connect.add_vectors(table_name=tanimoto_table, records=vectors)
+        time.sleep(add_time_interval)
+        status, res = connect.get_table_row_count(tanimoto_table)
+        assert res == nb
