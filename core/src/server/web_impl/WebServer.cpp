@@ -15,16 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <oatpp-swagger/AsyncController.hpp>
 #include <oatpp/network/server/Server.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
-#include <oatpp-swagger/AsyncController.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/SwaggerComponent.hpp"
 #include "server/web_impl/controller/WebController.hpp"
 
 #include "server/Config.h"
-#include "utils/Log.h"
 
 namespace milvus {
 namespace server {
@@ -57,7 +56,7 @@ WebServer::StartService() {
 
     {
         AppComponent components = AppComponent(std::stoi(port));
-    SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
+        SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
         /* create ApiControllers and add endpoints to router */
         OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
@@ -111,32 +110,7 @@ WebServer::StartService() {
 Status
 WebServer::StopService() {
     try_stop_.store(true);
-//    if (server_ptr_ != nullptr) {
-//        server_ptr_->stop();
 
-//        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
-
-//        OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_connection_provider_)([this] {
-//        return std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
-//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("localhost", this->port_)
-//        );
-//        auto client_provider = oatpp::network::client::SimpleTCPConnectionProvider::createShared("localhost", 19121);
-//        client_provider->getConnection();
-//        }());
-//        client_provider->getConnection();
-    //        requestExecutor->getConnection();
-    //
-    //        Config& config = Config::GetInstance();
-    //        std::string port;
-    //
-    //        config.GetServerConfigWebPort(port);
-    //
-    //        auto client_provider = std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
-    //            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", std::stoi(port))
-    //        );
-
-    //        client_provider->getConnection();
-//    }
     return Status::OK();
 }
 

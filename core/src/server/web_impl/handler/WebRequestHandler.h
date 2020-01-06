@@ -45,26 +45,24 @@ namespace milvus {
 namespace server {
 namespace web {
 
-#define RETURN_STATUS_DTO(STATUS_CODE, MESSAGE)         \
-    do {                                                \
-        auto status_dto = StatusDto::createShared();    \
-        status_dto->code = (STATUS_CODE);               \
-        status_dto->message = (MESSAGE);                \
-        return status_dto;                              \
-    } while(false);
-
-
-#define ASSIGN_RETURN_STATUS_DTO(STATUS)                                \
-    do {                                                                \
-        int code;                                                       \
-        if (0 != (STATUS).code()) {                                     \
-            code = WebErrorMap((STATUS).code());                        \
-        } else {                                                        \
-            code = 0;                                                   \
-        }                                                               \
-        RETURN_STATUS_DTO(code, (STATUS).message().c_str())             \
+#define RETURN_STATUS_DTO(STATUS_CODE, MESSAGE)      \
+    do {                                             \
+        auto status_dto = StatusDto::createShared(); \
+        status_dto->code = (STATUS_CODE);            \
+        status_dto->message = (MESSAGE);             \
+        return status_dto;                           \
     } while (false);
 
+#define ASSIGN_RETURN_STATUS_DTO(STATUS)                    \
+    do {                                                    \
+        int code;                                           \
+        if (0 != (STATUS).code()) {                         \
+            code = WebErrorMap((STATUS).code());            \
+        } else {                                            \
+            code = 0;                                       \
+        }                                                   \
+        RETURN_STATUS_DTO(code, (STATUS).message().c_str()) \
+    } while (false);
 
 StatusCode
 WebErrorMap(ErrorCode code);

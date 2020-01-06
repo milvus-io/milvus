@@ -450,7 +450,7 @@ WebRequestHandler::GetIndex(const OString& table_name, IndexDto::ObjectWrapper& 
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
 
     if (status.ok()) {
-        index_dto->index_type = IndexMap.at(engine::EngineType(param.index_type_)).c_str();//;
+        index_dto->index_type = IndexMap.at(engine::EngineType(param.index_type_)).c_str();
         index_dto->nlist = param.nlist_;
     }
 

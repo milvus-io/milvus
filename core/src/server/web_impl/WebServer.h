@@ -17,17 +17,16 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
-#include <atomic>
 
 #include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/component/AppComponent.hpp"
 
 #include "utils/Status.h"
-
 
 namespace milvus {
 namespace server {
@@ -50,7 +49,8 @@ class WebServer {
  private:
     WebServer() {
         try_stop_.store(false);
-    };
+    }
+
     ~WebServer() = default;
 
     Status
