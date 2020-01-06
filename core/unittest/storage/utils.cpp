@@ -25,6 +25,8 @@ namespace {
 
 static const char* CONFIG_STR =
     "storage_config:\n"
+    "  primary_path: /tmp/milvus\n"
+    "  secondary_path:\n"
     "  minio_enable: true\n"
     "  minio_address: 127.0.0.1\n"
     "  minio_port: 9000\n"
