@@ -1426,6 +1426,206 @@ class TestIndexJAC:
         assert result._index_type == IndexType.FLAT
 
 
+class TestIndexHAM:
+    tmp, vectors = gen_binary_vectors(nb, dim)
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_index_params()
+    )
+    def get_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in open source")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_hamming_index_params(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    """
+    ******************************************************************
+      The following cases are used to test `create_index` function
+    ******************************************************************
+    """
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test create index interface
+        method: create table and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        index_params = get_hamming_index_params
+        logging.getLogger().info(index_params)
+        status, ids = connect.add_vectors(ham_table, self.vectors)
+        status = connect.create_index(ham_table, index_params)
+        if index_params["index_type"] != IndexType.FLAT and index_params["index_type"] != IndexType.IVFLAT:
+            assert not status.OK()
+        else:
+            assert status.OK()
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_partition(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test create index interface
+        method: create table, create partition, and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        partition_name = gen_unique_str()
+        index_params = get_hamming_index_params
+        logging.getLogger().info(index_params)
+        status = connect.create_partition(ham_table, partition_name, tag)
+        status, ids = connect.add_vectors(ham_table, self.vectors, partition_tag=tag)
+        status = connect.create_index(partition_name, index_params)
+        assert status.OK()
+
+    @pytest.mark.level(2)
+    def test_create_index_without_connect(self, dis_connect, ham_table):
+        '''
+        target: test create index without connection
+        method: create table and add vectors in it, check if added successfully
+        expected: raise exception
+        '''
+        nlist = 16384
+        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+        with pytest.raises(Exception) as e:
+            status = dis_connect.create_index(ham_table, index_param)
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_search_with_query_vectors(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test create index interface, search with more query vectors
+        method: create table and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        index_params = get_hamming_index_params
+        logging.getLogger().info(index_params)
+        status, ids = connect.add_vectors(ham_table, self.vectors)
+        status = connect.create_index(ham_table, index_params)
+        logging.getLogger().info(connect.describe_index(ham_table))
+        query_vecs = [self.vectors[0], self.vectors[1], self.vectors[2]]
+        top_k = 5
+        status, result = connect.search_vectors(ham_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert len(result) == len(query_vecs)
+
+    """
+    ******************************************************************
+      The following cases are used to test `describe_index` function
+    ******************************************************************
+    """
+
+    def test_describe_index(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test describe index interface
+        method: create table and add vectors in it, create index, call describe index
+        expected: return code 0, and index instructure
+        '''
+        index_params = get_hamming_index_params
+        logging.getLogger().info(index_params)
+        # status, ids = connect.add_vectors(jac_table, vectors[:5000])
+        status = connect.create_index(ham_table, index_params)
+        status, result = connect.describe_index(ham_table)
+        logging.getLogger().info(result)
+        assert result._table_name == ham_table
+        assert result._index_type == index_params["index_type"]
+        assert result._nlist == index_params["nlist"]
+
+    def test_describe_index_partition(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test describe index interface
+        method: create table, create partition and add vectors in it, create index, call describe index
+        expected: return code 0, and index instructure
+        '''
+        partition_name = gen_unique_str()
+        index_params = get_hamming_index_params
+        logging.getLogger().info(index_params)
+        status = connect.create_partition(ham_table, partition_name, tag)
+        status, ids = connect.add_vectors(ham_table, vectors, partition_tag=tag)
+        status = connect.create_index(ham_table, index_params)
+        status, result = connect.describe_index(ham_table)
+        logging.getLogger().info(result)
+        assert result._nlist == index_params["nlist"]
+        assert result._table_name == ham_table
+        assert result._index_type == index_params["index_type"]
+        status, result = connect.describe_index(partition_name)
+        logging.getLogger().info(result)
+        assert result._nlist == index_params["nlist"]
+        assert result._table_name == partition_name
+        assert result._index_type == index_params["index_type"]
+
+    """
+    ******************************************************************
+      The following cases are used to test `drop_index` function
+    ******************************************************************
+    """
+
+    def test_drop_index(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test drop index interface
+        method: create table and add vectors in it, create index, call drop index
+        expected: return code 0, and default index param
+        '''
+        index_params = get_hamming_index_params
+        status, mode = connect._cmd("mode")
+        assert status.OK()
+        # status, ids = connect.add_vectors(ip_table, vectors)
+        status = connect.create_index(ham_table, index_params)
+        assert status.OK()
+        status, result = connect.describe_index(ham_table)
+        logging.getLogger().info(result)
+        status = connect.drop_index(ham_table)
+        assert status.OK()
+        status, result = connect.describe_index(ham_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ham_table
+        assert result._index_type == IndexType.FLAT
+
+    def test_drop_index_partition(self, connect, ham_table, get_hamming_index_params):
+        '''
+        target: test drop index interface
+        method: create table, create partition and add vectors in it, create index on table, call drop table index
+        expected: return code 0, and default index param
+        '''
+        partition_name = gen_unique_str()
+        index_params = get_hamming_index_params
+        status = connect.create_partition(ham_table, partition_name, tag)
+        status, ids = connect.add_vectors(ham_table, vectors, partition_tag=tag)
+        status = connect.create_index(ham_table, index_params)
+        assert status.OK()
+        status, result = connect.describe_index(ham_table)
+        logging.getLogger().info(result)
+        status = connect.drop_index(ham_table)
+        assert status.OK()
+        status, result = connect.describe_index(ham_table)
+        logging.getLogger().info(result)
+        assert result._nlist == 16384
+        assert result._table_name == ham_table
+        assert result._index_type == IndexType.FLAT
+
 class TestIndexTableInvalid(object):
     """
     Test create / describe / drop index interfaces with invalid table names

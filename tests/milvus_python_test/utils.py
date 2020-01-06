@@ -35,6 +35,12 @@ def jaccard(x, y):
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
 
 
+def hamming(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return np.bitwise_xor(x, y).sum()
+
+
 def gen_single_vector(dim):
     return [[random.random() for _ in range(dim)]]
 
