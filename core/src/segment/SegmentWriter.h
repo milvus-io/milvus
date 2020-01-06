@@ -35,10 +35,10 @@ class SegmentWriter {
     AddVectors(const std::string& field_name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
 
     Status
-    WriteVectors();
+    WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
-    WriteDeletedDocs(DeletedDocsPtr& deleted_docs);
+    WriteDeletedDocs(const DeletedDocsPtr& deleted_docs);
 
     Status
     Serialize();
@@ -48,6 +48,13 @@ class SegmentWriter {
 
     Status
     GetSegment(SegmentPtr& segment_ptr);
+
+ private:
+    Status
+    WriteVectors();
+
+    Status
+    WriteBloomFilter();
 
  private:
     store::DirectoryPtr directory_ptr_;

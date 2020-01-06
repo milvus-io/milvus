@@ -36,7 +36,7 @@ class Codec {
     virtual DeletedDocsFormatPtr
     GetDeletedDocsFormat() = 0;
 
-    virtual IdBloomFilterFormat
+    virtual IdBloomFilterFormatPtr
     GetIdBloomFilterFormat() = 0;
 
     // TODO(zhiru)
