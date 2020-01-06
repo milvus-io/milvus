@@ -65,16 +65,21 @@ class MockS3Client : public Aws::S3::S3Client {
         auto factory = request.GetResponseStreamFactory();
         Aws::Utils::Stream::ResponseStream resp_stream(factory);
 
-        std::shared_ptr<Aws::IOStream> body = aws_map_[request.GetKey()];
-        Aws::String body_str((Aws::IStreamBufIterator(*body)), Aws::IStreamBufIterator());
+        try {
+            std::shared_ptr<Aws::IOStream> body = aws_map_.at(request.GetKey());
+            Aws::String body_str((Aws::IStreamBufIterator(*body)), Aws::IStreamBufIterator());
 
-        resp_stream.GetUnderlyingStream().write(body_str.c_str(), body_str.length());
-        resp_stream.GetUnderlyingStream().flush();
-        Aws::AmazonWebServiceResult<Aws::Utils::Stream::ResponseStream>
-            awsStream(std::move(resp_stream), Aws::Http::HeaderValueCollection());
+            resp_stream.GetUnderlyingStream().write(body_str.c_str(), body_str.length());
+            resp_stream.GetUnderlyingStream().flush();
+            Aws::AmazonWebServiceResult<Aws::Utils::Stream::ResponseStream>
+                    awsStream(std::move(resp_stream), Aws::Http::HeaderValueCollection());
 
-        Aws::S3::Model::GetObjectResult result(std::move(awsStream));
-        return Aws::S3::Model::GetObjectOutcome(std::move(result));
+            Aws::S3::Model::GetObjectResult result(std::move(awsStream));
+            return Aws::S3::Model::GetObjectOutcome(std::move(result));
+        }
+        catch (...) {
+            return Aws::S3::Model::GetObjectOutcome();
+        }
     }
 
     Aws::S3::Model::ListObjectsOutcome ListObjects(const Aws::S3::Model::ListObjectsRequest& request) const override {

@@ -35,12 +35,16 @@ INITIALIZE_EASYLOGGINGPP
 
 TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string filename = "/tmp/test_file_in";
+    const std::string filename_dummy = "/tmp/test_file_dummy";
     const std::string filename_out = "/tmp/test_file_out";
     const std::string objname = "/tmp/test_obj";
+    const std::string objname_dummy = "/tmp/test_obj_dummy";
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
     if (!storage_inst.StartService().ok()) {
+        // If StartService() error out, use MockS3Client instead.
+        // By default, S3 will retry 10 times, cost 25 seconds.
         storage_inst.client_ptr_ = std::make_shared<MockS3Client>();
     }
 
@@ -61,6 +65,9 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
         std::string str_out;
         fs_out >> str_out;
         ASSERT_TRUE(str_out == ss_in.str());
+
+        ASSERT_FALSE(storage_inst.PutObjectFile(filename_dummy, filename_dummy).ok());
+        ASSERT_FALSE(storage_inst.GetObjectFile(filename_dummy, filename_out).ok());
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -71,6 +78,8 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
         std::string content_out;
         ASSERT_TRUE(storage_inst.GetObjectStr(objname, content_out).ok());
         ASSERT_TRUE(content_out == content);
+
+        ASSERT_FALSE(storage_inst.GetObjectStr(objname_dummy, content_out).ok());
     }
 
     ///////////////////////////////////////////////////////////////////////////
