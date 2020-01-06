@@ -49,13 +49,31 @@ SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8
 Status
 SegmentWriter::Serialize() {
     // TODO(zhiru)
+    return WriteVectors();
+}
+
+Status
+SegmentWriter::WriteVectors() {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
         default_codec.GetVectorsFormat()->write(directory_ptr_, segment_ptr_->vectors_ptr_);
-        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (Exception& e) {
-        std::string err_msg = "Failed to serialize segment. " + std::string(e.what());
+        std::string err_msg = "Failed to write vectors. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteDeletedDocs(DeletedDocsPtr& deleted_docs) {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
         return Status(e.code(), err_msg);
     }
@@ -64,7 +82,7 @@ SegmentWriter::Serialize() {
 
 Status
 SegmentWriter::Cache() {
-    // TODO
+    // TODO(zhiru)
     return Status::OK();
 }
 

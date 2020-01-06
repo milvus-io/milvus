@@ -38,12 +38,17 @@ class SegmentReader {
     LoadFromDisk();
 
     Status
+    LoadUids(std::vector<doc_id_t>& uids);
+
+    Status
     GetSegment(SegmentPtr& segment_ptr);
 
  private:
     store::DirectoryPtr directory_ptr_;
     SegmentPtr segment_ptr_;
 };
+
+using SegmentReaderPtr = std::shared_ptr<SegmentReader>;
 
 }  // namespace segment
 }  // namespace milvus

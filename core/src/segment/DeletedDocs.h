@@ -25,17 +25,18 @@
 namespace milvus {
 namespace segment {
 
-// using DeletedDocList = std::vector<id_type_t>;
+using offset_t = size_t;
 
 class DeletedDocs {
  public:
-    explicit DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids);
+    explicit DeletedDocs(const std::vector<offset_t>& deleted_doc_offsets);
 
     DeletedDocs() = default;
 
-    void AddDeletedDoc(doc_id_t doc_id);
+    void
+    AddDeletedDoc(offset_t offset);
 
-    const std::vector<doc_id_t>&
+    const std::vector<offset_t>&
     GetDeletedDocs() const;
 
     // TODO
@@ -58,7 +59,7 @@ class DeletedDocs {
     operator=(DeletedDocs&&) = delete;
 
  private:
-    std::vector<doc_id_t> deleted_doc_ids_;
+    std::vector<offset_t> deleted_doc_offsets_;
     //    faiss::ConcurrentBitsetPtr bitset_;
     const std::string name_ = "deleted_docs";
 };

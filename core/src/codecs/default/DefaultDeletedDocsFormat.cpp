@@ -48,7 +48,7 @@ void
 DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) {
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs->GetName() + deleted_docs_extension_;
-    FILE* del_file = fopen(del_file_path.c_str(), "wb");
+    FILE* del_file = fopen(del_file_path.c_str(), "ab");  // TODO(zhiru): append mode
     if (del_file == nullptr) {
         std::string err_msg = "Failed to open file: " + del_file_path;
         ENGINE_LOG_ERROR << err_msg;

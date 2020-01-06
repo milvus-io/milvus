@@ -147,7 +147,6 @@ CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
         return status;
     }
 
-    table_file.directory_ = parent_path;
     table_file.location_ = parent_path + "/" + table_file.file_id_;
 
     return Status::OK();
@@ -194,6 +193,12 @@ DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
     utils::GetTableFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
     return Status::OK();
+}
+
+Status
+GetParentPath(const std::string& path, std::string& parent_path) {
+    boost::filesystem::path p(path);
+    parent_path = p.parent_path().filename().string();
 }
 
 bool

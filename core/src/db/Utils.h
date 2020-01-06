@@ -17,12 +17,12 @@
 
 #pragma once
 
+#include <ctime>
+#include <string>
+
 #include "Options.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
-
-#include <ctime>
-#include <string>
 
 namespace milvus {
 namespace engine {
@@ -42,6 +42,9 @@ Status
 GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status
 DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+
+Status
+GetParentPath(const std::string& path, std::string& parent_path);
 
 bool
 IsSameIndex(const TableIndex& index1, const TableIndex& index2);

@@ -129,6 +129,30 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
         }
     }
 }
+void
+DefaultVectorsFormat::readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
+    std::string dir_path = directory_ptr->GetDirPath();
+    if (!boost::filesystem::is_directory(dir_path)) {
+        std::string err_msg = "Directory: " + dir_path + "does not exist";
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+        const auto& path = it.path();
+        if (path.extension().string() == user_id_extension_) {
+            int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+            if (uid_fd == -1) {
+                std::string err_msg = "Failed to open file: " + path.string();
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+            }
+            auto file_size = boost::filesystem::file_size(path);
+            auto count = file_size / sizeof(int64_t);
+            ::read(uid_fd, uids.data(), file_size);
+        }
+    }
+}
 
 }  // namespace codec
 }  // namespace milvus

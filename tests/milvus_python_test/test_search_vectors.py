@@ -1,5 +1,7 @@
 import pdb
 import copy
+import struct
+
 import pytest
 import threading
 import datetime
@@ -89,6 +91,17 @@ class TestSearchBase:
         params=gen_simple_index_params()
     )
     def get_jaccard_index_params(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_hamming_index_params(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
             return request.param
@@ -614,6 +627,56 @@ class TestSearchBase:
         distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
         distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
         status, result = connect.search_vectors(jac_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
+
+    def test_search_distance_hamming_flat_index(self, connect, ham_table):
+        '''
+        target: search ip_table, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 1
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, ham_table, nb=2)
+        index_params = {
+            "index_type": IndexType.FLAT,
+            "nlist": 16384
+        }
+        connect.create_index(ham_table, index_params)
+        logging.getLogger().info(connect.describe_table(ham_table))
+        logging.getLogger().info(connect.describe_index(ham_table))
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, ham_table, nb=1, insert=False)
+        distance_0 = hamming(query_int_vectors[0], int_vectors[0])
+        distance_1 = hamming(query_int_vectors[0], int_vectors[1])
+        status, result = connect.search_vectors(ham_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert abs(struct.unpack('>i', struct.pack('>f', result[0][0].distance)) - min(distance_0, distance_1)) <= epsilon
+
+    def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_table):
+        '''
+        target: search ip_table, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 1
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_table, nb=2)
+        index_params = {
+            "index_type": IndexType.FLAT,
+            "nlist": 16384
+        }
+        connect.create_index(tanimoto_table, index_params)
+        logging.getLogger().info(connect.describe_table(tanimoto_table))
+        logging.getLogger().info(connect.describe_index(tanimoto_table))
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, tanimoto_table, nb=1, insert=False)
+        distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
+        distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
+        status, result = connect.search_vectors(tanimoto_table, top_k, nprobe, query_vecs)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
         assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon

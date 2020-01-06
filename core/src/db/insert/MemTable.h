@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,10 @@ class MemTable {
     GetCurrentMem();
 
  private:
+    Status
+    ApplyDeletes();
+
+ private:
     const std::string table_id_;
 
     MemTableFileList mem_table_file_list_;
@@ -69,6 +74,8 @@ class MemTable {
     DBOptions options_;
 
     std::mutex mutex_;
+
+    std::set<segment::doc_id_t> doc_ids_to_delete_;
 };  // MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;
