@@ -43,7 +43,6 @@ SimpleIDGenerator::NextIDNumbers(size_t n, IDNumbers& ids) {
         NextIDNumbers(MAX_IDS_PER_MICRO, ids);
         return;
     }
-    fiu_do_on("SimpleIDGeneratorNextIDNumbersZero", n = 0);
     if (n <= 0) {
         return;
     }

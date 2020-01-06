@@ -109,6 +109,10 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     ASSERT_FALSE(has_table);
     fiu_disable("MySQLMetaImpl_HasTable_ThrowException");
 
+    FIU_ENABLE_FIU("MySQLMetaImpl_DropTable_CLUSTER_WRITABLE_MODE");
+    stat = impl_->DropTable(table_id);
+    fiu_disable("MySQLMetaImpl_DropTable_CLUSTER_WRITABLE_MODE");
+
     FIU_ENABLE_FIU("MySQLMetaImpl_DropAll_NUllConnection");
     status = impl_->DropAll();
     ASSERT_FALSE(status.ok());
@@ -156,7 +160,14 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     //DropDataByDate
     milvus::engine::meta::DatesT dates;
+    dates.clear();
+    status = impl_->DropDataByDate(table_file.table_id_, dates);
+    ASSERT_TRUE(status.ok());
+
     dates.push_back(milvus::engine::utils::GetDate());
+    status = impl_->DropDataByDate("notexist", dates);
+    ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
+
     FIU_ENABLE_FIU("MySQLMetaImpl_DropDataByDate_NUllConnection");
     status = impl_->DropDataByDate(table_file.table_id_, dates);
     ASSERT_FALSE(status.ok());
@@ -210,6 +221,11 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, new_file_type);
 
+    auto no_table_file = table_file;
+    no_table_file.table_id_ = "notexist";
+    status = impl_->UpdateTableFile(no_table_file);
+    ASSERT_TRUE(status.ok());
+
     FIU_ENABLE_FIU("MySQLMetaImpl_CleanUpShadowFiles_NUllConnection");
     status = impl_->CleanUpShadowFiles();
     ASSERT_FALSE(status.ok());
@@ -233,6 +249,9 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->UpdateTableFiles(files_schema);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_UpdateTableFiles_ThrowException");
+
+    status = impl_->UpdateTableFiles(files_schema);
+    ASSERT_TRUE(status.ok());
 
     dates.clear();
     for (auto i = 2; i < 10; ++i) {
@@ -266,6 +285,15 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_GetTableFiles_ThrowException");
+
+    ids.clear();
+    status = impl_->GetTableFiles(table_file.table_id_, ids, files);
+    ASSERT_TRUE(status.ok());
+
+    status = impl_->DropTable(table_file.table_id_);
+    ASSERT_TRUE(status.ok());
+    status = impl_->UpdateTableFile(table_file);
+    ASSERT_TRUE(status.ok());
 }
 
 TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
@@ -432,41 +460,46 @@ TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
     auto table_id = "meta_test_group";
     milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
-
-    FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateDirectory");
     milvus::engine::DBMetaOptions meta = GetOptions().meta_;
-    //delete directory created by SetUp
-    boost::filesystem::remove_all(meta.path_);
-    milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_);
-    fiu_disable("MySQLMetaImpl_Initialize_FailCreateDirectory");
-
+    {
+        FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateDirectory");
+        //delete directory created by SetUp
+        boost::filesystem::remove_all(meta.path_);
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_));
+        fiu_disable("MySQLMetaImpl_Initialize_FailCreateDirectory");
+    }
     {
         meta.backend_uri_ = "null";
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_));
     }
     {
         meta.backend_uri_ = "notmysql://root:123456@127.0.0.1:3306/test";
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(meta, GetOptions().mode_));
-    }
-    {
-        FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_NullConnection");
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
-        fiu_disable("MySQLMetaImpl_Initialize_NullConnection");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(meta, GetOptions().mode_));
     }
     {
         FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_IsThreadAware");
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
         fiu_disable("MySQLMetaImpl_Initialize_IsThreadAware");
     }
     {
         FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateTableScheme");
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
         fiu_disable("MySQLMetaImpl_Initialize_FailCreateTableScheme");
     }
     {
         FIU_ENABLE_FIU("MySQLMetaImpl_Initialize_FailCreateTableFiles");
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl_1(GetOptions().meta_, GetOptions().mode_));
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
         fiu_disable("MySQLMetaImpl_Initialize_FailCreateTableFiles");
+    }
+    {
+        FIU_ENABLE_FIU("MySQLConnectionPool_create_ThrowException");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
+        fiu_disable("MySQLConnectionPool_create_ThrowException");
+    }
+    {
+        FIU_ENABLE_FIU("MySQLMetaImpl_ValidateMetaSchema_FailValidate");
+        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
+        fiu_disable("MySQLMetaImpl_ValidateMetaSchema_FailValidate");
     }
 }
 
@@ -558,6 +591,21 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_FilesToMerge_ThrowException");
 
+    status = impl_->FilesToMerge("notexist", dated_files);
+    ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
+
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
+    table_file.file_size_ = milvus::engine::ONE_GB + 1;
+    status = impl_->UpdateTableFile(table_file);
+    ASSERT_TRUE(status.ok());
+
+    {
+        //skip large files
+        milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
+        status = impl_->FilesToMerge(table.table_id_, dated_files);
+        ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
+    }
+
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
@@ -595,6 +643,9 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_FilesToSearch_ThrowException");
+
+    status = impl_->FilesToSearch("notexist", ids, dates, dated_files);
+    ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
     std::vector<int> file_types;
     milvus::engine::meta::TableFilesSchema table_files;
@@ -689,6 +740,9 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_UpdateTableIndex_ThrowException");
 
+    status = impl_->UpdateTableIndex("notexist", index);
+    ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
+
     int64_t flag = 65536;
     status = impl_->UpdateTableFlag(table_id, flag);
     ASSERT_TRUE(status.ok());
@@ -730,6 +784,9 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl_DescribeTableIndex_ThrowException");
+
+    status = impl_->DescribeTableIndex("notexist", index_out);
+    ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
     status = impl_->UpdateTableFilesToIndex(table_id);
     ASSERT_TRUE(status.ok());

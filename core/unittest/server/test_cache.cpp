@@ -179,6 +179,9 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
         ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
+
+        //insert aleady existed key
+        cpu_mgr->InsertItem("index_6g", data_obj);
     }
 
     cpu_mgr->PrintInfo();
@@ -220,9 +223,9 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
 
-    fiu_enable("CpuCacheMgr_GpuCacheMgr_Zero_CpucacheThreshold", 1, nullptr, 0);
+    fiu_enable("GpuCacheMgr_GpuCacheMgr_Zero_GpucacheThreshold", 1, nullptr, 0);
     auto* gpu_cache_mgr = new milvus::cache::GpuCacheMgr();
-    fiu_disable("CpuCacheMgr_GpuCacheMgr_Zero_CpucacheThreshold");
+    fiu_disable("GpuCacheMgr_GpuCacheMgr_Zero_GpucacheThreshold");
     delete gpu_cache_mgr;
 }
 #endif

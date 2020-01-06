@@ -81,8 +81,12 @@ TEST_F(MetaTest, FALID_TEST) {
         //failed initialize
         auto options_1 = options;
         options_1.meta_.path_ = options.meta_.path_ + "1";
+        if(boost::filesystem::is_directory(options_1.meta_.path_)){
+            boost::filesystem::remove_all(options_1.meta_.path_);
+        }
+
         FIU_ENABLE_FIU("SqliteMetaImpl_Initialize_FailCreateDirectory");
-        milvus::engine::meta::SqliteMetaImpl impl(options_1.meta_);
+        ASSERT_ANY_THROW(milvus::engine::meta::SqliteMetaImpl impl(options_1.meta_));
         fiu_disable("SqliteMetaImpl_Initialize_FailCreateDirectory");
 
         boost::filesystem::remove_all(options_1.meta_.path_);
@@ -288,6 +292,15 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
     }
     {
+        milvus::engine::meta::TableFileSchema file;
+        file.table_id_ = table_id;
+        file.file_type_  = milvus::engine::meta::TableFileSchema::RAW;
+        status = impl_->CreateTableFile(file);
+        ASSERT_TRUE(status.ok());
+        file.file_size_ = std::numeric_limits<size_t>::max();
+        status = impl_->UpdateTableFile(file);
+        ASSERT_TRUE(status.ok());
+
         milvus::engine::meta::DatePartionedTableFilesSchema schema;
         status = impl_->FilesToMerge("notexist", schema);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
@@ -296,6 +309,11 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->FilesToMerge(table_id, schema);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl_FilesToMerge_ThrowException");
+
+        //skip large files
+        milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
+        status = impl_->FilesToMerge(table.table_id_, dated_files);
+        ASSERT_EQ(dated_files[file.date_].size(), 0);
     }
     {
         milvus::engine::meta::TableFileSchema file;
@@ -354,15 +372,30 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl_Count_ThrowException");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_ThrowException");
+        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_ThrowException");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_FailCommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_FailCommited");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_FailCommited");
+        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_FailCommited");
+
+        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_Failcommited");
+        status = impl_->CleanUpFilesWithTTL(1);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
+        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_Failcommited");
+
+        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_ThrowException");
+        status = impl_->CleanUpFilesWithTTL(1);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
+        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_ThrowException");
+
+        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTableFolder_ThrowException");
+        status = impl_->CleanUpFilesWithTTL(1);
+        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
+        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTableFolder_ThrowException");
     }
 }
 
@@ -669,10 +702,20 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 
-    //Todo(sjh): add file filter
+    sleep(1);
+    std::vector<int> files_to_delete;
+    milvus::engine::meta::TableFilesSchema files_schema;
+    files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    status = impl_->FilesByType(table_id,files_to_delete,files_schema);
+    ASSERT_TRUE(status.ok());
+
+    table_file.table_id_ = table_id;
+    table_file.file_type_= milvus::engine::meta::TableFileSchema::TO_DELETE;
     milvus::engine::OngoingFileChecker filter;
+    table_file.file_id_ = files_schema.front().file_id_;
     filter.MarkOngoingFile(table_file);
     status = impl_->CleanUpFilesWithTTL(1UL, &filter);
+    ASSERT_TRUE(status.ok());
 }
 
 TEST_F(MetaTest, INDEX_TEST) {

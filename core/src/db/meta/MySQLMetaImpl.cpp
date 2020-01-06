@@ -210,6 +210,7 @@ MySQLMetaImpl::ValidateMetaSchema() {
     }
 
     auto validate_func = [&](const MetaSchema& schema) {
+        fiu_return_on("MySQLMetaImpl_ValidateMetaSchema_FailValidate", false);
         mysqlpp::Query query_statement = connectionPtr->query();
         query_statement << "DESC " << schema.name() << ";";
 
@@ -256,7 +257,7 @@ MySQLMetaImpl::Initialize() {
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_META_TRANSACTION_FAILED, msg);
+            throw Exception(DB_META_TRANSACTION_FAILED, msg);
         }
     }
 
@@ -300,9 +301,7 @@ MySQLMetaImpl::Initialize() {
     // step 6: try connect mysql server
     mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-    bool is_null_connection{connectionPtr == nullptr};
-    fiu_do_on("MySQLMetaImpl_Initialize_NullConnection", is_null_connection = true);
-    if (is_null_connection) {
+    if (connectionPtr == nullptr) {
         std::string msg = "Failed to connect MySQL meta server: " + uri;
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_INVALID_META_URI, msg);

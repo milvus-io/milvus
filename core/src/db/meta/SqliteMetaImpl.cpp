@@ -147,7 +147,7 @@ SqliteMetaImpl::Initialize() {
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_INVALID_PATH, msg);
+            throw Exception(DB_INVALID_PATH, msg);
         }
     }
 
@@ -1339,7 +1339,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
     // remove to_delete files
     try {
-        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_ThrowException", throw std::exception());
+        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_ThrowException", throw std::exception());
 
         server::MetricCollector metric;
 
@@ -1401,7 +1401,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             }
             return true;
         });
-        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_FailCommited", commited = false);
+        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_FailCommited", commited = false);
 
         if (!commited) {
             return HandleException("CleanUpFilesWithTTL error: sqlite transaction failed");
@@ -1416,6 +1416,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
     // remove to_delete tables
     try {
+        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_ThrowException", throw std::exception());
         server::MetricCollector metric;
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
@@ -1432,6 +1433,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
             return true;
         });
+        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_Failcommited", commited = false);
 
         if (!commited) {
             return HandleException("CleanUpFilesWithTTL error: sqlite transaction failed");
@@ -1447,6 +1449,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
     // remove deleted table folder
     // don't remove table folder until all its files has been deleted
     try {
+        fiu_do_on("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTableFolder_ThrowException", throw std::exception());
         server::MetricCollector metric;
 
         int64_t remove_tables = 0;
