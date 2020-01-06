@@ -45,7 +45,7 @@ DBWrapper::StartService() {
     }
 
     std::string path;
-    s = config.GetDBConfigPrimaryPath(path);
+    s = config.GetStorageConfigPrimaryPath(path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
@@ -54,7 +54,7 @@ DBWrapper::StartService() {
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
-    s = config.GetDBConfigSecondaryPath(db_slave_path);
+    s = config.GetStorageConfigSecondaryPath(db_slave_path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
