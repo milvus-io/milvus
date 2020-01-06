@@ -19,6 +19,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#771 - Add server build commit info interface
 - \#759 - Put C++ sdk out of milvus/core
 - \#788 - Add web server into server module
+- \#813 - Add push mode for prometheus monitor
 - \#815 - Support MinIO storage
 - \#910 - Change Milvus c++ standard to c++17
 

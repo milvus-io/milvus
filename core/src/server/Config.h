@@ -100,8 +100,10 @@ static const char* CONFIG_METRIC_ENABLE_MONITOR_DEFAULT = "false";
 static const char* CONFIG_METRIC_COLLECTOR = "collector";
 static const char* CONFIG_METRIC_COLLECTOR_DEFAULT = "prometheus";
 static const char* CONFIG_METRIC_PROMETHEUS = "prometheus_config";
+static const char* CONFIG_METRIC_PROMETHEUS_ADDRESS = "address";
+static const char* CONFIG_METRIC_PROMETHEUS_ADDRESS_DEFAULT = "127.0.0.1";
 static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
+static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "9091";
 
 /* engine config */
 static const char* CONFIG_ENGINE = "engine_config";
@@ -216,6 +218,8 @@ class Config {
     Status
     CheckMetricConfigCollector(const std::string& value);
     Status
+    CheckMetricConfigPrometheusAddress(const std::string& value);
+    Status
     CheckMetricConfigPrometheusPort(const std::string& value);
 
     /* cache config */
@@ -306,6 +310,8 @@ class Config {
     Status
     GetMetricConfigCollector(std::string& value);
     Status
+    GetMetricConfigPrometheusAddress(std::string& value);
+    Status
     GetMetricConfigPrometheusPort(std::string& value);
 
     /* cache config */
@@ -389,6 +395,8 @@ class Config {
     SetMetricConfigEnableMonitor(const std::string& value);
     Status
     SetMetricConfigCollector(const std::string& value);
+    Status
+    SetMetricConfigPrometheusAddress(const std::string& value);
     Status
     SetMetricConfigPrometheusPort(const std::string& value);
 

@@ -67,6 +67,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST) {
     instance.ConnectionGaugeIncrement();
     instance.ConnectionGaugeDecrement();
     instance.KeepingAliveCounterIncrement();
+    instance.PushToGateway();
     instance.OctetsSet();
 
     instance.CPUCoreUsagePercentSet();

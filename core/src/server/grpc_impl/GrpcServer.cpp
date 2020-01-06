@@ -55,6 +55,7 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     void
     UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
+        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, 20);
     }
 
     void
