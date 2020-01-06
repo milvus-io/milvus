@@ -69,11 +69,23 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT_INFO(root) {
         info->summary = "Index.html page";
-        info->addResponse<String>(Status::CODE_200, "text/html");
     }
 
     ENDPOINT_ASYNC("GET", "/", root) {
      ENDPOINT_ASYNC_INIT(root);
+        Action
+        act() override {
+            auto response = controller->createResponse(Status::CODE_200, "Welcome to milvus");
+            response->putHeader(Header::CONTENT_TYPE, "text/html");
+            return _return(response);
+        }
+    };
+
+    ENDPOINT_INFO(docs) {
+        info->summary = "API documents";
+    }
+    ENDPOINT_ASYNC("GET", "/docs", docs) {
+        ENDPOINT_ASYNC_INIT(docs);
         Action
         act() override {
             auto response = controller->createResponse(Status::CODE_302, "Welcome to milvus");

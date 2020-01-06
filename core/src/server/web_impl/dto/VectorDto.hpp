@@ -52,7 +52,6 @@ class SearchRequestDto : public OObject {
 class InsertRequestDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(InsertRequestDto, Object)
 
-//    DTO_FIELD(String, table_name);
     DTO_FIELD(String, tag) = VALUE_PARTITION_TAG_DEFAULT;
     DTO_FIELD(List<List<Float32>::ObjectWrapper>::ObjectWrapper, records);
     DTO_FIELD(List<Int64>::ObjectWrapper, ids);
