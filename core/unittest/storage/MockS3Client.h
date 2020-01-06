@@ -42,17 +42,20 @@ class MockS3Client : public Aws::S3::S3Client {
         S3Client(Aws::Auth::AWSCredentials("", ""), clientConfiguration) {
     }
 
-    Aws::S3::Model::CreateBucketOutcome CreateBucket(const Aws::S3::Model::CreateBucketRequest&) const override {
+    Aws::S3::Model::CreateBucketOutcome
+    CreateBucket(const Aws::S3::Model::CreateBucketRequest&) const override {
         Aws::S3::Model::CreateBucketResult result;
         return Aws::S3::Model::CreateBucketOutcome(std::move(result));
     }
 
-    Aws::S3::Model::DeleteBucketOutcome DeleteBucket(const Aws::S3::Model::DeleteBucketRequest&) const override {
+    Aws::S3::Model::DeleteBucketOutcome
+    DeleteBucket(const Aws::S3::Model::DeleteBucketRequest&) const override {
         Aws::NoResult result;
         return Aws::S3::Model::DeleteBucketOutcome(std::move(result));
     }
 
-    Aws::S3::Model::PutObjectOutcome PutObject(const Aws::S3::Model::PutObjectRequest& request) const override {
+    Aws::S3::Model::PutObjectOutcome
+    PutObject(const Aws::S3::Model::PutObjectRequest& request) const override {
         Aws::String key = request.GetKey();
         std::shared_ptr<Aws::IOStream> body = request.GetBody();
         aws_map_[key] = body;
@@ -61,7 +64,8 @@ class MockS3Client : public Aws::S3::S3Client {
         return Aws::S3::Model::PutObjectOutcome(std::move(result));
     }
 
-    Aws::S3::Model::GetObjectOutcome GetObject(const Aws::S3::Model::GetObjectRequest& request) const override {
+    Aws::S3::Model::GetObjectOutcome
+    GetObject(const Aws::S3::Model::GetObjectRequest& request) const override {
         auto factory = request.GetResponseStreamFactory();
         Aws::Utils::Stream::ResponseStream resp_stream(factory);
 
@@ -82,7 +86,9 @@ class MockS3Client : public Aws::S3::S3Client {
         }
     }
 
-    Aws::S3::Model::ListObjectsOutcome ListObjects(const Aws::S3::Model::ListObjectsRequest& request) const override {
+    Aws::S3::Model::ListObjectsOutcome
+    ListObjects(const Aws::S3::Model::ListObjectsRequest& request) const override {
+        /* TODO: add object key list into ListObjectsOutcome */
         Aws::Utils::Xml::XmlDocument xmlDoc = Aws::Utils::Xml::XmlDocument::CreateWithRootNode("");
 
         Aws::AmazonWebServiceResult<Aws::Utils::Xml::XmlDocument>
@@ -91,7 +97,8 @@ class MockS3Client : public Aws::S3::S3Client {
         return Aws::S3::Model::ListObjectsOutcome(std::move(result));
     }
 
-    Aws::S3::Model::DeleteObjectOutcome DeleteObject(const Aws::S3::Model::DeleteObjectRequest& request) const override {
+    Aws::S3::Model::DeleteObjectOutcome
+    DeleteObject(const Aws::S3::Model::DeleteObjectRequest& request) const override {
         Aws::String key = request.GetKey();
         aws_map_.erase(key);
         Aws::S3::Model::DeleteObjectResult result;
