@@ -40,12 +40,12 @@ PrometheusMetrics::Init() {
         }
 
         // Following should be read from config file.
-        std::string push_port, push_ip;
+        std::string push_port, push_address;
         s = config.GetMetricConfigPrometheusPort(push_port);
         if (!s.ok()) {
             return s;
         }
-        s = config.GetMetricConfigPrometheusIp(push_ip);
+        s = config.GetMetricConfigPrometheusAddress(push_address);
         if (!s.ok()) {
             return s;
         }
@@ -56,7 +56,7 @@ PrometheusMetrics::Init() {
         auto labels = prometheus::Gateway::GetInstanceLabel("pushgateway");
 
         // Init pushgateway
-        gateway_ = std::make_shared<prometheus::Gateway>(push_ip, push_port, "milvus_metrics", labels);
+        gateway_ = std::make_shared<prometheus::Gateway>(push_address, push_port, "milvus_metrics", labels);
 
         // Init Exposer
         // exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);

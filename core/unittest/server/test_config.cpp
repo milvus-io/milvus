@@ -218,9 +218,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetMetricConfigCollector(str_val).ok());
     ASSERT_TRUE(str_val == metric_collector);
 
-    std::string metric_prometheus_ip = "127.0.0.1";
-    ASSERT_TRUE(config.GetMetricConfigPrometheusIp(str_val).ok());
-    ASSERT_TRUE(str_val == metric_prometheus_ip);
+    std::string metric_prometheus_address = "127.0.0.1";
+    ASSERT_TRUE(config.GetMetricConfigPrometheusAddress(str_val).ok());
+    ASSERT_TRUE(str_val == metric_prometheus_address);
 
     std::string metric_prometheus_port = "2222";
     ASSERT_TRUE(config.SetMetricConfigPrometheusPort(metric_prometheus_port).ok());
@@ -525,7 +525,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetMetricConfigCollector("zilliz").ok());
 
-    ASSERT_FALSE(config.SetMetricConfigPrometheusIP("127.0.0").ok());
+    ASSERT_FALSE(config.SetMetricConfigPrometheusAddress("127.0.0").ok());
 
     ASSERT_FALSE(config.SetMetricConfigPrometheusPort("0xff").ok());
 
