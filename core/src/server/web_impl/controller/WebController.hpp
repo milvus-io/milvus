@@ -52,7 +52,7 @@ namespace web {
 
 class WebController : public oatpp::web::server::api::ApiController {
  public:
-    WebController(OATPP_COMPONENT(std::shared_ptr<ObjectMapper>, objectMapper))
+    WebController(const std::shared_ptr<ObjectMapper>& objectMapper)
         : oatpp::web::server::api::ApiController(objectMapper) {}
 
 // private:

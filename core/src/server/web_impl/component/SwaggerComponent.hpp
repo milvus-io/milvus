@@ -37,9 +37,6 @@ class SwaggerComponent {
 
  public:
 
-    /**
-     *  General API docs info
-     */
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::swagger::DocumentInfo>, swagger_document_info_)([this] {
 
         oatpp::swagger::DocumentInfo::Builder builder;

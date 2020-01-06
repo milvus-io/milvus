@@ -103,6 +103,7 @@ set(web_server_files
         ${web_controller_files}
         ${web_dto_files}
         ${web_impl_files}
+        )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)

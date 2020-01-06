@@ -47,21 +47,20 @@ WebServer::Stop() {
 
 Status
 WebServer::StartService() {
+    oatpp::base::Environment::init();
+
     Config& config = Config::GetInstance();
     std::string port;
     Status status;
 
     status = config.GetServerConfigWebPort(port);
 
-    //    oatpp::base::Environment::init();
-
     {
-        //    components_ = std::make_shared<AppComponent>(std::stoi(port));
         AppComponent components = AppComponent(std::stoi(port));
-        SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
+    SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
         /* create ApiControllers and add endpoints to router */
-        auto router = components.http_router_.getObject();
+        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
 
         auto doc_endpoints = oatpp::swagger::AsyncController::Endpoints::createShared();
 
@@ -80,43 +79,64 @@ WebServer::StartService() {
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, connection_provider);
 
         /* create server */
-        server_ptr_ = std::make_unique<oatpp::network::server::Server>(connection_provider, connection_handler);
+        auto server = oatpp::network::server::Server(connection_provider, connection_handler);
+
+        std::thread stop_thread([&server, this] {
+            while (!this->try_stop_.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+
+            server.stop();
+            OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
+            client_provider->getConnection();
+        });
 
         // start synchronously
-        server_ptr_->run();
+        server.run();
 
         connection_handler->stop();
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor);
         executor->waitTasksFinished();
         executor->join();
+
+        stop_thread.join();
     }
 
-    //    oatpp::base::Environment::destroy();
+    oatpp::base::Environment::destroy();
 
     return Status::OK();
 }
 
 Status
 WebServer::StopService() {
-    if (server_ptr_ != nullptr) {
-        server_ptr_->stop();
+    try_stop_.store(true);
+//    if (server_ptr_ != nullptr) {
+//        server_ptr_->stop();
 
-        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
-        client_provider->getConnection();
-        //        requestExecutor->getConnection();
-        //
-        //        Config& config = Config::GetInstance();
-        //        std::string port;
-        //
-        //        config.GetServerConfigWebPort(port);
-        //
-        //        auto client_provider = std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
-        //            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", std::stoi(port))
-        //        );
+//        OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
 
-        //        client_provider->getConnection();
-    }
+//        OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_connection_provider_)([this] {
+//        return std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
+//            oatpp::network::client::SimpleTCPConnectionProvider::createShared("localhost", this->port_)
+//        );
+//        auto client_provider = oatpp::network::client::SimpleTCPConnectionProvider::createShared("localhost", 19121);
+//        client_provider->getConnection();
+//        }());
+//        client_provider->getConnection();
+    //        requestExecutor->getConnection();
+    //
+    //        Config& config = Config::GetInstance();
+    //        std::string port;
+    //
+    //        config.GetServerConfigWebPort(port);
+    //
+    //        auto client_provider = std::static_pointer_cast<oatpp::network::ClientConnectionProvider>(
+    //            oatpp::network::client::SimpleTCPConnectionProvider::createShared("127.0.0.1", std::stoi(port))
+    //        );
+
+    //        client_provider->getConnection();
+//    }
     return Status::OK();
 }
 

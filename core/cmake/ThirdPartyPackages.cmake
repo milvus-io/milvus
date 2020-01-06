@@ -1044,7 +1044,10 @@ macro(build_oatpp)
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF
-            -DOATPP_BUILD_TESTS=OFF)
+            -DOATPP_BUILD_TESTS=OFF
+            -DOATPP_DISABLE_LOGD=ON
+            )
+
 
     externalproject_add(oatpp_ep
             URL
@@ -1102,8 +1105,7 @@ macro(build_oatpp_swagger)
             ${MAKE}
             ${MAKE_BUILD_ARGS}
             BUILD_BYPRODUCTS
-            ${OATPP_SWAGGER_STATIC_LIB}
-            )
+            ${OATPP_SWAGGER_STATIC_LIB})
 
     file(MAKE_DIRECTORY "${OATPP_SWAGGER_INCLUDE_DIR}")
     add_library(oatpp-swagger STATIC IMPORTED)

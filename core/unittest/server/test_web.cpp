@@ -148,8 +148,8 @@ class WebHandlerTest : public testing::Test {
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
         boost::filesystem::remove_all("/tmp/milvus_web_handler_test");
-        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_web_handler_test");
-        milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
+        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_web_handler_test");
+        milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
@@ -412,14 +412,14 @@ class TestClient : public oatpp::web::client::ApiClient {
              BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
 
     API_CALL("GET",
-             "/tables/{table_name}/parittions",
+             "/tables/{table_name}/partitions",
              showPartitions,
              PATH(String, table_name, "table_name"),
              QUERY(Int64, offset),
              QUERY(Int64, page_size))
 
     API_CALL("DELETE",
-             "/tables/{table_name}/parittions/{partition_tag}",
+             "/tables/{table_name}/partitions/{partition_tag}",
              dropPartition,
              PATH(String, table_name, "table_name"),
              PATH(String, partition_tag))
@@ -443,8 +443,8 @@ class TestClient : public oatpp::web::client::ApiClient {
 
 class WebControllerTest : public testing::Test {
  protected:
-    void
-    SetUp() override {
+    static void
+    SetUpTestCase() {
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
         res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
@@ -462,8 +462,8 @@ class WebControllerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_web_controller_test");
-        milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
+        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_web_controller_test");
+        milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
@@ -475,16 +475,27 @@ class WebControllerTest : public testing::Test {
 
         milvus::server::web::WebServer::GetInstance().Start();
 
-        // wait for 10 second until server launched
-        sleep(5);
+        sleep(10);
+    }
 
+    static void
+    TearDownTestCase() {
+        milvus::server::web::WebServer::GetInstance().Stop();
+
+        milvus::server::DBWrapper::GetInstance().StopService();
+        milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+        milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+        milvus::scheduler::SchedInst::GetInstance()->Stop();
+        boost::filesystem::remove_all("/tmp/milvus_web_controller_test");
+    }
+
+    void
+    SetUp() override {
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
         object_mapper = objectMapper;
 
         auto requestExecutor = oatpp::web::client::HttpRequestExecutor::createShared(clientConnectionProvider);
-//        client_ptr = std::shared_ptr<TestClient>(dynamic_cast<TestClient*>(TestClient::createShared(requestExecutor,
-//                                                                                                    objectMapper).get()));
         client_ptr = TestClient::createShared(requestExecutor, objectMapper);
 
         conncetion_ptr = client_ptr->getConnection();
@@ -492,10 +503,8 @@ class WebControllerTest : public testing::Test {
 
         auto response = client_ptr->getTable(CONTROLLER_TEST_TABLE_NAME, conncetion_ptr);
         if (OStatus::CODE_200.code == response->getStatusCode()) {
-//            OStatus::CODE_400.code == response->getStatus().code) {
             return;
         }
-//         initialize handler, create table
         auto table_dto = milvus::server::web::TableRequestDto::createShared();
         table_dto->table_name = CONTROLLER_TEST_TABLE_NAME;
         table_dto->dimension = 128;
@@ -506,19 +515,13 @@ class WebControllerTest : public testing::Test {
 
     void
     TearDown() override {
-        milvus::server::web::WebServer::GetInstance().Stop();
-
-        milvus::server::DBWrapper::GetInstance().StopService();
-        milvus::scheduler::JobMgrInst::GetInstance()->Stop();
-        milvus::scheduler::ResMgrInst::GetInstance()->Stop();
-        milvus::scheduler::SchedInst::GetInstance()->Stop();
-        boost::filesystem::remove_all("/tmp/milvus_web_controller_test");
-    }
+        ;
+    };
 
  protected:
-    std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
-    std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle> conncetion_ptr;
-    std::shared_ptr<TestClient> client_ptr;
+   std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
+   std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle> conncetion_ptr;
+   std::shared_ptr<TestClient> client_ptr;
 
  protected:
     void GenTable(const std::string& table_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
@@ -720,8 +723,8 @@ TEST_F(WebControllerTest, PARTITION) {
     response = client_ptr->showPartitions(PARTITION_TEST_TABLE_NAME, 0, 10, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
-    response = client_ptr->showPartitions(OString("ran33253") + RandomName().c_str(), 0, 10, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+//    response = client_ptr->showPartitions(OString("ran6tu") + RandomName().c_str(), 0, 10, conncetion_ptr);
+//    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, SEARCH) {
@@ -740,7 +743,7 @@ TEST_F(WebControllerTest, SEARCH) {
     auto response = client_ptr->insert(OString(SEARCH_TEST_TABLE_NAME.c_str()), insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
-    sleep(10);
+    sleep(6);
 
     //Create partition and insert 200 vectors into it
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
@@ -809,7 +812,7 @@ TEST_F(WebControllerTest, GPUCONFIG) {
 }
 
 TEST_F(WebControllerTest, DEVICESCONFIG) {
-    auto response = client_ptr->getDevices(conncetion_ptr);
+    auto response = WebControllerTest::client_ptr->getDevices(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 

@@ -20,12 +20,14 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <atomic>
 
 #include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/component/AppComponent.hpp"
 
 #include "utils/Status.h"
+
 
 namespace milvus {
 namespace server {
@@ -46,7 +48,9 @@ class WebServer {
     Stop();
 
  private:
-    WebServer() = default;
+    WebServer() {
+        try_stop_.store(false);
+    };
     ~WebServer() = default;
 
     Status
@@ -55,8 +59,8 @@ class WebServer {
     StopService();
 
  private:
-    //    std::shared_ptr<AppComponent> components_;
-    std::unique_ptr<oatpp::network::server::Server> server_ptr_;
+    std::atomic_bool try_stop_;
+
     std::shared_ptr<std::thread> thread_ptr_;
 };
 
