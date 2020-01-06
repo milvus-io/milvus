@@ -33,19 +33,6 @@ class StatusDto: public oatpp::data::mapping::type::Object {
     DTO_FIELD(Int64, code) = 0;
 };
 
-class MessageDto : public OObject {
-    DTO_INIT(MessageDto, Object)
-
-    DTO_FIELD(String, message_cn);
-    DTO_FIELD(String, message_en);
-};
-
-class ErrorMapDto : public OObject {
-    DTO_INIT(ErrorMapDto, Object)
-
-    DTO_FIELD(Fields<MessageDto::ObjectWrapper>::ObjectWrapper, map, "error_map");
-};
-
 #include OATPP_CODEGEN_END(DTO)
 
 } // namespace web

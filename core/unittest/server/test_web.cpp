@@ -158,30 +158,33 @@ class WebHandlerTest : public testing::Test {
 
     void
     SetUp() override {
-        // initialize handler, create table
         handler = std::make_shared<milvus::server::web::WebRequestHandler>();
-
-        auto table_dto = milvus::server::web::TableRequestDto::createShared();
-        table_dto->table_name = TABLE_NAME;
-        table_dto->dimension = TABLE_DIM;
-        table_dto->index_file_size = INDEX_FILE_SIZE;
-        table_dto->metric_type = "L2";
-
-        auto status_dto = handler->CreateTable(table_dto);
     }
 
     void
     TearDown() override {
-        auto status = handler->DropTable(TABLE_NAME);
+        ;
     }
 
     static void
-    TearDownTestCase()  {
+    TearDownTestCase() {
         milvus::server::DBWrapper::GetInstance().StopService();
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
         boost::filesystem::remove_all("/tmp/milvus_web_handler_test");
+    }
+
+ protected:
+    void
+    GenTable(const std::string& table_name, int64_t dim, int64_t index_size, const std::string& metric) {
+        auto table_dto = milvus::server::web::TableRequestDto::createShared();
+        table_dto->table_name = table_name.c_str();
+        table_dto->dimension = dim;
+        table_dto->index_file_size = index_size;
+        table_dto->metric_type = metric.c_str();
+
+        auto status_dto = handler->CreateTable(table_dto);
     }
 
  protected:
@@ -234,7 +237,9 @@ TEST_F(WebHandlerTest, TABLE) {
 
 TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    milvus::server::web::OString table_name(TABLE_NAME);
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+
+    GenTable(table_name->std_str(), 10, 10, "L2");
 
     milvus::server::web::OQueryParams query_params;
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
@@ -244,34 +249,41 @@ TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
 
 TEST_F(WebHandlerTest, GET_TABLE) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    milvus::server::web::OString table_name(TABLE_NAME);
+
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    GenTable(table_name->std_str(), 10, 10, "L2");
+
     milvus::server::web::OQueryParams query_params;
     auto table_dto = milvus::server::web::TableFieldsDto::createShared();
     auto status_dto = handler->GetTable(table_name, query_params, table_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
-    ASSERT_EQ(TABLE_DIM, table_dto->dimension->getValue());
+    ASSERT_EQ(10, table_dto->dimension->getValue());
+    ASSERT_EQ(10, table_dto->index_file_size->getValue());
+    ASSERT_EQ("L2", table_dto->metric_type->std_str());
 }
 
 TEST_F(WebHandlerTest, INSERT_COUNT) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    GenTable(table_name->std_str(), 16, 10, "L2");
+
     auto insert_request_dto = milvus::server::web::InsertRequestDto::createShared();
     insert_request_dto->records = insert_request_dto->records->createShared();
     for (size_t i = 0; i < 1000; i++) {
-        insert_request_dto->records->pushBack(RandomRowRecordDto(TABLE_DIM));
+        insert_request_dto->records->pushBack(RandomRowRecordDto(16));
     }
     insert_request_dto->ids = insert_request_dto->ids->createShared();
 
     auto ids_dto = milvus::server::web::VectorIdsDto::createShared();
 
-    auto status_dto = handler->Insert(TABLE_NAME, insert_request_dto, ids_dto);
+    auto status_dto = handler->Insert(table_name, insert_request_dto, ids_dto);
 
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ(1000, ids_dto->ids->count());
 
     sleep(8);
 
-    milvus::server::web::OString table_name(TABLE_NAME);
     milvus::server::web::OQueryParams query_params;
     query_params.put("fields", "num");
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
@@ -283,7 +295,9 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
 TEST_F(WebHandlerTest, INDEX) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    milvus::server::web::OString table_name(TABLE_NAME);
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    GenTable(table_name->std_str(), 16, 10, "L2");
+
     auto index_request_dto = milvus::server::web::IndexRequestDto::createShared();
     index_request_dto->index_type = "FLAT";
     index_request_dto->nlist = 10;
@@ -313,33 +327,49 @@ TEST_F(WebHandlerTest, INDEX) {
 TEST_F(WebHandlerTest, PARTITION) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    GenTable(table_name->std_str(), 16, 10, "L2");
+
     auto partition_dto = milvus::server::web::PartitionRequestDto::createShared();
     partition_dto->partition_name = "partition_test";
     partition_dto->partition_tag = "test";
 
-    milvus::server::web::OString table_name(TABLE_NAME);
     auto status_dto = handler->CreatePartition(table_name, partition_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
 
     // test partition name equal to table name
-    partition_dto->partition_name = TABLE_NAME;
+    partition_dto->partition_name = table_name;
     partition_dto->partition_tag = "test02";
     status_dto = handler->CreatePartition(table_name, partition_dto);
     ASSERT_NE(0, status_dto->code->getValue());
     ASSERT_EQ(StatusCode::ILLEGAL_TABLE_NAME, status_dto->code->getValue());
 
+    auto partitions_dto = milvus::server::web::PartitionListDto::createShared();
+    status_dto = handler->ShowPartitions(0, 10, table_name, partitions_dto);
+    ASSERT_EQ(1, partitions_dto->partitions->count());
+
     status_dto = handler->DropPartition(table_name, "test");
     ASSERT_EQ(0, status_dto->code->getValue());
 
     // Show all partitions
-    auto partitions_dto = milvus::server::web::PartitionListDto::createShared();
-    status_dto = handler->ShowPartitions(0, 10, TABLE_NAME, partitions_dto);
+    partitions_dto = milvus::server::web::PartitionListDto::createShared();
+    status_dto = handler->ShowPartitions(0, 10, table_name, partitions_dto);
 }
 
 TEST_F(WebHandlerTest, SEARCH) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
 
-    milvus::server::web::OString table_name(TABLE_NAME);
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
+    GenTable(table_name->std_str(), TABLE_DIM, 10, "L2");
+
+    auto insert_request_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_request_dto->records = insert_request_dto->records->createShared();
+    for (size_t i = 0; i < 1000; i++) {
+        insert_request_dto->records->pushBack(RandomRowRecordDto(TABLE_DIM));
+    }
+    insert_request_dto->ids = insert_request_dto->ids->createShared();
+    auto ids_dto = milvus::server::web::VectorIdsDto::createShared();
+    auto status_dto = handler->Insert(table_name, insert_request_dto, ids_dto);
 
     auto search_request_dto = milvus::server::web::SearchRequestDto::createShared();
     search_request_dto->records = RandomRecordsDto(TABLE_DIM, 10);
@@ -348,7 +378,7 @@ TEST_F(WebHandlerTest, SEARCH) {
 
     auto results_dto = milvus::server::web::TopkResultsDto::createShared();
 
-    auto status_dto = handler->Search(table_name, search_request_dto, results_dto);
+    status_dto = handler->Search(table_name, search_request_dto, results_dto);
     ASSERT_EQ(0, status_dto->code->getValue()) << status_dto->message->std_str();
 }
 
@@ -378,27 +408,41 @@ class TestClient : public oatpp::web::client::ApiClient {
 #include OATPP_CODEGEN_BEGIN(ApiClient)
  API_CLIENT_INIT(TestClient)
 
+    API_CALL("GET", "/", root)
+
+    API_CALL("GET", "/docs", docs)
+
     API_CALL("GET", "/state", getState)
 
     API_CALL("GET", "/devices", getDevices)
 
     API_CALL("GET", "/config/advanced", getAdvanced)
 
+    API_CALL("OPTIONS", "/config/advanced", optionsAdvanced)
+
     API_CALL("PUT", "/config/advanced", setAdvanced,
              BODY_DTO(milvus::server::web::AdvancedConfigDto::ObjectWrapper, body))
+
+    API_CALL("OPTIONS", "config/gpu_resources", optionsGpuConfig)
 
     API_CALL("GET", "/config/gpu_resources", getGPUConfig)
 
     API_CALL("PUT", "/config/gpu_resources", setGPUConfig,
              BODY_DTO(milvus::server::web::GPUConfigDto::ObjectWrapper, body))
 
+    API_CALL("OPTIONS", "/tables", optionsTables)
+
     API_CALL("POST", "/tables", createTable, BODY_DTO(milvus::server::web::TableRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables", showTables, QUERY(Int64, offset), QUERY(Int64, page_size))
 
+    API_CALL("OPTIONS", "/tables/{table_name}", optionsTable, PATH(String, table_name, "table_name"))
+
     API_CALL("GET", "/tables/{table_name}", getTable, PATH(String, table_name, "table_name"))
 
     API_CALL("DELETE", "/tables/{table_name}", dropTable, PATH(String, table_name, "table_name"))
+
+    API_CALL("OPTIONS", "/tables/{table_name}/indexes", optionsIndexes, PATH(String, table_name, "table_name"))
 
     API_CALL("POST",
              "/tables/{table_name}/indexes",
@@ -409,6 +453,8 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
 
     API_CALL("DELETE", "/tables/{table_name}/indexes", dropIndex, PATH(String, table_name, "table_name"))
+
+    API_CALL("OPTIONS", "/tables/{table_name}/partitions", optionsPartitions, PATH(String, table_name, "table_name"))
 
     API_CALL("POST",
              "/tables/{table_name}/partitions",
@@ -423,11 +469,19 @@ class TestClient : public oatpp::web::client::ApiClient {
              QUERY(Int64, offset),
              QUERY(Int64, page_size))
 
+    API_CALL("OPTIONS",
+             "/tables/{table_name}/partitions/{partition_tag}",
+             optionsParTag,
+             PATH(String, table_name, "table_name"),
+             PATH(String, partition_tag, "partition_tag"))
+
     API_CALL("DELETE",
              "/tables/{table_name}/partitions/{partition_tag}",
              dropPartition,
              PATH(String, table_name, "table_name"),
              PATH(String, partition_tag))
+
+    API_CALL("OPTIONS", "/tables/{table_name}/vectors", optionsVectors, PATH(String, table_name, "table_name"))
 
     API_CALL("POST",
              "/tables/{table_name}/vectors",
@@ -481,7 +535,7 @@ class WebControllerTest : public testing::Test {
 
         milvus::server::web::WebServer::GetInstance().Start();
 
-        sleep(10);
+        sleep(5);
     }
 
     static void
@@ -496,6 +550,20 @@ class WebControllerTest : public testing::Test {
     }
 
     void
+    GenTable(const OString& table_name, int64_t dim, int64_t index_size, const OString& metric) {
+        auto response = client_ptr->getTable(table_name, conncetion_ptr);
+        if (OStatus::CODE_200.code == response->getStatusCode()) {
+            return;
+        }
+        auto table_dto = milvus::server::web::TableRequestDto::createShared();
+        table_dto->table_name = table_name;
+        table_dto->dimension = dim;
+        table_dto->index_file_size = index_size;
+        table_dto->metric_type = metric;
+        client_ptr->createTable(table_dto, conncetion_ptr);
+    }
+
+    void
     SetUp() override {
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
@@ -505,18 +573,6 @@ class WebControllerTest : public testing::Test {
         client_ptr = TestClient::createShared(requestExecutor, objectMapper);
 
         conncetion_ptr = client_ptr->getConnection();
-        ASSERT_NE(nullptr, conncetion_ptr);
-
-        auto response = client_ptr->getTable(CONTROLLER_TEST_TABLE_NAME, conncetion_ptr);
-        if (OStatus::CODE_200.code == response->getStatusCode()) {
-            return;
-        }
-        auto table_dto = milvus::server::web::TableRequestDto::createShared();
-        table_dto->table_name = CONTROLLER_TEST_TABLE_NAME;
-        table_dto->dimension = 128;
-        table_dto->index_file_size = 100;
-        table_dto->metric_type = 1;
-        client_ptr->createTable(table_dto, conncetion_ptr);
     }
 
     void
@@ -525,9 +581,9 @@ class WebControllerTest : public testing::Test {
     };
 
  protected:
-   std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
-   std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle> conncetion_ptr;
-   std::shared_ptr<TestClient> client_ptr;
+    std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
+    std::shared_ptr<oatpp::web::client::RequestExecutor::ConnectionHandle> conncetion_ptr;
+    std::shared_ptr<TestClient> client_ptr;
 
  protected:
     void GenTable(const std::string& table_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
@@ -542,15 +598,61 @@ class WebControllerTest : public testing::Test {
 };
 
 } // namespace
+TEST_F(WebControllerTest, OPTIONS) {
+    auto response = client_ptr->root(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->docs(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_302.code, response->getStatusCode());
+
+    response = client_ptr->getState(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsAdvanced(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsGpuConfig(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsIndexes("test", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsParTag("test", "tag", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsPartitions("table_name", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsTable("table", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsTables(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsVectors("table", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
 
 TEST_F(WebControllerTest, CREATE_TABLE) {
     auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = "web_test_create_table" + OString(RandomName().c_str());
-    table_dto->dimension = 128;
-    table_dto->index_file_size = 100;
-    table_dto->metric_type = 1;
-
     auto response = client_ptr->createTable(table_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code) << result_dto->message->std_str();
+
+    OString table_name = "web_test_create_table" + OString(RandomName().c_str());
+
+    table_dto->table_name = table_name;
+    response = client_ptr->createTable(table_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code) << result_dto->message->std_str();
+
+    table_dto->dimension = 128;
+    table_dto->index_file_size = 10;
+    table_dto->metric_type = "L2";
+
+    response = client_ptr->createTable(table_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // invalid table name
@@ -560,7 +662,9 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
 }
 
 TEST_F(WebControllerTest, GET_TABLE) {
-    OString table_name = CONTROLLER_TEST_TABLE_NAME;
+    OString table_name = "web_test_create_table" + OString(RandomName().c_str());
+    GenTable(table_name, 10, 10, "L2");
+
     OQueryParams params;
 
     // fields value is 'num', test count table
@@ -602,112 +706,134 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
 }
 
 TEST_F(WebControllerTest, DROP_TABLE) {
-    auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = "table_drop_test" + OString(RandomName().c_str());
-    table_dto->dimension = 128;
-    table_dto->index_file_size = 100;
-    table_dto->metric_type = 1;
-
-    auto response = client_ptr->createTable(table_dto, conncetion_ptr);//controller->CreateTable(table_dto);
+    auto table_name = "table_drop_test" + OString(RandomName().c_str());
+    GenTable(table_name, 128, 100, "L2");
 
     sleep(1);
 
-    response = client_ptr->dropTable(table_dto->table_name, conncetion_ptr);
+    auto response = client_ptr->dropTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, INSERT) {
-    OString INSERT_TABLE_NAME = "test_insert_table_test" + OString(RandomName().c_str());
+    auto table_name = "test_insert_table_test" + OString(RandomName().c_str());
     const int64_t dim = 64;
-
-    auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = INSERT_TABLE_NAME;
-    table_dto->dimension = 64;
-    table_dto->index_file_size = 100;
-    table_dto->metric_type = 1;
-    auto response = client_ptr->createTable(table_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    GenTable(table_name, dim, 100, "L2");
 
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = RandomRecordsDto(dim, 20);
-//    insert_dto->records = insert_dto->records->createShared();
-//    for (size_t i = 0; i < 20; i++) {
-//        insert_dto->records->pushBack(RandomRowRecordDto(dim));
-//    }
 
-    response = client_ptr->insert(INSERT_TABLE_NAME, insert_dto, conncetion_ptr);
+    auto response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
+    ASSERT_EQ(20, result_dto->ids->count());
 
-    response = client_ptr->dropTable(INSERT_TABLE_NAME, conncetion_ptr);
+    response = client_ptr->dropTable(table_name, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, INSERT_IDS) {
+    auto table_name = "test_insert_table_test" + OString(RandomName().c_str());
+    const int64_t dim = 64;
+    GenTable(table_name, dim, 100, "L2");
+
+    auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->ids = insert_dto->ids->createShared();
+    for (size_t i = 0; i < 20; i++) {
+        insert_dto->ids->pushBack(i);
+    }
+
+    insert_dto->records = RandomRecordsDto(dim, 20);
+
+    auto response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
+    ASSERT_EQ(20, result_dto->ids->count());
+
+    response = client_ptr->dropTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, INDEX) {
-    const OString INDEX_TEST_TABLE_NAME = "test_insert_table_test_" + OString(RandomName().c_str());
-    auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = INDEX_TEST_TABLE_NAME;
-    table_dto->dimension = 64;
-    table_dto->index_file_size = 100;
-    table_dto->metric_type = 1;
+    auto table_name = "test_insert_table_test" + OString(RandomName().c_str());
+    GenTable(table_name, 64, 100, "L2");
 
-    auto response = client_ptr->createTable(table_dto);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-
+    // test index with imcomplete param
     auto index_dto = milvus::server::web::IndexRequestDto::createShared();
+    auto response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    // drop index
+    response = client_ptr->dropIndex(table_name, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
+
+    response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    // drop index
+    response = client_ptr->dropIndex(table_name, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    index_dto->index_type = "J46";
+    response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_INDEX_TYPE, result_dto->code);
+
     index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
     index_dto->nlist = 10;
 
-    response = client_ptr->createIndex(INDEX_TEST_TABLE_NAME, index_dto, conncetion_ptr);
+    response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // drop index
-    response = client_ptr->dropIndex(INDEX_TEST_TABLE_NAME, conncetion_ptr);
+    response = client_ptr->dropIndex(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     // invalid index type
     index_dto->index_type = 100;
-    response = client_ptr->createIndex(INDEX_TEST_TABLE_NAME, index_dto, conncetion_ptr);
+    response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
     ASSERT_NE(OStatus::CODE_201.code, response->getStatusCode());
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 
     // insert data and create index
-    response = client_ptr->dropIndex(INDEX_TEST_TABLE_NAME, conncetion_ptr);
+    response = client_ptr->dropIndex(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
     insert_dto->ids = insert_dto->ids->createShared();
-    insert_dto->records = insert_dto->records->createShared();
-    for (size_t i = 0; i < 200; i++) {
-        insert_dto->records->pushBack(RandomRowRecordDto(64));
-    }
-    response = client_ptr->insert(INDEX_TEST_TABLE_NAME, insert_dto, conncetion_ptr);
+    insert_dto->records = RandomRecordsDto(64, 200);
+
+    response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
-    response = client_ptr->createIndex(INDEX_TEST_TABLE_NAME, index_dto, conncetion_ptr);
+    response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // get index
-    response = client_ptr->getIndex(INDEX_TEST_TABLE_NAME, conncetion_ptr);
+    response = client_ptr->getIndex(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, PARTITION) {
-    const OString PARTITION_TEST_TABLE_NAME = "test_partition_" + OString(RandomName().c_str());
-    auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = PARTITION_TEST_TABLE_NAME;
-    table_dto->dimension = 64;
-    table_dto->index_file_size = 100;
-    table_dto->metric_type = 1;
-
-    auto response = client_ptr->createTable(table_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    const OString table_name = "test_controller_partition_" + OString(RandomName().c_str());
+    GenTable(table_name, 64, 100, "L2");
 
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
+    auto response = client_ptr->createPartition(table_name, par_param);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
     par_param->partition_name = "partition01" + OString(RandomName().c_str());
+    response = client_ptr->createPartition(table_name, par_param);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
     par_param->partition_tag = "tag01";
-    response = client_ptr->createPartition(PARTITION_TEST_TABLE_NAME, par_param);
+    response = client_ptr->createPartition(table_name, par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // insert 200 vectors into table with tag = 'tag01'
@@ -721,61 +847,68 @@ TEST_F(WebControllerTest, PARTITION) {
     for (size_t i = 0; i < 200; i++) {
         insert_dto->records->pushBack(RandomRowRecordDto(64));
     }
-    response = client_ptr->insert(PARTITION_TEST_TABLE_NAME, insert_dto, conncetion_ptr);
+    response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // Show all partitins
-
-    response = client_ptr->showPartitions(PARTITION_TEST_TABLE_NAME, 0, 10, conncetion_ptr);
+    response = client_ptr->showPartitions(table_name, 0, 10, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
-//    response = client_ptr->showPartitions(OString("ran6tu") + RandomName().c_str(), 0, 10, conncetion_ptr);
-//    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    response = client_ptr->dropPartition(table_name, "tag01", conncetion_ptr);
 }
 
 TEST_F(WebControllerTest, SEARCH) {
-    const std::string SEARCH_TEST_TABLE_NAME = "test_partition_table_test";
-
-    GenTable(SEARCH_TEST_TABLE_NAME, 64, 100, 1);
+    const OString table_name = "test_partition_table_test" + OString(RandomName().c_str());
+    GenTable(table_name, 64, 100, "L2");
 
     // Insert 200 vectors into table
     OQueryParams query_params;
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = RandomRecordsDto(64, 200);// insert_dto->records->createShared();
-//    for (size_t i = 0; i < 200; i++) {
-//        insert_dto->records->pushBack(RandomRowRecordDto(64));
-//    }
-    auto response = client_ptr->insert(OString(SEARCH_TEST_TABLE_NAME.c_str()), insert_dto, conncetion_ptr);
+
+    auto response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
-    sleep(6);
+    sleep(4);
 
     //Create partition and insert 200 vectors into it
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     par_param->partition_name = "partition" + OString(RandomName().c_str());
     par_param->partition_tag = "tag" + OString(RandomName().c_str());
-    response = client_ptr->createPartition(SEARCH_TEST_TABLE_NAME.c_str(), par_param);
+    response = client_ptr->createPartition(table_name, par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
                         << "Error: " << response->getStatusDescription()->std_str();
 
     insert_dto->tag = par_param->partition_tag;
-    response = client_ptr->insert(SEARCH_TEST_TABLE_NAME.c_str(), insert_dto, conncetion_ptr);
+    response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    sleep(10);
+    sleep(5);
 
     // Test search
     auto search_request_dto = milvus::server::web::SearchRequestDto::createShared();
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
     search_request_dto->nprobe = 1;
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
     search_request_dto->topk = 1;
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
     search_request_dto->records = RandomRecordsDto(64, 10);
-    response = client_ptr->search(SEARCH_TEST_TABLE_NAME.c_str(), search_request_dto, conncetion_ptr);
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     // Test search with tags
     search_request_dto->tags = search_request_dto->tags->createShared();
     search_request_dto->tags->pushBack(par_param->partition_tag);
-    response = client_ptr->search(SEARCH_TEST_TABLE_NAME.c_str(), search_request_dto, conncetion_ptr);
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
@@ -793,9 +926,21 @@ TEST_F(WebControllerTest, ADVANCEDCONFIG) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     auto config_dto = milvus::server::web::AdvancedConfigDto::createShared();
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     config_dto->cpu_cache_capacity = 3;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     config_dto->cache_insert_data = true;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     config_dto->gpu_search_threshold = 1000;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     config_dto->use_blas_threshold = 1000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -806,10 +951,23 @@ TEST_F(WebControllerTest, GPUCONFIG) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     auto gpu_config_dto = milvus::server::web::GPUConfigDto::createShared();
+
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     gpu_config_dto->enable = true;
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     gpu_config_dto->cache_capacity = 2;
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
     gpu_config_dto->build_index_resources->pushBack("GPU0");
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
     gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
     gpu_config_dto->search_resources->pushBack("GPU0");
 

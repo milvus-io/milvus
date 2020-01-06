@@ -31,13 +31,6 @@ class DeviceInfoDto : public OObject {
     DTO_FIELD(Int64, memory);
 };
 
-//class GpuDeviceInfoDto : public OObject {
-//    DTO_INIT(GpuDeviceInfoDto, Object);
-//
-//    DTO_FIELD(String, device_id);
-//    DTO_FIELD(Float32, memory);
-//};
-
 class DevicesDto : public OObject {
     DTO_INIT(DevicesDto, Object);
 

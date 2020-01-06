@@ -50,6 +50,7 @@ static const char* KEY_PARTITION_TAG = "partition_tag";
 ////////////////////////////////////////////////////
 
 static const int64_t VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT = 1024;
+static const char* VALUE_TABLE_METRIC_TYPE_DEFAULT = "L2";
 
 static const char* VALUE_PARTITION_TAG_DEFAULT = "";
 

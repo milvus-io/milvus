@@ -28,17 +28,17 @@ namespace web {
 class AdvancedConfigDto : public OObject {
     DTO_INIT(AdvancedConfigDto, Object);
 
-    DTO_FIELD(Int64, cpu_cache_capacity);
-    DTO_FIELD(Boolean, cache_insert_data);
-    DTO_FIELD(Int64, use_blas_threshold);
-    DTO_FIELD(Int64, gpu_search_threshold);
+    DTO_FIELD(Int64, cpu_cache_capacity) = 4;
+    DTO_FIELD(Boolean, cache_insert_data) = false;
+    DTO_FIELD(Int64, use_blas_threshold) = 1100;
+    DTO_FIELD(Int64, gpu_search_threshold) = 1000;
 };
 
 class GPUConfigDto : public OObject {
     DTO_INIT(GPUConfigDto, Object);
 
-    DTO_FIELD(Boolean, enable) = false;
-    DTO_FIELD(Int64, cache_capacity);
+    DTO_FIELD(Boolean, enable) = true;
+    DTO_FIELD(Int64, cache_capacity) = 1;
     DTO_FIELD(List<String>::ObjectWrapper, search_resources);
     DTO_FIELD(List<String>::ObjectWrapper, build_index_resources);
 };

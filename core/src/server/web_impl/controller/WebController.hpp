@@ -113,31 +113,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-//    ENDPOINT_INFO(GetErrorCodeMap) {
-//        info->summary = "";
-//
-//        info->addResponse<ErrorMapDto::ObjectWrapper>(Status::CODE_200, "application/json");
-//    }
-
-//    ENDPOINT_ASYNC("GET", "/error_code_map", GetErrorCodeMap) {
-//     ENDPOINT_ASYNC_INIT(GetErrorCodeMap);
-//
-//        Action
-//        act() override {
-//            auto map_dto = ErrorMapDto::createShared();
-//
-//
-//            map_dto->map = map_dto->map->createShared();
-//            WebRequestHandler handler = WebRequestHandler();
-//            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-//            auto status_dto = handler.GetErrorMap(map_dto);
-//
-//            auto response = controller->createDtoResponse(Status::CODE_200, map_dto);
-//            CORS_SUPPORT(response)
-//            return _return(response);
-//        }
-//    };
-
     ENDPOINT_INFO(GetDevices) {
         info->summary = "Obtain system devices info";
 

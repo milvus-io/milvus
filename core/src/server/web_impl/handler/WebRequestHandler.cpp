@@ -144,7 +144,6 @@ StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
     Config& config = Config::GetInstance();
 
-    //    advanced_config->cpu_cache_capacity =
     int64_t value;
     auto status = config.GetCacheConfigCpuCacheCapacity(value);
     if (!status.ok()) {
@@ -268,15 +267,15 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     Config& config = Config::GetInstance();
 
     if (nullptr == gpu_config_dto->enable.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'enable\' miss"))
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
     }
     auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
-    if (!status.ok() || !gpu_config_dto->enable->getValue()) {
+    if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
     if (nullptr == gpu_config_dto->cache_capacity.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'cache_capacity\' miss"))
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
     }
     status = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_config_dto->cache_capacity->getValue()));
     if (!status.ok()) {
@@ -284,7 +283,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
 
     if (nullptr == gpu_config_dto->search_resources.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'search_resources\' miss"))
+        gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+        gpu_config_dto->search_resources->pushBack("GPU0");
+        //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'search_resources\' miss")
     }
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
@@ -303,6 +304,10 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
+    if (nullptr == gpu_config_dto->build_index_resources.get()) {
+        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+        gpu_config_dto->build_index_resources->pushBack("GPU0");
+    }
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
         [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
@@ -346,10 +351,9 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
         RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
     }
 
-    auto status =
-        request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(),
-            table_schema->dimension, table_schema->index_file_size,
-                                     static_cast<int64_t>(MetricNameMap.at(table_schema->metric_type->std_str())));
+    auto status = request_handler_.CreateTable(
+        context_ptr_, table_schema->table_name->std_str(), table_schema->dimension, table_schema->index_file_size,
+        static_cast<int64_t>(MetricNameMap.at(table_schema->metric_type->std_str())));
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -363,18 +367,6 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
     std::map<std::string, std::string> table_info;
     status = getTaleInfo(context_ptr_, table_name->std_str(), table_info);
     if (!status.ok()) {
-//        int code;
-//        if (0 != status.code()) {
-//            code = WebErrorMap(status.code());
-//        } else {
-//            code = 0;
-//        }
-//
-//        auto status_dto = StatusDto::createShared();
-//        status_dto->code = code;
-//        status_dto->message = status.message().c_str();
-//        return status_dto;
-//        RETURN_STATUS_DTO(code, status.message().c_str());
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
@@ -567,12 +559,12 @@ StatusDto::ObjectWrapper
 WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
                           TopkResultsDto::ObjectWrapper& results_dto) {
     if (nullptr == search_request->topk.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'topk\' is required in request body"))
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'topk\' is required in request body")
     }
     int64_t topk_t = search_request->topk->getValue();
 
     if (nullptr == search_request->nprobe.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'nprobe\' is required in request body"))
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'nprobe\' is required in request body")
     }
     int64_t nprobe_t = search_request->nprobe->getValue();
 

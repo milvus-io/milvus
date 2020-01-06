@@ -37,8 +37,8 @@ namespace web {
 class IndexRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(IndexRequestDto, Object)
 
-    DTO_FIELD(String, index_type) = VALUE_INDEX_INDEX_TYPE_DEFAULT;
-    DTO_FIELD(Int64, nlist) = VALUE_INDEX_NLIST_DEFAULT;
+    DTO_FIELD(String, index_type) = "FLAT";
+    DTO_FIELD(Int64, nlist) = 16384;
 };
 
 using IndexDto = IndexRequestDto;
