@@ -43,51 +43,57 @@ class MockS3Client : public Aws::S3::S3Client {
     }
 
     Aws::S3::Model::CreateBucketOutcome CreateBucket(const Aws::S3::Model::CreateBucketRequest&) const override {
-        Aws::S3::Model::CreateBucketOutcome outcome;
-        Aws::S3::Model::CreateBucketResult result(outcome.GetResultWithOwnership());
-        return result;
+        Aws::S3::Model::CreateBucketResult result;
+        return Aws::S3::Model::CreateBucketOutcome(std::move(result));
     }
 
     Aws::S3::Model::DeleteBucketOutcome DeleteBucket(const Aws::S3::Model::DeleteBucketRequest&) const override {
         Aws::NoResult result;
-        return result;
+        return Aws::S3::Model::DeleteBucketOutcome(std::move(result));
     }
 
     Aws::S3::Model::PutObjectOutcome PutObject(const Aws::S3::Model::PutObjectRequest& request) const override {
+        Aws::String key = request.GetKey();
         std::shared_ptr<Aws::IOStream> body = request.GetBody();
-        Aws::String tempBodyString((Aws::IStreamBufIterator(*body)), Aws::IStreamBufIterator());
-        bodyString = tempBodyString;
+        aws_map_[key] = body;
 
-        Aws::S3::Model::PutObjectOutcome outcome;
-        Aws::S3::Model::PutObjectResult result(outcome.GetResultWithOwnership());
-        return result;
+        Aws::S3::Model::PutObjectResult result;
+        return Aws::S3::Model::PutObjectOutcome(std::move(result));
     }
 
     Aws::S3::Model::GetObjectOutcome GetObject(const Aws::S3::Model::GetObjectRequest& request) const override {
         auto factory = request.GetResponseStreamFactory();
-        Aws::Utils::Stream::ResponseStream responseStream(factory);
+        Aws::Utils::Stream::ResponseStream resp_stream(factory);
 
-        responseStream.GetUnderlyingStream().write(bodyString.c_str(), bodyString.length());
+        std::shared_ptr<Aws::IOStream> body = aws_map_[request.GetKey()];
+        Aws::String body_str((Aws::IStreamBufIterator(*body)), Aws::IStreamBufIterator());
 
-        responseStream.GetUnderlyingStream().flush();
+        resp_stream.GetUnderlyingStream().write(body_str.c_str(), body_str.length());
+        resp_stream.GetUnderlyingStream().flush();
         Aws::AmazonWebServiceResult<Aws::Utils::Stream::ResponseStream>
-            awsStream(std::move(responseStream), Aws::Http::HeaderValueCollection());
-        Aws::S3::Model::GetObjectResult getObjectResult(std::move(awsStream));
-        return Aws::S3::Model::GetObjectOutcome(std::move(getObjectResult));
+            awsStream(std::move(resp_stream), Aws::Http::HeaderValueCollection());
+
+        Aws::S3::Model::GetObjectResult result(std::move(awsStream));
+        return Aws::S3::Model::GetObjectOutcome(std::move(result));
     }
 
-    Aws::S3::Model::ListObjectsOutcome ListObjects(const Aws::S3::Model::ListObjectsRequest&) const override {
-        Aws::S3::Model::ListObjectsOutcome outcome;
-        Aws::S3::Model::ListObjectsResult result(outcome.GetResultWithOwnership());
+    Aws::S3::Model::ListObjectsOutcome ListObjects(const Aws::S3::Model::ListObjectsRequest& request) const override {
+        Aws::Utils::Xml::XmlDocument xmlDoc = Aws::Utils::Xml::XmlDocument::CreateWithRootNode("");
+
+        Aws::AmazonWebServiceResult<Aws::Utils::Xml::XmlDocument>
+                awsDoc(std::move(xmlDoc), Aws::Http::HeaderValueCollection());
+        Aws::S3::Model::ListObjectsResult result(std::move(awsDoc));
+        return Aws::S3::Model::ListObjectsOutcome(std::move(result));
+    }
+
+    Aws::S3::Model::DeleteObjectOutcome DeleteObject(const Aws::S3::Model::DeleteObjectRequest& request) const override {
+        Aws::String key = request.GetKey();
+        aws_map_.erase(key);
+        Aws::S3::Model::DeleteObjectResult result;
+        Aws::S3::Model::DeleteObjectOutcome(std::move(result));
         return result;
     }
 
-    Aws::S3::Model::DeleteObjectOutcome DeleteObject(const Aws::S3::Model::DeleteObjectRequest&) const override {
-        Aws::S3::Model::DeleteObjectOutcome outcome;
-        Aws::S3::Model::DeleteObjectResult result(outcome.GetResultWithOwnership());
-        return result;
-    }
-
-    mutable Aws::String bodyString;
+    mutable Aws::Map<Aws::String, std::shared_ptr<Aws::IOStream>> aws_map_;
 };
 
