@@ -154,7 +154,6 @@ class WebRequestHandler {
     }
 
  private:
-    //    std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<Context> context_ptr_;
     RequestHandler request_handler_;
 };

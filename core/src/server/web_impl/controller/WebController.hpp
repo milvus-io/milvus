@@ -113,33 +113,30 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT_INFO(GetErrorCodeMap) {
-        info->summary = "";
+//    ENDPOINT_INFO(GetErrorCodeMap) {
+//        info->summary = "";
+//
+//        info->addResponse<ErrorMapDto::ObjectWrapper>(Status::CODE_200, "application/json");
+//    }
 
-        info->addResponse<ErrorMapDto::ObjectWrapper>(Status::CODE_200, "application/json");
-    }
-
-    ENDPOINT_ASYNC("GET", "/error_code_map", GetErrorCodeMap) {
-     ENDPOINT_ASYNC_INIT(GetErrorCodeMap);
-
-        Action
-        act() override {
-            auto map_dto = ErrorMapDto::createShared();
-            map_dto->map = map_dto->map->createShared();
-//            auto info_dto = MessageDto::createShared();
-//            info_dto->message_ = "hello";
-//            info_dto->language = "en/us";
-//            map_dto->map->put("20", info_dto);
-//            auto info2_dto = ErrorInfoDto::createShared();
-//            info2_dto->message = "Error";
-//            info2_dto->language = "zh/ch";
-//            map_dto->map->put("30", info2_dto);
-
-            auto response = controller->createDtoResponse(Status::CODE_200, map_dto);
-            CORS_SUPPORT(response)
-            return _return(response);
-        }
-    };
+//    ENDPOINT_ASYNC("GET", "/error_code_map", GetErrorCodeMap) {
+//     ENDPOINT_ASYNC_INIT(GetErrorCodeMap);
+//
+//        Action
+//        act() override {
+//            auto map_dto = ErrorMapDto::createShared();
+//
+//
+//            map_dto->map = map_dto->map->createShared();
+//            WebRequestHandler handler = WebRequestHandler();
+//            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+//            auto status_dto = handler.GetErrorMap(map_dto);
+//
+//            auto response = controller->createDtoResponse(Status::CODE_200, map_dto);
+//            CORS_SUPPORT(response)
+//            return _return(response);
+//        }
+//    };
 
     ENDPOINT_INFO(GetDevices) {
         info->summary = "Obtain system devices info";
@@ -884,7 +881,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT_INFO(Cmd) {
+    ENDPOINT_INFO(SystemMsg) {
         info->summary = "Command";
 
         info->pathParams.add<String>("cmd_str");
@@ -894,17 +891,25 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ENDPOINT_ASYNC("GET", "/cmd/{cmd_str}", Cmd) {
-     ENDPOINT_ASYNC_INIT(Cmd);
+    ENDPOINT_ASYNC("GET", "/system/{msg}", SystemMsg) {
+     ENDPOINT_ASYNC_INIT(SystemMsg);
 
         Action
         act() override {
-            auto cmd_str = request->getPathVariable("cmd_str");
-            auto cmd_dto = CommandDto::createShared();
-            WebRequestHandler handler = WebRequestHandler();
-            handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-            auto status_dto = handler.Cmd(cmd_str, cmd_dto);
             std::shared_ptr<OutgoingResponse> response;
+            auto cmd_dto = CommandDto::createShared();
+            auto status_dto = StatusDto::createShared();
+
+            auto cmd_str = request->getPathVariable("msg");
+            if (nullptr ==  cmd_str.get()) {
+                status_dto->code = PATH_PARAM_LOSS;
+                status_dto->message = "The path must be form of \'/system/{msg}\'";
+            } else {
+                WebRequestHandler handler = WebRequestHandler();
+                handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+                status_dto = handler.Cmd(cmd_str, cmd_dto);
+            }
+
             if (0 == status_dto->code->getValue()) {
                 response = controller->createDtoResponse(Status::CODE_200, cmd_dto);
             } else {

@@ -71,8 +71,6 @@ using OList = milvus::server::web::OList<T>;
 
 using StatusCode = milvus::server::web::StatusCode;
 
-//using namespace milvus::server::web;
-
 namespace {
 
 OList<OFloat32>::ObjectWrapper
@@ -128,8 +126,8 @@ namespace {
 
 class WebHandlerTest : public testing::Test {
  protected:
-    void
-    SetUp() override {
+    static void
+    SetUpTestCase() {
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
         res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
@@ -156,7 +154,10 @@ class WebHandlerTest : public testing::Test {
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
         milvus::server::DBWrapper::GetInstance().StartService();
+    }
 
+    void
+    SetUp() override {
         // initialize handler, create table
         handler = std::make_shared<milvus::server::web::WebRequestHandler>();
 
@@ -164,13 +165,18 @@ class WebHandlerTest : public testing::Test {
         table_dto->table_name = TABLE_NAME;
         table_dto->dimension = TABLE_DIM;
         table_dto->index_file_size = INDEX_FILE_SIZE;
-        table_dto->metric_type = 1;
+        table_dto->metric_type = "L2";
 
-        auto satus_dto = handler->CreateTable(table_dto);
+        auto status_dto = handler->CreateTable(table_dto);
     }
 
     void
     TearDown() override {
+        auto status = handler->DropTable(TABLE_NAME);
+    }
+
+    static void
+    TearDownTestCase()  {
         milvus::server::DBWrapper::GetInstance().StopService();
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
@@ -187,13 +193,13 @@ class WebHandlerTest : public testing::Test {
 
 TEST_F(WebHandlerTest, TABLE) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    milvus::server::web::OString table_name(TABLE_NAME);
+    auto table_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
 
     auto table_dto = milvus::server::web::TableRequestDto::createShared();
-    table_dto->table_name = "web_table_test";
+    table_dto->table_name = table_name;
     table_dto->dimension = TABLE_DIM + 100000;
     table_dto->index_file_size = INDEX_FILE_SIZE;
-    table_dto->metric_type = 1;
+    table_dto->metric_type = "L2";
 
     // invalid dimension
     auto status_dto = handler->CreateTable(table_dto);
@@ -207,12 +213,12 @@ TEST_F(WebHandlerTest, TABLE) {
 
     // invalid metric type
     table_dto->index_file_size = INDEX_FILE_SIZE;
-    table_dto->metric_type = 100;
+    table_dto->metric_type = "L1";
     status_dto = handler->CreateTable(table_dto);
     ASSERT_EQ(StatusCode::ILLEGAL_METRIC_TYPE, status_dto->code->getValue());
 
     // create table successfully
-    table_dto->metric_type = 1;
+    table_dto->metric_type = "L2";
     status_dto = handler->CreateTable(table_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
 
@@ -229,8 +235,8 @@ TEST_F(WebHandlerTest, TABLE) {
 TEST_F(WebHandlerTest, HAS_TABLE_TEST) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
     milvus::server::web::OString table_name(TABLE_NAME);
+
     milvus::server::web::OQueryParams query_params;
-    query_params.put("fields", "NULL");
     auto tables_dto = milvus::server::web::TableFieldsDto::createShared();
     auto status_dto = handler->GetTable(table_name, query_params, tables_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
@@ -240,9 +246,8 @@ TEST_F(WebHandlerTest, GET_TABLE) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());
     milvus::server::web::OString table_name(TABLE_NAME);
     milvus::server::web::OQueryParams query_params;
-    auto status_dto = milvus::server::web::StatusDto::createShared();
     auto table_dto = milvus::server::web::TableFieldsDto::createShared();
-    auto status_Dto = handler->GetTable(table_name, query_params, table_dto);
+    auto status_dto = handler->GetTable(table_name, query_params, table_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ(TABLE_DIM, table_dto->dimension->getValue());
 }
@@ -436,7 +441,7 @@ class TestClient : public oatpp::web::client::ApiClient {
              PATH(String, table_name, "table_name"),
              BODY_DTO(milvus::server::web::SearchRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET", "/cmd/{cmd_str}", cmd, PATH(String, cmd_str, "cmd_str"))
+    API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"))
 
 #include OATPP_CODEGEN_END(ApiClient)
 };
@@ -462,6 +467,7 @@ class WebControllerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
+        boost::filesystem::remove_all("/tmp/milvus_web_controller_test");
         milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_web_controller_test");
         milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");

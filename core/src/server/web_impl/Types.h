@@ -33,7 +33,7 @@ namespace web {
 using OString = oatpp::data::mapping::type::String;
 using OInt64 = oatpp::data::mapping::type::Int64;
 using OFloat32 = oatpp::data::mapping::type::Float32;
-template <class T>
+template<class T>
 using OList = oatpp::data::mapping::type::List<T>;
 
 using OQueryParams = oatpp::web::protocol::http::QueryParams;
@@ -92,6 +92,11 @@ static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = 
 static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::L2, NAME_METRIC_TYPE_L2},
     {engine::MetricType::IP, NAME_METRIC_TYPE_IP},
+};
+
+static const std::unordered_map<std::string, engine::MetricType> MetricNameMap = {
+    {NAME_METRIC_TYPE_L2, engine::MetricType::L2},
+    {NAME_METRIC_TYPE_IP, engine::MetricType::IP},
 };
 
 }  // namespace web

@@ -34,7 +34,7 @@ class TableRequestDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, table_name, "table_name");
     DTO_FIELD(Int64, dimension, "dimension");
     DTO_FIELD(Int64, index_file_size, "index_file_size") = VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT;
-    DTO_FIELD(Int64, metric_type, "metric_type") = VALUE_TABLE_METRIC_TYPE_DEFAULT;
+    DTO_FIELD(String, metric_type, "metric_type");
 };
 
 class TableFieldsDto : public oatpp::data::mapping::type::Object {

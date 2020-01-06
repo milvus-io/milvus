@@ -104,16 +104,17 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
 
     table_info[KEY_TABLE_TABLE_NAME] = schema.table_name_;
     table_info[KEY_TABLE_DIMENSION] = std::to_string(schema.dimension_);
-    table_info[KEY_TABLE_INDEX_METRIC_TYPE] = MetricMap.at(engine::MetricType(schema.metric_type_));
+    table_info[KEY_TABLE_INDEX_METRIC_TYPE] = std::string(MetricMap.at(engine::MetricType(schema.metric_type_)));
     table_info[KEY_TABLE_INDEX_FILE_SIZE] = std::to_string(schema.index_file_size_);
 
-    table_info[KEY_INDEX_INDEX_TYPE] = IndexMap.at(engine::EngineType(index_param.index_type_));
+    table_info[KEY_INDEX_INDEX_TYPE] = std::string(IndexMap.at(engine::EngineType(index_param.index_type_)));
     table_info[KEY_INDEX_NLIST] = std::to_string(index_param.nlist_);
 
     table_info[KEY_TABLE_COUNT] = std::to_string(count);
 }
 
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
+
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
     auto getgb = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
@@ -341,9 +342,14 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'metric_type\' is missing")
     }
 
+    if (MetricNameMap.find(table_schema->metric_type->std_str()) == MetricNameMap.end()) {
+        RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
+    }
+
     auto status =
-        request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(), table_schema->dimension,
-                                     table_schema->index_file_size, table_schema->metric_type);
+        request_handler_.CreateTable(context_ptr_, table_schema->table_name->std_str(),
+            table_schema->dimension, table_schema->index_file_size,
+                                     static_cast<int64_t>(MetricNameMap.at(table_schema->metric_type->std_str())));
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -357,6 +363,18 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
     std::map<std::string, std::string> table_info;
     status = getTaleInfo(context_ptr_, table_name->std_str(), table_info);
     if (!status.ok()) {
+//        int code;
+//        if (0 != status.code()) {
+//            code = WebErrorMap(status.code());
+//        } else {
+//            code = 0;
+//        }
+//
+//        auto status_dto = StatusDto::createShared();
+//        status_dto->code = code;
+//        status_dto->message = status.message().c_str();
+//        return status_dto;
+//        RETURN_STATUS_DTO(code, status.message().c_str());
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
@@ -400,8 +418,8 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
 
                 auto table_fields_dto = TableFieldsDto::createShared();
                 table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
-                table_fields_dto->dimension = std::stol(table_info[KEY_TABLE_DIMENSION]);
-                table_fields_dto->index_file_size = std::stol(table_info[KEY_TABLE_INDEX_FILE_SIZE]);
+                table_fields_dto->dimension = std::stol(table_info[std::string(KEY_TABLE_DIMENSION)]);
+                table_fields_dto->index_file_size = std::stol(table_info[std::string(KEY_TABLE_INDEX_FILE_SIZE)]);
                 table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
                 table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
                 table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
@@ -431,7 +449,7 @@ WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto:
     }
     std::string index_type = index_param->index_type->std_str();
     if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_INVALID_INDEX_TYPE, "The index type is invalid."))
+        RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
     }
 
     if (nullptr == index_param->nlist.get()) {
