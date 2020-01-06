@@ -29,9 +29,6 @@ namespace storage {
 
 class S3ClientWrapper : public IStorage {
  public:
-    S3ClientWrapper() = default;
-    ~S3ClientWrapper() = default;
-
     static S3ClientWrapper&
     GetInstance() {
         static S3ClientWrapper wrapper;

@@ -22,9 +22,14 @@
 
 #include "easyloggingpp/easylogging++.h"
 #include "server/Config.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
 #include "storage/IStorage.h"
-#include "storage/s3/S3ClientWrapper.h"
+#include "storage/MockS3Client.h"
 #include "storage/utils.h"
+
+#define private public
+#include "storage/s3/S3ClientWrapper.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -34,13 +39,10 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string object_name = "/tmp/test_obj";
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
-    std::string config_path(CONFIG_PATH);
-    config_path += CONFIG_FILE;
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
-
-    auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    ASSERT_TRUE(storage_inst.StartService().ok());
+    auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+    if (!storage_inst.StartService().ok()) {
+        storage_inst.client_ptr_ = std::make_shared<MockS3Client>();
+    }
 
     ///////////////////////////////////////////////////////////////////////////
     /* check PutObjectFile() and GetObjectFile() */
@@ -79,3 +81,46 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     storage_inst.StopService();
 }
 
+TEST_F(StorageTest, S3_RW_TEST) {
+    const std::string index_name = "/tmp/test_index";
+    const std::string content = "abcdefg";
+
+    auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+    if (!storage_inst.StartService().ok()) {
+        storage_inst.client_ptr_ = std::make_shared<MockS3Client>();
+    }
+
+    {
+        milvus::storage::S3IOWriter writer(index_name);
+        size_t len = content.length();
+        writer.write(&len, sizeof(len));
+        writer.write((void*)(content.data()), len);
+    }
+
+    {
+        milvus::storage::S3IOReader reader(index_name);
+        size_t length = reader.length();
+        size_t rp = 0;
+        reader.seekg(rp);
+        std::string content_out;
+        while (rp < length) {
+            size_t len;
+            reader.read(&len, sizeof(len));
+            rp += sizeof(len);
+            reader.seekg(rp);
+
+            auto data = new char[len];
+            reader.read(data, len);
+            rp += len;
+            reader.seekg(rp);
+
+            content_out += std::string(data, len);
+
+            delete[] data;
+        }
+
+        ASSERT_TRUE(content == content_out);
+    }
+
+    storage_inst.StopService();
+}
