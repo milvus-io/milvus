@@ -654,7 +654,7 @@ class TestSearchBase:
         status, result = connect.search_vectors(ham_table, top_k, nprobe, query_vecs)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
-        assert struct.unpack('>i', struct.pack('>f', result[0][0].distance)) == min(distance_0, distance_1)
+        assert result[0][0].distance == min(distance_0, distance_1).astype(float)
 
     def test_search_distance_ip_index_params(self, connect, ip_table, get_index_params):
         '''
