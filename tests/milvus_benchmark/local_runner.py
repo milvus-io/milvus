@@ -48,6 +48,8 @@ class LocalRunner(Runner):
                         milvus = MilvusClient(table_name, ip=self.ip, port=self.port)
                         logger.info(milvus.describe())
                         logger.info(milvus.describe_index())
+                        logger.info(milvus.count())
+                        logger.info(milvus.show_tables())
                         # parse index info
                         index_types = param["index.index_types"]
                         nlists = param["index.nlists"]
@@ -64,7 +66,7 @@ class LocalRunner(Runner):
                                 logger.info("End preloading table")
                                 # Run query test
                                 logger.info("Start warm up query")
-                                res = self.do_query(milvus, table_name, [1], [1], 1, 1)
+                                res = self.do_query(milvus, table_name, [1], [1], 1, 2)
                                 logger.info("End warm up query")
                                 for nprobe in nprobes:
                                     logger.info("index_type: %s, nlist: %s, metric_type: %s, nprobe: %s" % (index_type, nlist, metric_type, nprobe))
@@ -204,12 +206,14 @@ class LocalRunner(Runner):
                         #     p.join()
                         i = i + 1
                         milvus_instance = MilvusClient(table_name, ip=self.ip, port=self.port)
-                        top_ks = random.sample([x for x in range(1, 100)], 4)
-                        nqs = random.sample([x for x in range(1, 200)], 3)
+                        top_ks = random.sample([x for x in range(1, 100)], 1)
+                        nqs = random.sample([x for x in range(1, 200)], 2)
                         nprobe = random.choice([x for x in range(1, 100)])
                         res = self.do_query(milvus_instance, table_name, top_ks, nqs, nprobe, run_count)
                         # milvus_instance = MilvusClient(table_name)
                         status, res = milvus_instance.insert(insert_vectors, ids=[x for x in range(len(insert_vectors))])
                         if not status.OK():
                             logger.error(status.message)
+                        logger.debug(milvus.count())
+                        res = self.do_query(milvus_instance, table_name, top_ks, nqs, nprobe, run_count)
                         # status = milvus_instance.create_index(index_type, 16384)
