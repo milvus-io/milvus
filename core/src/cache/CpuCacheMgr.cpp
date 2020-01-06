@@ -29,28 +29,17 @@ constexpr int64_t unit = 1024 * 1024 * 1024;
 }
 
 CpuCacheMgr::CpuCacheMgr() {
+    // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
-    Status s;
 
     int64_t cpu_cache_cap;
-    s = config.GetCacheConfigCpuCacheCapacity(cpu_cache_cap);
-    if (!s.ok()) {
-        SERVER_LOG_ERROR << s.message();
-    }
+    config.GetCacheConfigCpuCacheCapacity(cpu_cache_cap);
     int64_t cap = cpu_cache_cap * unit;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float cpu_cache_threshold;
-    s = config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
-    if (!s.ok()) {
-        SERVER_LOG_ERROR << s.message();
-    }
-    if (cpu_cache_threshold > 0.0 && cpu_cache_threshold <= 1.0) {
-        cache_->set_freemem_percent(cpu_cache_threshold);
-    } else {
-        SERVER_LOG_ERROR << "Invalid cpu_cache_threshold: " << cpu_cache_threshold << ", by default set to "
-                         << cache_->freemem_percent();
-    }
+    config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
+    cache_->set_freemem_percent(cpu_cache_threshold);
 }
 
 CpuCacheMgr*

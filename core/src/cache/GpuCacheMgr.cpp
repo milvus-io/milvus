@@ -34,28 +34,17 @@ constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
 GpuCacheMgr::GpuCacheMgr() {
+    // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
-    Status s;
 
     int64_t gpu_cache_cap;
-    s = config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
-    if (!s.ok()) {
-        SERVER_LOG_ERROR << s.message();
-    }
+    config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
     int64_t cap = gpu_cache_cap * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float gpu_mem_threshold;
-    s = config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
-    if (!s.ok()) {
-        SERVER_LOG_ERROR << s.message();
-    }
-    if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
-        cache_->set_freemem_percent(gpu_mem_threshold);
-    } else {
-        SERVER_LOG_ERROR << "Invalid gpu_mem_threshold: " << gpu_mem_threshold << ", by default set to "
-                         << cache_->freemem_percent();
-    }
+    config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
+    cache_->set_freemem_percent(gpu_mem_threshold);
 }
 
 GpuCacheMgr*

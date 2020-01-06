@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#715 - Milvus crash when searching and building index simultaneously using SQ8H
 - \#744 - Don't return partition table for show_tables
 - \#770 - Server unittest run failed on low-end server
+- \#805 - IVFTest.gpu_seal_test unittest failed
 - \#831 - Judge branch error in CommonUtil.cpp
 
 ## Feature
@@ -17,6 +18,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#766 - If partition tag is similar, wrong partition is searched
 - \#771 - Add server build commit info interface
 - \#759 - Put C++ sdk out of milvus/core
+- \#815 - Support MinIO storage
+- \#910 - Change Milvus c++ standard to c++17
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
@@ -24,6 +27,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#791 - Remove Arrow
 - \#834 - add cpu mode for built-in Faiss
 - \#848 - Add ready-to-use config files to the Milvus repo for enhanced user experince
+- \#860 - Remove redundant checks in CacheMgr's constructor
+- \#908 - Move "primary_path" and "secondary_path" to storage config
 
 ## Task
 
