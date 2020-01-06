@@ -27,39 +27,48 @@
 namespace milvus {
 namespace server {
 
-ErrorCode
+Status
 PrometheusMetrics::Init() {
     try {
         Config& config = Config::GetInstance();
         Status s = config.GetMetricConfigEnableMonitor(startup_);
         if (!s.ok()) {
-            return s.code();
+            return s;
         }
         if (!startup_) {
-            return SERVER_SUCCESS;
+            return Status::OK();
         }
 
         // Following should be read from config file.
-        std::string bind_address;
-        s = config.GetMetricConfigPrometheusPort(bind_address);
+        std::string push_port, push_address;
+        s = config.GetMetricConfigPrometheusPort(push_port);
         if (!s.ok()) {
-            return s.code();
+            return s;
+        }
+        s = config.GetMetricConfigPrometheusAddress(push_address);
+        if (!s.ok()) {
+            return s;
         }
 
         const std::string uri = std::string("/metrics");
         const std::size_t num_threads = 2;
 
-        // Init Exposer
-        exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);
+        auto labels = prometheus::Gateway::GetInstanceLabel("pushgateway");
 
-        // Exposer Registry
-        exposer_ptr_->RegisterCollectable(registry_);
+        // Init pushgateway
+        gateway_ = std::make_shared<prometheus::Gateway>(push_address, push_port, "milvus_metrics", labels);
+
+        // Init Exposer
+        // exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);
+
+        // Pushgateway Registry
+        gateway_->RegisterCollectable(registry_);
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << "Failed to connect prometheus server: " << std::string(ex.what());
-        return SERVER_UNEXPECTED_ERROR;
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 void

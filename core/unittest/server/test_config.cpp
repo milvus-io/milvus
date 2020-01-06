@@ -218,6 +218,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetMetricConfigCollector(str_val).ok());
     ASSERT_TRUE(str_val == metric_collector);
 
+    std::string metric_prometheus_address = "127.0.0.1";
+    ASSERT_TRUE(config.GetMetricConfigPrometheusAddress(str_val).ok());
+    ASSERT_TRUE(str_val == metric_prometheus_address);
+
     std::string metric_prometheus_port = "2222";
     ASSERT_TRUE(config.SetMetricConfigPrometheusPort(metric_prometheus_port).ok());
     ASSERT_TRUE(config.GetMetricConfigPrometheusPort(str_val).ok());
@@ -298,12 +302,14 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 #endif
 }
 
-std::string gen_get_command(const std::string& parent_node, const std::string& child_node) {
+std::string
+gen_get_command(const std::string& parent_node, const std::string& child_node) {
     std::string cmd = "get_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
     return cmd;
 }
 
-std::string gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
+std::string
+gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
     std::string cmd = "set_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
     return cmd;
 }
@@ -518,6 +524,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
 
     ASSERT_FALSE(config.SetMetricConfigCollector("zilliz").ok());
+
+    ASSERT_FALSE(config.SetMetricConfigPrometheusAddress("127.0.0").ok());
 
     ASSERT_FALSE(config.SetMetricConfigPrometheusPort("0xff").ok());
 
