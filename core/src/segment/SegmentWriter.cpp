@@ -76,16 +76,16 @@ SegmentWriter::WriteBloomFilter() {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
-        IdBloomFilterPtr id_bloom_filter_ptr;
-        default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, id_bloom_filter_ptr);
+        segment_ptr_->id_bloom_filter_ptr_ = nullptr;
+        default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
         // TODO(zhiru): ?
         for (auto& kv : segment_ptr_->vectors_ptr_->vectors) {
             auto& uids = kv.second->GetUids();
             for (auto& uid : uids) {
-                id_bloom_filter_ptr->Add(uid);
+                segment_ptr_->id_bloom_filter_ptr_->Add(uid);
             }
         }
-        default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, id_bloom_filter_ptr);
+        default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
 
     } catch (Exception& e) {
         std::string err_msg = "Failed to write vectors. " + std::string(e.what());
