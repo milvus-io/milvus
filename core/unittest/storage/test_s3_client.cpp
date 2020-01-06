@@ -36,7 +36,7 @@ INITIALIZE_EASYLOGGINGPP
 TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string filename = "/tmp/test_file_in";
     const std::string filename_out = "/tmp/test_file_out";
-    const std::string object_name = "/tmp/test_obj";
+    const std::string objname = "/tmp/test_obj";
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
@@ -66,14 +66,17 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     ///////////////////////////////////////////////////////////////////////////
     /* check PutObjectStr() and GetObjectStr() */
     {
-        ASSERT_TRUE(storage_inst.PutObjectStr(object_name, content).ok());
+        ASSERT_TRUE(storage_inst.PutObjectStr(objname, content).ok());
 
         std::string content_out;
-        ASSERT_TRUE(storage_inst.GetObjectStr(object_name, content_out).ok());
+        ASSERT_TRUE(storage_inst.GetObjectStr(objname, content_out).ok());
         ASSERT_TRUE(content_out == content);
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    ASSERT_TRUE(storage_inst.DeleteObject(filename).ok());
+    ASSERT_TRUE(storage_inst.DeleteObject(objname).ok());
+
     ASSERT_TRUE(storage_inst.DeleteObjects("/tmp").ok());
 
     ASSERT_TRUE(storage_inst.DeleteBucket().ok());
@@ -95,6 +98,7 @@ TEST_F(StorageTest, S3_RW_TEST) {
         size_t len = content.length();
         writer.write(&len, sizeof(len));
         writer.write((void*)(content.data()), len);
+        ASSERT_TRUE(len + sizeof(len) == writer.length());
     }
 
     {
