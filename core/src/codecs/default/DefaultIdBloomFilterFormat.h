@@ -17,43 +17,33 @@
 
 #pragma once
 
-#include "AttrsFormat.h"
-#include "AttrsIndexFormat.h"
-#include "DeletedDocsFormat.h"
-#include "IdBloomFilterFormat.h"
-#include "IdIndexFormat.h"
-#include "VectorsFormat.h"
-#include "VectorsIndexFormat.h"
+#include "segment/IdBloomFilter.h"
+#include "store/Directory.h"
 
 namespace milvus {
 namespace codec {
 
-class Codec {
+class DefaultIdBloomFilterFormat {
  public:
-    virtual VectorsFormatPtr
-    GetVectorsFormat() = 0;
+    DefaultIdBloomFilterFormat() = default;
 
-    virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() = 0;
+    void
+    read(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
-    virtual IdBloomFilterFormat
-    GetIdBloomFilterFormat() = 0;
+    void
+    write(const store::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
-    // TODO(zhiru)
-    /*
-    virtual AttrsFormat
-    GetAttrsFormat() = 0;
+    // No copy and move
+    DefaultIdBloomFilterFormat(const DefaultIdBloomFilterFormat&) = delete;
+    DefaultIdBloomFilterFormat(DefaultIdBloomFilterFormat&&) = delete;
 
-    virtual VectorsIndexFormat
-    GetVectorsIndexFormat() = 0;
+    DefaultIdBloomFilterFormat&
+    operator=(const DefaultIdBloomFilterFormat&) = delete;
+    DefaultIdBloomFilterFormat&
+    operator=(DefaultIdBloomFilterFormat&&) = delete;
 
-    virtual AttrsIndexFormat
-    GetAttrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    GetIdIndexFormat() = 0;
-
-    */
+ private:
+    const std::string bloom_filter_extension_ = "bin";
 };
 
 }  // namespace codec

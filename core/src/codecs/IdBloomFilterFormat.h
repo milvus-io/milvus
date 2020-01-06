@@ -25,10 +25,10 @@ namespace codec {
 class IdBloomFilterFormat {
  public:
     virtual segment::IdBloomFilter
-    read() = 0;
+    read(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
 
     virtual void
-    write(segment::IdBloomFilter id_bloom_filter) = 0;
+    write(const store::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
 };
 
 }  // namespace codec
