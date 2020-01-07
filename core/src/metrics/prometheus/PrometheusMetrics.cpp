@@ -31,27 +31,18 @@ Status
 PrometheusMetrics::Init() {
     try {
         Config& config = Config::GetInstance();
-        Status s = config.GetMetricConfigEnableMonitor(startup_);
-        if (!s.ok()) {
-            return s;
-        }
+        CONFIG_CHECK(config.GetMetricConfigEnableMonitor(startup_));
         if (!startup_) {
             return Status::OK();
         }
 
         // Following should be read from config file.
         std::string push_port, push_address;
-        s = config.GetMetricConfigPrometheusPort(push_port);
-        if (!s.ok()) {
-            return s;
-        }
-        s = config.GetMetricConfigPrometheusAddress(push_address);
-        if (!s.ok()) {
-            return s;
-        }
+        CONFIG_CHECK(config.GetMetricConfigPort(push_port));
+        CONFIG_CHECK(config.GetMetricConfigAddress(push_address));
 
         const std::string uri = std::string("/metrics");
-        const std::size_t num_threads = 2;
+        // const std::size_t num_threads = 2;
 
         auto labels = prometheus::Gateway::GetInstanceLabel("pushgateway");
 
