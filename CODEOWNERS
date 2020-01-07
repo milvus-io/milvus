@@ -1,0 +1,10 @@
+# Each line is a component followed by one or more owners. 
+
+* @JinHai-CN
+/core   @JinHai-CN @XuPeng-SH
+/ci     @ZhifengZhang-CN
+/docker @ZhifengZhang-CN
+/docs   @jielinxu @yamasite
+/sdk    @fishpenguin
+/shards @XuPeng-SH
+/tests  @del-zhenwu
