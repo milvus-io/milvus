@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "utils/Status.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -76,6 +76,9 @@ class ExecutionEngine {
 
     virtual Status
     Load(bool to_cache = true) = 0;
+
+    virtual Status
+    Load(bool to_cache, bool on) = 0;
 
     virtual Status
     CopyToGpu(uint64_t device_id, bool hybrid) = 0;

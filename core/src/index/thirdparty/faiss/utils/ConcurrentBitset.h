@@ -25,7 +25,7 @@ namespace faiss {
 
 class ConcurrentBitset {
  public:
-    using id_type_t = int64_t;
+    using id_type_t = int32_t;
 
     explicit ConcurrentBitset(id_type_t size);
 

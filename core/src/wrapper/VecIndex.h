@@ -27,6 +27,7 @@
 #include "knowhere/index/vector_index/Quantizer.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
+#include <faiss/utils/ConcurrentBitset.h>
 
 namespace milvus {
 namespace engine {
@@ -151,6 +152,25 @@ class VecIndex : public cache::DataObj {
         return std::make_pair(nullptr, nullptr);
     }
     ////////////////
+
+    virtual Status
+    SearchById(const int64_t& nq, const float* xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t* ids, const Config& cfg = Config()){
+        ENGINE_LOG_ERROR << "SearchById not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    SearchById(const int64_t& nq, const uint8_t * xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t* ids, const Config& cfg = Config()){
+        ENGINE_LOG_ERROR << "SearchById with uint8_t not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+        ENGINE_LOG_ERROR << "SetBlacklist not support";
+        return Status::OK();
+    }
+
  private:
     int64_t size_ = 0;
 };

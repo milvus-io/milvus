@@ -17,12 +17,15 @@
 
 #include "db/engine/ExecutionEngineImpl.h"
 
+#include <faiss/utils/ConcurrentBitset.h>
+
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
@@ -125,11 +128,18 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     if (ec != KNOWHERE_SUCCESS) {
         throw Exception(DB_ERROR, "Build index error");
     }
+
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    segment_reader_ptr_ = std::make_shared<segment::SegmentReader>(segment_dir);
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
                                          MetricType metric_type, int32_t nlist)
     : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    segment_reader_ptr_ = std::make_shared<segment::SegmentReader>(segment_dir);
 }
 
 VecIndexPtr
@@ -355,10 +365,7 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    // TODO(zhiru): I WANT TO GET RID OF THIS BUT IT SEEMS IMPOSSIBLE TO DO RIGHT NOW
-    
-
-    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         try {
@@ -380,6 +387,86 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
     if (!already_in_cache && to_cache) {
         Cache();
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::Load(bool to_cache, bool on) {
+    // TODO(zhiru): ???
+
+    if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
+        index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
+                                                        : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+        bool in_cache;
+        auto status = segment_reader_ptr_->LoadCache(in_cache);
+        if (!in_cache) {
+            status = segment_reader_ptr_->Load();
+            if (!status.ok()) {
+                std::string msg = "Failed to load segment from " + location_;
+                ENGINE_LOG_ERROR << msg;
+                return Status(DB_ERROR, msg);
+            }
+        }
+        segment::SegmentPtr segment_ptr;
+        segment_reader_ptr_->GetSegment(segment_ptr);
+        auto& vectors_map = segment_ptr->vectors_ptr_->vectors;
+        auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
+
+        // TODO(zhiru): Load all vector fields to a single VecIndex
+        for (auto& kv : vectors_map) {
+            auto vectors = kv.second->GetData();
+
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                std::make_shared<faiss::ConcurrentBitset>(kv.second->GetCount());
+            for (auto& offset : deleted_docs) {
+                if (!concurrent_bitset_ptr->test(offset)) {
+                    concurrent_bitset_ptr->set(offset);
+                }
+            }
+            if (index_type_ == EngineType::FAISS_IDMAP) {
+                std::vector<float> float_vectors;
+                float_vectors.resize(kv.second->GetCount());
+                memcpy(float_vectors.data(), vectors.data(), vectors.size());
+                status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(kv.second->GetCount(),
+                                                                                  float_vectors.data(), Config());
+                status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+            } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
+                status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(kv.second->GetCount(),
+                                                                                     vectors.data(), Config());
+                status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+            }
+            if (!status.ok()) {
+                return status;
+            }
+        }
+        if (!in_cache && to_cache) {
+            Cache();
+        }
+    } else {
+        std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+        bool already_in_cache = (index_ != nullptr);
+        if (!already_in_cache) {
+            try {
+                double physical_size = PhysicalSize();
+                server::CollectExecutionEngineMetrics metrics(physical_size);
+                index_ = read_index(location_);
+                if (index_ == nullptr) {
+                    std::string msg = "Failed to load index from " + location_;
+                    ENGINE_LOG_ERROR << msg;
+                    return Status(DB_ERROR, msg);
+                } else {
+                    ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+                }
+            } catch (std::exception& e) {
+                ENGINE_LOG_ERROR << e.what();
+                return Status(DB_ERROR, e.what());
+            }
+        }
+
+        if (!already_in_cache && to_cache) {
+            Cache();
+        }
     }
     return Status::OK();
 }
@@ -522,6 +609,7 @@ ExecutionEngineImpl::CopyToCpu() {
 
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {
+    // TODO(zhiru): merge raw files, applying deletes, contruct bloom filter
     if (location == location_) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }

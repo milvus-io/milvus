@@ -84,7 +84,7 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
 
 void
 IDMAP::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
-    index_->search(n, (float*)data, k, distances, labels);
+    index_->search(n, (float*)data, k, distances, labels, bitset_);
 }
 
 void
@@ -189,6 +189,34 @@ IDMAP::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 void
 IDMAP::Seal() {
     // do nothing
+}
+
+DatasetPtr
+IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    GETTENSOR(dataset)
+
+    auto elems = rows * config->k;
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
+
+    // todo: enable search by id (zhiru)
+    auto whitelist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, whitelist);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
+    return ret_ds;
+}
+
+void
+IDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+    bitset_ = std::move(list);
 }
 
 }  // namespace knowhere
