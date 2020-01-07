@@ -2,8 +2,8 @@ import json
 from pprint import pprint
 import jenkins
 
-JENKINS_URL = "http://192.168.1.231:8080"
-server = jenkins.Jenkins(JENKINS_URL, username='zhenxiang.li', password='Fantast1c')
+JENKINS_URL = "****"
+server = jenkins.Jenkins(JENKINS_URL, username='****', password='****')
 user = server.get_whoami()
 version = server.get_version()
 print('Hello %s from Jenkins %s' % (user['fullName'], version))
