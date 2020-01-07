@@ -43,6 +43,12 @@ class BinVecImpl : public VecIndexImpl {
     VecIndexPtr
     CopyToGpu(const int64_t& device_id, const Config& cfg) override;
 
+    Status
+    SetBlacklist(faiss::ConcurrentBitsetPtr list) override;
+
+    Status
+    SearchById(const int64_t& nq, const uint8_t* xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t* ids,
+               const Config& cfg) override;
     VecIndexPtr
     CopyToCpu(const Config& cfg) override;
 };
@@ -65,6 +71,9 @@ class BinBFIndex : public BinVecImpl {
 
     const int64_t*
     GetRawIds();
+
+    Status
+    AddWithoutIds(const int64_t& nb, const uint8_t* xb, const Config& cfg);
 };
 
 }  // namespace engine

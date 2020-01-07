@@ -22,6 +22,8 @@
 #include <utility>
 #include <vector>
 
+#include <faiss/utils/ConcurrentBitset.h>
+
 #include "FaissBaseBinaryIndex.h"
 #include "VectorIndex.h"
 #include "faiss/IndexIVF.h"
@@ -60,6 +62,12 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
     int64_t
     Dimension() override;
 
+    DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config);
+
+    void
+    SetBlacklist(faiss::ConcurrentBitsetPtr list);
+
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config);
@@ -69,6 +77,9 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
 
  protected:
     std::mutex mutex_;
+
+ private:
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using BinaryIVFIndexPtr = std::shared_ptr<BinaryIVF>;

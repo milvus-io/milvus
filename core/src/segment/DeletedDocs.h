@@ -25,7 +25,7 @@
 namespace milvus {
 namespace segment {
 
-using offset_t = size_t;
+using offset_t = int32_t;
 
 class DeletedDocs {
  public:

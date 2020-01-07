@@ -39,7 +39,7 @@ SegmentReader::LoadCache(bool& in_cache) {
 }
 
 Status
-SegmentReader::LoadFromDisk() {
+SegmentReader::Load() {
     // TODO(zhiru)
     codec::DefaultCodec default_codec;
     try {

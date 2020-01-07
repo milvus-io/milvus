@@ -61,6 +61,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(bool to_cache) override;
 
     Status
+    Load(bool to_cache, bool on) override ;
+
+    Status
     CopyToGpu(uint64_t device_id, bool hybrid = false) override;
 
     Status
@@ -133,6 +136,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     int64_t nlist_ = 0;
     int64_t gpu_num_ = 0;
+
+    // TODO(zhiru)
+    segment::SegmentReaderPtr segment_reader_ptr_;
 };
 
 }  // namespace engine

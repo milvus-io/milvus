@@ -67,7 +67,7 @@ void
 BinaryIDMAP::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
                          const Config& cfg) {
     int32_t* pdistances = (int32_t*)distances;
-    index_->search(n, (uint8_t*)data, k, pdistances, labels);
+    index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
 }
 
 void
@@ -130,6 +130,50 @@ BinaryIDMAP::GetRawIds() {
 void
 BinaryIDMAP::Seal() {
     // do nothing
+}
+
+void
+BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    GETTENSOR(dataset)
+
+    std::vector<int64_t> new_ids(rows);
+    for (int i = 0; i < rows; ++i) {
+        new_ids[i] = i;
+    }
+
+    index_->add_with_ids(rows, (uint8_t*)p_data, new_ids.data());
+}
+
+DatasetPtr
+BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    GETBINARYTENSOR(dataset)
+
+    auto elems = rows * config->k;
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
+
+    int32_t* pdistances = (int32_t*)p_dist;
+    index_->searchById(rows, (uint8_t*)p_data, config->k, pdistances, p_id, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
+    return ret_ds;
+}
+
+void
+BinaryIDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+    bitset_ = std::move(list);
 }
 
 }  // namespace knowhere

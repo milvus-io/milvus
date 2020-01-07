@@ -87,7 +87,6 @@ struct TableFileSchema {
     uint16_t dimension_ = 0;
     // TODO(zhiru)
     std::string location_;
-    std::string directory_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
     int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
@@ -95,7 +94,7 @@ struct TableFileSchema {
     int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
     uint64_t flush_lsn_ = 0;
-};                                               // TableFileSchema
+};  // TableFileSchema
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;

@@ -35,7 +35,7 @@ class SegmentReader {
     LoadCache(bool& in_cache);
 
     Status
-    LoadFromDisk();
+    Load();
 
     Status
     LoadUids(std::vector<doc_id_t>& uids);

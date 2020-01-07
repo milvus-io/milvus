@@ -69,6 +69,13 @@ class VecIndexImpl : public VecIndex {
     Status
     Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg) override;
 
+    Status
+    SearchById(const int64_t& nq, const float* xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t* ids,
+               const Config& cfg) override;
+
+    Status
+    SetBlacklist(faiss::ConcurrentBitsetPtr list) override;
+
  protected:
     int64_t dim = 0;
 
@@ -95,6 +102,9 @@ class BFIndex : public VecIndexImpl {
 
     const int64_t*
     GetRawIds();
+
+    Status
+    AddWithoutIds(const int64_t& nb, const float* xb, const Config& cfg);
 };
 
 class ToIndexData : public cache::DataObj {
