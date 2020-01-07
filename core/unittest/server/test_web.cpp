@@ -163,7 +163,6 @@ class WebHandlerTest : public testing::Test {
 
     void
     TearDown() override {
-        ;
     }
 
     static void
@@ -577,7 +576,6 @@ class WebControllerTest : public testing::Test {
 
     void
     TearDown() override {
-        ;
     };
 
  protected:
@@ -947,7 +945,6 @@ TEST_F(WebControllerTest, ADVANCEDCONFIG) {
 }
 
 TEST_F(WebControllerTest, GPUCONFIG) {
-
 #ifndef MILVUS_GPU_VERSION
     auto response = client_ptr->getGPUConfig(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
