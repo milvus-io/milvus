@@ -363,6 +363,7 @@ ExecutionEngineImpl::Serialize() {
     return status;
 }
 
+/*
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
     std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
@@ -390,10 +391,11 @@ ExecutionEngineImpl::Load(bool to_cache) {
     }
     return Status::OK();
 }
+*/
 
 Status
-ExecutionEngineImpl::Load(bool to_cache, bool on) {
-    // TODO(zhiru): ???
+ExecutionEngineImpl::Load(bool to_cache) {
+    // TODO(zhiru): refactor
 
     if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
         index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)

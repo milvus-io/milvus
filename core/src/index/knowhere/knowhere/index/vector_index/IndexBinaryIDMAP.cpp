@@ -58,8 +58,19 @@ BinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     search_impl(rows, (uint8_t*)p_data, config->k, p_dist, p_id, Config());
 
     auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
+    if (index_->metric_type == faiss::METRIC_Hamming) {
+        auto pf_dist = (float*)malloc(p_dist_size);
+        int32_t* pi_dist = (int32_t*)p_dist;
+        for (int i = 0; i < elems; i++) {
+            *(pf_dist + i) = (float)(*(pi_dist + i));
+        }
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, pf_dist);
+        free(p_dist);
+    } else {
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+    }
     return ret_ds;
 }
 
