@@ -27,18 +27,12 @@ namespace web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-//class IndexDto : public oatpp::data::mapping::type::Object {
-// DTO_INIT(IndexDto, Object)
-//
-//    DTO_FIELD(Int64, index_type);
-//    DTO_FIELD(Int64, nlist);
-//};
-
 class IndexRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(IndexRequestDto, Object)
 
-    DTO_FIELD(String, index_type) = "FLAT";
-    DTO_FIELD(Int64, nlist) = 16384;
+    DTO_FIELD(String, index_type) = VALUE_INDEX_INDEX_TYPE_DEFAULT;
+
+    DTO_FIELD(Int64, nlist) = VALUE_INDEX_NLIST_DEFAULT;
 };
 
 using IndexDto = IndexRequestDto;

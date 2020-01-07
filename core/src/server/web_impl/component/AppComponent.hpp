@@ -57,8 +57,9 @@ class AppComponent {
             auto provider = oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
             return provider;
         } catch (std::exception& e) {
-            std::string
-                error_msg = "Cannot bind port " + std::to_string(this->port_) + ". Check if the port is already used";
+            std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) +
+                                    ". Check if the port is already used";
+            std::cout << error_msg << std::endl;
             throw std::runtime_error(error_msg);
         }
     }());

@@ -947,6 +947,16 @@ TEST_F(WebControllerTest, ADVANCEDCONFIG) {
 }
 
 TEST_F(WebControllerTest, GPUCONFIG) {
+
+#ifndef MILVUS_GPU_VERSION
+    auto response = client_ptr->getGPUConfig(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    auto gpu_config_dto = milvus::server::web::GPUConfigDto::createShared();
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+#else
+
     auto response = client_ptr->getGPUConfig(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
@@ -973,6 +983,8 @@ TEST_F(WebControllerTest, GPUCONFIG) {
 
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+#endif
 }
 
 TEST_F(WebControllerTest, DEVICESCONFIG) {
