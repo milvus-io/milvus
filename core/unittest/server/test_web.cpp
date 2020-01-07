@@ -935,10 +935,14 @@ TEST_F(WebControllerTest, ADVANCEDCONFIG) {
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
+#ifdef MILVUS_GPU_VERSION
+    
     config_dto->gpu_search_threshold = 1000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-
+    
+#endif
+    
     config_dto->use_blas_threshold = 1000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());

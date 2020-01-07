@@ -33,17 +33,16 @@
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
 
+#include "utils/Log.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/web_impl/handler/WebRequestHandler.h"
 
-# define CORS_SUPPORT(RESPONSE)                                                                 \
-    do {                                                                                        \
-        response->putHeader("access-control-allow-methods", "GET, POST, PUT, OPTIONS, DELETE"); \
-        response->putHeader("access-control-allow-origin", "*");                                \
-        response->putHeader("access-control-allow-headers",                                     \
-            "DNT, User-Agent, X-Requested-With, If-Modified-Since, "                            \
-            "Cache-Control, Content-Type, Range, Authorization");                               \
-        response->putHeader("access-control-max-age", "1728000");                               \
+# define CORS_SUPPORT(RESPONSE)                                                                                                 \
+    do {                                                                                                                        \
+        (RESPONSE)->putHeaderIfNotExists(OString("Access-Control-Allow-Methods"), OString("GET, POST, PUT, OPTIONS, DELETE"));  \
+        (RESPONSE)->putHeaderIfNotExists(OString("Access-Control-Allow-Origin"), OString("*"));                                 \
+        (RESPONSE)->putHeaderIfNotExists(OString("Access-Control-Allow-Headers"), OString("DNT, User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type, Range, Authorization"));                                     \
+        (RESPONSE)->putHeaderIfNotExists(OString("Access-Control-Max-Age"), OString("1728000"));                                \
     } while(false);
 
 namespace milvus {
@@ -76,7 +75,8 @@ class WebController : public oatpp::web::server::api::ApiController {
         Action
         act() override {
             auto response = controller->createResponse(Status::CODE_200, "Welcome to milvus");
-            response->putHeader(Header::CONTENT_TYPE, "text/html");
+            response->putHeader(Header::CONTENT_TYPE, "text/plain");
+//            CORS_SUPPORT(response)
             return _return(response);
         }
     };
@@ -84,8 +84,9 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(docs) {
         info->summary = "API documents";
     }
+
     ENDPOINT_ASYNC("GET", "/docs", docs) {
-        ENDPOINT_ASYNC_INIT(docs);
+     ENDPOINT_ASYNC_INIT(docs);
         Action
         act() override {
             auto response = controller->createResponse(Status::CODE_302, "Welcome to milvus");
@@ -215,12 +216,16 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-    ENDPOINT_ASYNC("OPTIONS", "config/gpu_resources", GPUConfigOptions) {
+//    ADD_CORS(GPUConfigOptions)
+    ENDPOINT_ASYNC("OPTIONS", "/config/gpu_resources", GPUConfigOptions) {
      ENDPOINT_ASYNC_INIT(GPUConfigOptions);
 
         Action
         act() override {
-            auto response = controller->createDtoResponse(Status::CODE_200, StatusDto::createShared());
+            auto status_dto = StatusDto::createShared();
+            status_dto->code = 0;
+            status_dto->message = "OK";
+            auto response = controller->createDtoResponse(Status::CODE_200, status_dto);
             CORS_SUPPORT(response)
             return _return(response);
         }
@@ -233,7 +238,8 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT_ASYNC("GET", "config/gpu_resources", GetGPUConfig) {
+//    ADD_CORS(GetGPUConfig)
+    ENDPOINT_ASYNC("GET", "/config/gpu_resources", GetGPUConfig) {
      ENDPOINT_ASYNC_INIT(GetGPUConfig);
 
         Action
@@ -264,7 +270,8 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ENDPOINT_ASYNC("PUT", "config/gpu_resources", SetGPUConfig) {
+//    ADD_CORS(SetGPUConfig)
+    ENDPOINT_ASYNC("PUT", "/config/gpu_resources", SetGPUConfig) {
      ENDPOINT_ASYNC_INIT(SetGPUConfig);
         Action
         act() override {
@@ -289,6 +296,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
+//    ADD_CORS(TablesOptions)
     ENDPOINT_ASYNC("OPTIONS", "/tables", TablesOptions) {
      ENDPOINT_ASYNC_INIT(TablesOptions);
 
@@ -309,6 +317,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+//    ADD_CORS(CreateTable)
     ENDPOINT_ASYNC("POST", "/tables", CreateTable) {
      ENDPOINT_ASYNC_INIT(CreateTable);
 
@@ -365,7 +374,9 @@ class WebController : public oatpp::web::server::api::ApiController {
             if (nullptr == page_size_str.get()) {
                 error_status_dto->code = StatusCode::QUERY_PARAM_LOSS;
                 error_status_dto->message = "Query param \'page_size\' is required!";
-                return _return(controller->createDtoResponse(Status::CODE_400, error_status_dto));
+                auto response = controller->createDtoResponse(Status::CODE_400, error_status_dto);
+                CORS_SUPPORT(response);
+                return _return(response);
             }
             Int64 page_size = std::stol(page_size_str->std_str());
 
@@ -381,10 +392,15 @@ class WebController : public oatpp::web::server::api::ApiController {
             }
 
             CORS_SUPPORT(response);
+//            response->putHeaderIfNotExists("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS, DELETE");
+//            response->putHeaderIfNotExists("Access-Control-Allow-Origin", "*");
+//            response->putHeaderIfNotExists("Access-Control-Max-Age", "1728000");
+
             return _return(response);
         }
     };
 
+//    ADD_CORS(TableOptions)
     ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}", TableOptions) {
      ENDPOINT_ASYNC_INIT(TableOptions);
 
@@ -411,6 +427,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(GetTable)
     ENDPOINT_ASYNC("GET", "/tables/{table_name}", GetTable) {
      ENDPOINT_ASYNC_INIT(GetTable);
 
@@ -455,6 +472,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(DropTable)
     ENDPOINT_ASYNC("DELETE", "/tables/{table_name}", DropTable) {
      ENDPOINT_ASYNC_INIT(DropTable);
 
@@ -479,6 +497,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
+//    ADD_CORS(IndexOptions)
     ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/indexes", IndexOptions) {
      ENDPOINT_ASYNC_INIT(IndexOptions);
 
@@ -500,6 +519,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+//    ADD_CORS(CreateIndex)
     ENDPOINT_ASYNC("POST", "/tables/{table_name}/indexes", CreateIndex) {
      ENDPOINT_ASYNC_INIT(CreateIndex);
 
@@ -537,6 +557,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(GetIndex)
     ENDPOINT_ASYNC("GET", "/tables/{table_name}/indexes", GetIndex) {
      ENDPOINT_ASYNC_INIT(GetIndex);
 
@@ -558,7 +579,6 @@ class WebController : public oatpp::web::server::api::ApiController {
             }
 
             CORS_SUPPORT(response)
-
             return _return(response);
         }
     };
@@ -573,6 +593,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+//    ADD_CORS(DropIndex)
     ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/indexes", DropIndex) {
      ENDPOINT_ASYNC_INIT(DropIndex);
         Action
@@ -592,16 +613,12 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = controller->createDtoResponse(Status::CODE_400, status_dto);
             }
 
-            CORS_SUPPORT(response);
+            CORS_SUPPORT(response)
             return _return(response);
         }
     };
 
-/*
- * Create partition
- *
- * url = POST '<server address>/partitions/tables/<table_name>'
- */
+//    ADD_CORS(PartitionsOptions)
     ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions) {
      ENDPOINT_ASYNC_INIT(PartitionsOptions);
 
@@ -624,6 +641,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
+//    ADD_CORS(CreatePartition)
     ENDPOINT_ASYNC("POST",
                    "/tables/{table_name}/partitions",
                    CreatePartition) {
@@ -653,11 +671,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
-/*
- * Show partitions
- *
- * url = GET '<server address>/partitions/tables/{tableName}?offset={}&page_size={}'
- */
     ENDPOINT_INFO(ShowPartitions) {
         info->summary = "Show partitions";
 
@@ -674,6 +687,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(ShowPartitions)
     ENDPOINT_ASYNC("GET", "/tables/{table_name}/partitions", ShowPartitions) {
      ENDPOINT_ASYNC_INIT(ShowPartitions);
         Action
@@ -714,6 +728,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     };
 
+//    ADD_CORS(PartitionOptions)
     ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", PartitionOptions) {
      ENDPOINT_ASYNC_INIT(PartitionOptions);
 
@@ -736,6 +751,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(DropPartition)
     ENDPOINT_ASYNC("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition) {
      ENDPOINT_ASYNC_INIT(DropPartition);
 
@@ -773,20 +789,25 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(Insert)
     ENDPOINT_ASYNC("POST", "/tables/{table_name}/vectors", Insert) {
      ENDPOINT_ASYNC_INIT(Insert);
 
         Action
         act() override {
+            ENGINE_LOG_DEBUG << "<Web> | Insert | call insert act() ";
             return request->readBodyToDtoAsync<InsertRequestDto>(controller->getDefaultObjectMapper())
                 .callbackTo(&Insert::returnResponse);
         }
 
         Action returnResponse(const InsertRequestDto::ObjectWrapper& body) {
+            ENGINE_LOG_DEBUG << "<Web> | Insert | returnResponse | start handler ";
             auto ids_dto = VectorIdsDto::createShared();
             WebRequestHandler handler = WebRequestHandler();
             handler.RegisterRequestHandler(::milvus::server::RequestHandler());
             auto status_dto = handler.Insert(request->getPathVariable("table_name"), body, ids_dto);
+
+            ENGINE_LOG_DEBUG << "<Web> | Insert | returnResponse | handler done.";
 
             std::shared_ptr<OutgoingResponse> response;
             int64_t code = status_dto->code->getValue();
@@ -798,12 +819,15 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = controller->createDtoResponse(Status::CODE_400, status_dto);
             }
 
+            ENGINE_LOG_DEBUG << "<Web> | Insert | returnResponse | return response ";
+
             CORS_SUPPORT(response)
             return _return(response);
         }
 
     };
 
+//    ADD_CORS(VectorsOptions)
     ENDPOINT_ASYNC("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
      ENDPOINT_ASYNC_INIT(VectorsOptions);
 
@@ -827,6 +851,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(Search)
     ENDPOINT_ASYNC("PUT", "/tables/{table_name}/vectors", Search) {
      ENDPOINT_ASYNC_INIT(Search);
         Action
@@ -866,6 +891,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+//    ADD_CORS(SystemMsg)
     ENDPOINT_ASYNC("GET", "/system/{msg}", SystemMsg) {
      ENDPOINT_ASYNC_INIT(SystemMsg);
 
@@ -876,7 +902,7 @@ class WebController : public oatpp::web::server::api::ApiController {
             auto status_dto = StatusDto::createShared();
 
             auto cmd_str = request->getPathVariable("msg");
-            if (nullptr ==  cmd_str.get()) {
+            if (nullptr == cmd_str.get()) {
                 status_dto->code = PATH_PARAM_LOSS;
                 status_dto->message = "The path must be form of \'/system/{msg}\'";
             } else {

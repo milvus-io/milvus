@@ -1046,7 +1046,6 @@ macro(build_oatpp)
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_BUILD_TESTS=OFF
-            -DOATPP_DISABLE_LOGD=ON
             )
 
 

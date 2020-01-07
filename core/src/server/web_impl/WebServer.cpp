@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <chrono>
+
 #include <oatpp-swagger/AsyncController.hpp>
 #include <oatpp/network/server/Server.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
@@ -96,7 +98,7 @@ WebServer::StartService() {
         connection_handler->stop();
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor);
-        executor->waitTasksFinished();
+        executor->waitTasksFinished(std::chrono::seconds(30));
         executor->join();
 
         stop_thread.join();

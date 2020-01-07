@@ -22,13 +22,15 @@
 #include <string>
 #include <vector>
 
+#include "utils/Log.h"
+#include "metrics/SystemInfo.h"
+
 #include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
 
-#include "metrics/SystemInfo.h"
 
 namespace milvus {
 namespace server {
@@ -168,13 +170,18 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
     }
     advanced_config->use_blas_threshold = value;
 
+#ifdef MILVUS_GPU_VERSION
+
     status = config.GetEngineConfigGpuSearchThreshold(value);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
     advanced_config->gpu_search_threshold = value;
 
+#endif
+
     ASSIGN_RETURN_STATUS_DTO(status)
+
 }
 
 StatusDto::ObjectWrapper
@@ -206,6 +213,8 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+#ifdef MILVUS_GPU_VERSION
+
     if (nullptr == advanced_config->gpu_search_threshold.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
     }
@@ -214,6 +223,8 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
+
+#endif
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -542,6 +553,9 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
 StatusDto::ObjectWrapper
 WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
                           VectorIdsDto::ObjectWrapper& ids_dto) {
+
+    ENGINE_LOG_DEBUG << "<Web> | controller | handler | start";
+
     std::vector<int64_t> ids;
     if (nullptr != param->ids.get() && param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
@@ -549,19 +563,35 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
         }
     }
 
+    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Obtain all ids";
+
     if (nullptr == param->records.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'\' is required to fill vectors")
     }
 
-    std::vector<float> datas;
-    for (int64_t j = 0; j < param->records->count(); j++) {
-        for (int64_t k = 0; k < param->records->get(j)->count(); k++) {
-            datas.emplace_back(param->records->get(j)->get(k)->getValue());
-        }
+    size_t tal_size = 0;
+    for (int64_t i = 0; i < param->records->count(); i++) {
+        tal_size += param->records->get(i)->count();
     }
+
+    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Obtain datas size";
+
+    std::vector<float> datas(tal_size);
+    size_t index_offset = 0;
+    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item){
+        row_item->forEach([&datas, &index_offset](const OFloat32& item){
+            datas[index_offset] = item->getValue();
+            index_offset ++;
+        });
+    });
+
+
+    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Obtain all datas. " << "total get data size: " << index_offset;
 
     auto status = request_handler_.Insert(context_ptr_, table_name->std_str(), param->records->count(), datas,
                                           param->tag->std_str(), ids);
+
+    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Insert done";
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
@@ -569,6 +599,8 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
             ids_dto->ids->pushBack(std::to_string(id).c_str());
         }
     }
+
+    ENGINE_LOG_DEBUG << "<Web> | controller | handler | return";
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -602,12 +634,19 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill query vectors")
     }
 
-    std::vector<float> datas;
-    for (int64_t j = 0; j < search_request->records->count(); j++) {
-        for (int64_t k = 0; k < search_request->records->get(j)->count(); k++) {
-            datas.emplace_back(search_request->records->get(j)->get(k)->getValue());
-        }
-    }
+    size_t tal_size = 0;
+    search_request->records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& item){
+        tal_size += item->count();
+    });
+    
+    std::vector<float> datas(tal_size);
+    size_t index_offset = 0;
+    search_request->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& elem){
+        elem->forEach([&datas, &index_offset](const OFloat32& item){
+            datas[index_offset] = item->getValue();
+            index_offset ++;
+        });
+    });
 
     std::vector<Range> range_list;
 
@@ -615,25 +654,26 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     auto context_ptr = GenContextPtr("Web Handler");
     auto status = request_handler_.Search(context_ptr, table_name->std_str(), search_request->records->count(), datas,
                                           range_list, topk_t, nprobe_t, tag_list, file_id_list, result);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+    
+    results_dto->num = result.row_num_;
+    results_dto->results = results_dto->results->createShared();
+    if (0 == result.row_num_) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
-    if (status.ok()) {
-        results_dto->num = result.row_num_;
-        results_dto->results = results_dto->results->createShared();
-        if (0 == result.row_num_) {
-            ASSIGN_RETURN_STATUS_DTO(status)
+    auto step = result.id_list_.size() / result.row_num_;
+    for (size_t i = 0; i < result.row_num_; i++) {
+        auto row_result_dto = OList<ResultDto::ObjectWrapper>::createShared();
+        for (size_t j = 0; j < step; j++) {
+            auto result_dto = ResultDto::createShared();
+            result_dto->id = std::to_string(result.id_list_.at(i * step + j)).c_str();
+            result_dto->dit = std::to_string(result.distance_list_.at(i * step + j)).c_str();
+            row_result_dto->pushBack(result_dto);
         }
-
-        auto step = result.id_list_.size() / result.row_num_;
-        for (size_t i = 0; i < result.row_num_; i++) {
-            auto row_result_dto = OList<ResultDto::ObjectWrapper>::createShared();
-            for (size_t j = 0; j < step; j++) {
-                auto result_dto = ResultDto::createShared();
-                result_dto->id = std::to_string(result.id_list_.at(i * step + j)).c_str();
-                result_dto->dit = std::to_string(result.distance_list_.at(i * step + j)).c_str();
-                row_result_dto->pushBack(result_dto);
-            }
-            results_dto->results->pushBack(row_result_dto);
-        }
+        results_dto->results->pushBack(row_result_dto);
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
