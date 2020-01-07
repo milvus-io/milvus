@@ -381,6 +381,10 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
 StatusDto::ObjectWrapper
 WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query_params,
                             TableFieldsDto::ObjectWrapper& fields_dto) {
+    if (nullptr == table_name.get()) {
+        RETURN_STATUS_DTO(PATH_PARAM_LOSS, "Path param \'table_name\' is required!");
+    }
+
     Status status = Status::OK();
 
     // TODO: query string field `fields` npt used here
@@ -404,6 +408,13 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
 StatusDto::ObjectWrapper
 WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
                               TableListFieldsDto::ObjectWrapper& response_dto) {
+    if (nullptr == offset.get()) {
+        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'offset\' is required");
+    }
+
+    if (nullptr == page_size.get()) {
+        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required");
+    }
     std::vector<std::string> tables;
     Status status = Status::OK();
 
@@ -513,6 +524,14 @@ WebRequestHandler::CreatePartition(const OString& table_name, const PartitionReq
 StatusDto::ObjectWrapper
 WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
+    if (nullptr == offset.get()) {
+        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'offset\' is required!");
+    }
+
+    if (nullptr == page_size.get()) {
+        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required!");
+    }
+
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
 

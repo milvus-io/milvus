@@ -97,10 +97,6 @@ WebServer::StartService() {
 
         connection_handler->stop();
 
-        OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor);
-        executor->waitTasksFinished(std::chrono::seconds(30));
-        executor->join();
-
         stop_thread.join();
     }
 

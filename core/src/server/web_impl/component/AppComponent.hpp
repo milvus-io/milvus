@@ -43,19 +43,10 @@ class AppComponent {
     const int port_;
 
  public:
-    OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor_)([] {
-        return std::make_shared<oatpp::async::Executor>(
-            10 /* Data-Processing threads */,
-            2 /* I/O threads */,
-            1 /* Timer threads */
-        );
-    }());
-
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)
     ([this] {
         try {
-            auto provider = oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
-            return provider;
+            return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
         } catch (std::exception& e) {
             std::string error_msg = "Cannot bind http port " + std::to_string(this->port_) +
                                     ". Check if the port is already used";
@@ -74,9 +65,8 @@ class AppComponent {
     }());
 
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, server_connection_handler_)([] {
-        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
-        OATPP_COMPONENT(std::shared_ptr<oatpp::async::Executor>, executor);
-        return oatpp::web::server::AsyncHttpConnectionHandler::createShared(router, executor);
+        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router); // get Router component
+        return oatpp::web::server::HttpConnectionHandler::createShared(router);
     }());
 
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, api_object_mapper_)([] {

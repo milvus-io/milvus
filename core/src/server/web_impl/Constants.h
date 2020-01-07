@@ -21,6 +21,20 @@
 namespace milvus {
 namespace server {
 namespace web {
+
+////////////////////////////////////////////////////
+
+static const char* CORS_KEY_METHODS = "Access-Control-Allow-Methods";
+static const char* CORS_KEY_ORIGIN = "Access-Control-Allow-Origin";
+static const char* CORS_KEY_HEADERS = "Access-Control-Allow-Headers";
+static const char* CORS_KEY_AGE = "Access-Control-Max-Age";
+
+static const char* CORS_VALUE_METHODS = "GET, POST, PUT, OPTIONS, DELETE";
+static const char* CORS_VALUE_ORIGIN = "*";
+static const char* CORS_VALUE_HEADERS =
+    "DNT, User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type, Range, Authorization";
+static const char* CORS_VALUE_AGE = "1728000";
+
 ////////////////////////////////////////////////////
 
 static const char* NAME_ENGINE_TYPE_FLAT = "FLAT";
