@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <memory>
 #include <utility>
 
@@ -24,32 +23,35 @@
 #include <aws/core/client/ClientConfiguration.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/StringUtils.h>
-#include <aws/s3/model/PutObjectRequest.h>
-#include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/S3Client.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
-#include <aws/s3/S3Client.h>
+#include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/PutObjectRequest.h>
+
+namespace milvus {
+namespace storage {
 
 /*
  * This is a class that represents a S3 Client which is used to mimic the put/get operations of a actual s3 client.
  * During a put object, the body of the request is stored as well as the metadata of the request. This data is then
  * populated into a get object result when a get operation is called.
  */
-class MockS3Client : public Aws::S3::S3Client {
+class S3ClientMock : public Aws::S3::S3Client {
  public:
-    explicit MockS3Client(Aws::Client::ClientConfiguration clientConfiguration = Aws::Client::ClientConfiguration()) :
-        S3Client(Aws::Auth::AWSCredentials("", ""), clientConfiguration) {
+    explicit S3ClientMock(Aws::Client::ClientConfiguration clientConfiguration = Aws::Client::ClientConfiguration())
+        : S3Client(Aws::Auth::AWSCredentials("", ""), clientConfiguration) {
     }
 
     Aws::S3::Model::CreateBucketOutcome
-    CreateBucket(const Aws::S3::Model::CreateBucketRequest&) const override {
+    CreateBucket(const Aws::S3::Model::CreateBucketRequest& request) const override {
         Aws::S3::Model::CreateBucketResult result;
         return Aws::S3::Model::CreateBucketOutcome(std::move(result));
     }
 
     Aws::S3::Model::DeleteBucketOutcome
-    DeleteBucket(const Aws::S3::Model::DeleteBucketRequest&) const override {
+    DeleteBucket(const Aws::S3::Model::DeleteBucketRequest& request) const override {
         Aws::NoResult result;
         return Aws::S3::Model::DeleteBucketOutcome(std::move(result));
     }
@@ -75,13 +77,12 @@ class MockS3Client : public Aws::S3::S3Client {
 
             resp_stream.GetUnderlyingStream().write(body_str.c_str(), body_str.length());
             resp_stream.GetUnderlyingStream().flush();
-            Aws::AmazonWebServiceResult<Aws::Utils::Stream::ResponseStream>
-                    awsStream(std::move(resp_stream), Aws::Http::HeaderValueCollection());
+            Aws::AmazonWebServiceResult<Aws::Utils::Stream::ResponseStream> awsStream(
+                std::move(resp_stream), Aws::Http::HeaderValueCollection());
 
             Aws::S3::Model::GetObjectResult result(std::move(awsStream));
             return Aws::S3::Model::GetObjectOutcome(std::move(result));
-        }
-        catch (...) {
+        } catch (...) {
             return Aws::S3::Model::GetObjectOutcome();
         }
     }
@@ -89,11 +90,8 @@ class MockS3Client : public Aws::S3::S3Client {
     Aws::S3::Model::ListObjectsOutcome
     ListObjects(const Aws::S3::Model::ListObjectsRequest& request) const override {
         /* TODO: add object key list into ListObjectsOutcome */
-        Aws::Utils::Xml::XmlDocument xmlDoc = Aws::Utils::Xml::XmlDocument::CreateWithRootNode("");
 
-        Aws::AmazonWebServiceResult<Aws::Utils::Xml::XmlDocument>
-                awsDoc(std::move(xmlDoc), Aws::Http::HeaderValueCollection());
-        Aws::S3::Model::ListObjectsResult result(std::move(awsDoc));
+        Aws::S3::Model::ListObjectsResult result;
         return Aws::S3::Model::ListObjectsOutcome(std::move(result));
     }
 
@@ -109,3 +107,5 @@ class MockS3Client : public Aws::S3::S3Client {
     mutable Aws::Map<Aws::String, std::shared_ptr<Aws::IOStream>> aws_map_;
 };
 
+}  // namespace storage
+}  // namespace milvus

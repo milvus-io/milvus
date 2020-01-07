@@ -19,21 +19,23 @@
 #include <gtest/gtest.h>
 #include <fstream>
 #include <memory>
+#include <fiu-local.h>
+#include <fiu-control.h>
 
 #include "easyloggingpp/easylogging++.h"
 #include "server/Config.h"
+#include "storage/s3/S3ClientWrapper.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "storage/IStorage.h"
-#include "storage/MockS3Client.h"
+#include "src/storage/s3/S3ClientMock.h"
 #include "storage/utils.h"
-
-#define private public
-#include "storage/s3/S3ClientWrapper.h"
 
 INITIALIZE_EASYLOGGINGPP
 
 TEST_F(StorageTest, S3_CLIENT_TEST) {
+    fiu_init(0);
+
     const std::string filename = "/tmp/test_file_in";
     const std::string filename_dummy = "/tmp/test_file_dummy";
     const std::string filename_out = "/tmp/test_file_out";
@@ -42,11 +44,8 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    if (!storage_inst.StartService().ok()) {
-        // If StartService() error out, use MockS3Client instead.
-        // By default, S3 will retry 10 times, cost 25 seconds.
-        storage_inst.client_ptr_ = std::make_shared<MockS3Client>();
-    }
+    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    ASSERT_TRUE(storage_inst.StartService().ok());
 
     ///////////////////////////////////////////////////////////////////////////
     /* check PutObjectFile() and GetObjectFile() */
@@ -94,13 +93,14 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
 }
 
 TEST_F(StorageTest, S3_RW_TEST) {
+    fiu_init(0);
+
     const std::string index_name = "/tmp/test_index";
     const std::string content = "abcdefg";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    if (!storage_inst.StartService().ok()) {
-        storage_inst.client_ptr_ = std::make_shared<MockS3Client>();
-    }
+    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    ASSERT_TRUE(storage_inst.StartService().ok());
 
     {
         milvus::storage::S3IOWriter writer(index_name);
@@ -134,6 +134,77 @@ TEST_F(StorageTest, S3_RW_TEST) {
 
         ASSERT_TRUE(content == content_out);
     }
+
+    storage_inst.StopService();
+}
+
+TEST_F(StorageTest, S3_FAIL_TEST) {
+    fiu_init(0);
+
+    const std::string filename = "/tmp/test_file_in";
+    const std::string filename_dummy = "/tmp/test_file_dummy";
+    const std::string filename_out = "/tmp/test_file_out";
+    const std::string objname = "/tmp/test_obj";
+    const std::string objname_dummy = "/tmp/test_obj_dummy";
+    const std::string content = "abcdefghijklmnopqrstuvwxyz";
+
+    auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+
+    fiu_enable("S3ClientWrapper.StartService.minio_disable", 1, NULL, 0);
+    ASSERT_TRUE(storage_inst.StartService().ok());
+    fiu_disable("S3ClientWrapper.StartService.minio_disable");
+
+    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    ASSERT_TRUE(storage_inst.StartService().ok());
+    fiu_disable("S3ClientWrapper.StartService.mock_enable");
+
+    fiu_enable("S3ClientWrapper.CreateBucket.outcome.fail", 1, NULL, 0);
+    ASSERT_FALSE(storage_inst.CreateBucket().ok());
+    fiu_disable("S3ClientWrapper.CreateBucket.outcome.fail");
+
+    ///////////////////////////////////////////////////////////////////////////
+    /* check PutObjectFile() and GetObjectFile() */
+    {
+        fiu_enable("S3ClientWrapper.PutObjectFile.outcome.fail", 1, NULL, 0);
+        ASSERT_FALSE(storage_inst.PutObjectFile(filename, filename).ok());
+        fiu_disable("S3ClientWrapper.PutObjectFile.outcome.fail");
+
+        fiu_enable("S3ClientWrapper.GetObjectFile.outcome.fail", 1, NULL, 0);
+        ASSERT_FALSE(storage_inst.GetObjectFile(filename, filename_out).ok());
+        fiu_disable("S3ClientWrapper.GetObjectFile.outcome.fail");
+
+        ASSERT_FALSE(storage_inst.PutObjectFile(filename_dummy, filename_dummy).ok());
+        ASSERT_FALSE(storage_inst.GetObjectFile(filename_dummy, filename_out).ok());
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    /* check PutObjectStr() and GetObjectStr() */
+    {
+        fiu_enable("S3ClientWrapper.PutObjectStr.outcome.fail", 1, NULL, 0);
+        ASSERT_FALSE(storage_inst.PutObjectStr(objname, content).ok());
+        fiu_disable("S3ClientWrapper.PutObjectStr.outcome.fail");
+
+        std::string content_out;
+        fiu_enable("S3ClientWrapper.GetObjectStr.outcome.fail", 1, NULL, 0);
+        ASSERT_FALSE(storage_inst.GetObjectStr(objname, content_out).ok());
+        fiu_disable("S3ClientWrapper.GetObjectStr.outcome.fail");
+
+        ASSERT_FALSE(storage_inst.GetObjectStr(objname_dummy, content_out).ok());
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    fiu_enable("S3ClientWrapper.DeleteObject.outcome.fail", 1, NULL, 0);
+    ASSERT_FALSE(storage_inst.DeleteObject(filename).ok());
+    fiu_disable("S3ClientWrapper.DeleteObject.outcome.fail");
+
+    fiu_enable("S3ClientWrapper.ListObjects.outcome.fail", 1, NULL, 0);
+    ASSERT_FALSE(storage_inst.DeleteObjects("/tmp").ok());
+    fiu_disable("S3ClientWrapper.ListObjects.outcome.fail");
+    ASSERT_TRUE(storage_inst.DeleteObjects("/tmp").ok());
+
+    fiu_enable("S3ClientWrapper.DeleteBucket.outcome.fail", 1, NULL, 0);
+    ASSERT_FALSE(storage_inst.DeleteBucket().ok());
+    fiu_disable("S3ClientWrapper.DeleteBucket.outcome.fail");
 
     storage_inst.StopService();
 }
