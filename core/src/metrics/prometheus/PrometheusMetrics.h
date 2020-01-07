@@ -18,6 +18,7 @@
 #pragma once
 
 #include <prometheus/exposer.h>
+#include <prometheus/gateway.h>
 #include <prometheus/registry.h>
 #include <iostream>
 #include <memory>
@@ -25,7 +26,8 @@
 #include <vector>
 
 #include "metrics/MetricBase.h"
-#include "utils/Error.h"
+#include "utils/Log.h"
+#include "utils/Status.h"
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
 //#define server::Metrics::GetInstance() server::GetInstance()
@@ -42,11 +44,11 @@ class PrometheusMetrics : public MetricsBase {
         return instance;
     }
 
-    ErrorCode
-    Init();
+    Status
+    Init() override;
 
  private:
-    std::shared_ptr<prometheus::Exposer> exposer_ptr_;
+    std::shared_ptr<prometheus::Gateway> gateway_;
     std::shared_ptr<prometheus::Registry> registry_ = std::make_shared<prometheus::Registry>();
     bool startup_ = false;
 
@@ -293,9 +295,18 @@ class PrometheusMetrics : public MetricsBase {
     void
     CPUTemperature() override;
 
-    std::shared_ptr<prometheus::Exposer>&
-    exposer_ptr() {
-        return exposer_ptr_;
+    void
+    PushToGateway() override {
+        if (startup_) {
+            if (gateway_->Push() != 200) {
+                ENGINE_LOG_WARNING << "Metrics pushgateway failed";
+            }
+        }
+    }
+
+    std::shared_ptr<prometheus::Gateway>&
+    gateway() {
+        return gateway_;
     }
 
     //    prometheus::Exposer& exposer() { return exposer_;}
