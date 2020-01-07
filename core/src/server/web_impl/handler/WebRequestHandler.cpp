@@ -22,12 +22,11 @@
 #include <string>
 #include <vector>
 
+#include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
-
-#include "server/Config.h"
 
 #include "metrics/SystemInfo.h"
 
@@ -117,13 +116,18 @@ WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const st
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto getgb = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
+    auto getgb = [](uint64_t x) -> uint64_t {
+        return x / 1024 / 1024 / 1024;
+    };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
     devices_dto->cpu->memory = getgb(system_info.GetPhysicalMemory());
 
     devices_dto->gpus = devices_dto->gpus->createShared();
+
+#ifdef MILVUS_GPU_VERSION
+
     size_t count = system_info.num_device();
     std::vector<uint64_t> device_mems = system_info.GPUMemoryTotal();
 
@@ -136,6 +140,8 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
         device_dto->memory = getgb(device_mems.at(i));
         devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
+
+#endif
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
@@ -178,7 +184,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     Config& config = Config::GetInstance();
 
     if (nullptr == advanced_config->cpu_cache_capacity.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'cpu_cache_capacity\' miss."));
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
     }
     auto status =
         config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
@@ -187,7 +193,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     }
 
     if (nullptr == advanced_config->cache_insert_data.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'cache_insert_data\' miss."));
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
     }
     status = config.SetCacheConfigCacheInsertData(std::to_string(advanced_config->cache_insert_data->getValue()));
     if (!status.ok()) {
@@ -195,7 +201,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     }
 
     if (nullptr == advanced_config->use_blas_threshold.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'use_blas_threshold\' miss."));
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
     }
     status = config.SetEngineConfigUseBlasThreshold(std::to_string(advanced_config->use_blas_threshold->getValue()));
     if (!status.ok()) {
@@ -203,7 +209,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     }
 
     if (nullptr == advanced_config->gpu_search_threshold.get()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(SERVER_UNSUPPORTED_ERROR, "Field \'gpu_search_threshold\' miss."));
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
     }
     status =
         config.SetEngineConfigGpuSearchThreshold(std::to_string(advanced_config->gpu_search_threshold->getValue()));
@@ -216,6 +222,12 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+
+#ifndef MILVUS_GPU_VERSION
+    RETURN_STATUS_DTO(UNEXPECTED_ERROR, "The version not support GPU resources");
+
+#else
+
     Config& config = Config::GetInstance();
 
     bool enable;
@@ -260,13 +272,22 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
+
+#endif
 }
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+
+#ifndef MILVUS_GPU_VERSION
+    RETURN_STATUS_DTO(UNEXPECTED_ERROR, "The version not support GPU resources");
+
+#else
+
     Config& config = Config::GetInstance();
 
     if (nullptr == gpu_config_dto->enable.get()) {
+
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
     }
     auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
@@ -289,7 +310,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
+        [&search_resources](const OString& res) {
+            search_resources.emplace_back(res->toLowerCase()->std_str());
+        });
 
     std::string search_resources_value;
     for (auto& res : search_resources) {
@@ -310,7 +333,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
+        [&build_resources](const OString& res) {
+            build_resources.emplace_back(res->toLowerCase()->std_str());
+        });
 
     std::string build_resources_value;
     for (auto& res : build_resources) {
@@ -327,6 +352,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
+
+#endif
 }
 
 StatusDto::ObjectWrapper
@@ -572,12 +599,16 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     std::vector<std::string> file_id_list;
 
     if (nullptr != search_request->tags.get()) {
-        search_request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
+        search_request->tags->forEach([&tag_list](const OString& tag) {
+            tag_list.emplace_back(tag->std_str());
+        });
     }
 
     if (nullptr != search_request->file_ids.get()) {
         search_request->file_ids->forEach(
-            [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
+            [&file_id_list](const OString& id) {
+                file_id_list.emplace_back(id->std_str());
+            });
     }
 
     if (nullptr == search_request->records.get()) {

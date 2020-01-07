@@ -53,7 +53,14 @@ class AppComponent {
 
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ServerConnectionProvider>, server_connection_provider_)
     ([this] {
-        return oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
+        try {
+            auto provider = oatpp::network::server::SimpleTCPConnectionProvider::createShared(this->port_);
+            return provider;
+        } catch (std::exception& e) {
+            std::string
+                error_msg = "Cannot bind port " + std::to_string(this->port_) + ". Check if the port is already used";
+            throw std::runtime_error(error_msg);
+        }
     }());
 
     OATPP_CREATE_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_connection_provider_)

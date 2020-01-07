@@ -58,12 +58,12 @@ WebServer::StartService() {
         AppComponent components = AppComponent(std::stoi(port));
         SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
 
-        /* create ApiControllers and add endpoints to router */
-        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
-
         auto doc_endpoints = oatpp::swagger::AsyncController::Endpoints::createShared();
 
         auto user_controller = WebController::createShared();
+
+        /* create ApiControllers and add endpoints to router */
+        OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
         user_controller->addEndpointsToRouter(router);
 
         doc_endpoints->pushBackAll(user_controller->getEndpoints());
