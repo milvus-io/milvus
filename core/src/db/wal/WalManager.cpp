@@ -25,6 +25,10 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
+std::condition_variable reader_cv;
+std::mutex reader_mutex;
+bool reader_is_waiting = 0;
+
 WalManager*
 WalManager::GetInstance() {
     static WalManager wal_manager;
@@ -37,37 +41,23 @@ WalManager::WalManager() {
 
 void
 WalManager::Init() {
-    //todo: init p_buffer_ and other vars
-    //todo: step2 init p_buffer_;
-    //todo: step3 load meta
-    //step4 run wal thread
+    // step1: load config & meta
     server::Config& config = server::Config::GetInstance();
     config.GetWalConfigBufferSize(mxlog_config_.buffer_size);
     config.GetWalConfigRecordSize(mxlog_config_.record_size);
     config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
-    meta_handler_.SetMXLogInternalMetaFilePath(mxlog_config_.mxlog_path);
-    meta_handler_.GetMXLogExternalMeta(p_table_meta_);
+    p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
-    is_recoverying = false;
+
+    // step2:
+    Recovery();
+
+    // step3: run wal thread
     Start();
 }
 
 void
 WalManager::Start() {
-    Recovery();
-    is_running_ = true;
-    Run();
-}
-
-void
-WalManager::Stop() {
-    is_running_ = false;
-    //todo: xjbx
-    reader_cv.notify_one();
-}
-
-void
-WalManager::Run() {
     std::string table_id;
     MXLogType mxlog_type;
     size_t num_of_vectors;
@@ -91,14 +81,24 @@ WalManager::Run() {
                 reader_is_waiting = false;
                 Dispatch(table_id, mxlog_type, num_of_vectors, vector_dim, vectors, vector_ids, last_applied_lsn_, lsn);
             } else {
+                // todo: wait-notify
                 reader_is_waiting = true;
                 std::unique_lock<std::mutex> reader_lock(reader_mutex);
-                reader_cv.wait(reader_lock, [] { return reader_is_waiting;});
+//                reader_cv.wait(reader_lock, [] { return reader_is_waiting;});
+                reader_cv.wait(reader_lock);
             }
         }
     };
+    is_running_ = true;
     reader_ = std::thread(work);
     reader_.join();
+}
+
+void
+WalManager::Stop() {
+    is_running_ = false;
+    // todo: wait-notify
+    reader_cv.notify_one();
 }
 
 bool
@@ -107,45 +107,39 @@ WalManager::Insert(const std::string &table_id,
                    const float *vectors,
                    milvus::engine::IDNumbers &vector_ids) {
 
-    //todo: should wait outside walmanager
-    while (is_recoverying) {
-        usleep(2);
-    }
     uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
     auto table_meta = p_table_meta_->find(table_id);
     if (table_meta == p_table_meta_->end()) {
         //todo: get table_meta by table_id and cache it
-        meta_handler_.GetMXLogExternalMeta(p_table_meta_);//pull newest meta
     }
     uint16_t dim = table_meta->second->dimension_;
     //split and insert into wal
     size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim << 2) + 8);
-    size_t i = 0;
     __glibcxx_assert(vectors_per_record > 0);
-    meta_handler_.GetMXLogInternalMeta(last_applied_lsn_, current_file_no_);
-    for (; i + vectors_per_record < n; i += vectors_per_record) {
-        if(!p_buffer_->Append(table_id, MXLogType::Insert, vectors_per_record, dim, vectors + i * (dim << 2), vector_ids, i, false, meta_handler_, last_applied_lsn_)) {
+
+    uint64_t new_lsn = 0;
+    for (size_t i = 0; i < n; i += vectors_per_record) {
+        size_t insert_len = std::min(n - i, vectors_per_record);
+        new_lsn = p_buffer_->Append(table_id,
+                                    MXLogType::Insert,
+                                    insert_len,
+                                    dim,
+                                    vectors + i * (dim << 2),
+                                    vector_ids,
+                                    i);
+        if(new_lsn == -1) {
             return false;
         }
     }
-    if (i < n) {
-        if(!p_buffer_->Append(table_id, MXLogType::Insert, n - i, dim, vectors + i * (dim << 2), vector_ids, i, true, meta_handler_, last_applied_lsn_)) {
-            return false;
-        }
-    }
-    //todo: consider sync and async flush
-    current_file_no_ = (uint32_t)(last_applied_lsn_ >> 32);
-    meta_handler_.SetMXLogInternalMeta(last_applied_lsn_, current_file_no_);
+
+    last_applied_lsn_ = new_lsn;
+    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
     return true;
 }
 
 //TBD
 void
 WalManager::DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids) {
-    //todo: do it outside, in grpc queue, or there exisit invoke wal interface concurrently, which not support
-    while (is_recoverying) {
-        usleep(2);
-    }
     //todo: similar to insert
 }
 
@@ -155,19 +149,18 @@ WalManager::Flush(const std::string& table_id) {
     auto table_meta = p_table_meta_->find(table_id);
     if (table_meta == p_table_meta_->end()) {
         //todo: get table_meta by table_id and cache it
-        meta_handler_.GetMXLogExternalMeta(p_table_meta_);//pull newest meta
+        // meta_handler_.GetMXLogExternalMeta(p_table_meta_);//pull newest meta
     }
     MXLogType type;
-    if ("" == table_id) {
+    if (table_id.empty()) {
         type = MXLogType::FlushAll;
     } else {
         type = MXLogType::Flush;
     }
     milvus::engine::IDNumbers useless_vec;
-    meta_handler_.GetMXLogInternalMeta(last_applied_lsn_, current_file_no_);
-    p_buffer_->Append(table_id, type, 0, 0, NULL, useless_vec, -1, true, meta_handler_, last_applied_lsn_);
-    current_file_no_ = (uint32_t)(last_applied_lsn_ >> 32);
-    meta_handler_.SetMXLogInternalMeta(last_applied_lsn_, current_file_no_);
+    // todo: flush-wait-notify
+    p_buffer_->Append(table_id, type, 0, 0, NULL, useless_vec, -1);
+    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
 }
 
 void
@@ -175,13 +168,20 @@ WalManager::Recovery() {
     //todo: how to judge that whether system exit normally last time?
     //todo: if (system.exit.normally) return;
     //todo: fetch meta
-    is_recoverying = true;
-    p_table_meta_->clear();
-    meta_handler_.GetMXLogExternalMeta(p_table_meta_);
+    auto table_meta = Meta.GetAllMeta();
+    p_meta_handler_->GetMXLogInternalMeta(last_applied_lsn_);
     uint64_t current_recovery_point = 0;
 //    for (auto it = p_table_meta_->begin(), it != p_table_meta_->end(); ++ it) {
 //        start_recovery_point = std::min(start_recovery_point, kv.second);
 //    }
+
+    // todo:
+    // if (last_applied_lsn_ < current_recovery_point) {
+    // read config
+    //   case ignore: let wal lsn = largest flused lsn
+    //   case try recover: let wal lsn = largest flused lsn
+    //   case exit:
+    // }
 
     while (current_recovery_point <= last_applied_lsn_) {
         std::string table_id;
@@ -191,14 +191,17 @@ WalManager::Recovery() {
             auto meta_schema = p_table_meta_->find(table_id);
             //todo: wait zhiru's interface
 //            if (meta_schema->second->lsn < current_recovery_point) {
-//                Apply(current_recovery_point);
+                Apply(current_recovery_point);
 //            }
         }
         current_recovery_point = next_lsn;
     }
 
     p_buffer_->ReSet();
-    is_recoverying = false;
+}
+
+uint64_t WalManager::GetCurrentLsn() {
+    return last_applied_lsn_;
 }
 
 void

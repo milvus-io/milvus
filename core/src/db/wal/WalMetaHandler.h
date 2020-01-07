@@ -33,19 +33,18 @@ static const char* WAL_META_FILE_NAME = "mxlog.meta";
 
 class MXLogMetaHandler {
  public:
-    MXLogMetaHandler();
+    MXLogMetaHandler(const std::string& internal_meta_file_path);
     ~MXLogMetaHandler();
 
-    void GetMXLogInternalMeta(uint64_t& wal_lsn, uint32_t& wal_file_no);
-    void SetMXLogInternalMeta(const uint64_t& wal_lsn, const uint32_t& wal_file_no);
-    void GetMXLogExternalMeta(TableMetaPtr global_meta);
-    void SetMXLogInternalMetaFilePath(const std::string& internal_meta_file_path);
+    void GetMXLogInternalMeta(uint64_t& wal_lsn);
+    void SetMXLogInternalMeta(const uint64_t& wal_lsn);
 
  private:
-    MXLogFileHandler wal_meta_;
-    uint64_t wal_lsn_;
-    uint32_t wal_file_no_;
+    FILE *wal_meta_fp_;
+
 };
+
+using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;
 
 
 } // wal

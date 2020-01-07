@@ -29,14 +29,16 @@ namespace wal {
 
 using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
-std::condition_variable reader_cv;
-std::mutex reader_mutex;
-bool reader_is_waiting;
-bool is_recoverying;
+extern std::condition_variable reader_cv;
+extern std::mutex reader_mutex;
+extern bool reader_is_waiting;
 
 #define WAL_BUFFER_MIN_SIZE 64
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 #define WAL_META_AMOUNT 2
+#ifdef offsetof
+#undef offsetof
+#endif
 #define offsetof(type, field) ((long) &((type *)0)->field)
 
 enum class MXLogType {
@@ -57,7 +59,7 @@ struct MXLogRecord{
     uint16_t table_id_size;//
     uint16_t dim;//one record contains the same dimension vectors
     uint8_t mxl_type;//record type, insert/delete/update/flush...
-    //mxl_data include vecter_ids[vector_num], table_id and float* vectors
+    //mxl_data include, table_id vecter_ids[vector_num] and float* vectors
     char mxl_data[];//data address
 //    char* mxl_data;
 };

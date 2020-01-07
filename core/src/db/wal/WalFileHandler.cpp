@@ -47,19 +47,23 @@ MXLogFileHandler::OpenFile() {
 }
 
 bool
-MXLogFileHandler::Load(char *buf) {
+MXLogFileHandler::Load(char *buf,
+                       uint64_t data_size) {
     if(!IsOpen()) {
         if (!OpenFile())
             return false;
     }
-    auto res = fread(buf, 1, file_size_, p_file_);
-    __glibcxx_assert(res == file_size_);
+    if (data_size == -1) {
+        data_size = file_size_;
+    }
+    auto res = fread(buf, 1, data_size, p_file_);
+    __glibcxx_assert(res == data_size);
     return true;
 }
 
 bool
 MXLogFileHandler::Write(char *buf,
-                        const uint64_t &data_size,
+                        uint64_t data_size,
                         bool is_sync) {
     if(!IsOpen()) {
         if (!OpenFile())

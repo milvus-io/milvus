@@ -37,16 +37,13 @@ class MXLogBuffer {
     MXLogBuffer(const std::string& mxlog_path, const uint32_t& buffer_size);
     ~MXLogBuffer();
 
-    bool Append(const std::string &table_id,
+    uint64_t Append(const std::string &table_id,
                 const MXLogType& record_type,
                 const size_t& n,
                 const size_t& dim,
                 const float *vectors,
                 const milvus::engine::IDNumbers& vector_ids,
-                const size_t& vector_ids_offset,
-                bool update_file_no,
-                MXLogMetaHandler& meta_handler,
-                uint64_t& lsn);
+                const size_t& vector_ids_offset);
 
     bool Next(std::string &table_id,
               MXLogType& mxl_type,
@@ -62,7 +59,7 @@ class MXLogBuffer {
     uint32_t GetWriterFileNo();
     void SetWriterFileNo(const uint32_t& file_no);
     void ReSet();
-    bool LoadForRecovery(const uint64_t& lsn);
+    bool LoadForRecovery(uint64_t& lsn);
     bool NextInfo(std::string& table_id, uint64_t& next_lsn);
 
  private:

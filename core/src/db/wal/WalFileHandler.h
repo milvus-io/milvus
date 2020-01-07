@@ -35,8 +35,8 @@ class MXLogFileHandler {
     std::string GetFileName();
     bool OpenFile();
     bool CloseFile();
-    bool Load(char *buf);
-    bool Write(char *buf, const uint64_t& data_size, bool is_sync = false);
+    bool Load(char *buf, uint64_t data_size = -1);
+    bool Write(char *buf, uint64_t data_size, bool is_sync = false);
     void ReBorn(const uint64_t& new_file_no);
     uint64_t GetFileSize();
     void SetFileOpenMode(const std::string& open_mode);
