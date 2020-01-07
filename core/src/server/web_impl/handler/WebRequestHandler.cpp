@@ -571,7 +571,7 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
     }
 
     if (nullptr == param->records.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'\' is required to fill vectors")
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
     }
 
     size_t tal_size = 0;
