@@ -57,8 +57,8 @@ check_ccache() {
     fi
 }
 
-if [[ -n "${CHANGE_BRANCH}" && "${BRANCH_NAME}" =~ "PR-" ]];then
-    check_ccache ${CHANGE_BRANCH}
+if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]];then
+    check_ccache ${CHANGE_TARGET}
     check_ccache ${BRANCH_NAME}
 fi
 

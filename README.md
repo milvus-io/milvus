@@ -8,6 +8,7 @@
 ![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
 [![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
 [![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
 
@@ -15,33 +16,22 @@
 
 Milvus is the world's fastest similarity search engine for massive-scale feature vectors. Built with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
-For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md).
 
-Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/core/src/sdk) SDKs. 
+Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/sdk) SDKs. 
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.6.0/).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0.md).
 
 ## Get started
 
-See the [Milvus install guide](https://www.milvus.io/docs/en/userguide/install_milvus/) for using Docker containers. To install Milvus from source code, see [build from source](install.md).
+See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) for using Docker containers. To install Milvus from source code, see [build from source](install.md).
 
-To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/en/reference/milvus_config/).
+To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/v0.6.0/reference/milvus_config.md).
 
 ### Try your first Milvus program
 
-Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/) or [Java example code](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples). 
+Try running a program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples). 
 
-To use C++ example code, use below command:
-
-```shell
- # Run Milvus C++ example
- $ cd [Milvus root path]/core/milvus/bin
- $ ./sdk_simple
-```
-
-## Roadmap
-
-Please read our [roadmap](https://milvus.io/docs/en/roadmap/) for upcoming features.
 
 ## Contribution guidelines
 
@@ -83,7 +73,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 - [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [Milvus FAQ](https://www.milvus.io/docs/en/faq/operational_faq/)
+- [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 

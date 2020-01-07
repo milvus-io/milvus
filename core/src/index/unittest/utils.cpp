@@ -16,6 +16,7 @@
 // under the License.
 
 #include "unittest/utils.h"
+#include "knowhere/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -120,38 +121,27 @@ FileIOWriter::operator()(void* ptr, size_t size) {
 }
 
 knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids) {
-    std::vector<int64_t> shape{nb, dim};
-    auto tensor = knowhere::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
-    std::vector<knowhere::TensorPtr> tensors{tensor};
-    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
-
-    auto id_array = knowhere::ConstructInt64Array((uint8_t*)ids, nb * sizeof(int64_t));
-    std::vector<knowhere::ArrayPtr> arrays{id_array};
-    std::vector<knowhere::FieldPtr> array_fields{knowhere::ConstructInt64Field("id")};
-    auto array_schema = std::make_shared<knowhere::Schema>(tensor_fields);
-
-    auto dataset =
-        std::make_shared<knowhere::Dataset>(std::move(arrays), array_schema, std::move(tensors), tensor_schema);
-    return dataset;
+generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
+    return ret_ds;
 }
 
 knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, float* xb) {
-    std::vector<int64_t> shape{nb, dim};
-    auto tensor = knowhere::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
-    std::vector<knowhere::TensorPtr> tensors{tensor};
-    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
-
-    auto dataset = std::make_shared<knowhere::Dataset>(std::move(tensors), tensor_schema);
-    return dataset;
+generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    return ret_ds;
 }
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->ids();
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *((int64_t*)(ids) + i * k));
         //        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
@@ -160,8 +150,8 @@ AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->ids();
-    auto dists = result->dist();
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
 
     std::stringstream ss_id;
     std::stringstream ss_dist;
@@ -170,7 +160,7 @@ PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
             // ss_id << *(ids->data()->GetValues<int64_t>(1, i * k + j)) << " ";
             // ss_dist << *(dists->data()->GetValues<float>(1, i * k + j)) << " ";
             ss_id << *((int64_t*)(ids) + i * k + j) << " ";
-            ss_dist << *((float*)(dists) + i * k + j) << " ";
+            ss_dist << *((float*)(dist) + i * k + j) << " ";
         }
         ss_id << std::endl;
         ss_dist << std::endl;

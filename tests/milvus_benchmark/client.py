@@ -1,8 +1,8 @@
+import sys
 import pdb
 import random
 import logging
 import json
-import sys
 import time, datetime
 from multiprocessing import Process
 from milvus import Milvus, IndexType, MetricType
@@ -12,7 +12,14 @@ logger = logging.getLogger("milvus_benchmark.client")
 SERVER_HOST_DEFAULT = "127.0.0.1"
 # SERVER_HOST_DEFAULT = "192.168.1.130"
 SERVER_PORT_DEFAULT = 19530
-
+INDEX_MAP = {
+    "flat": IndexType.FLAT,
+    "ivf_flat": IndexType.IVFLAT,
+    "ivf_sq8": IndexType.IVF_SQ8,
+    "nsg": IndexType.RNSG,
+    "ivf_sq8h": IndexType.IVF_SQ8H,
+    "ivf_pq": IndexType.IVF_PQ
+}
 
 def time_wrapper(func):
     """
@@ -28,18 +35,30 @@ def time_wrapper(func):
 
 
 class MilvusClient(object):
-    def __init__(self, table_name=None, ip=None, port=None):
+    def __init__(self, table_name=None, ip=None, port=None, timeout=60):
         self._milvus = Milvus()
         self._table_name = table_name
         try:
+            i = 1
+            start_time = time.time()
             if not ip:
                 self._milvus.connect(
                     host = SERVER_HOST_DEFAULT,
                     port = SERVER_PORT_DEFAULT)
             else:
-                self._milvus.connect(
-                    host = ip,
-                    port = port)
+                # retry connect for remote server
+                while time.time() < start_time + timeout:
+                    try:
+                        self._milvus.connect(
+                            host = ip,
+                            port = port)
+                        if self._milvus.connected() is True:
+                            logger.debug("Try connect times: %d, %s" % (i, round(time.time() - start_time, 2)))
+                            break
+                    except Exception as e:
+                        logger.debug("Milvus connect failed")
+                        i = i + 1
+
         except Exception as e:
             raise e
 
@@ -49,7 +68,7 @@ class MilvusClient(object):
     def check_status(self, status):
         if not status.OK():
             logger.error(status.message)
-            raise Exception("Status not ok")
+            # raise Exception("Status not ok")
 
     def create_table(self, table_name, dimension, index_file_size, metric_type):
         if not self._table_name:
@@ -58,6 +77,10 @@ class MilvusClient(object):
             metric_type = MetricType.L2
         elif metric_type == "ip":
             metric_type = MetricType.IP
+        elif metric_type == "jaccard":
+            metric_type = MetricType.JACCARD
+        elif metric_type == "hamming":
+            metric_type = MetricType.HAMMING
         else:
             logger.error("Not supported metric_type: %s" % metric_type)
         create_param = {'table_name': table_name,
@@ -75,20 +98,8 @@ class MilvusClient(object):
 
     @time_wrapper
     def create_index(self, index_type, nlist):
-        if index_type == "flat":
-            index_type = IndexType.FLAT
-        elif index_type == "ivf_flat":
-            index_type = IndexType.IVFLAT
-        elif index_type == "ivf_sq8":
-            index_type = IndexType.IVF_SQ8
-        elif index_type == "nsg":
-            index_type = IndexType.NSG
-        elif index_type == "ivf_sq8h":
-            index_type = IndexType.IVF_SQ8H
-        elif index_type == "ivf_pq":
-            index_type = IndexType.IVF_PQ
         index_params = {
-            "index_type": index_type,
+            "index_type": INDEX_MAP[index_type],
             "nlist": nlist,
         }
         logger.info("Building index start, table_name: %s, index_params: %s" % (self._table_name, json.dumps(index_params)))
@@ -96,7 +107,18 @@ class MilvusClient(object):
         self.check_status(status)
 
     def describe_index(self):
-        return self._milvus.describe_index(self._table_name)
+        status, result = self._milvus.describe_index(self._table_name)
+        index_type = None
+        for k, v in INDEX_MAP.items():
+            if result._index_type == v:
+                index_type = k
+                break
+        nlist = result._nlist
+        res = {
+            "index_type": index_type,
+            "nlist": nlist
+        }
+        return res
 
     def drop_index(self):
         logger.info("Drop index: %s" % self._table_name)
@@ -106,7 +128,7 @@ class MilvusClient(object):
     def query(self, X, top_k, nprobe):
         status, result = self._milvus.search_vectors(self._table_name, top_k, nprobe, X)
         self.check_status(status)
-        return status, result
+        return result
 
     def count(self):
         return self._milvus.get_table_row_count(self._table_name)[1]
@@ -122,7 +144,7 @@ class MilvusClient(object):
                 continue
             else:
                 break
-        if i < timeout:
+        if i >= timeout:
             logger.error("Delete table timeout")
 
     def describe(self):
@@ -131,14 +153,43 @@ class MilvusClient(object):
     def show_tables(self):
         return self._milvus.show_tables()
 
-    def exists_table(self):
-        status, res = self._milvus.has_table(self._table_name)
+    def exists_table(self, table_name=None):
+        if table_name is None:
+            table_name = self._table_name
+        status, res = self._milvus.has_table(table_name)
         self.check_status(status)
         return res
 
     @time_wrapper
     def preload_table(self):
         return self._milvus.preload_table(self._table_name, timeout=3000)
+
+    def get_server_version(self):
+        status, res = self._milvus.server_version()
+        return res
+
+    def get_server_mode(self):
+        return self.cmd("mode")
+
+    def get_server_commit(self):
+        return self.cmd("build_commit_id")
+
+    def get_server_config(self):
+        return json.loads(self.cmd("get_config *"))
+
+    def get_mem_info(self):
+        result = json.loads(self.cmd("get_system_info"))
+        result_human = {
+            # unit: Gb
+            "memory_used": round(int(result["memory_used"]) / (1024*1024*1024), 2)
+        }
+        return result_human
+
+    def cmd(self, command):
+        status, res = self._milvus._cmd(command)
+        logger.info("Server command: %s, result: %s" % (command, res))
+        self.check_status(status)
+        return res
 
 
 def fit(table_name, X):
@@ -265,6 +316,12 @@ if __name__ == "__main__":
     # data = mmap_fvecs("/poc/deep1b/deep1B_queries.fvecs")
     # data = sklearn.preprocessing.normalize(data, axis=1, norm='l2')
     # np.save("/test/milvus/deep1b/query.npy", data)
+    dimension = 4096
+    insert_xb = 10000
+    insert_vectors = [[random.random() for _ in range(dimension)] for _ in range(insert_xb)]
+    data = sklearn.preprocessing.normalize(insert_vectors, axis=1, norm='l2')
+    np.save("/test/milvus/raw_data/random/query_%d.npy" % dimension, data)
+    sys.exit()
 
     total_size = 100000000
     # total_size = 1000000000

@@ -42,6 +42,7 @@ static constexpr int64_t INSERT_LOOP = 1000;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
+
 milvus::engine::meta::TableSchema
 BuildTableSchema() {
     milvus::engine::meta::TableSchema table_info;
@@ -737,9 +738,11 @@ TEST_F(DBTest, INDEX_TEST) {
     fiu_disable("DBImpl_UpdateTableIndexRecursively_FailUpdateTableIndex");
 
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
+#endif
 #endif
 
     milvus::engine::TableIndex index_out;
