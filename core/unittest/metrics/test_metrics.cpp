@@ -30,17 +30,9 @@
 #include "db/meta/SqliteMetaImpl.h"
 
 TEST_F(MetricTest, METRIC_TEST) {
-    milvus::server::Config::GetInstance().SetMetricConfigCollector("zabbix");
-    milvus::server::Metrics::GetInstance();
-    milvus::server::Config::GetInstance().SetMetricConfigCollector("prometheus");
-    milvus::server::Metrics::GetInstance();
-
     milvus::server::SystemInfo::GetInstance().Init();
-//    server::Metrics::GetInstance().Init();
-//    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
     milvus::server::Metrics::GetInstance().Init();
 
-//    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
     std::cout << milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
 
