@@ -100,11 +100,13 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& config);
 
+#ifdef MILVUS_GPU_VERSION
     StatusDto::ObjectWrapper
     GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto);
 
     StatusDto::ObjectWrapper
     SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
+#endif
 
     StatusDto::ObjectWrapper
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);

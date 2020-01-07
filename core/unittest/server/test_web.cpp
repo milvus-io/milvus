@@ -422,12 +422,16 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("PUT", "/config/advanced", setAdvanced,
              BODY_DTO(milvus::server::web::AdvancedConfigDto::ObjectWrapper, body))
 
+#ifdef MILVUS_GPU_VERSION
+
     API_CALL("OPTIONS", "config/gpu_resources", optionsGpuConfig)
 
     API_CALL("GET", "/config/gpu_resources", getGPUConfig)
 
     API_CALL("PUT", "/config/gpu_resources", setGPUConfig,
              BODY_DTO(milvus::server::web::GPUConfigDto::ObjectWrapper, body))
+
+#endif
 
     API_CALL("OPTIONS", "/tables", optionsTables)
 
@@ -609,8 +613,12 @@ TEST_F(WebControllerTest, OPTIONS) {
     response = client_ptr->optionsAdvanced(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
+#ifdef MILVUS_GPU_VERSION
+
     response = client_ptr->optionsGpuConfig(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+#endif
 
     response = client_ptr->optionsIndexes("test", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -936,28 +944,20 @@ TEST_F(WebControllerTest, ADVANCEDCONFIG) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
 #ifdef MILVUS_GPU_VERSION
-    
+
     config_dto->gpu_search_threshold = 1000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    
+
 #endif
-    
+
     config_dto->use_blas_threshold = 1000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
+#ifdef MILVUS_GPU_VERSION
 TEST_F(WebControllerTest, GPUCONFIG) {
-#ifndef MILVUS_GPU_VERSION
-    auto response = client_ptr->getGPUConfig(conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-
-    auto gpu_config_dto = milvus::server::web::GPUConfigDto::createShared();
-    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-#else
-
     auto response = client_ptr->getGPUConfig(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
@@ -984,9 +984,9 @@ TEST_F(WebControllerTest, GPUCONFIG) {
 
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
 
 #endif
-}
 
 TEST_F(WebControllerTest, DEVICESCONFIG) {
     auto response = WebControllerTest::client_ptr->getDevices(conncetion_ptr);

@@ -31,7 +31,11 @@ class AdvancedConfigDto : public OObject {
     DTO_FIELD(Int64, cpu_cache_capacity) = 4;
     DTO_FIELD(Boolean, cache_insert_data) = false;
     DTO_FIELD(Int64, use_blas_threshold) = 1100;
+
+#ifdef MILVUS_GPU_VERSION
     DTO_FIELD(Int64, gpu_search_threshold) = 1000;
+
+#endif
 };
 
 class GPUConfigDto : public OObject {

@@ -22,15 +22,14 @@
 #include <string>
 #include <vector>
 
-#include "utils/Log.h"
 #include "metrics/SystemInfo.h"
+#include "utils/Log.h"
 
 #include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
-
 
 namespace milvus {
 namespace server {
@@ -181,7 +180,6 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
 #endif
 
     ASSIGN_RETURN_STATUS_DTO(status)
-
 }
 
 StatusDto::ObjectWrapper
@@ -229,13 +227,10 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
+#ifdef MILVUS_GPU_VERSION
+
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-#ifndef MILVUS_GPU_VERSION
-    RETURN_STATUS_DTO(UNEXPECTED_ERROR, "The version not support GPU resources");
-
-#else
-
     Config& config = Config::GetInstance();
 
     bool enable;
@@ -243,7 +238,6 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
-
     gpu_config_dto->enable = enable;
 
     if (!enable) {
@@ -280,17 +274,14 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
+}
 
 #endif
-}
+
+#ifdef MILVUS_GPU_VERSION
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-#ifndef MILVUS_GPU_VERSION
-    RETURN_STATUS_DTO(UNEXPECTED_ERROR, "The version not support GPU resources");
-
-#else
-
     Config& config = Config::GetInstance();
 
     if (nullptr == gpu_config_dto->enable.get()) {
@@ -354,9 +345,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
+}
 
 #endif
-}
 
 StatusDto::ObjectWrapper
 WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schema) {
@@ -553,17 +544,12 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
 StatusDto::ObjectWrapper
 WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
                           VectorIdsDto::ObjectWrapper& ids_dto) {
-
-    ENGINE_LOG_DEBUG << "<Web> | controller | handler | start";
-
     std::vector<int64_t> ids;
     if (nullptr != param->ids.get() && param->ids->count() > 0) {
         for (int64_t i = 0; i < param->ids->count(); i++) {
             ids.emplace_back(param->ids->get(i)->getValue());
         }
     }
-
-    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Obtain all ids";
 
     if (nullptr == param->records.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'\' is required to fill vectors")
@@ -574,24 +560,17 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
         tal_size += param->records->get(i)->count();
     }
 
-    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Obtain datas size";
-
     std::vector<float> datas(tal_size);
     size_t index_offset = 0;
-    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item){
-        row_item->forEach([&datas, &index_offset](const OFloat32& item){
+    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
+        row_item->forEach([&datas, &index_offset](const OFloat32& item) {
             datas[index_offset] = item->getValue();
-            index_offset ++;
+            index_offset++;
         });
     });
 
-
-    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Obtain all datas. " << "total get data size: " << index_offset;
-
     auto status = request_handler_.Insert(context_ptr_, table_name->std_str(), param->records->count(), datas,
                                           param->tag->std_str(), ids);
-
-    ENGINE_LOG_DEBUG << "<Web> | controller | handler | Insert done";
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
@@ -599,8 +578,6 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
             ids_dto->ids->pushBack(std::to_string(id).c_str());
         }
     }
-
-    ENGINE_LOG_DEBUG << "<Web> | controller | handler | return";
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -635,16 +612,15 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     }
 
     size_t tal_size = 0;
-    search_request->records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& item){
-        tal_size += item->count();
-    });
-    
+    search_request->records->forEach(
+        [&tal_size](const OList<OFloat32>::ObjectWrapper& item) { tal_size += item->count(); });
+
     std::vector<float> datas(tal_size);
     size_t index_offset = 0;
-    search_request->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& elem){
-        elem->forEach([&datas, &index_offset](const OFloat32& item){
+    search_request->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& elem) {
+        elem->forEach([&datas, &index_offset](const OFloat32& item) {
             datas[index_offset] = item->getValue();
-            index_offset ++;
+            index_offset++;
         });
     });
 
@@ -657,7 +633,7 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    
+
     results_dto->num = result.row_num_;
     results_dto->results = results_dto->results->createShared();
     if (0 == result.row_num_) {
