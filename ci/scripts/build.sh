@@ -21,9 +21,10 @@ BUILD_COVERAGE="OFF"
 RUN_CPPLINT="OFF"
 GPU_VERSION="OFF"
 WITH_MKL="OFF"
+FIU_ENABLE="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "o:t:b:f:pgulcmh" arg
+while getopts "o:t:b:f:pgulcmih" arg
 do
         case $arg in
              o)
@@ -57,6 +58,9 @@ do
              m)
                 WITH_MKL="ON"
                 ;;
+             i)
+                FIU_ENABLE="ON"
+                ;;
              h) # help
                 echo "
 
@@ -71,10 +75,11 @@ parameter:
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
 -m: build with MKL(default: OFF)
+-i: build FIU_ENABLE(default: OFF)
 -h: help
 
 usage:
-./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-u] [-l] [-c] [-m] [-h]
+./build.sh -o \${INSTALL_PREFIX} -t \${BUILD_TYPE} -b \${CORE_BUILD_DIR} -f \${FAISS_ROOT} [-p] [-g] [-u] [-l] [-c] [-m] [-i] [-h]
                 "
                 exit 0
                 ;;
@@ -105,6 +110,7 @@ CMAKE_CMD="cmake \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DArrow_SOURCE=AUTO \
 -DFAISS_SOURCE=AUTO \
+-DMILVUS_WITH_FIU=${FIU_ENABLE} \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
