@@ -25,9 +25,11 @@
 #include <thread>
 #include <utility>
 
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/SearchJob.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -240,11 +242,27 @@ XSearchTask::Execute() {
             double span = rc.RecordSection(hdr + ", do search");
             //            search_job->AccumSearchCost(span);
 
+            // step 2.5: map offsets to user-provided ids
+            std::string segment_dir;
+            engine::utils::GetParentPath(file_->location_, segment_dir);
+            segment::SegmentReader segment_reader(segment_dir);
+            std::vector<segment::doc_id_t> uids;
+            auto status = segment_reader.LoadUids(uids);
+            if (!status.ok()) {
+                search_job->GetStatus() = s;
+                search_job->SearchDone(index_id_);
+                return;
+            }
+            std::vector<int64_t> mapped_ids;
+            for (auto& offset : output_ids) {
+                mapped_ids.emplace_back(uids[offset]);
+            }
+
             // step 3: pick up topk result
             auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
-                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
+                XSearchTask::MergeTopkToResultSet(mapped_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 
