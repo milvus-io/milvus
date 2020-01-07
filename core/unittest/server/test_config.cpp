@@ -177,7 +177,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
     ASSERT_TRUE(str_val == storage_secondary_path);
 
-    bool storage_minio_enable = false;
+    bool storage_minio_enable = true;
     ASSERT_TRUE(config.SetStorageConfigMinioEnable(std::to_string(storage_minio_enable)).ok());
     ASSERT_TRUE(config.GetStorageConfigMinioEnable(bool_val).ok());
     ASSERT_TRUE(bool_val == storage_minio_enable);
@@ -213,19 +213,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetMetricConfigEnableMonitor(bool_val).ok());
     ASSERT_TRUE(bool_val == metric_enable_monitor);
 
-    std::string metric_collector = "prometheus";
-    ASSERT_TRUE(config.SetMetricConfigCollector(metric_collector).ok());
-    ASSERT_TRUE(config.GetMetricConfigCollector(str_val).ok());
-    ASSERT_TRUE(str_val == metric_collector);
+    std::string metric_address = "192.168.0.2";
+    ASSERT_TRUE(config.SetMetricConfigAddress(metric_address).ok());
+    ASSERT_TRUE(config.GetMetricConfigAddress(str_val).ok());
+    ASSERT_TRUE(str_val == metric_address);
 
-    std::string metric_prometheus_address = "127.0.0.1";
-    ASSERT_TRUE(config.GetMetricConfigPrometheusAddress(str_val).ok());
-    ASSERT_TRUE(str_val == metric_prometheus_address);
-
-    std::string metric_prometheus_port = "2222";
-    ASSERT_TRUE(config.SetMetricConfigPrometheusPort(metric_prometheus_port).ok());
-    ASSERT_TRUE(config.GetMetricConfigPrometheusPort(str_val).ok());
-    ASSERT_TRUE(str_val == metric_prometheus_port);
+    std::string metric_port = "2222";
+    ASSERT_TRUE(config.SetMetricConfigPort(metric_port).ok());
+    ASSERT_TRUE(config.GetMetricConfigPort(str_val).ok());
+    ASSERT_TRUE(str_val == metric_port);
 
     /* cache config */
     int64_t cache_cpu_cache_capacity = 1;
@@ -523,11 +519,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     /* metric config */
     ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
 
-    ASSERT_FALSE(config.SetMetricConfigCollector("zilliz").ok());
+    ASSERT_FALSE(config.SetMetricConfigAddress("127.0.0").ok());
 
-    ASSERT_FALSE(config.SetMetricConfigPrometheusAddress("127.0.0").ok());
-
-    ASSERT_FALSE(config.SetMetricConfigPrometheusPort("0xff").ok());
+    ASSERT_FALSE(config.SetMetricConfigPort("0xff").ok());
 
     /* cache config */
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("a").ok());
