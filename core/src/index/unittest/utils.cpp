@@ -39,6 +39,11 @@ DataGen::Init_with_default() {
 }
 
 void
+BinaryDataGen::Init_with_binary_default() {
+    Generate(dim, nb, nq);
+}
+
+void
 DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     this->nb = nb;
     this->nq = nq;
@@ -50,6 +55,21 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
+}
+
+void
+BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
+    this->nb = nb;
+    this->nq = nq;
+    this->dim = dim;
+
+    int64_t dim_x = dim / 8;
+    GenBinaryAll(dim_x, nb, xb, ids, nq, xq);
+    assert(xb.size() == (size_t)dim_x * nb);
+    assert(xq.size() == (size_t)dim_x * nq);
+
+    base_dataset = generate_binary_dataset(nb, dim, xb.data(), ids.data());
+    query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
 }
 
 knowhere::DatasetPtr
@@ -79,6 +99,23 @@ GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int
 }
 
 void
+GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
+             const int64_t& nq, std::vector<uint8_t>& xq) {
+    xb.resize(nb * dim);
+    xq.resize(nq * dim);
+    ids.resize(nb);
+    GenBinaryAll(dim, nb, xb.data(), ids.data(), nq, xq.data());
+}
+
+void
+GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, const int64_t& nq, uint8_t* xq) {
+    GenBinaryBase(dim, nb, xb, ids);
+    for (int64_t i = 0; i < nq * dim; ++i) {
+        xq[i] = xb[i];
+    }
+}
+
+void
 GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids) {
     for (auto i = 0; i < nb; ++i) {
         for (auto j = 0; j < dim; ++j) {
@@ -86,6 +123,17 @@ GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids) {
             xb[i * dim + j] = drand48();
         }
         xb[dim * i] += i / 1000.;
+        ids[i] = i;
+    }
+}
+
+void
+GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids) {
+    for (auto i = 0; i < nb; ++i) {
+        for (auto j = 0; j < dim; ++j) {
+            // p_data[i * d + j] = float(base + i);
+            xb[i * dim + j] = (uint8_t)lrand48();
+        }
         ids[i] = i;
     }
 }
@@ -131,7 +179,26 @@ generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids) {
 }
 
 knowhere::DatasetPtr
+generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
+    return ret_ds;
+}
+
+knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    return ret_ds;
+}
+
+knowhere::DatasetPtr
+generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
     auto ret_ds = std::make_shared<knowhere::Dataset>();
     ret_ds->Set(knowhere::meta::ROWS, nb);
     ret_ds->Set(knowhere::meta::DIM, dim);

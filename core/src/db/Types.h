@@ -17,20 +17,23 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
-
 #include <faiss/Index.h>
 #include <stdint.h>
+
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "db/engine/ExecutionEngine.h"
+#include "segment/Types.h"
+
 namespace milvus {
 namespace engine {
 
-typedef int64_t IDNumber;
+// TODO
+typedef segment::doc_id_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
@@ -41,6 +44,14 @@ struct TableIndex {
     int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     int32_t nlist_ = 16384;
     int32_t metric_type_ = (int)MetricType::L2;
+};
+
+struct VectorsData {
+    std::string field_name_ = "default";  // TODO(zhiru)
+    uint64_t vector_count_ = 0;
+    std::vector<float> float_data_;
+    std::vector<uint8_t> binary_data_;
+    IDNumbers id_array_;
 };
 
 using File2RefCount = std::map<std::string, int64_t>;

@@ -97,7 +97,14 @@ struct IndexBinary {
   virtual void search(idx_t n, const uint8_t *x, idx_t k,
                       int32_t *distances, idx_t *labels) const = 0;
 
-  /** Query n vectors of dimension d to the index.
+  virtual void search (idx_t n, const uint8_t *x, idx_t k,
+      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const = 0;
+
+  virtual void searchById (idx_t n, const uint8_t *x, idx_t k,
+      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const = 0;
+
+
+    /** Query n vectors of dimension d to the index.
    *
    * return all vectors with distance < radius. Note that many
    * indexes do not implement the range_search (only the k-NN search

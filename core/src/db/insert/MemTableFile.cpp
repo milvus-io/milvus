@@ -16,13 +16,19 @@
 // under the License.
 
 #include "db/insert/MemTableFile.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <string>
+
 #include "db/Constants.h"
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
-
-#include <cmath>
-#include <string>
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -32,9 +38,12 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
-        execution_engine_ = EngineFactory::Build(
+        /*execution_engine_ = EngineFactory::Build(
             table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
-            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);
+            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);*/
+        std::string directory;
+        utils::GetParentPath(table_file_schema_.location_, directory);
+        segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
 }
 
@@ -53,7 +62,7 @@ MemTableFile::CreateTableFile() {
 }
 
 Status
-MemTableFile::Add(const VectorSourcePtr& source, IDNumbers& vector_ids) {
+MemTableFile::Add(VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
@@ -62,18 +71,54 @@ MemTableFile::Add(const VectorSourcePtr& source, IDNumbers& vector_ids) {
         return Status(DB_ERROR, "Not able to create table file");
     }
 
-    size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
+    size_t single_vector_mem_size = source->SingleVectorSize(table_file_schema_.dimension_);
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status =
-            source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added, vector_ids);
+        auto status = source->Add(/*execution_engine_,*/ segment_writer_ptr_, table_file_schema_, num_vectors_to_add,
+                                  num_vectors_added);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
         return status;
     }
+    return Status::OK();
+}
+
+Status
+MemTableFile::Delete(segment::doc_id_t doc_id) {
+    // Use bloom filter to check whether the id is present in this table file
+    std::string segment_dir;
+    utils::GetParentPath(table_file_schema_.location_, segment_dir);
+    segment::SegmentReader segment_reader(segment_dir);
+    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+    if (!id_bloom_filter_ptr->Check(doc_id)) {
+        return Status::OK();
+    }
+
+    // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
+    int vector_type_size;
+    if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
+        vector_type_size = sizeof(uint8_t);
+    } else {
+        vector_type_size = sizeof(float);
+    }
+
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+    auto vectors_map = segment_ptr->vectors_ptr_->vectors;
+    for (auto& it : vectors_map) {
+        // Check wither the doc_id is indeed present, if yes, delete it's corresponding buffer
+        auto uids = it.second->GetUids();
+        auto found = std::find(uids.begin(), uids.end(), doc_id);
+        if (found != uids.end()) {
+            auto offset = std::distance(uids.begin(), found);
+            it.second->Erase(offset, vector_type_size);
+        }
+    }
+
     return Status::OK();
 }
 
@@ -89,35 +134,50 @@ MemTableFile::GetMemLeft() {
 
 bool
 MemTableFile::IsFull() {
-    size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
+    size_t single_vector_mem_size = table_file_schema_.dimension_ * FLOAT_TYPE_SIZE;
     return (GetMemLeft() < single_vector_mem_size);
 }
 
 Status
-MemTableFile::Serialize() {
+MemTableFile::Serialize(uint64_t wal_lsn) {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    execution_engine_->Serialize();
-    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
-    table_file_schema_.row_count_ = execution_engine_->Count();
+    segment_writer_ptr_->Serialize();
 
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
+    //    execution_engine_->Serialize();
+
+    // TODO(zhiru):
+    //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
+    //    table_file_schema_.row_count_ = execution_engine_->Count();
+
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
-    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
+        table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
         table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::TableFileSchema::TO_INDEX
                                                                                       : meta::TableFileSchema::RAW;
     } else {
         table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
     }
 
+    // Set table file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
+    // GetTableFilesByFlushLSN() in meta.
+    table_file_schema_.flush_lsn_ = wal_lsn;
+
     auto status = meta_->UpdateTableFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
+                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
+    // TODO(zhiru): cache
+    /*
+        if (options_.insert_cache_immediately_) {
+            execution_engine_->Cache();
+        }
+    */
     if (options_.insert_cache_immediately_) {
-        execution_engine_->Cache();
+        segment_writer_ptr_->Cache();
     }
 
     return status;

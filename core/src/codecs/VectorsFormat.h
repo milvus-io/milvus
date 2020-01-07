@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "segment/Vectors.h"
 #include "store/Directory.h"
 
@@ -26,11 +28,17 @@ namespace codec {
 class VectorsFormat {
  public:
     virtual void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) = 0;
+    read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) = 0;
 
     virtual void
-    write(const store::DirectoryPtr &directory_ptr, const segment::Vectors& vectors) = 0;
+    write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) = 0;
+
+    // TODO(zhiru): this is an ugly but convenient method
+    virtual void
+    readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) = 0;
 };
+
+using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;
 
 }  // namespace codec
 }  // namespace milvus

@@ -18,39 +18,39 @@
 #pragma once
 
 #include <memory>
+#include <vector>
+
+#include "Types.h"
 
 namespace milvus {
 namespace segment {
 
 class Vector {
  public:
-    Vector(void* data, size_t nbytes, int64_t* uids);
+    Vector(std::vector<uint8_t> data, std::vector<doc_id_t> uids);
 
-    Vector();
-
-    void
-    SetData(void* data);
+    Vector() = default;
 
     void
-    SetNbytes(size_t nbytes);
+    AddData(const std::vector<uint8_t>& data);
 
     void
-    SetUids(int64_t* uids);
+    AddUids(const std::vector<doc_id_t>& uids);
 
-    void
-    SetCount(size_t count);
-
-    void*
+    const std::vector<uint8_t>&
     GetData() const;
 
-    size_t
-    GetNumBytes() const;
-
-    int64_t*
+    const std::vector<doc_id_t>&
     GetUids() const;
 
     size_t
-    GetCount() const;
+    GetCount();
+
+    size_t
+    GetDimension();
+
+    void
+    Erase(size_t offset, int vector_type_size);
 
     // No copy and move
     Vector(const Vector&) = delete;
@@ -62,10 +62,9 @@ class Vector {
     operator=(Vector&&) = delete;
 
  private:
-    void* data_;
-    size_t nbytes_;
-    int64_t* uids_;
-    size_t count_;
+    std::vector<uint8_t> data_;
+    // TODO: since all vector fields should correspond to the same set of uids, save them in Vectors instead?
+    std::vector<doc_id_t> uids_;
 };
 
 using VectorPtr = std::shared_ptr<Vector>;

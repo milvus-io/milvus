@@ -49,7 +49,7 @@ else ()
     define_option(KNOWHERE_GPU_VERSION "Build GPU version" OFF)
 endif ()
 
-define_option(CUSTOMIZATION "Build with customized FAISS library" OFF)
+define_option(CUSTOMIZATION "Build with customized FAISS library" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")

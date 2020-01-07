@@ -28,10 +28,13 @@ class DefaultVectorsFormat : public VectorsFormat {
     DefaultVectorsFormat() = default;
 
     void
-    read(const store::DirectoryPtr& directory_ptr, segment::Vectors& vectors_read) override;
+    read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) override;
 
     void
-    write(const store::DirectoryPtr& directory_ptr, const segment::Vectors& vectors) override;
+    write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) override;
+
+    void
+    readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) override;
 
     // No copy and move
     DefaultVectorsFormat(const DefaultVectorsFormat&) = delete;

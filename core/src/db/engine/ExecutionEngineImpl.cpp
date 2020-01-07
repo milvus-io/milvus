@@ -16,8 +16,16 @@
 // under the License.
 
 #include "db/engine/ExecutionEngineImpl.h"
+
+#include <faiss/utils/ConcurrentBitset.h>
+
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
@@ -25,19 +33,50 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-
+#include "utils/ValidationUtil.h"
+#include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
 #include "wrapper/VecIndex.h"
 
-#include <stdexcept>
-#include <utility>
-#include <vector>
-
 //#define ON_SEARCH
 namespace milvus {
 namespace engine {
+
+namespace {
+
+Status
+MappingMetricType(MetricType metric_type, knowhere::METRICTYPE& kw_type) {
+    switch (metric_type) {
+        case MetricType::IP:
+            kw_type = knowhere::METRICTYPE::IP;
+            break;
+        case MetricType::L2:
+            kw_type = knowhere::METRICTYPE::L2;
+            break;
+        case MetricType::HAMMING:
+            kw_type = knowhere::METRICTYPE::HAMMING;
+            break;
+        case MetricType::JACCARD:
+            kw_type = knowhere::METRICTYPE::JACCARD;
+            break;
+        case MetricType::TANIMOTO:
+            kw_type = knowhere::METRICTYPE::TANIMOTO;
+            break;
+        default:
+            return Status(DB_ERROR, "Unsupported metric type");
+    }
+
+    return Status::OK();
+}
+
+bool
+IsBinaryIndexType(IndexType type) {
+    return type == IndexType::FAISS_BIN_IDMAP || type == IndexType::FAISS_BIN_IVFLAT_CPU;
+}
+
+}  // namespace
 
 class CachedQuantizer : public cache::DataObj {
  public:
@@ -61,7 +100,10 @@ class CachedQuantizer : public cache::DataObj {
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
                                          MetricType metric_type, int32_t nlist)
     : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
-    index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
+    EngineType tmp_index_type = server::ValidationUtil::IsBinaryMetricType((int32_t)metric_type)
+                                    ? EngineType::FAISS_BIN_IDMAP
+                                    : EngineType::FAISS_IDMAP;
+    index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }
@@ -69,19 +111,35 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     TempMetaConf temp_conf;
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = dimension;
-    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    auto status = MappingMetricType(metric_type, temp_conf.metric_type);
+    if (!status.ok()) {
+        throw Exception(DB_ERROR, status.message());
+    }
+
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->Match(temp_conf);
 
-    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
+    ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
+    if (auto bf_index = std::dynamic_pointer_cast<BFIndex>(index_)) {
+        ec = bf_index->Build(conf);
+    } else if (auto bf_bin_index = std::dynamic_pointer_cast<BinBFIndex>(index_)) {
+        ec = bf_bin_index->Build(conf);
+    }
     if (ec != KNOWHERE_SUCCESS) {
         throw Exception(DB_ERROR, "Build index error");
     }
+
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    segment_reader_ptr_ = std::make_shared<segment::SegmentReader>(segment_dir);
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
                                          MetricType metric_type, int32_t nlist)
     : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    segment_reader_ptr_ = std::make_shared<segment::SegmentReader>(segment_dir);
 }
 
 VecIndexPtr
@@ -120,6 +178,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             if (gpu_resource_enable) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
@@ -128,6 +187,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             }
             break;
         }
+#endif
 #endif
         case EngineType::FAISS_PQ: {
 #ifdef MILVUS_GPU_VERSION
@@ -144,6 +204,14 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::SPTAG_BKT: {
             index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
+            break;
+        }
+        case EngineType::FAISS_BIN_IDMAP: {
+            index = GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+            break;
+        }
+        case EngineType::FAISS_BIN_IVFFLAT: {
+            index = GetVecIndexFactory(IndexType::FAISS_BIN_IVFLAT_CPU);
             break;
         }
         default: {
@@ -240,6 +308,12 @@ ExecutionEngineImpl::AddWithIds(int64_t n, const float* xdata, const int64_t* xi
     return status;
 }
 
+Status
+ExecutionEngineImpl::AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) {
+    auto status = index_->Add(n, xdata, xids);
+    return status;
+}
+
 size_t
 ExecutionEngineImpl::Count() const {
     if (index_ == nullptr) {
@@ -251,7 +325,11 @@ ExecutionEngineImpl::Count() const {
 
 size_t
 ExecutionEngineImpl::Size() const {
-    return (size_t)(Count() * Dimension()) * sizeof(float);
+    if (IsBinaryIndexType(index_->GetType())) {
+        return (size_t)(Count() * Dimension() / 8);
+    } else {
+        return (size_t)(Count() * Dimension()) * sizeof(float);
+    }
 }
 
 size_t
@@ -285,9 +363,10 @@ ExecutionEngineImpl::Serialize() {
     return status;
 }
 
+/*
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         try {
@@ -309,6 +388,87 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
     if (!already_in_cache && to_cache) {
         Cache();
+    }
+    return Status::OK();
+}
+*/
+
+Status
+ExecutionEngineImpl::Load(bool to_cache) {
+    // TODO(zhiru): refactor
+
+    if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
+        index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
+                                                        : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+        bool in_cache;
+        auto status = segment_reader_ptr_->LoadCache(in_cache);
+        if (!in_cache) {
+            status = segment_reader_ptr_->Load();
+            if (!status.ok()) {
+                std::string msg = "Failed to load segment from " + location_;
+                ENGINE_LOG_ERROR << msg;
+                return Status(DB_ERROR, msg);
+            }
+        }
+        segment::SegmentPtr segment_ptr;
+        segment_reader_ptr_->GetSegment(segment_ptr);
+        auto& vectors_map = segment_ptr->vectors_ptr_->vectors;
+        auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
+
+        // TODO(zhiru): Load all vector fields to a single VecIndex
+        for (auto& kv : vectors_map) {
+            auto vectors = kv.second->GetData();
+
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                std::make_shared<faiss::ConcurrentBitset>(kv.second->GetCount());
+            for (auto& offset : deleted_docs) {
+                if (!concurrent_bitset_ptr->test(offset)) {
+                    concurrent_bitset_ptr->set(offset);
+                }
+            }
+            if (index_type_ == EngineType::FAISS_IDMAP) {
+                std::vector<float> float_vectors;
+                float_vectors.resize(kv.second->GetCount());
+                memcpy(float_vectors.data(), vectors.data(), vectors.size());
+                status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(kv.second->GetCount(),
+                                                                                  float_vectors.data(), Config());
+                status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+            } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
+                status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(kv.second->GetCount(),
+                                                                                     vectors.data(), Config());
+                status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+            }
+            if (!status.ok()) {
+                return status;
+            }
+        }
+        if (!in_cache && to_cache) {
+            Cache();
+        }
+    } else {
+        std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+        bool already_in_cache = (index_ != nullptr);
+        if (!already_in_cache) {
+            try {
+                double physical_size = PhysicalSize();
+                server::CollectExecutionEngineMetrics metrics(physical_size);
+                index_ = read_index(location_);
+                if (index_ == nullptr) {
+                    std::string msg = "Failed to load index from " + location_;
+                    ENGINE_LOG_ERROR << msg;
+                    return Status(DB_ERROR, msg);
+                } else {
+                    ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+                }
+            } catch (std::exception& e) {
+                ENGINE_LOG_ERROR << e.what();
+                return Status(DB_ERROR, e.what());
+            }
+        }
+
+        if (!already_in_cache && to_cache) {
+            Cache();
+        }
     }
     return Status::OK();
 }
@@ -451,6 +611,7 @@ ExecutionEngineImpl::CopyToCpu() {
 
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {
+    // TODO(zhiru): merge raw files, applying deletes, contruct bloom filter
     if (location == location_) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
@@ -481,6 +642,14 @@ ExecutionEngineImpl::Merge(const std::string& location) {
             ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
         }
         return status;
+    } else if (auto bin_index = std::dynamic_pointer_cast<BinBFIndex>(to_merge)) {
+        auto status = index_->Add(bin_index->Count(), bin_index->GetRawVectors(), bin_index->GetRawIds());
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to merge: " << location << " to: " << location_;
+        } else {
+            ENGINE_LOG_DEBUG << "Finish merge index file: " << location;
+        }
+        return status;
     } else {
         return Status(DB_ERROR, "file index type is not idmap");
     }
@@ -491,7 +660,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    if (from_index == nullptr) {
+    auto bin_from_index = std::dynamic_pointer_cast<BinBFIndex>(index_);
+    if (from_index == nullptr && bin_from_index == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: from_index is null, failed to build index";
         return nullptr;
     }
@@ -505,13 +675,20 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = Dimension();
     temp_conf.nlist = nlist_;
-    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
     temp_conf.size = Count();
+    auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
+    if (!status.ok()) {
+        throw Exception(DB_ERROR, status.message());
+    }
 
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     auto conf = adapter->Match(temp_conf);
 
-    auto status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+    if (from_index) {
+        status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+    } else if (bin_from_index) {
+        status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
+    }
     if (!status.ok()) {
         throw Exception(DB_ERROR, status.message());
     }
@@ -578,6 +755,40 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     }
 #endif
 
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+    }
+
+    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+    temp_conf.k = k;
+    temp_conf.nprobe = nprobe;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    if (hybrid) {
+        HybridLoad();
+    }
+
+    auto status = index_->Search(n, data, distances, labels, conf);
+
+    if (hybrid) {
+        HybridUnset();
+    }
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
+    }
+    return status;
+}
+
+Status
+ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances,
+                            int64_t* labels, bool hybrid) {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");

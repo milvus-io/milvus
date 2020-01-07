@@ -73,9 +73,9 @@ NSG::Load(const BinarySet& index_binary) {
 DatasetPtr
 NSG::Search(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
+    //    if (build_cfg != nullptr) {
+    //        build_cfg->CheckValid();  // throw exception
+    //    }
 
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");

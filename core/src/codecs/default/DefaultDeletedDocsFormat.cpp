@@ -26,9 +26,9 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocs& deleted_docs) {
+DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
     std::string dir_path = directory_ptr->GetDirPath();
-    const std::string del_file_path = dir_path + "/" + deleted_docs.GetName() + deleted_docs_extension_;
+    const std::string del_file_path = dir_path + "/" + deleted_docs->GetName() + deleted_docs_extension_;
     FILE* del_file = fopen(del_file_path.c_str(), "rb");
     if (del_file == nullptr) {
         std::string err_msg = "Failed to open file: " + del_file_path;
@@ -45,18 +45,18 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
 }
 
 void
-DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocs& deleted_docs) {
+DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) {
     std::string dir_path = directory_ptr->GetDirPath();
-    const std::string del_file_path = dir_path + "/" + deleted_docs.GetName() + deleted_docs_extension_;
-    FILE* del_file = fopen(del_file_path.c_str(), "wb");
+    const std::string del_file_path = dir_path + "/" + deleted_docs->GetName() + deleted_docs_extension_;
+    FILE* del_file = fopen(del_file_path.c_str(), "ab");  // TODO(zhiru): append mode
     if (del_file == nullptr) {
         std::string err_msg = "Failed to open file: " + del_file_path;
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
-    auto deleted_docs_list = deleted_docs.GetDeletedDocs();
-    fwrite((void*)(deleted_docs_list.data()), sizeof(segment::doc_id_t), deleted_docs.GetSize(), del_file);
+    auto deleted_docs_list = deleted_docs->GetDeletedDocs();
+    fwrite((void*)(deleted_docs_list.data()), sizeof(segment::doc_id_t), deleted_docs->GetSize(), del_file);
     fclose(del_file);
 }
 

@@ -161,4 +161,13 @@ ConnectionImpl::DropPartition(const PartitionParam& param) {
     return client_proxy_->DropPartition(param);
 }
 
+Status
+ConnectionImpl::GetConfig(const std::string& node_name, std::string& value) const {
+    return client_proxy_->GetConfig(node_name, value);
+}
+
+Status
+ConnectionImpl::SetConfig(const std::string& node_name, const std::string& value) const {
+    return client_proxy_->SetConfig(node_name, value);
+}
 }  // namespace milvus

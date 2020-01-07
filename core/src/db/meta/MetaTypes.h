@@ -17,14 +17,14 @@
 
 #pragma once
 
-#include "db/Constants.h"
-#include "db/engine/ExecutionEngine.h"
-#include "src/version.h"
-
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "db/Constants.h"
+#include "db/engine/ExecutionEngine.h"
+#include "src/version.h"
 
 namespace milvus {
 namespace engine {
@@ -62,6 +62,7 @@ struct TableSchema {
     std::string owner_table_;
     std::string partition_tag_;
     std::string version_ = CURRENT_VERSION;
+    uint64_t flush_lsn_ = 0;
 };  // TableSchema
 
 struct TableFileSchema {
@@ -84,6 +85,7 @@ struct TableFileSchema {
     size_t row_count_ = 0;
     DateT date_ = EmptyDate;
     uint16_t dimension_ = 0;
+    // TODO(zhiru)
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
@@ -91,7 +93,8 @@ struct TableFileSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
-};                                               // TableFileSchema
+    uint64_t flush_lsn_ = 0;
+};  // TableFileSchema
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;

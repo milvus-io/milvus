@@ -70,9 +70,11 @@ set(scheduler_files
 
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
 set(thirdparty_files
         ${thirdparty_easyloggingpp_files}
         ${thirdparty_nlohmann_files}
+        ${thirdparty_dablooms_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
@@ -91,6 +93,15 @@ set(grpc_server_files
         ${grpc_request_files}
         ${grpc_impl_files}
         ${grpc_interceptor_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -115,13 +126,14 @@ set(engine_files
         ${db_meta_files}
         ${db_wal_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
-#        ${codecs_files}
-#        ${codecs_default_files}
-#        ${segment_files}
-#        ${store_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
+        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
@@ -149,6 +161,11 @@ set(boost_lib
         libboost_serialization.a
         )
 
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        )
+
 set(third_party_libs
         sqlite
         ${grpc_lib}
@@ -157,6 +174,9 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
+        ${s3_client_lib}
+        curl
+        crypto
         )
 
 if (MILVUS_GPU_VERSION)

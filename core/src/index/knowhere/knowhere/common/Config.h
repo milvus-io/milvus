@@ -20,6 +20,7 @@
 #include <memory>
 #include <sstream>
 #include "Log.h"
+#include "knowhere/common/Exception.h"
 
 namespace knowhere {
 
@@ -27,6 +28,9 @@ enum class METRICTYPE {
     INVALID = 0,
     L2 = 1,
     IP = 2,
+    HAMMING = 20,
+    JACCARD = 21,
+    TANIMOTO = 22,
 };
 
 // General Config
@@ -50,7 +54,13 @@ struct Cfg {
 
     virtual bool
     CheckValid() {
-        return true;
+        if (metric_type == METRICTYPE::IP || metric_type == METRICTYPE::L2) {
+            return true;
+        }
+        std::stringstream ss;
+        ss << "MetricType: " << int(metric_type) << " not support!";
+        KNOWHERE_THROW_MSG(ss.str());
+        return false;
     }
 
     void

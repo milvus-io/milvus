@@ -17,17 +17,27 @@
 
 #pragma once
 
+#include <memory>
+
+#include "segment/IdBloomFilter.h"
+#include "store/Directory.h"
+
 namespace milvus {
 namespace codec {
 
 class IdBloomFilterFormat {
  public:
-    virtual IdBloomFilter
-    read() = 0;
+    virtual void
+    read(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
 
     virtual void
-    write(IdBloomFilter id_bloom_filter) = 0;
+    write(const store::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+
+    virtual void
+    create(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
 };
+
+using IdBloomFilterFormatPtr = std::shared_ptr<IdBloomFilterFormat>;
 
 }  // namespace codec
 }  // namespace milvus

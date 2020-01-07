@@ -17,14 +17,15 @@
 
 #pragma once
 
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "MemTableFile.h"
 #include "VectorSource.h"
 #include "utils/Status.h"
-
-#include <memory>
-#include <mutex>
-#include <string>
-#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -36,7 +37,10 @@ class MemTable {
     MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
-    Add(VectorSourcePtr& source, IDNumbers& vector_ids);
+    Add(VectorSourcePtr& source);
+
+    Status
+    Delete(segment::doc_id_t doc_id);
 
     void
     GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);
@@ -45,7 +49,7 @@ class MemTable {
     GetTableFileCount();
 
     Status
-    Serialize();
+    Serialize(uint64_t wal_lsn);
 
     bool
     Empty();
@@ -57,6 +61,10 @@ class MemTable {
     GetCurrentMem();
 
  private:
+    Status
+    ApplyDeletes();
+
+ private:
     const std::string table_id_;
 
     MemTableFileList mem_table_file_list_;
@@ -66,6 +74,8 @@ class MemTable {
     DBOptions options_;
 
     std::mutex mutex_;
+
+    std::set<segment::doc_id_t> doc_ids_to_delete_;
 };  // MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;

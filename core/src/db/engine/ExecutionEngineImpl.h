@@ -17,11 +17,13 @@
 
 #pragma once
 
-#include "ExecutionEngine.h"
-#include "wrapper/VecIndex.h"
+#include <src/segment/SegmentReader.h>
 
 #include <memory>
 #include <string>
+
+#include "ExecutionEngine.h"
+#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace engine {
@@ -36,6 +38,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
+
+    Status
+    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) override;
 
     size_t
     Count() const override;
@@ -56,6 +61,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(bool to_cache) override;
 
     Status
+    Load(bool to_cache, bool on) override ;
+
+    Status
     CopyToGpu(uint64_t device_id, bool hybrid = false) override;
 
     Status
@@ -72,6 +80,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+           bool hybrid = false) override;
+
+    Status
+    Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
            bool hybrid = false) override;
 
     ExecutionEnginePtr
@@ -124,6 +136,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     int64_t nlist_ = 0;
     int64_t gpu_num_ = 0;
+
+    // TODO(zhiru)
+    segment::SegmentReaderPtr segment_reader_ptr_;
 };
 
 }  // namespace engine

@@ -47,7 +47,7 @@ constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 void
 CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) {
-    auto vector_data = target->mutable_vector_data();
+    auto vector_data = target->mutable_float_data();
     vector_data->Resize(static_cast<int>(src.size()), 0.0);
     memcpy(vector_data->mutable_data(), src.data(), src.size() * sizeof(float));
 }
@@ -73,10 +73,10 @@ class RpcHandlerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
-        milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
+        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_test");
+        milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 

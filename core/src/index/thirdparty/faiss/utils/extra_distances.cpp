@@ -112,7 +112,39 @@ struct VectorDistanceJensenShannon {
     }
 };
 
+struct VectorDistanceJaccard {
+    size_t d;
 
+    float operator () (const float *x, const float *y) const {
+        float accu_num = 0, accu_den = 0;
+        const float EPSILON = 0.000001;
+        for (size_t i = 0; i < d; i++) {
+            float xi = x[i], yi = y[i];
+            if (fabs (xi - yi) < EPSILON) {
+                accu_num += xi;
+                accu_den += xi;
+            } else {
+                accu_den += xi;
+                accu_den += yi;
+            }
+        }
+        return 1 - accu_num / accu_den;
+    }
+};
+
+struct VectorDistanceTanimoto {
+    size_t d;
+
+    float operator () (const float *x, const float *y) const {
+        float accu_num = 0, accu_den = 0;
+        for (size_t i = 0; i < d; i++) {
+            float xi = x[i], yi = y[i];
+            accu_num += xi * yi;
+            accu_den += xi * xi + yi * yi - xi * yi;
+        }
+        return  -log2(accu_num / accu_den) ;
+    }
+};
 
 
 
@@ -263,6 +295,18 @@ void pairwise_extra_distances (
                                            dis, ldq, ldb, ldd);
         break;
     }
+    case METRIC_Jaccard: {
+        VectorDistanceJaccard vd({(size_t) d});
+        pairwise_extra_distances_template(vd, nq, xq, nb, xb,
+                                          dis, ldq, ldb, ldd);
+        break;
+    }
+    case METRIC_Tanimoto: {
+        VectorDistanceTanimoto vd({(size_t) d});
+        pairwise_extra_distances_template(vd, nq, xq, nb, xb,
+                                          dis, ldq, ldb, ldd);
+        break;
+    }
     default:
         FAISS_THROW_MSG ("metric type not implemented");
     }
@@ -294,6 +338,16 @@ void knn_extra_metrics (
     case METRIC_Lp: {
         VectorDistanceLp vd({(size_t)d, metric_arg});
         knn_extra_metrics_template (vd, x, y, nx, ny, res);
+        break;
+    }
+    case METRIC_Jaccard: {
+        VectorDistanceJaccard vd({(size_t) d});
+        knn_extra_metrics_template(vd, x, y, nx, ny, res);
+        break;
+    }
+    case METRIC_Tanimoto: {
+        VectorDistanceTanimoto vd({(size_t) d});
+        knn_extra_metrics_template(vd, x, y, nx, ny, res);
         break;
     }
     default:

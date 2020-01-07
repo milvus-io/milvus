@@ -28,6 +28,8 @@ class Directory {
  public:
     explicit Directory(const std::string& dir_path);
 
+    void Create();
+
     void
     ListAll(std::vector<std::string>& file_paths);
 
@@ -37,7 +39,7 @@ class Directory {
     const std::string&
     GetDirPath() const;
 
-    // TODO:
+    // TODO(zhiru):
     //  open(), sync(), close()
     //  function that opens a stream for reading file
     //  function that creates a new, empty file and returns an stream for appending data to this file

@@ -16,6 +16,8 @@
 #include <string>
 #include <sstream>
 
+#include <faiss/utils/ConcurrentBitset.h>
+
 #define FAISS_VERSION_MAJOR 1
 #define FAISS_VERSION_MINOR 6
 #define FAISS_VERSION_PATCH 0
@@ -47,6 +49,9 @@ enum MetricType {
     METRIC_L1,                 ///< L1 (aka cityblock)
     METRIC_Linf,               ///< infinity distance
     METRIC_Lp,                 ///< L_p distance, p is given by metric_arg
+    METRIC_Jaccard,
+    METRIC_Tanimoto,
+    METRIC_Hamming,
 
     /// some additional metrics defined in scipy.spatial.distance
     METRIC_Canberra = 20,
@@ -132,6 +137,12 @@ struct Index {
      */
     virtual void search (idx_t n, const float *x, idx_t k,
                          float *distances, idx_t *labels) const = 0;
+
+    virtual void search (idx_t n, const float *x, idx_t k,
+                         float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const = 0;
+
+    virtual void searchById (idx_t n, const float *x, idx_t k,
+                         float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const = 0;
 
     /** query n vectors of dimension d to the index.
      *

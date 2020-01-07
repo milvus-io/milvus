@@ -18,20 +18,25 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
-#include "src/index/thirdparty/faiss/utils/ConcurrentBitset.h"
+#include "Types.h"
 
 namespace milvus {
 namespace segment {
 
-using doc_id_t = int64_t;
-// using DeletedDocList = std::vector<id_type_t>;
+using offset_t = int32_t;
 
 class DeletedDocs {
  public:
-    explicit DeletedDocs(const std::vector<doc_id_t>& deleted_doc_ids);
+    explicit DeletedDocs(const std::vector<offset_t>& deleted_doc_offsets);
 
-    const std::vector<doc_id_t>&
+    DeletedDocs() = default;
+
+    void
+    AddDeletedDoc(offset_t offset);
+
+    const std::vector<offset_t>&
     GetDeletedDocs() const;
 
     // TODO
@@ -54,7 +59,7 @@ class DeletedDocs {
     operator=(DeletedDocs&&) = delete;
 
  private:
-    std::vector<doc_id_t> deleted_doc_ids_;
+    std::vector<offset_t> deleted_doc_offsets_;
     //    faiss::ConcurrentBitsetPtr bitset_;
     const std::string name_ = "deleted_docs";
 };

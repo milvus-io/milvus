@@ -17,53 +17,53 @@
 
 #include "Vector.h"
 
+#include <utility>
+
 #include "Vectors.h"
 
 namespace milvus {
 namespace segment {
 
-Vector::Vector(void* data, size_t nbytes, int64_t* uids) : data_(data), nbytes_(nbytes), uids_(uids) {
+Vector::Vector(std::vector<uint8_t> data, std::vector<doc_id_t> uids) : data_(std::move(data)), uids_(std::move(uids)) {
 }
 
-Vector::Vector() {
+void
+Vector::AddData(const std::vector<uint8_t>& data) {
+    data_.reserve(data_.size() + data.size());
+    data_.insert(data_.end(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
 }
 
-
 void
-Vector::SetData(void* data) {
-    data_ = data;
-}
-void
-Vector::SetNbytes(size_t nbytes) {
-    nbytes_ = nbytes;
-}
-void
-Vector::SetUids(int64_t* uids) {
-    uids_ = uids;
-}
-void
-Vector::SetCount(size_t count) {
-    count_ = count;
+Vector::AddUids(const std::vector<doc_id_t>& uids) {
+    data_.reserve(data_.size() + uids.size());
+    data_.insert(data_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
 }
 
-void*
+void
+Vector::Erase(size_t offset, int vector_type_size) {
+    auto step = offset * GetDimension() * vector_type_size;
+    data_.erase(data_.begin() + step, data_.begin() + step * 2);
+    uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
+}
+
+const std::vector<uint8_t>&
 Vector::GetData() const {
     return data_;
 }
 
-size_t
-Vector::GetNumBytes() const {
-    return nbytes_;
-}
-
-int64_t*
+const std::vector<doc_id_t>&
 Vector::GetUids() const {
     return uids_;
 }
 
 size_t
-Vector::GetCount() const {
-    return count_;
+Vector::GetCount() {
+    return uids_.size();
+}
+
+size_t
+Vector::GetDimension() {
+    return data_.size() / GetCount();
 }
 
 }  // namespace segment

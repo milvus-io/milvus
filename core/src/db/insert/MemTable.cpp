@@ -16,10 +16,14 @@
 // under the License.
 
 #include "db/insert/MemTable.h"
-#include "utils/Log.h"
+
+#include <src/segment/SegmentReader.h>
 
 #include <memory>
 #include <string>
+
+#include "db/Utils.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
@@ -29,7 +33,7 @@ MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const
 }
 
 Status
-MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
+MemTable::Add(VectorSourcePtr& source) {
     while (!source->AllAdded()) {
         MemTableFilePtr current_mem_table_file;
         if (!mem_table_file_list_.empty()) {
@@ -39,12 +43,12 @@ MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
             MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
-            status = new_mem_table_file->Add(source, vector_ids);
+            status = new_mem_table_file->Add(source);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
             }
         } else {
-            status = current_mem_table_file->Add(source, vector_ids);
+            status = current_mem_table_file->Add(source);
         }
 
         if (!status.ok()) {
@@ -54,6 +58,16 @@ MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
         }
     }
     return Status::OK();
+}
+
+Status
+MemTable::Delete(segment::doc_id_t doc_id) {
+    // Locate which table file the doc id lands in
+    for (auto& table_file : mem_table_file_list_) {
+        table_file->Delete(doc_id);
+    }
+    // Add the id to delete list so it can be applied to other segments on disk during the next flush
+    doc_ids_to_delete_.insert(doc_id);
 }
 
 void
@@ -67,16 +81,30 @@ MemTable::GetTableFileCount() {
 }
 
 Status
-MemTable::Serialize() {
+MemTable::Serialize(uint64_t wal_lsn) {
+    auto status = ApplyDeletes();
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
+
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
-        auto status = (*mem_table_file)->Serialize();
+        status = (*mem_table_file)->Serialize(wal_lsn);
         if (!status.ok()) {
             std::string err_msg = "Insert data serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_table_file = mem_table_file_list_.erase(mem_table_file);
+        }
+        // Update flush lsn
+        status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
+            ENGINE_LOG_ERROR << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
     }
     return Status::OK();
 }
@@ -99,6 +127,89 @@ MemTable::GetCurrentMem() {
         total_mem += mem_table_file->GetCurrentMem();
     }
     return total_mem;
+}
+
+Status
+MemTable::ApplyDeletes() {
+    // Applying deletes to other segments on disk:
+    // For each id in delete list:
+    //     For each segment in table:
+    //         Load its bloom filter
+    //         If present, add the uid to segment's uid list
+    // For each segment
+    //     Load its uids file.
+    //     Scan the uids, if any uid in segment's uid list exists, add its offset to deletedDoc
+    //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
+
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::BACKUP};
+    meta::TableFilesSchema table_files_schema;
+    auto status = meta_->FilesByType(table_id_, file_types, table_files_schema);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to apply deletes: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+    std::unordered_map<std::string, std::vector<segment::doc_id_t>> ids_to_check_map;
+
+    for (auto& id : doc_ids_to_delete_) {
+        for (auto& table_file : table_files_schema) {
+            std::string segment_dir;
+            utils::GetParentPath(table_file.location_, segment_dir);
+
+            segment::SegmentReader segment_reader(segment_dir);
+            segment::IdBloomFilterPtr id_bloom_filter_ptr;
+            segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+            if (id_bloom_filter_ptr->Check(id)) {
+                ids_to_check_map[segment_dir].emplace_back(id);
+            }
+        }
+    }
+
+    for (auto& kv : ids_to_check_map) {
+        segment::SegmentReader segment_reader(kv.first);
+        std::vector<segment::doc_id_t> uids;
+        status = segment_reader.LoadUids(uids);
+        if (!status.ok()) {
+            break;
+        }
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+        if (!status.ok()) {
+            break;
+        }
+
+        auto& ids_to_check = kv.second;
+
+        segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
+
+        for (size_t i = 0; i < uids.size(); ++i) {
+            if (std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]) != ids_to_check.end()) {
+                deleted_docs->AddDeletedDoc(i);
+                id_bloom_filter_ptr->Remove(uids[i]);
+            }
+        }
+
+        segment::Segment tmp_segment;
+        segment::SegmentWriter segment_writer(kv.first);
+        status = segment_writer.WriteDeletedDocs(deleted_docs);
+        if (!status.ok()) {
+            break;
+        }
+        status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
+        if (!status.ok()) {
+            break;
+        }
+    }
+
+    if (!status.ok()) {
+        std::string err_msg = "Failed to apply deletes: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    doc_ids_to_delete_.clear();
+    
+    return Status::OK();
 }
 
 }  // namespace engine

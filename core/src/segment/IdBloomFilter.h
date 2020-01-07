@@ -17,15 +17,34 @@
 
 #pragma once
 
+#include <mutex>
+
+#include "dablooms/dablooms.h"
+#include "segment/Types.h"
+
 namespace milvus {
 namespace segment {
 
 class IdBloomFilter {
  public:
-    IdBloomFilter(BloomFilter bloom_filter);
+    IdBloomFilter(scaling_bloom_t* bloom_filter);
+
+    ~IdBloomFilter();
+
+    scaling_bloom_t*
+    GetBloomFilter();
 
     bool
-    test(int64_t uid);
+    Check(segment::doc_id_t uid);
+
+    void
+    Add(segment::doc_id_t uid);
+
+    void
+    Remove(segment::doc_id_t uid);
+
+    const std::string&
+    GetName() const;
 
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;
@@ -37,7 +56,9 @@ class IdBloomFilter {
     operator=(IdBloomFilter&&) = delete;
 
  private:
-    BloomFilter bloom_filter_;
+    scaling_bloom_t* bloom_filter_;
+    const std::string name_ = "bloom_filter";
+    std::mutex mutex_;
 };
 
 using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;

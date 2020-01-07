@@ -92,9 +92,9 @@ TEST(UtilTest, COMMON_TEST) {
     tm time_struct;
     memset(&time_struct, 0, sizeof(tm));
     milvus::server::CommonUtil::ConvertTime(tt, time_struct);
-    ASSERT_GT(time_struct.tm_year, 0);
-    ASSERT_GT(time_struct.tm_mon, 0);
-    ASSERT_GT(time_struct.tm_mday, 0);
+    ASSERT_GE(time_struct.tm_year, 0);
+    ASSERT_GE(time_struct.tm_mon, 0);
+    ASSERT_GE(time_struct.tm_mday, 0);
     milvus::server::CommonUtil::ConvertTime(time_struct, tt);
     ASSERT_GT(tt, 0);
 
@@ -283,9 +283,9 @@ TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
               milvus::SERVER_INVALID_VECTOR_DIMENSION);
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(0).code(),
               milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(16385).code(),
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(32769).code(),
               milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(16384).code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(32768).code(), milvus::SERVER_SUCCESS);
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(1).code(), milvus::SERVER_SUCCESS);
 }
 
