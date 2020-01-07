@@ -23,7 +23,7 @@
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
-#include "knowhere/index/vector_index/IndexSPTAG.h"
+//#include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "server/Config.h"
 #include "storage/file/FileIOReader.h"
 #include "storage/file/FileIOWriter.h"
@@ -76,14 +76,14 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::IVFPQ>();
             break;
         }
-        case IndexType::SPTAG_KDT_RNT_CPU: {
-            index = std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
-            break;
-        }
-        case IndexType::SPTAG_BKT_RNT_CPU: {
-            index = std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
-            break;
-        }
+//        case IndexType::SPTAG_KDT_RNT_CPU: {
+//            index = std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
+//            break;
+//        }
+//        case IndexType::SPTAG_BKT_RNT_CPU: {
+//            index = std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
+//            break;
+//        }
         case IndexType::FAISS_IVFSQ8_CPU: {
             index = std::make_shared<knowhere::IVFSQ>();
             break;

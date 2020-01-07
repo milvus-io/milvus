@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <immintrin.h>
 
 #include "knowhere/index/vector_index/nsg/Distance.h"
 
@@ -30,6 +29,8 @@ DistanceL2::Compare(const float* a, const float* b, unsigned size) const {
 
 #ifdef __GNUC__
 #ifdef __AVX__
+
+#include <immintrin.h>
 
 #define AVX_L2SQR(addr1, addr2, dest, tmp1, tmp2) \
     tmp1 = _mm256_loadu_ps(addr1);                \

@@ -602,12 +602,12 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         CONFIG_CHECK(GetDBConfigInsertBufferSize(buffer_value));
 
         int64_t insert_buffer_size = buffer_value * GB;
-        if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
-            std::string msg = "Invalid cpu cache capacity: " + value +
-                              ". Possible reason: sum of cache_config.cpu_cache_capacity and "
-                              "db_config.insert_buffer_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
+//        if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
+//            std::string msg = "Invalid cpu cache capacity: " + value +
+//                              ". Possible reason: sum of cache_config.cpu_cache_capacity and "
+//                              "db_config.insert_buffer_size exceeds system memory.";
+//            return Status(SERVER_INVALID_ARGUMENT, msg);
+//        }
     }
     return Status::OK();
 }

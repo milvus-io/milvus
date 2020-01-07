@@ -199,7 +199,7 @@ if ("${MAKE}" STREQUAL "")
 endif ()
 
 if (NOT DEFINED MAKE_BUILD_ARGS)
-    set(MAKE_BUILD_ARGS "-j8")
+    set(MAKE_BUILD_ARGS "-j4")
 endif ()
 message(STATUS "Third Party MAKE_BUILD_ARGS = ${MAKE_BUILD_ARGS}")
 

@@ -5,7 +5,7 @@
 
 -include ../../makefile.inc
 
-CPU_TARGETS = 1-Flat 2-IVFFlat 3-IVFPQ
+CPU_TARGETS = 0-IVFSQ 1-Flat 2-IVFFlat 3-IVFPQ
 GPU_TARGETS = 6-RUN 7-GPU 8-GPU
 
 default: cpu
@@ -17,7 +17,7 @@ cpu: $(CPU_TARGETS)
 gpu: $(GPU_TARGETS)
 
 %: %.cpp ../../libfaiss.a
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDFLAGS) -I../../include $(LIBS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDFLAGS) -I../.. $(LIBS)
 
 clean:
 	rm -f $(CPU_TARGETS) $(GPU_TARGETS)

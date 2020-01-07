@@ -6819,7 +6819,8 @@ $as_echo_n "checking for cpu arch... " >&6; }
       ARCH_CXXFLAGS="-m64"
       ;;
     aarch64*-*)
-      ARCH_CPUFLAGS="-march=armv8.2-a"
+#      ARCH_CPUFLAGS="-march=armv8.2-a"
+      ARCH_CPUFLAGS="-march=armv8-a"
       ;;
     *) ;;
   esac

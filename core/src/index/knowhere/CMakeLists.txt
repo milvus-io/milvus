@@ -1,35 +1,35 @@
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
-include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
+#include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 
-set(SPTAG_SOURCE_DIR ${INDEX_SOURCE_DIR}/thirdparty/SPTAG)
-file(GLOB HDR_FILES
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/Common/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h
-        ${SPTAG_SOURCE_DIR}/AnnService/inc/Helper/*.h)
-file(GLOB SRC_FILES
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
-        ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
+#set(SPTAG_SOURCE_DIR ${INDEX_SOURCE_DIR}/thirdparty/SPTAG)
+#file(GLOB HDR_FILES
+#        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/*.h
+#        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/Common/*.h
+#        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h
+#        ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h
+#        ${SPTAG_SOURCE_DIR}/AnnService/inc/Helper/*.h)
+#file(GLOB SRC_FILES
+#        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/*.cpp
+#        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp
+#        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp
+#        ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
+#        ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
 
-if (NOT TARGET SPTAGLibStatic)
-    add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-endif ()
+#if (NOT TARGET SPTAGLibStatic)
+#    add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
+#endif ()
 
 set(external_srcs
-        knowhere/adapter/SptagAdapter.cpp
-        knowhere/adapter/VectorAdapter.cpp
+	#        knowhere/adapter/SptagAdapter.cpp
+	knowhere/adapter/VectorAdapter.cpp
         knowhere/common/Exception.cpp
         knowhere/common/Timer.cpp
         )
 
 set(index_srcs
         knowhere/index/preprocessor/Normalize.cpp
-        knowhere/index/vector_index/IndexSPTAG.cpp
+	#        knowhere/index/vector_index/IndexSPTAG.cpp
         knowhere/index/vector_index/IndexIDMAP.cpp
         knowhere/index/vector_index/IndexIVF.cpp
         knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
@@ -46,7 +46,7 @@ set(index_srcs
         )
 
 set(depend_libs
-        SPTAGLibStatic
+	#        SPTAGLibStatic
         faiss
         gomp
         gfortran
@@ -106,7 +106,7 @@ target_link_libraries(
 set(INDEX_INCLUDE_DIRS
         ${INDEX_SOURCE_DIR}/knowhere
         ${INDEX_SOURCE_DIR}/thirdparty
-        ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
+	#        ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
         ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
         ${OPENBLAS_INCLUDE_DIR}

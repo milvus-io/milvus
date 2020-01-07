@@ -160,5 +160,5 @@ else
   fi
 
   # compile and build
-  make -j 8 install || exit 1
+  make -j 4 install || exit 1
 fi

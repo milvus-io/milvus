@@ -13,7 +13,8 @@ AC_MSG_CHECKING([for cpu arch])
       ;;
     aarch64*-*)
 dnl This is an arch for Nvidia Xavier a proper detection would be nice.
-      ARCH_CPUFLAGS="-march=armv8.2-a"
+      ARCH_CPUFLAGS="-march=armv8-a"
+#      ARCH_CPUFLAGS="-march=armv8.2-a"
       ;;
     *) ;;
   esac
