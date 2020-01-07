@@ -19,7 +19,6 @@
 
 #include <oatpp/parser/json/mapping/Serializer.hpp>
 #include <oatpp/parser/json/mapping/Deserializer.hpp>
-#include <oatpp/web/server/AsyncHttpConnectionHandler.hpp>
 #include <oatpp/web/server/HttpRouter.hpp>
 #include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/network/server/SimpleTCPConnectionProvider.hpp>

@@ -634,6 +634,8 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
+    ADD_CORS(SystemMsg)
+
     ENDPOINT("GET", "/system/{msg}", SystemMsg, PATH(String, msg)) {
         auto cmd_dto = CommandDto::createShared();
 

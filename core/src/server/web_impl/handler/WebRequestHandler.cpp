@@ -292,6 +292,10 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
+    if (!gpu_config_dto->enable->getValue()) {
+        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources false");
+    }
+
     if (nullptr == gpu_config_dto->cache_capacity.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
     }
@@ -303,8 +307,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     if (nullptr == gpu_config_dto->search_resources.get()) {
         gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
         gpu_config_dto->search_resources->pushBack("GPU0");
-        //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'search_resources\' miss")
     }
+
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
         [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
