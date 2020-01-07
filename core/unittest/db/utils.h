@@ -20,6 +20,8 @@
 #include <gtest/gtest.h>
 #include <chrono>
 #include <memory>
+#include <fiu-control.h>
+#include <fiu-local.h>
 
 #include "db/DB.h"
 #include "db/meta/MySQLMetaImpl.h"

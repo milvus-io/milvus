@@ -92,6 +92,8 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
 #endif
+
+    fiu_do_on("ExecutionEngineImpl_CreatetVecIndex_InvalidType", type = EngineType::INVALID);
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {

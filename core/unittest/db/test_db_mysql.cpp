@@ -476,15 +476,6 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         stat = db_->DropIndex(table_name);
         ASSERT_TRUE(stat.ok());
     }
-
-    {
-        milvus::engine::meta::DatesT dates;
-        FIU_ENABLE_FIU("");
-        FIU_ENABLE_FIU("");
-
-        stat = db_->DropTable(table_name, dates);
-        ASSERT_TRUE(stat.ok());
-    }
 }
 
 

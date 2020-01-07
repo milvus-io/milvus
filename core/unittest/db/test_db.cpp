@@ -249,7 +249,7 @@ TEST_F(DBTest, DB_TEST) {
         ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
 
         options.meta_.backend_uri_ = "mysql://root:123456@127.0.0.1:3306/test";
-        milvus::engine::DBFactory::Build(options);
+        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
 
         options.meta_.backend_uri_ = "dummy://root:123456@127.0.0.1:3306/test";
         ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
