@@ -28,7 +28,6 @@
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "storage/IStorage.h"
-#include "src/storage/s3/S3ClientMock.h"
 #include "storage/utils.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -64,9 +63,6 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
         std::string str_out;
         fs_out >> str_out;
         ASSERT_TRUE(str_out == ss_in.str());
-
-        ASSERT_FALSE(storage_inst.PutObjectFile(filename_dummy, filename_dummy).ok());
-        ASSERT_FALSE(storage_inst.GetObjectFile(filename_dummy, filename_out).ok());
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -77,8 +73,6 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
         std::string content_out;
         ASSERT_TRUE(storage_inst.GetObjectStr(objname, content_out).ok());
         ASSERT_TRUE(content_out == content);
-
-        ASSERT_FALSE(storage_inst.GetObjectStr(objname_dummy, content_out).ok());
     }
 
     ///////////////////////////////////////////////////////////////////////////
