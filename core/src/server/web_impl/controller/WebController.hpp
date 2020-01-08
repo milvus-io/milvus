@@ -495,8 +495,8 @@ class WebController : public oatpp::web::server::api::ApiController {
              "/tables/{table_name}/partitions",
              ShowPartitions,
              PATH(String, table_name),
-             QUERY(Int64, offset, "Page offset"),
-             QUERY(Int64, page_size, "Page size")) {
+             QUERY(Int64, offset, "offset"),
+             QUERY(Int64, page_size, "page_size")) {
         auto status_dto = StatusDto::createShared();
         auto partition_list_dto = PartitionListDto::createShared();
         auto handler = WebRequestHandler();
@@ -535,11 +535,11 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("DELETE",
              "/tables/{table_name}/partitions/{partition_tag}",
              DropPartition,
-             QUERY(String, table_name),
-             QUERY(String, tag)) {
+             PATH(String, table_name),
+             PATH(String, partition_tag)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-        auto status_dto = handler.DropPartition(table_name, tag);
+        auto status_dto = handler.DropPartition(table_name, partition_tag);
         auto code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_204, status_dto);

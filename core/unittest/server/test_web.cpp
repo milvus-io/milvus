@@ -611,32 +611,32 @@ TEST_F(WebControllerTest, OPTIONS) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     response = client_ptr->optionsAdvanced(conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
 #ifdef MILVUS_GPU_VERSION
 
     response = client_ptr->optionsGpuConfig(conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
 #endif
 
     response = client_ptr->optionsIndexes("test", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsParTag("test", "tag", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsPartitions("table_name", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsTable("table", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsTables(conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsVectors("table", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, CREATE_TABLE) {
@@ -861,6 +861,7 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     response = client_ptr->dropPartition(table_name, "tag01", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, SEARCH) {
