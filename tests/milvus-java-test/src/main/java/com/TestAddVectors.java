@@ -1,8 +1,7 @@
 package com;
 
-import io.milvus.client.InsertParam;
-import io.milvus.client.InsertResponse;
-import io.milvus.client.MilvusClient;
+import io.milvus.client.*;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -12,6 +11,7 @@ import java.util.stream.Stream;
 
 public class TestAddVectors {
     int dimension = 128;
+    String tag = "tag";
 
     public List<List<Float>> gen_vectors(Integer nb) {
         List<List<Float>> xb = new LinkedList<>();
@@ -28,7 +28,7 @@ public class TestAddVectors {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_vectors_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-        int nb = 10000;
+        int nb = 1000;
         List<List<Float>> vectors = gen_vectors(nb);
         String tableNameNew = tableName + "_";
         InsertParam insertParam = new InsertParam.Builder(tableNameNew, vectors).build();
@@ -47,7 +47,7 @@ public class TestAddVectors {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_vectors(MilvusClient client, String tableName) throws InterruptedException {
-        int nb = 10000;
+        int nb = 1000;
         List<List<Float>> vectors = gen_vectors(nb);
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
         InsertResponse res = client.insert(insertParam);
@@ -79,7 +79,7 @@ public class TestAddVectors {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_vectors_with_ids(MilvusClient client, String tableName) throws InterruptedException {
-        int nb = 10000;
+        int nb = 1000;
         List<List<Float>> vectors = gen_vectors(nb);
         // Add vectors with ids
         List<Long> vectorIds;
@@ -111,7 +111,7 @@ public class TestAddVectors {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_vectors_with_invalid_dimension(MilvusClient client, String tableName) {
-        int nb = 10000;
+        int nb = 1000;
         List<List<Float>> vectors = gen_vectors(nb);
         vectors.get(0).add((float) 0);
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
@@ -121,7 +121,7 @@ public class TestAddVectors {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_vectors_with_invalid_vectors(MilvusClient client, String tableName) {
-        int nb = 10000;
+        int nb = 1000;
         List<List<Float>> vectors = gen_vectors(nb);
         vectors.set(0, new ArrayList<>());
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
@@ -147,4 +147,53 @@ public class TestAddVectors {
         Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb * loops);
     }
 
+    // ----------------------------- partition cases in Insert ---------------------------------
+    // Add vectors into table with given tag
+    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+    public void test_add_vectors_partition(MilvusClient client, String tableName) throws InterruptedException {
+        int nb = 1000;
+        List<List<Float>> vectors = gen_vectors(nb);
+        String partitionName = RandomStringUtils.randomAlphabetic(10);
+        io.milvus.client.Partition partition = new io.milvus.client.Partition.Builder(tableName, partitionName, tag).build();
+        Response createpResponse = client.createPartition(partition);
+        assert(createpResponse.ok());
+        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).withPartitionTag(tag).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        Thread.currentThread().sleep(1000);
+        // Assert table row count
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb);
+    }
+
+    // Add vectors into table, which tag not existed
+    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+    public void test_add_vectors_partition_tag_not_existed(MilvusClient client, String tableName) {
+        int nb = 1000;
+        String newTag = RandomStringUtils.randomAlphabetic(10);
+        List<List<Float>> vectors = gen_vectors(nb);
+        String partitionName = RandomStringUtils.randomAlphabetic(10);
+        io.milvus.client.Partition partition = new io.milvus.client.Partition.Builder(tableName, partitionName, tag).build();
+        Response createpResponse = client.createPartition(partition);
+        assert(createpResponse.ok());
+        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).withPartitionTag(newTag).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(!res.getResponse().ok());
+    }
+
+    // Create table, add vectors into table
+    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+    public void test_add_vectors_partition_A(MilvusClient client, String tableName) throws InterruptedException {
+        int nb = 1000;
+        List<List<Float>> vectors = gen_vectors(nb);
+        String partitionName = RandomStringUtils.randomAlphabetic(10);
+        io.milvus.client.Partition partition = new io.milvus.client.Partition.Builder(tableName, partitionName, tag).build();
+        Response createpResponse = client.createPartition(partition);
+        assert(createpResponse.ok());
+        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        Thread.currentThread().sleep(1000);
+        // Assert table row count
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb);
+    }
 }

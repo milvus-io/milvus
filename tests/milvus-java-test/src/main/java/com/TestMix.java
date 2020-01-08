@@ -121,6 +121,31 @@ public class TestMix {
     }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+    public void test_add_vectors_partition_threads(MilvusClient client, String tableName) throws InterruptedException {
+        int thread_num = 10;
+        String tag = RandomStringUtils.randomAlphabetic(10);
+        String partitionName = RandomStringUtils.randomAlphabetic(10);
+        io.milvus.client.Partition partition = new io.milvus.client.Partition.Builder(tableName, partitionName, tag).build();
+        client.createPartition(partition);
+        List<List<Float>> vectors = gen_vectors(nb,false);
+        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).withPartitionTag(tag).build();
+        ForkJoinPool executor = new ForkJoinPool();
+        for (int i = 0; i < thread_num; i++) {
+            executor.execute(
+                    () -> {
+                        InsertResponse res_insert = client.insert(insertParam);
+                        assert (res_insert.getResponse().ok());
+                    });
+        }
+        executor.awaitQuiescence(100, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        Thread.sleep(2000);
+        GetTableRowCountResponse getTableRowCountResponse = client.getTableRowCount(tableName);
+        Assert.assertEquals(getTableRowCountResponse.getTableRowCount(), thread_num * nb);
+    }
+
+    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_index_vectors_threads(MilvusClient client, String tableName) throws InterruptedException {
         int thread_num = 50;
         List<List<Float>> vectors = gen_vectors(nb,false);

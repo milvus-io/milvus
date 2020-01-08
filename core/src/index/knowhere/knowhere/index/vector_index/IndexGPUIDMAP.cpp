@@ -127,7 +127,7 @@ GPUIDMAP::search_impl(int64_t n, const float* data, int64_t k, float* distances,
 }
 
 void
-GPUIDMAP::GenGraph(float* data, const int64_t& k, Graph& graph, const Config& config) {
+GPUIDMAP::GenGraph(const float* data, const int64_t& k, Graph& graph, const Config& config) {
     int64_t K = k + 1;
     auto ntotal = Count();
 
