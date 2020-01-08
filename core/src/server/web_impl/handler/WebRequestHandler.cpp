@@ -82,7 +82,7 @@ WebErrorMap(ErrorCode code) {
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 
 Status
-WebRequestHandler::getTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
+WebRequestHandler::GetTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
                                std::map<std::string, std::string>& table_info) {
     TableSchema schema;
     auto status = request_handler_.DescribeTable(context_ptr_, table_name, schema);
@@ -393,7 +393,7 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
 
     // TODO: query string field `fields` npt used here
     std::map<std::string, std::string> table_info;
-    status = getTaleInfo(context_ptr_, table_name->std_str(), table_info);
+    status = GetTaleInfo(context_ptr_, table_name->std_str(), table_info);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -438,7 +438,7 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
             for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
                 std::map<std::string, std::string> table_info;
 
-                status = getTaleInfo(context_ptr_, tables.at(i), table_info);
+                status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
                 if (!status.ok()) {
                     break;
                 }

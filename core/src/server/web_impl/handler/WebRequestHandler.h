@@ -88,7 +88,7 @@ class WebRequestHandler {
     }
 
     Status
-    getTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
+    GetTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
                 std::map<std::string, std::string>& table_info);
 
     StatusDto::ObjectWrapper
