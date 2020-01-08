@@ -21,8 +21,6 @@
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
 
-#define private public
-
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 
@@ -189,10 +187,10 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     cpu_mgr->ClearCache();
     ASSERT_EQ(cpu_mgr->ItemCount(), 0);
 
-    fiu_enable("CpuCacheMgr_CpuCacheMgr_ZeroCpucacheThreshold", 1, nullptr, 0);
-    auto* cpu_cache_mgr = new milvus::cache::CpuCacheMgr();
-    fiu_disable("CpuCacheMgr_CpuCacheMgr_ZeroCpucacheThreshold");
-    delete cpu_cache_mgr;
+//    fiu_enable("CpuCacheMgr_CpuCacheMgr_ZeroCpucacheThreshold", 1, nullptr, 0);
+//    auto* cpu_cache_mgr = new milvus::cache::CpuCacheMgr();
+//    fiu_disable("CpuCacheMgr_CpuCacheMgr_ZeroCpucacheThreshold");
+//    delete cpu_cache_mgr;
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -223,10 +221,10 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
 
-    fiu_enable("GpuCacheMgr_GpuCacheMgr_ZeroGpucacheThreshold", 1, nullptr, 0);
-    auto* gpu_cache_mgr = new milvus::cache::GpuCacheMgr();
-    fiu_disable("GpuCacheMgr_GpuCacheMgr_ZeroGpucacheThreshold");
-    delete gpu_cache_mgr;
+//    fiu_enable("GpuCacheMgr_GpuCacheMgr_ZeroGpucacheThreshold", 1, nullptr, 0);
+//    auto* gpu_cache_mgr = new milvus::cache::GpuCacheMgr();
+//    fiu_disable("GpuCacheMgr_GpuCacheMgr_ZeroGpucacheThreshold");
+//    delete gpu_cache_mgr;
 }
 #endif
 

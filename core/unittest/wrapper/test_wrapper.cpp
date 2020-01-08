@@ -247,9 +247,6 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
         s = write_index(index_, file_location);
         ASSERT_FALSE(s.ok());
         fiu_disable("VecIndex.write_index.throw_no_space_exception");
-
-        auto new_index = milvus::engine::read_index(file_location + "_invalid");
-        ASSERT_EQ(new_index, nullptr);
     }
 }
 

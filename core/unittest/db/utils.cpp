@@ -233,7 +233,7 @@ MetaTest::TearDown() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 milvus::engine::DBOptions
-MySqlDBTest::GetOptions() {
+MySqlDBTest:: GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = test_env->getURI();

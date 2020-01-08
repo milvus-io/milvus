@@ -91,6 +91,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     server::Config& config = server::Config::GetInstance();
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
+    fiu_do_on("ExecutionEngineImpl_CreatetVecIndex_GpuResDisabled",gpu_resource_enable = false);
 #endif
 
     fiu_do_on("ExecutionEngineImpl_CreatetVecIndex_InvalidType", type = EngineType::INVALID);

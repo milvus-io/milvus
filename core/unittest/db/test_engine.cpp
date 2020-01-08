@@ -87,6 +87,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
     {
         fiu_init(0);
+        // test ExecutionEngineImpl constructor when create vecindex failed
         FIU_ENABLE_FIU("ExecutionEngineImpl_CreatetVecIndex_InvalidType");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
@@ -95,6 +96,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
     }
 
     {
+        // test ExecutionEngineImpl constructor when build BFindex failed
         FIU_ENABLE_FIU("BFIndex.Build.throw_knowhere_exception");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
@@ -104,6 +106,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
+    fiu_init(0);
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
     auto engine_ptr = milvus::engine::EngineFactory::Build(
@@ -130,6 +133,45 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->GetLocation(), file_path);
     ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
 
+    ASSERT_ANY_THROW(engine_ptr->BuildIndex(file_path,milvus::engine::EngineType::INVALID));
+    FIU_ENABLE_FIU("VecIndexImpl.BuildAll.throw_knowhere_exception");
+    ASSERT_ANY_THROW(engine_ptr->BuildIndex(file_path,milvus::engine::EngineType::SPTAG_KDT));
+    fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
+
+    auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+    ASSERT_ANY_THROW(engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ));
+    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
+    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
+    engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
+    engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);
+
+#ifdef MILVUS_GPU_VERSION
+    FIU_ENABLE_FIU("ExecutionEngineImpl_CreatetVecIndex_GpuResDisabled");
+    engine_ptr->BuildIndex("/tmp/milvus_index_6", milvus::engine::EngineType::FAISS_IVFFLAT);
+    engine_ptr->BuildIndex("/tmp/milvus_index_7",milvus::engine::EngineType::FAISS_IVFSQ8);
+    ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_8",milvus::engine::EngineType::FAISS_IVFSQ8H));
+    ASSERT_ANY_THROW(engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_9", milvus::engine::EngineType::FAISS_PQ));
+    fiu_disable("ExecutionEngineImpl_CreatetVecIndex_GpuResDisabled");
+#endif
+
+    //merge self
+    status = engine_ptr->Merge(file_path);
+    ASSERT_FALSE(status.ok());
+
+//    FIU_ENABLE_FIU("VecIndexImpl.Add.throw_knowhere_exception");
+//    status = engine_ptr->Merge("/tmp/milvus_index_2");
+//    ASSERT_FALSE(status.ok());
+//    fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
+
+    FIU_ENABLE_FIU("vecIndex.throw_read_exception");
+    status = engine_ptr->Merge("dummy");
+    ASSERT_FALSE(status.ok());
+    fiu_disable("vecIndex.throw_read_exception");
+
+    //CPU version invoke CopyToCpu will fail
+    status = engine_ptr->CopyToCpu();
+    ASSERT_FALSE(status.ok());
+
 #ifdef MILVUS_GPU_VERSION
     status = engine_ptr->CopyToGpu(0, false);
     ASSERT_TRUE(status.ok());
@@ -147,11 +189,6 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     engine_ptr->CopyToCpu();
     ASSERT_TRUE(status.ok());
 #endif
-
-    auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
-    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
-    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
-    engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
@@ -170,6 +207,12 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     auto dim = engine_ptr->Dimension();
     ASSERT_EQ(dim, dimension);
 
+    auto status = engine_ptr->Merge("/tmp/milvus_index_2");
+    ASSERT_FALSE(status.ok());
+
+    auto build_index = engine_ptr->BuildIndex("/tmp/milvus_index_2",milvus::engine::EngineType::FAISS_IDMAP);
+    ASSERT_EQ(build_index, nullptr);
+
     int64_t n = 0;
     const float* data = nullptr;
     int64_t k = 10;
@@ -177,7 +220,7 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     float* distances = nullptr;
     int64_t* labels = nullptr;
     bool hybrid = false;
-    auto status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
+    status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
     ASSERT_FALSE(status.ok());
 
     fiu_disable("read_null_index");
