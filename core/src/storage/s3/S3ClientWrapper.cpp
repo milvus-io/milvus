@@ -22,12 +22,14 @@
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
+#include <fiu-local.h>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <utility>
 
 #include "server/Config.h"
+#include "storage/s3/S3ClientMock.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
@@ -40,6 +42,7 @@ S3ClientWrapper::StartService() {
     server::Config& config = server::Config::GetInstance();
     bool minio_enable = false;
     CONFIG_CHECK(config.GetStorageConfigMinioEnable(minio_enable));
+    fiu_do_on("S3ClientWrapper.StartService.minio_disable", minio_enable = false);
     if (!minio_enable) {
         STORAGE_LOG_INFO << "MinIO not enabled!";
         return Status::OK();
@@ -52,29 +55,30 @@ S3ClientWrapper::StartService() {
     CONFIG_CHECK(config.GetStorageConfigMinioBucket(minio_bucket_));
 
     Aws::InitAPI(options_);
-    Aws::Client::ClientConfiguration cfg;
 
+    Aws::Client::ClientConfiguration cfg;
     cfg.endpointOverride = minio_address_ + ":" + minio_port_;
     cfg.scheme = Aws::Http::Scheme::HTTP;
     cfg.verifySSL = false;
-    client_ptr_ = new Aws::S3::S3Client(Aws::Auth::AWSCredentials(minio_access_key_, minio_secret_key_), cfg,
-                                        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
-    if (client_ptr_ == nullptr) {
-        std::string str = "Cannot connect S3 server.";
-        return milvus::Status(SERVER_UNEXPECTED_ERROR, str);
+    client_ptr_ =
+        std::make_shared<Aws::S3::S3Client>(Aws::Auth::AWSCredentials(minio_access_key_, minio_secret_key_), cfg,
+                                            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
+
+    bool mock_enable = false;
+    fiu_do_on("S3ClientWrapper.StartService.mock_enable", mock_enable = true);
+    if (mock_enable) {
+        client_ptr_ = std::make_shared<S3ClientMock>();
     }
 
     return CreateBucket();
 }
 
-Status
+void
 S3ClientWrapper::StopService() {
     if (client_ptr_ != nullptr) {
-        delete client_ptr_;
         client_ptr_ = nullptr;
     }
     Aws::ShutdownAPI(options_);
-    return Status::OK();
 }
 
 Status
@@ -84,6 +88,7 @@ S3ClientWrapper::CreateBucket() {
 
     auto outcome = client_ptr_->CreateBucket(request);
 
+    fiu_do_on("S3ClientWrapper.CreateBucket.outcome.fail", outcome = Aws::S3::Model::CreateBucketOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         if (err.GetErrorType() != Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) {
@@ -103,6 +108,7 @@ S3ClientWrapper::DeleteBucket() {
 
     auto outcome = client_ptr_->DeleteBucket(request);
 
+    fiu_do_on("S3ClientWrapper.DeleteBucket.outcome.fail", outcome = Aws::S3::Model::DeleteBucketOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: DeleteBucket: " << err.GetExceptionName() << ": " << err.GetMessage();
@@ -131,6 +137,7 @@ S3ClientWrapper::PutObjectFile(const std::string& object_name, const std::string
 
     auto outcome = client_ptr_->PutObject(request);
 
+    fiu_do_on("S3ClientWrapper.PutObjectFile.outcome.fail", outcome = Aws::S3::Model::PutObjectOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: PutObject: " << err.GetExceptionName() << ": " << err.GetMessage();
@@ -152,6 +159,7 @@ S3ClientWrapper::PutObjectStr(const std::string& object_name, const std::string&
 
     auto outcome = client_ptr_->PutObject(request);
 
+    fiu_do_on("S3ClientWrapper.PutObjectStr.outcome.fail", outcome = Aws::S3::Model::PutObjectOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: PutObject: " << err.GetExceptionName() << ": " << err.GetMessage();
@@ -169,6 +177,7 @@ S3ClientWrapper::GetObjectFile(const std::string& object_name, const std::string
 
     auto outcome = client_ptr_->GetObject(request);
 
+    fiu_do_on("S3ClientWrapper.GetObjectFile.outcome.fail", outcome = Aws::S3::Model::GetObjectOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: GetObject: " << err.GetExceptionName() << ": " << err.GetMessage();
@@ -191,6 +200,7 @@ S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& conte
 
     auto outcome = client_ptr_->GetObject(request);
 
+    fiu_do_on("S3ClientWrapper.GetObjectStr.outcome.fail", outcome = Aws::S3::Model::GetObjectOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: GetObject: " << err.GetExceptionName() << ": " << err.GetMessage();
@@ -217,6 +227,7 @@ S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::s
 
     auto outcome = client_ptr_->ListObjects(request);
 
+    fiu_do_on("S3ClientWrapper.ListObjects.outcome.fail", outcome = Aws::S3::Model::ListObjectsOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: ListObjects: " << err.GetExceptionName() << ": " << err.GetMessage();
@@ -244,6 +255,7 @@ S3ClientWrapper::DeleteObject(const std::string& object_name) {
 
     auto outcome = client_ptr_->DeleteObject(request);
 
+    fiu_do_on("S3ClientWrapper.DeleteObject.outcome.fail", outcome = Aws::S3::Model::DeleteObjectOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
         STORAGE_LOG_ERROR << "ERROR: DeleteObject: " << err.GetExceptionName() << ": " << err.GetMessage();
