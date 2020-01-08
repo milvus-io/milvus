@@ -169,11 +169,13 @@ static void knn_inner_product_sse (const float * x,
             minheap_heapify (k, simi, idxi);
 
             for (size_t j = 0; j < ny; j++) {
-                float ip = fvec_inner_product (x_i, y_j, d);
+                if(!bitset || bitset->test(j)){
+                    float ip = fvec_inner_product (x_i, y_j, d);
 
-                if (ip > simi[0]) {
-                    minheap_pop (k, simi, idxi);
-                    minheap_push (k, simi, idxi, ip, j);
+                    if (ip > simi[0]) {
+                        minheap_pop (k, simi, idxi);
+                        minheap_push (k, simi, idxi, ip, j);
+                    }
                 }
                 y_j += d;
             }
@@ -233,17 +235,20 @@ static void knn_inner_product_blas (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        faiss::ConcurrentBitsetPtr bitset)
+        faiss::ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
     // BLAS does not like empty matrices
     if (nx == 0 || ny == 0) return;
 
+    size_t k = res->k;
+
     /* block sizes */
     const size_t bs_x = 4096, bs_y = 1024;
     // const size_t bs_x = 16, bs_y = 16;
-    std::unique_ptr<float[]> ip_block(new float[bs_x * bs_y]);
+    float *ip_block = new float[bs_x * bs_y];
+    ScopeDeleter<float> del1(ip_block);;
 
     for (size_t i0 = 0; i0 < nx; i0 += bs_x) {
         size_t i1 = i0 + bs_x;
@@ -259,11 +264,28 @@ static void knn_inner_product_blas (
                 sgemm_ ("Transpose", "Not transpose", &nyi, &nxi, &di, &one,
                         y + j0 * d, &di,
                         x + i0 * d, &di, &zero,
-                        ip_block.get(), &nyi);
+                        ip_block, &nyi);
             }
 
             /* collect maxima */
-            res->addn (j1 - j0, ip_block.get(), j0, i0, i1 - i0);
+#pragma omp parallel for
+            for(size_t i = i0; i < i1; i++){
+                float * __restrict simi = res->get_val(i);
+                int64_t * __restrict idxi = res->get_ids (i);
+                const float *ip_line = ip_block + (i - i0) * (j1 - j0);
+
+                for(size_t j = j0; j < j1; j++){
+                    if(!bitset || bitset->test(j)){
+                        float dis = *ip_line;
+
+                        if(dis > simi[0]){
+                            minheap_pop(k, simi, idxi);
+                            minheap_push(k, simi, idxi, dis, j);
+                        }
+                    }
+                    ip_line++;
+                }
+            }
         }
         InterruptCallback::check ();
     }
@@ -354,7 +376,8 @@ static void knn_jaccard_blas (const float * x,
                               const float * y,
                               size_t d, size_t nx, size_t ny,
                               float_maxheap_array_t * res,
-                              const DistanceCorrection &corr)
+                              const DistanceCorrection &corr,
+                              faiss::ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -400,19 +423,22 @@ static void knn_jaccard_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    float ip = *ip_line++;
-                    float dis = 1.0 - ip / (x_norms[i] + y_norms[j] - ip);
+                    if(!bitset || bitset->test(j)){
+                        float ip = *ip_line;
+                        float dis = 1.0 - ip / (x_norms[i] + y_norms[j] - ip);
 
-                    // negative values can occur for identical vectors
-                    // due to roundoff errors
-                    if (dis < 0) dis = 0;
+                        // negative values can occur for identical vectors
+                        // due to roundoff errors
+                        if (dis < 0) dis = 0;
 
-                    dis = corr (dis, i, j);
+                        dis = corr (dis, i, j);
 
-                    if (dis < simi[0]) {
-                        maxheap_pop (k, simi, idxi);
-                        maxheap_push (k, simi, idxi, dis, j);
+                        if (dis < simi[0]) {
+                            maxheap_pop (k, simi, idxi);
+                            maxheap_push (k, simi, idxi, dis, j);
+                        }
                     }
+                    ip_line++;
                 }
             }
         }
@@ -472,14 +498,15 @@ void knn_L2sqr (const float * x,
 void knn_jaccard (const float * x,
                   const float * y,
                   size_t d, size_t nx, size_t ny,
-                  float_maxheap_array_t * res)
+                  float_maxheap_array_t * res,
+                  faiss::ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);
-        printf("sse_not implemented!\n");
+        printf("jaccard sse not implemented!\n");
     } else {
         NopDistanceCorrection nop;
-        knn_jaccard_blas (x, y, d, nx, ny, res, nop);
+        knn_jaccard_blas (x, y, d, nx, ny, res, nop, bitset);
     }
 }
 

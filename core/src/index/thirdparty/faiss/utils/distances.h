@@ -186,7 +186,8 @@ void knn_jaccard (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_maxheap_array_t * res);
+        float_maxheap_array_t * res,
+        faiss::ConcurrentBitsetPtr bitset = nullptr);
 
 /** same as knn_L2sqr, but base_shift[bno] is subtracted to all
  * computed distances.
