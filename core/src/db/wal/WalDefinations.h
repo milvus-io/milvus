@@ -42,7 +42,8 @@ extern bool reader_is_waiting;
 #define offsetof(type, field) ((long) &((type *)0)->field)
 
 enum class MXLogType {
-    Insert,
+    InsertBinary,
+    InsertVector,
     Delete,
     Update,
     Flush,

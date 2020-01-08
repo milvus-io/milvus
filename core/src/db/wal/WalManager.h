@@ -32,19 +32,25 @@ namespace wal {
 
 class WalManager {
  public:
-    WalManager* GetInstance();
+    WalManager(const meta::MetaPtr& meta);
+    ~WalManager();
 
-    void Init();
+    void Recovery();
     void Start();
     void Stop();
     //todo: return error code
     bool
     Insert(const std::string &table_id,
-           size_t n,
-           const float *vectors,
-           milvus::engine::IDNumbers &vector_ids);
-    void DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);
-    void Flush(const std::string& table_id = "");
+           const std::vector<float> &vectors,
+           const IDNumbers &vector_ids);
+    bool
+    Insert(const std::string &table_id,
+           const std::vector<uint8_t> vectors,
+           const IDNumbers &vector_ids);
+    bool
+    DeleteById(const std::string& table_id,
+               const IDNumbers &vector_ids);
+    bool Flush(const std::string& table_id = "");
     void Apply(const uint64_t& apply_lsn);
     void Dispatch(std::string &table_id,
                   MXLogType& mxl_type,
@@ -55,14 +61,12 @@ class WalManager {
                   const uint64_t& last_applied_lsn,
                   uint64_t &lsn);
 
-    void Recovery();
-
     uint64_t GetCurrentLsn();
 
  private:
-    WalManager();
-    ~WalManager();
     WalManager operator = (WalManager&);
+
+    const meta::MetaPtr& meta_;
 
     bool is_running_;
     MXLogConfiguration mxlog_config_;

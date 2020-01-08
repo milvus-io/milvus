@@ -41,9 +41,8 @@ class MXLogBuffer {
                 const MXLogType& record_type,
                 const size_t& n,
                 const size_t& dim,
-                const float *vectors,
-                const milvus::engine::IDNumbers& vector_ids,
-                const size_t& vector_ids_offset);
+                const void *vectors,
+                const IDNumber* vector_ids);
 
     bool Next(std::string &table_id,
               MXLogType& mxl_type,

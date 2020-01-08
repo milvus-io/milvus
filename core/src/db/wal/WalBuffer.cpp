@@ -107,9 +107,8 @@ uint64_t MXLogBuffer::Append(const std::string &table_id,
                          const MXLogType& record_type,
                          const size_t& n,
                          const size_t& dim,
-                         const float *vectors,
-                         const milvus::engine::IDNumbers& vector_ids,
-                         const size_t& vector_ids_offset) {
+                         const void *vectors,
+                         const IDNumber* vector_ids) {
 
     uint64_t record_size = RecordSize(n, dim, table_id.size());
     if (SurplusSpace() < record_size) {
@@ -189,8 +188,7 @@ bool MXLogBuffer::Next(std::string &table_id,
                        uint64_t &lsn) {
 
     //reader catch up to writer, no next record, read fail
-    if (mxlog_buffer_reader_.buf_idx == mxlog_buffer_writer_.buf_idx
-      && mxlog_buffer_reader_.lsn == last_applied_lsn) {
+    if (mxlog_buffer_reader_.lsn == last_applied_lsn) {
         return false;
     }
     //otherwise, it means there must exists next record, in buffer or wal log

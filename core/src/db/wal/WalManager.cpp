@@ -29,31 +29,15 @@ std::condition_variable reader_cv;
 std::mutex reader_mutex;
 bool reader_is_waiting = 0;
 
-WalManager*
-WalManager::GetInstance() {
-    static WalManager wal_manager;
-    return &wal_manager;
-}
+WalManager::WalManager(const meta::MetaPtr& meta)
+    :meta_ (meta) {
 
-WalManager::WalManager() {
-    Init();
-}
-
-void
-WalManager::Init() {
-    // step1: load config & meta
     server::Config& config = server::Config::GetInstance();
     config.GetWalConfigBufferSize(mxlog_config_.buffer_size);
     config.GetWalConfigRecordSize(mxlog_config_.record_size);
     config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
-
-    // step2:
-    Recovery();
-
-    // step3: run wal thread
-    Start();
 }
 
 void
@@ -103,30 +87,58 @@ WalManager::Stop() {
 
 bool
 WalManager::Insert(const std::string &table_id,
-                   size_t n,
-                   const float *vectors,
-                   milvus::engine::IDNumbers &vector_ids) {
+                   const std::vector<float> &vectors,
+                   const IDNumbers &vector_ids)
+{
 
     uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
-    auto table_meta = p_table_meta_->find(table_id);
-    if (table_meta == p_table_meta_->end()) {
-        //todo: get table_meta by table_id and cache it
-    }
-    uint16_t dim = table_meta->second->dimension_;
+
+    size_t vector_num = vector_ids.size();
+    uint16_t dim = vectors.size() / vector_num;
     //split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim << 2) + 8);
+    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim * sizeof(float)) + sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
     uint64_t new_lsn = 0;
-    for (size_t i = 0; i < n; i += vectors_per_record) {
-        size_t insert_len = std::min(n - i, vectors_per_record);
+    for (size_t i = 0; i < vector_num; i += vectors_per_record) {
+        size_t insert_len = std::min(vector_num - i, vectors_per_record);
         new_lsn = p_buffer_->Append(table_id,
-                                    MXLogType::Insert,
+                                    MXLogType::InsertVector,
                                     insert_len,
                                     dim,
-                                    vectors + i * (dim << 2),
-                                    vector_ids,
-                                    i);
+                                    vectors.data() + i * dim,
+                                    vector_ids.data() + i);
+        if(new_lsn == -1) {
+            return false;
+        }
+    }
+
+    last_applied_lsn_ = new_lsn;
+    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
+    return true;
+}
+
+bool
+WalManager::Insert(const std::string &table_id,
+                   const std::vector<uint8_t> vectors,
+                   const IDNumbers &vector_ids) {
+    uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
+
+    size_t vector_num = vector_ids.size();
+    uint16_t dim = vectors.size() / vector_num;
+    //split and insert into wal
+    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim * sizeof(uint8_t)) + sizeof(IDNumber));
+    __glibcxx_assert(vectors_per_record > 0);
+
+    uint64_t new_lsn = 0;
+    for (size_t i = 0; i < vector_num; i += vectors_per_record) {
+        size_t insert_len = std::min(vector_num - i, vectors_per_record);
+        new_lsn = p_buffer_->Append(table_id,
+                                    MXLogType::InsertBinary,
+                                    insert_len,
+                                    dim,
+                                    vectors.data() + i * dim,
+                                    vector_ids.data() + i);
         if(new_lsn == -1) {
             return false;
         }
@@ -138,29 +150,45 @@ WalManager::Insert(const std::string &table_id,
 }
 
 //TBD
-void
-WalManager::DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids) {
-    //todo: similar to insert
+bool
+WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids) {
+    uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
+
+    size_t vector_num = vector_ids.size();
+
+    //split and insert into wal
+    size_t vectors_per_record = (max_record_data_size - table_id.size()) / (sizeof(IDNumber));
+    __glibcxx_assert(vectors_per_record > 0);
+
+    uint64_t new_lsn = 0;
+    for (size_t i = 0; i < vector_num; i += vectors_per_record) {
+        size_t delete_len = std::min(vector_num - i, vectors_per_record);
+        new_lsn = p_buffer_->Append(table_id,
+                                    MXLogType::Delete,
+                                    delete_len,
+                                    0,
+                                    nullptr,
+                                    vector_ids.data() + i);
+        if(new_lsn == -1) {
+            return false;
+        }
+    }
+
+    last_applied_lsn_ = new_lsn;
+    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
+    return true;
 }
 
-void
+bool
 WalManager::Flush(const std::string& table_id) {
-    uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
-    auto table_meta = p_table_meta_->find(table_id);
-    if (table_meta == p_table_meta_->end()) {
-        //todo: get table_meta by table_id and cache it
-        // meta_handler_.GetMXLogExternalMeta(p_table_meta_);//pull newest meta
-    }
     MXLogType type;
     if (table_id.empty()) {
         type = MXLogType::FlushAll;
     } else {
         type = MXLogType::Flush;
     }
-    milvus::engine::IDNumbers useless_vec;
     // todo: flush-wait-notify
-    p_buffer_->Append(table_id, type, 0, 0, NULL, useless_vec, -1);
-    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
+    last_applied_lsn_ = p_buffer_->Append(table_id, type, 0, 0, NULL, NULL);
 }
 
 void
@@ -168,7 +196,15 @@ WalManager::Recovery() {
     //todo: how to judge that whether system exit normally last time?
     //todo: if (system.exit.normally) return;
     //todo: fetch meta
-    auto table_meta = Meta.GetAllMeta();
+
+    std::vector<meta::TableSchema> table_schema_array;
+    auto status = meta_->AllTables(table_schema_array);
+    if (!status.ok()) {
+        // through
+    }
+
+
+
     p_meta_handler_->GetMXLogInternalMeta(last_applied_lsn_);
     uint64_t current_recovery_point = 0;
 //    for (auto it = p_table_meta_->begin(), it != p_table_meta_->end(); ++ it) {
