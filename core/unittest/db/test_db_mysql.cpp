@@ -34,9 +34,6 @@ static const char* TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
-const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
-const char* TABLE_ALREADY_EXISTS = "Table already exists and it is in delete state, please wait a second";
-const char* DUMMY_STD_EXCEPTION = "GENERAL ERROR WHEN DESCRIBING ALL TABLES:std::exception";
 
 milvus::engine::meta::TableSchema
 BuildTableSchema() {
@@ -147,61 +144,6 @@ TEST_F(MySqlDBTest, DB_TEST) {
     search.join();
 }
 
-TEST_F(MySqlDBTest, DB_TEST_2) {
-    fiu_init(0);
-
-    FIU_ENABLE_FIU("MySQLMetaImpl_CreateTable_NUllConnection");
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
-    ASSERT_FALSE(stat.ok());
-    ASSERT_EQ(stat.message(), FAILED_CONNECT_SQL_SERVER);
-    fiu_disable("MySQLMetaImpl_CreateTable_NUllConnection");
-
-    FIU_ENABLE_FIU("MySQLMetaImpl_CreateTable_ThrowException");
-    stat = db_->CreateTable(table_info);
-    ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl_CreateTable_ThrowException");
-
-    //ensure table has existed
-    stat = db_->CreateTable(table_info);
-    FIU_ENABLE_FIU("MySQLMetaImpl_CreateTableTable_Schema_TO_DELETE");
-    stat = db_->CreateTable(table_info);
-    ASSERT_FALSE(stat.ok());
-    ASSERT_EQ(stat.message(), TABLE_ALREADY_EXISTS);
-    fiu_disable("MySQLMetaImpl_CreateTableTable_Schema_TO_DELETE");
-
-    milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
-    FIU_ENABLE_FIU("MySQLMetaImpl_DescribeTable_NUllConnection");
-    stat = db_->DescribeTable(table_info_get);
-    ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl_DescribeTable_NUllConnection");
-
-    FIU_ENABLE_FIU("MySQLMetaImpl_DescribeTable_ThrowException");
-    stat = db_->DescribeTable(table_info_get);
-    ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl_DescribeTable_ThrowException");
-
-    bool has_table = false;
-    stat = db_->HasTable(TABLE_NAME, has_table);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_TRUE(has_table);
-
-    has_table = false;
-    FIU_ENABLE_FIU("MySQLMetaImpl_HasTable_NUllConnection");
-    stat = db_->HasTable(TABLE_NAME, has_table);
-    ASSERT_FALSE(stat.ok());
-    ASSERT_FALSE(has_table);
-    fiu_disable("MySQLMetaImpl_HasTable_NUllConnection");
-
-    FIU_ENABLE_FIU("MySQLMetaImpl_HasTable_ThrowException");
-    stat = db_->HasTable(TABLE_NAME, has_table);
-    ASSERT_FALSE(stat.ok());
-    ASSERT_FALSE(has_table);
-    fiu_disable("MySQLMetaImpl_HasTable_ThrowException");
-
-}
-
 TEST_F(MySqlDBTest, SEARCH_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
@@ -282,7 +224,6 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     FIU_ENABLE_FIU("MySQLMetaImpl_AllTable_ThrowException");
     stat = db_->AllTables(table_schema_array);
     ASSERT_FALSE(stat.ok());
-    ASSERT_EQ(stat.message(), DUMMY_STD_EXCEPTION);
     fiu_disable("MySQLMetaImpl_AllTable_NUllConnection");
     fiu_disable("MySQLMetaImpl_AllTable_ThrowException");
 
@@ -319,7 +260,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl_Size_NUllConnection");
     FIU_ENABLE_FIU("MySQLMetaImpl_Size_ThrowException");
-    stat =db_->Size(size);
+    stat = db_->Size(size);
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl_Size_ThrowException");
 }
@@ -472,8 +413,8 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         //Drop partition will failed,since it firstly drop partition meta table.
         FIU_ENABLE_FIU("MySQLMetaImpl_DropTable_NUllConnection");
         stat = db_->DropPartition(table_name + "_5");
-        //TODO(sjh):add assert expr, since DropPartion always return Status::OK().
-//        ASSERT_TRUE(stat.ok());
+        //TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.
+        //ASSERT_TRUE(stat.ok());
         fiu_disable("MySQLMetaImpl_DropTable_NUllConnection");
 
         std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
@@ -482,6 +423,10 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT + 1);
 
         FIU_ENABLE_FIU("MySQLMetaImpl_ShowPartitions_NUllConnection");
+        stat = db_->ShowPartitions(table_name, partition_schema_array);
+        ASSERT_FALSE(stat.ok());
+
+        FIU_ENABLE_FIU("MySQLMetaImpl_ShowPartitions_ThrowException");
         stat = db_->ShowPartitions(table_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
@@ -531,17 +476,6 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         stat = db_->DropIndex(table_name);
         ASSERT_TRUE(stat.ok());
     }
-
-    {
-        milvus::engine::meta::DatesT dates;
-        FIU_ENABLE_FIU("");
-        FIU_ENABLE_FIU("");
-
-        stat = db_->DropTable(table_name, dates);
-        ASSERT_TRUE(stat.ok());
-    }
-
-
 }
 
 

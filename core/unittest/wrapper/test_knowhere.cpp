@@ -33,6 +33,7 @@ TEST_F(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
     milvus::engine::KnowhereResource::Initialize();
     milvus::engine::KnowhereResource::Finalize();
 
+#ifdef MILVUS_GPU_VERSION
     fiu_init(0);
     fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
     s = milvus::engine::KnowhereResource::Initialize();
@@ -53,4 +54,5 @@ TEST_F(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
     s = milvus::engine::KnowhereResource::Initialize();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_gpu_resource_config_search_fail");
+#endif
 }

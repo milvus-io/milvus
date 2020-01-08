@@ -8,9 +8,7 @@ MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 DB_PATH="/tmp/milvus"
 PROFILING="OFF"
-USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
-CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 WITH_MKL="OFF"
@@ -19,7 +17,7 @@ FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 
-while getopts "p:d:t:f:ulrcgjhxzmei" arg; do
+while getopts "p:d:t:f:ulrcghzmei" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -53,12 +51,6 @@ while getopts "p:d:t:f:ulrcgjhxzmei" arg; do
   z)
     PROFILING="ON"
     ;;
-  j)
-    USE_JFROG_CACHE="ON"
-    ;;
-  x)
-    CUSTOMIZATION="ON"
-    ;;
   g)
     GPU_VERSION="ON"
     ;;
@@ -86,7 +78,6 @@ parameter:
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
 -z: profiling(default: OFF)
--j: use jfrog cache build directory(default: OFF)
 -g: build GPU version(default: OFF)
 -m: build with MKL(default: OFF)
 -e: build without prometheus(default: OFF)
@@ -94,7 +85,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-j] [-g] [-m] [-e] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
                 "
     exit 0
     ;;
@@ -125,8 +116,6 @@ CMAKE_CMD="cmake \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DMILVUS_ENABLE_PROFILING=${PROFILING} \
--DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
--DCUSTOMIZATION=${CUSTOMIZATION} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \

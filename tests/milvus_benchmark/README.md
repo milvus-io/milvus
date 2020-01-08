@@ -1,23 +1,42 @@
-# Requirements
+# Quick start
 
-- python 3.6+
-- pip install -r requirements.txt
+## 运行
 
-# How to use this Test Project
+### 运行说明：
 
-This project is used to test performance / accuracy /  stability of milvus server
+- 用于进行大数据集的准确性、性能、以及稳定性等相关测试
+- 可以运行两种模式：基于K8S+Jenkins的测试模式，以及local模式
 
-1. update your test configuration in suites_*.yaml
-2. run command
+### 运行示例：
 
-```shell
-### docker mode:
-python main.py --image=milvusdb/milvus:latest --run-count=2 --run-type=performance
+1. 基于K8S+Jenkins的测试方式：
 
-### local mode:
-python main.py --local --run-count=2 --run-type=performance --ip=127.0.0.1 --port=19530
-```
+   ![](assets/Parameters.png)
 
-# Contribution getting started
+2. 本地测试：
 
-- Follow PEP-8 for naming and black for formatting.
+   `python3 main.py --local --host=*.* --port=19530 --suite=suites/gpu_search_performance_random50m.yaml`
+
+### 测试集配置文件：
+
+在进行自定义的测试集或测试参数时，需要编写测试集配置文件。
+
+下面是搜索性能的测试集配置文件：
+
+![](assets/gpu_search_performance_random50m-yaml.png)
+
+1. search_performance: 定义测试类型，还包括`build_performance`,`insert_performance`,`accuracy`,`stability`,`search_stability`
+2. tables: 定义测试集列表
+3. 对于`search_performance`这类测试，每个table下都包含：
+   - server: milvus的server_config
+   - table_name: 表名，当前框架仅支持单表操作
+   - run_count: 搜索运行次数，并取搜索时间的最小值作为指标
+   - search_params: 向量搜索参数
+
+## 测试结果：
+
+搜索性能的结果输出：
+
+![](assets/milvus-nightly-performance-new-jenkins.png)
+
+在K8S测试模式下时，除打印上面的输出外，还会进行数据上报

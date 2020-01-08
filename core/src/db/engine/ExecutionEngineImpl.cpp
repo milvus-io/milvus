@@ -92,6 +92,8 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
 #endif
+
+    fiu_do_on("ExecutionEngineImpl_CreatetVecIndex_InvalidType", type = EngineType::INVALID);
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -121,6 +123,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             if (gpu_resource_enable) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
@@ -129,6 +132,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             }
             break;
         }
+#endif
 #endif
         case EngineType::FAISS_PQ: {
 #ifdef MILVUS_GPU_VERSION

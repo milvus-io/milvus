@@ -84,6 +84,23 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
+
+    {
+        fiu_init(0);
+        FIU_ENABLE_FIU("ExecutionEngineImpl_CreatetVecIndex_InvalidType");
+        ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
+            milvus::engine::MetricType::L2, 1024));
+        fiu_disable("ExecutionEngineImpl_CreatetVecIndex_InvalidType");
+    }
+
+    {
+        FIU_ENABLE_FIU("BFIndex.Build.throw_knowhere_exception");
+        ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
+            512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
+            milvus::engine::MetricType::L2, 1024));
+        fiu_disable("BFIndex.Build.throw_knowhere_exception");
+    }
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
@@ -113,20 +130,28 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->GetLocation(), file_path);
     ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
 
+#ifdef MILVUS_GPU_VERSION
     status = engine_ptr->CopyToGpu(0, false);
-    // ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok());
+    status = engine_ptr->GpuCache(0);
+    ASSERT_TRUE(status.ok());
+    status = engine_ptr->CopyToGpu(0, false);
+    ASSERT_TRUE(status.ok());
 
 //    auto new_engine = engine_ptr->Clone();
 //    ASSERT_EQ(new_engine->Dimension(), dimension);
 //    ASSERT_EQ(new_engine->Count(), ids.size());
+
     status = engine_ptr->CopyToCpu();
-    // ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok());
+    engine_ptr->CopyToCpu();
+    ASSERT_TRUE(status.ok());
+#endif
 
     auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
-    // ASSERT_TRUE(status.ok());
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
@@ -139,9 +164,21 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     fiu_enable("read_null_index", 1, NULL, 0);
 
     engine_ptr->Load(true);
-    engine_ptr->Count();
+    auto count = engine_ptr->Count();
+    ASSERT_EQ(count, 0);
 
-    engine_ptr->Dimension();
+    auto dim = engine_ptr->Dimension();
+    ASSERT_EQ(dim, dimension);
+
+    int64_t n = 0;
+    const float* data = nullptr;
+    int64_t k = 10;
+    int64_t nprobe = 0;
+    float* distances = nullptr;
+    int64_t* labels = nullptr;
+    bool hybrid = false;
+    auto status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
+    ASSERT_FALSE(status.ok());
 
     fiu_disable("read_null_index");
 }

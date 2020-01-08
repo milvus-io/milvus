@@ -84,6 +84,15 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
+
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
@@ -108,6 +117,7 @@ set(common_files
         ${thirdparty_files}
         ${scheduler_files}
         ${wrapper_files}
+        ${storage_files}
         ${helper_files}
         ${server_context_files}
         ${tracing_files}
@@ -129,6 +139,10 @@ set(unittest_libs
         opentracing
         opentracing_mocktracer
         fiu
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        curl
+        crypto
         )
 if (MILVUS_WITH_PROMETHEUS)
     set(unittest_libs ${unittest_libs}
@@ -161,3 +175,4 @@ add_subdirectory(wrapper)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)
+add_subdirectory(storage)

@@ -25,6 +25,7 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
+#include <fiu-local.h>
 #include <mysql++/mysql++.h>
 #include <string.h>
 #include <unistd.h>
@@ -39,7 +40,6 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <fiu-local.h>
 
 namespace milvus {
 namespace engine {
@@ -210,6 +210,7 @@ MySQLMetaImpl::ValidateMetaSchema() {
     }
 
     auto validate_func = [&](const MetaSchema& schema) {
+        fiu_return_on("MySQLMetaImpl_ValidateMetaSchema_FailValidate", false);
         mysqlpp::Query query_statement = connectionPtr->query();
         query_statement << "DESC " << schema.name() << ";";
 
@@ -252,10 +253,11 @@ MySQLMetaImpl::Initialize() {
     // step 1: create db root path
     if (!boost::filesystem::is_directory(options_.path_)) {
         auto ret = boost::filesystem::create_directory(options_.path_);
+        fiu_do_on("MySQLMetaImpl_Initialize_FailCreateDirectory", ret = false);
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_META_TRANSACTION_FAILED, msg);
+            throw Exception(DB_META_TRANSACTION_FAILED, msg);
         }
     }
 
@@ -305,7 +307,9 @@ MySQLMetaImpl::Initialize() {
         throw Exception(DB_INVALID_META_URI, msg);
     }
 
-    if (!connectionPtr->thread_aware()) {
+    bool is_thread_aware = connectionPtr->thread_aware();
+    fiu_do_on("MySQLMetaImpl_Initialize_IsThreadAware", is_thread_aware = false);
+    if (!is_thread_aware) {
         std::string msg =
             "Failed to initialize MySQL meta backend: MySQL client component wasn't built with thread awareness";
         ENGINE_LOG_ERROR << msg;
@@ -319,7 +323,9 @@ MySQLMetaImpl::Initialize() {
 
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-    if (!InitializeQuery.exec()) {
+    bool initialize_query_exec = InitializeQuery.exec();
+    fiu_do_on("MySQLMetaImpl_Initialize_FailCreateTableScheme", initialize_query_exec = false);
+    if (!initialize_query_exec) {
         std::string msg = "Failed to create meta table 'Tables' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
@@ -331,7 +337,9 @@ MySQLMetaImpl::Initialize() {
 
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-    if (!InitializeQuery.exec()) {
+    initialize_query_exec = InitializeQuery.exec();
+    fiu_do_on("MySQLMetaImpl_Initialize_FailCreateTableFiles", initialize_query_exec = false);
+    if (!initialize_query_exec) {
         std::string msg = "Failed to create meta table 'TableFiles' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
@@ -1660,46 +1668,58 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:raw_count++;
+                    case (int)TableFileSchema::RAW:
+                        raw_count++;
                         break;
-                    case (int)TableFileSchema::NEW:new_count++;
+                    case (int)TableFileSchema::NEW:
+                        new_count++;
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:new_merge_count++;
+                    case (int)TableFileSchema::NEW_MERGE:
+                        new_merge_count++;
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:new_index_count++;
+                    case (int)TableFileSchema::NEW_INDEX:
+                        new_index_count++;
                         break;
-                    case (int)TableFileSchema::TO_INDEX:to_index_count++;
+                    case (int)TableFileSchema::TO_INDEX:
+                        to_index_count++;
                         break;
-                    case (int)TableFileSchema::INDEX:index_count++;
+                    case (int)TableFileSchema::INDEX:
+                        index_count++;
                         break;
-                    case (int)TableFileSchema::BACKUP:backup_count++;
+                    case (int)TableFileSchema::BACKUP:
+                        backup_count++;
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
 
             std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)TableFileSchema::RAW:
+                        msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)TableFileSchema::NEW:
+                        msg = msg + " new files:" + std::to_string(new_count);
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        msg = msg + " new_merge files:"
-                              + std::to_string(new_merge_count);
+                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        msg = msg + " new_index files:"
-                              + std::to_string(new_index_count);
+                        msg = msg + " new_index files:" + std::to_string(new_index_count);
                         break;
-                    case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)TableFileSchema::TO_INDEX:
+                        msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)TableFileSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)TableFileSchema::INDEX:
+                        msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)TableFileSchema::BACKUP:
+                        msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:break;
+                    default:
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;

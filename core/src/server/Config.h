@@ -28,6 +28,14 @@
 namespace milvus {
 namespace server {
 
+#define CONFIG_CHECK(func) \
+    do {                   \
+        Status s = func;   \
+        if (!s.ok()) {     \
+            return s;      \
+        }                  \
+    } while (false)
+
 static const char* CONFIG_NODE_DELIMITER = ".";
 static const char* CONFIG_VERSION = "version";
 
@@ -44,10 +52,6 @@ static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
-static const char* CONFIG_DB_PRIMARY_PATH = "primary_path";
-static const char* CONFIG_DB_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
-static const char* CONFIG_DB_SECONDARY_PATH = "secondary_path";
-static const char* CONFIG_DB_SECONDARY_PATH_DEFAULT = "";
 static const char* CONFIG_DB_BACKEND_URL = "backend_url";
 static const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
@@ -58,6 +62,25 @@ static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+
+/* storage config */
+static const char* CONFIG_STORAGE = "storage_config";
+static const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
+static const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
+static const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
+static const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
+static const char* CONFIG_STORAGE_MINIO_ENABLE = "minio_enable";
+static const char* CONFIG_STORAGE_MINIO_ENABLE_DEFAULT = "false";
+static const char* CONFIG_STORAGE_MINIO_ADDRESS = "minio_address";
+static const char* CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_STORAGE_MINIO_PORT = "minio_port";
+static const char* CONFIG_STORAGE_MINIO_PORT_DEFAULT = "9000";
+static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY = "minio_access_key";
+static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_MINIO_SECRET_KEY = "minio_secret_key";
+static const char* CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_MINIO_BUCKET = "minio_bucket";
+static const char* CONFIG_STORAGE_MINIO_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -72,16 +95,15 @@ static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 static const char* CONFIG_METRIC = "metric_config";
 static const char* CONFIG_METRIC_ENABLE_MONITOR = "enable_monitor";
 static const char* CONFIG_METRIC_ENABLE_MONITOR_DEFAULT = "false";
-static const char* CONFIG_METRIC_COLLECTOR = "collector";
-static const char* CONFIG_METRIC_COLLECTOR_DEFAULT = "prometheus";
-static const char* CONFIG_METRIC_PROMETHEUS = "prometheus_config";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
+static const char* CONFIG_METRIC_ADDRESS = "address";
+static const char* CONFIG_METRIC_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_METRIC_PORT = "port";
+static const char* CONFIG_METRIC_PORT_DEFAULT = "9091";
 
 /* engine config */
 static const char* CONFIG_ENGINE = "engine_config";
 static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
-static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "20";
+static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
@@ -96,7 +118,7 @@ static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 static const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
 static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_capacity";
-static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "4";
+static const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1";
 static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
 static const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_GPU_RESOURCE_DELIMITER = ",";
@@ -157,10 +179,6 @@ class Config {
 
     /* db config */
     Status
-    CheckDBConfigPrimaryPath(const std::string& value);
-    Status
-    CheckDBConfigSecondaryPath(const std::string& value);
-    Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
@@ -169,13 +187,31 @@ class Config {
     Status
     CheckDBConfigInsertBufferSize(const std::string& value);
 
+    /* storage config */
+    Status
+    CheckStorageConfigPrimaryPath(const std::string& value);
+    Status
+    CheckStorageConfigSecondaryPath(const std::string& value);
+    Status
+    CheckStorageConfigMinioEnable(const std::string& value);
+    Status
+    CheckStorageConfigMinioAddress(const std::string& value);
+    Status
+    CheckStorageConfigMinioPort(const std::string& value);
+    Status
+    CheckStorageConfigMinioAccessKey(const std::string& value);
+    Status
+    CheckStorageConfigMinioSecretKey(const std::string& value);
+    Status
+    CheckStorageConfigMinioBucket(const std::string& value);
+
     /* metric config */
     Status
     CheckMetricConfigEnableMonitor(const std::string& value);
     Status
-    CheckMetricConfigCollector(const std::string& value);
+    CheckMetricConfigAddress(const std::string& value);
     Status
-    CheckMetricConfigPrometheusPort(const std::string& value);
+    CheckMetricConfigPort(const std::string& value);
 
     /* cache config */
     Status
@@ -229,10 +265,6 @@ class Config {
 
     /* db config */
     Status
-    GetDBConfigPrimaryPath(std::string& value);
-    Status
-    GetDBConfigSecondaryPath(std::string& value);
-    Status
     GetDBConfigBackendUrl(std::string& value);
     Status
     GetDBConfigArchiveDiskThreshold(int64_t& value);
@@ -243,13 +275,31 @@ class Config {
     Status
     GetDBConfigPreloadTable(std::string& value);
 
+    /* storage config */
+    Status
+    GetStorageConfigPrimaryPath(std::string& value);
+    Status
+    GetStorageConfigSecondaryPath(std::string& value);
+    Status
+    GetStorageConfigMinioEnable(bool& value);
+    Status
+    GetStorageConfigMinioAddress(std::string& value);
+    Status
+    GetStorageConfigMinioPort(std::string& value);
+    Status
+    GetStorageConfigMinioAccessKey(std::string& value);
+    Status
+    GetStorageConfigMinioSecretKey(std::string& value);
+    Status
+    GetStorageConfigMinioBucket(std::string& value);
+
     /* metric config */
     Status
     GetMetricConfigEnableMonitor(bool& value);
     Status
-    GetMetricConfigCollector(std::string& value);
+    GetMetricConfigAddress(std::string& value);
     Status
-    GetMetricConfigPrometheusPort(std::string& value);
+    GetMetricConfigPort(std::string& value);
 
     /* cache config */
     Status
@@ -299,10 +349,6 @@ class Config {
 
     /* db config */
     Status
-    SetDBConfigPrimaryPath(const std::string& value);
-    Status
-    SetDBConfigSecondaryPath(const std::string& value);
-    Status
     SetDBConfigBackendUrl(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
@@ -311,13 +357,31 @@ class Config {
     Status
     SetDBConfigInsertBufferSize(const std::string& value);
 
+    /* storage config */
+    Status
+    SetStorageConfigPrimaryPath(const std::string& value);
+    Status
+    SetStorageConfigSecondaryPath(const std::string& value);
+    Status
+    SetStorageConfigMinioEnable(const std::string& value);
+    Status
+    SetStorageConfigMinioAddress(const std::string& value);
+    Status
+    SetStorageConfigMinioPort(const std::string& value);
+    Status
+    SetStorageConfigMinioAccessKey(const std::string& value);
+    Status
+    SetStorageConfigMinioSecretKey(const std::string& value);
+    Status
+    SetStorageConfigMinioBucket(const std::string& value);
+
     /* metric config */
     Status
     SetMetricConfigEnableMonitor(const std::string& value);
     Status
-    SetMetricConfigCollector(const std::string& value);
+    SetMetricConfigAddress(const std::string& value);
     Status
-    SetMetricConfigPrometheusPort(const std::string& value);
+    SetMetricConfigPort(const std::string& value);
 
     /* cache config */
     Status

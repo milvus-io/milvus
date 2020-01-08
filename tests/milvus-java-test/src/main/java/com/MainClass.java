@@ -15,7 +15,7 @@ import java.util.List;
 
 public class MainClass {
     private static String host = "127.0.0.1";
-    private static String port = "19530";
+    private static String port = "19532";
     private int index_file_size = 50;
     public int dimension = 128;
 

@@ -32,8 +32,6 @@
 #include "db/utils.h"
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
-#include <fiu-local.h>
-#include <fiu-control.h>
 
 namespace {
 
@@ -43,6 +41,7 @@ static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
+
 
 milvus::engine::meta::TableSchema
 BuildTableSchema() {
@@ -243,6 +242,19 @@ TEST_F(DBTest, DB_TEST) {
     stat = db_->GetTableRowCount(TABLE_NAME, count);
     ASSERT_TRUE(stat.ok());
     ASSERT_GT(count, 0);
+
+    // test invalid build db
+    {
+        auto options = GetOptions();
+        options.meta_.backend_uri_ = "dummy";
+        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+
+        options.meta_.backend_uri_ = "mysql://root:123456@127.0.0.1:3306/test";
+        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+
+        options.meta_.backend_uri_ = "dummy://root:123456@127.0.0.1:3306/test";
+        ASSERT_ANY_THROW(milvus::engine::DBFactory::Build(options));
+    }
 }
 
 TEST_F(DBTest, SEARCH_TEST) {
@@ -367,6 +379,18 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
                                   result_distances);
         ASSERT_TRUE(stat.ok());
+
+        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
+                                  result_distances);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
+
+        FIU_ENABLE_FIU("DBImpl_QueryByFileID_EmptyFilesArray");
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
+                                  result_distances);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("DBImpl_QueryByFileID_EmptyFilesArray");
     }
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
@@ -380,6 +404,11 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
         stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
+
+        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
     }
 
 #ifdef CUSTOMIZATION
@@ -424,6 +453,8 @@ TEST_F(DBTest, SEARCH_TEST) {
 }
 
 TEST_F(DBTest, PRELOADTABLE_TEST) {
+    fiu_init(0);
+
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -453,6 +484,32 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     ASSERT_TRUE(stat.ok());
     int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
     ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
+
+    FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+    stat = db_->PreloadTable(TABLE_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
+
+    //create a partition
+    stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
+    ASSERT_TRUE(stat.ok());
+    stat = db_->PreloadTable(TABLE_NAME);
+    ASSERT_TRUE(stat.ok());
+
+    FIU_ENABLE_FIU("DBImpl_PreloadTable_NullEngine");
+    stat = db_->PreloadTable(TABLE_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_PreloadTable_NullEngine");
+
+    FIU_ENABLE_FIU("DBImpl_PreloadTable_ExceedCache");
+    stat = db_->PreloadTable(TABLE_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_PreloadTable_ExceedCache");
+
+    FIU_ENABLE_FIU("DBImpl_PreloadTable_EngineThrowException");
+    stat = db_->PreloadTable(TABLE_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_PreloadTable_EngineThrowException");
 }
 
 TEST_F(DBTest, SHUTDOWN_TEST) {
@@ -464,6 +521,26 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
 
     stat = db_->DescribeTable(table_info);
     ASSERT_FALSE(stat.ok());
+
+    stat = db_->UpdateTableFlag(TABLE_NAME, 0);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DropPartition("part0");
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DropPartitionByTag(TABLE_NAME, "0");
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
+    stat = db_->ShowPartitions(TABLE_NAME, partition_schema_array);
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<milvus::engine::meta::TableSchema> table_infos;
+    stat = db_->AllTables(table_infos);
+    ASSERT_EQ(stat.code(), milvus::DB_ERROR);
 
     bool has_table = false;
     stat = db_->HasTable(table_info.table_id_, has_table);
@@ -487,6 +564,9 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DescribeIndex(table_info.table_id_, index);
     ASSERT_FALSE(stat.ok());
 
+    stat = db_->DropIndex(TABLE_NAME);
+    ASSERT_FALSE(stat.ok());
+
     std::vector<std::string> tags;
     milvus::engine::meta::DatesT dates;
     milvus::engine::ResultIds result_ids;
@@ -499,8 +579,128 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
                               result_distances);
     ASSERT_FALSE(stat.ok());
 
+    stat =
+        db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, 1, nullptr, result_ids, result_distances);
+    ASSERT_FALSE(stat.ok());
+
     stat = db_->DropTable(table_info.table_id_, dates);
     ASSERT_FALSE(stat.ok());
+}
+
+TEST_F(DBTest, BACK_TIMER_THREAD_1) {
+    fiu_init(0);
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::Status stat;
+    //test background timer thread
+    {
+        FIU_ENABLE_FIU("DBImpl_StartMetricTask_InvalidTotalCache");
+        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToMerge_ThrowException");
+        stat = db_->CreateTable(table_info);
+        ASSERT_TRUE(stat.ok());
+
+        //insert some vector to create some tablefiles
+        int64_t nb = VECTOR_COUNT;
+        std::vector<float> xb;
+        BuildVectors(nb, xb);
+
+        int loop = 10;
+        for (auto i = 0; i < loop; ++i) {
+            milvus::engine::IDNumbers vector_ids;
+            db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
+            ASSERT_EQ(vector_ids.size(), nb);
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        db_->Stop();
+        fiu_disable("DBImpl_StartMetricTask_InvalidTotalCache");
+        fiu_disable("SqliteMetaImpl_FilesToMerge_ThrowException");
+    }
+
+    FIU_ENABLE_FIU("DBImpl_StartMetricTask_InvalidTotalCache");
+    db_->Start();
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    db_->Stop();
+    fiu_disable("DBImpl_StartMetricTask_InvalidTotalCache");
+}
+
+TEST_F(DBTest, BACK_TIMER_THREAD_2) {
+    fiu_init(0);
+    milvus::Status stat;
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+
+    stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    //insert some vector to create some tablefiles
+    int64_t nb = VECTOR_COUNT;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = 10;
+    for (auto i = 0; i < loop; ++i) {
+        milvus::engine::IDNumbers vector_ids;
+        db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
+        ASSERT_EQ(vector_ids.size(), nb);
+    }
+
+    FIU_ENABLE_FIU("SqliteMetaImpl_CreateTableFile_ThrowException");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    db_->Stop();
+    fiu_disable("SqliteMetaImpl_CreateTableFile_ThrowException");
+}
+
+TEST_F(DBTest, BACK_TIMER_THREAD_3) {
+    fiu_init(0);
+    milvus::Status stat;
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+
+    stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    //insert some vector to create some tablefiles
+    int64_t nb = VECTOR_COUNT;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = 10;
+    for (auto i = 0; i < loop; ++i) {
+        milvus::engine::IDNumbers vector_ids;
+        db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
+        ASSERT_EQ(vector_ids.size(), nb);
+    }
+
+    FIU_ENABLE_FIU("DBImpl_MergeFiles_SerializeThrowException");
+    db_->Start();
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    db_->Stop();
+    fiu_disable("DBImpl_MergeFiles_SerializeThrowException");
+}
+
+TEST_F(DBTest, BACK_TIMER_THREAD_4) {
+    fiu_init(0);
+    milvus::Status stat;
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+
+    stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    //insert some vector to create some tablefiles
+    int64_t nb = VECTOR_COUNT;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = 10;
+    for (auto i = 0; i < loop; ++i) {
+        milvus::engine::IDNumbers vector_ids;
+        db_->InsertVectors(TABLE_NAME, "", nb, xb.data(), vector_ids);
+        ASSERT_EQ(vector_ids.size(), nb);
+    }
+
+    FIU_ENABLE_FIU("DBImpl_MergeFiles_SerializeErrorStatus");
+    db_->Start();
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    db_->Stop();
+    fiu_disable("DBImpl_MergeFiles_SerializeErrorStatus");
 }
 
 TEST_F(DBTest, INDEX_TEST) {
@@ -525,10 +725,24 @@ TEST_F(DBTest, INDEX_TEST) {
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
+    fiu_init(0);
+    FIU_ENABLE_FIU("SqliteMetaImpl_DescribeTableIndex_ThrowException");
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("SqliteMetaImpl_DescribeTableIndex_ThrowException");
+
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+    FIU_ENABLE_FIU("DBImpl_UpdateTableIndexRecursively_FailUpdateTableIndex");
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_UpdateTableIndexRecursively_FailUpdateTableIndex");
+
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
+#endif
 #endif
 
     milvus::engine::TableIndex index_out;
@@ -576,6 +790,10 @@ TEST_F(DBTest, PARTITION_TEST) {
 
         db_->InsertVectors(table_name, partition_tag, INSERT_BATCH, xb.data(), vector_ids);
         ASSERT_EQ(vector_ids.size(), INSERT_BATCH);
+
+        //insert data into not existed partition
+        stat = db_->InsertVectors(TABLE_NAME, "notexist", INSERT_BATCH, xb.data(), vector_ids);
+        ASSERT_FALSE(stat.ok());
     }
 
     // duplicated partition is not allowed
@@ -597,10 +815,31 @@ TEST_F(DBTest, PARTITION_TEST) {
         stat = db_->CreateIndex(table_info.table_id_, index);
         ASSERT_TRUE(stat.ok());
 
+        fiu_init(0);
+        FIU_ENABLE_FIU("DBImpl_BuildTableIndexRecursively_FailBuildTableIndexForPartition");
+        stat = db_->CreateIndex(table_info.table_id_, index);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("DBImpl_BuildTableIndexRecursively_FailBuildTableIndexForPartition");
+
+        FIU_ENABLE_FIU("DBImpl_BuildTableIndexRecursively_NotEmptyFailedFiles");
+        stat = db_->CreateIndex(table_info.table_id_, index);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("DBImpl_BuildTableIndexRecursively_NotEmptyFailedFiles");
+
         uint64_t row_count = 0;
         stat = db_->GetTableRowCount(TABLE_NAME, row_count);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(row_count, INSERT_BATCH * PARTITION_COUNT);
+
+        FIU_ENABLE_FIU("SqliteMetaImpl_Count_ThrowException");
+        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("SqliteMetaImpl_Count_ThrowException");
+
+        FIU_ENABLE_FIU("DBImpl_GetTableRowCountRecursively_FailGetTableRowCountForPartition");
+        stat = db_->GetTableRowCount(TABLE_NAME, row_count);
+        ASSERT_FALSE(stat.ok());
+        fiu_disable("DBImpl_GetTableRowCountRecursively_FailGetTableRowCountForPartition");
     }
 
     {  // search
@@ -614,7 +853,8 @@ TEST_F(DBTest, PARTITION_TEST) {
         std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        stat =
+            db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -622,7 +862,8 @@ TEST_F(DBTest, PARTITION_TEST) {
         tags.clear();
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        stat =
+            db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -630,7 +871,8 @@ TEST_F(DBTest, PARTITION_TEST) {
         tags.push_back("\\d");
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
+        stat =
+            db_->Query(dummy_context_, TABLE_NAME, tags, topk, nq, nprobe, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
     }
@@ -640,6 +882,16 @@ TEST_F(DBTest, PARTITION_TEST) {
 
     stat = db_->DropPartitionByTag(table_name, "1");
     ASSERT_TRUE(stat.ok());
+
+    FIU_ENABLE_FIU("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+    stat = db_->DropIndex(table_info.table_id_);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+
+    FIU_ENABLE_FIU("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+    stat = db_->DropIndex(table_info.table_id_);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
 
     stat = db_->DropIndex(table_name);
     ASSERT_TRUE(stat.ok());
@@ -718,6 +970,18 @@ TEST_F(DBTest2, DELETE_TEST) {
     stat = db_->CreateIndex(TABLE_NAME, index);
 
     std::vector<milvus::engine::meta::DateT> dates;
+
+    //create partition, drop table will drop partition recursively
+    stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
+    ASSERT_TRUE(stat.ok());
+
+    //fail drop table
+    fiu_init(0);
+    FIU_ENABLE_FIU("DBImpl_DropTableRecursively_failed");
+    stat = db_->DropTable(TABLE_NAME, dates);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl_DropTableRecursively_failed");
+
     stat = db_->DropTable(TABLE_NAME, dates);
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());

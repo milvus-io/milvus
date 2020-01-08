@@ -221,17 +221,20 @@ DBImpl::PreloadTable(const std::string& table_id) {
     for (auto& file : files_array) {
         ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
                                                          (MetricType)file.metric_type_, file.nlist_);
+        fiu_do_on("DBImpl_PreloadTable_NullEngine", engine = nullptr);
         if (engine == nullptr) {
             ENGINE_LOG_ERROR << "Invalid engine type";
             return Status(DB_ERROR, "Invalid engine type");
         }
 
         size += engine->PhysicalSize();
+        fiu_do_on("DBImpl_PreloadTable_ExceedCache", size = available_size + 1);
         if (size > available_size) {
             ENGINE_LOG_DEBUG << "Pre-load canceled since cache almost full";
             return Status(SERVER_CACHE_FULL, "Cache is full");
         } else {
             try {
+                fiu_do_on("DBImpl_PreloadTable_EngineThrowException", throw std::exception());
                 std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
                 TimeRecorderAuto rc_1(msg);
                 engine->Load(true);
@@ -497,6 +500,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
         return status;
     }
 
+    fiu_do_on("DBImpl_QueryByFileID_EmptyFilesArray", files_array.clear());
     if (files_array.empty()) {
         return Status(DB_ERROR, "Invalid file id");
     }
@@ -611,6 +615,8 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    fiu_do_on("DBImpl_StartMetricTask_InvalidTotalCache", cache_total = 0);
+
     if (cache_total > 0) {
         double cache_usage_double = cache_usage;
         server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage_double * 100 / cache_total);
@@ -631,6 +637,7 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().CPUCoreUsagePercentSet();
     server::Metrics::GetInstance().GPUTemperature();
     server::Metrics::GetInstance().CPUTemperature();
+    server::Metrics::GetInstance().PushToGateway();
 
     // ENGINE_LOG_TRACE << "Metric task finished";
 }
@@ -737,6 +744,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
     // step 3: serialize to disk
     try {
         status = index->Serialize();
+        fiu_do_on("DBImpl_MergeFiles_SerializeThrowException", throw std::exception());
+        fiu_do_on("DBImpl_MergeFiles_SerializeErrorStatus", status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             ENGINE_LOG_ERROR << status.message();
         }
@@ -991,6 +1000,7 @@ DBImpl::DropTableRecursively(const std::string& table_id, const meta::DatesT& da
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
         status = DropTableRecursively(schema.table_id_, dates);
+        fiu_do_on("DBImpl_DropTableRecursively_failed", status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -1004,6 +1014,8 @@ DBImpl::UpdateTableIndexRecursively(const std::string& table_id, const TableInde
     DropIndex(table_id);
 
     auto status = meta_ptr_->UpdateTableIndex(table_id, index);
+    fiu_do_on("DBImpl_UpdateTableIndexRecursively_FailUpdateTableIndex",
+              status = Status(DB_META_TRANSACTION_FAILED, ""));
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to update table index info for table: " << table_id;
         return status;
@@ -1064,6 +1076,8 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
         status = BuildTableIndexRecursively(schema.table_id_, index);
+        fiu_do_on("DBImpl_BuildTableIndexRecursively_FailBuildTableIndexForPartition",
+                  status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -1072,6 +1086,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     // failed to build index for some files, return error
     std::vector<std::string> failed_files;
     index_failed_checker_.GetFailedIndexFileOfTable(table_id, failed_files);
+    fiu_do_on("DBImpl_BuildTableIndexRecursively_NotEmptyFailedFiles", failed_files.emplace_back("fiu"));
     if (!failed_files.empty()) {
         std::string msg = "Failed to build index for " + std::to_string(failed_files.size()) +
                           ((failed_files.size() == 1) ? " file" : " files");
@@ -1096,6 +1111,8 @@ DBImpl::DropTableIndexRecursively(const std::string& table_id) {
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
         status = DropTableIndexRecursively(schema.table_id_);
+        fiu_do_on("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition",
+                  status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -1118,6 +1135,8 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
     for (auto& schema : partition_array) {
         uint64_t partition_row_count = 0;
         status = GetTableRowCountRecursively(schema.table_id_, partition_row_count);
+        fiu_do_on("DBImpl_GetTableRowCountRecursively_FailGetTableRowCountForPartition",
+                  status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
