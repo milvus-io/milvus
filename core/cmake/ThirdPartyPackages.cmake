@@ -379,6 +379,7 @@ macro(build_gtest)
             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
     set(GTEST_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${GTEST_PREFIX}"
             "-DCMAKE_INSTALL_LIBDIR=lib"
             -DCMAKE_CXX_FLAGS=${GTEST_CMAKE_CXX_FLAGS}
