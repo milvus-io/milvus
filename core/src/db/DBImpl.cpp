@@ -18,6 +18,7 @@
 #include "db/DBImpl.h"
 
 #include <assert.h>
+#include <utils/ValidationUtil.h>
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
@@ -41,6 +42,7 @@
 #include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
@@ -326,8 +328,6 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    // TODO(zhiru): Enter WAL. They should call mem_mgr_->InsertVectors
-
     // if partition is specified, use partition as target table
     Status status;
     std::string target_table_name = table_id;
@@ -339,6 +339,8 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
             return status;
         }
     }
+
+    // TODO(zhiru): Enter WAL. They should call mem_mgr_->InsertVectors
 
     // insert vectors into target table
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
@@ -380,10 +382,13 @@ DBImpl::Flush(const std::string& table_id) {
     }
 
     // TODO(zhiru): Enter WAL. They should call mem_mgr_->Flush and provide a LSN
+
+    // TODO: wait till notified by flush_ok_cv
+
     uint64_t wal_lsn = 0;
     auto status = mem_mgr_->Flush(table_id, wal_lsn);
     std::set<std::string> table_ids{table_id};
-    AddCompactionTask(table_ids);
+    Merge(table_ids);
 }
 
 Status
@@ -393,14 +398,18 @@ DBImpl::Flush() {
     }
 
     // TODO(zhiru): Enter WAL. They should call mem_mgr_->Flush and provide a LSN
+    //    WAL->Flush
+
+    // TODO: wait till notified by flush_ok_cv
+
     uint64_t wal_lsn = 0;
     std::set<std::string> table_ids;
     auto status = mem_mgr_->Flush(table_ids, wal_lsn);
-    AddCompactionTask(table_ids);
+    Merge(table_ids);
 }
 
-void
-DBImpl::AddCompactionTask(const std::set<std::string>& table_ids) {
+Status
+DBImpl::Merge(const std::set<std::string>& table_ids) {
     // compaction finished?
     {
         std::lock_guard<std::mutex> lck(compact_result_mutex_);
@@ -724,6 +733,7 @@ DBImpl::StartMetricTask() {
 
     // ENGINE_LOG_TRACE << "Metric task finished";
 }
+/*
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
@@ -805,6 +815,106 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
     if (options_.insert_cache_immediately_) {
         index->Cache();
+    }
+
+    return status;
+}
+*/
+
+Status
+DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
+    ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
+
+    // step 1: create table file
+    meta::TableFileSchema table_file;
+    table_file.table_id_ = table_id;
+    table_file.date_ = date;
+    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
+    Status status = meta_ptr_->CreateTableFile(table_file);
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
+        return status;
+    }
+
+    // step 2: merge files
+    /*
+    ExecutionEnginePtr index =
+        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
+                             (MetricType)table_file.metric_type_, table_file.nlist_);
+*/
+    meta::TableFilesSchema updated;
+    int64_t index_size = 0;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(table_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
+
+    // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
+    int vector_type_size;
+    if (server::ValidationUtil::IsBinaryMetricType(table_file.metric_type_)) {
+        vector_type_size = sizeof(uint8_t);
+    } else {
+        vector_type_size = sizeof(float);
+    }
+
+    for (auto& file : files) {
+        server::CollectMergeFilesMetrics metrics;
+        segment_writer_ptr->Merge(file.location_, vector_type_size);
+        auto file_schema = file;
+        file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
+        updated.push_back(file_schema);
+        auto size = segment_writer_ptr->Size();
+        if (size >= file_schema.index_file_size_) {
+            break;
+        }
+    }
+
+    // step 3: serialize to disk
+    try {
+        status = segment_writer_ptr->Serialize();
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << status.message();
+        }
+    } catch (std::exception& ex) {
+        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
+        ENGINE_LOG_ERROR << msg;
+        status = Status(DB_ERROR, msg);
+    }
+
+    if (!status.ok()) {
+        // if failed to serialize merge file to disk
+        // typical error: out of disk space, out of memory or permition denied
+        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        status = meta_ptr_->UpdateTableFile(table_file);
+        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+        ENGINE_LOG_ERROR << "Failed to persist merged file: " << table_file.location_
+                         << ", possible out of disk space or memory";
+
+        return status;
+    }
+
+    // step 4: update table files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
+                                    ? meta::TableFileSchema::TO_INDEX
+                                    : meta::TableFileSchema::RAW;
+    } else {
+        table_file.file_type_ = meta::TableFileSchema::RAW;
+    }
+    table_file.file_size_ = segment_writer_ptr->Size();
+    // TODO(zhiru): row count?
+    table_file.row_count_ = segment_writer_ptr->VectorCount();
+    updated.push_back(table_file);
+    status = meta_ptr_->UpdateTableFiles(updated);
+    ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ << " of size " << segment_writer_ptr->Size()
+                     << " bytes";
+
+    if (options_.insert_cache_immediately_) {
+        segment_writer_ptr->Cache();
     }
 
     return status;
