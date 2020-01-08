@@ -418,8 +418,6 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
 
 /* DB config */
 Status
-    fiu_return_on("check_config_primary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
-    fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 Config::CheckDBConfigBackendUrl(const std::string& value) {
     auto exist_error = !ValidationUtil::ValidateDbURI(value).ok();
     fiu_do_on("check_config_backend_url_fail", exist_error = true);
@@ -490,6 +488,7 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
 /* storage config */
 Status
 Config::CheckStorageConfigPrimaryPath(const std::string& value) {
+    fiu_return_on("check_config_primary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "storage_config.db_path is empty.");
     }
@@ -498,17 +497,16 @@ Config::CheckStorageConfigPrimaryPath(const std::string& value) {
 
 Status
 Config::CheckStorageConfigSecondaryPath(const std::string& value) {
+    fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.db_path is empty.");
+    }
     return Status::OK();
 }
 
 Status
 Config::CheckStorageConfigMinioEnable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-Config::CheckMetricConfigEnableMonitor(const std::string& value) {
-    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
-    fiu_do_on("check_config_enable_monitor_fail", exist_error = true);
-
-    if (exist_error) {
         std::string msg =
             "Invalid storage config: " + value + ". Possible reason: storage_config.minio_enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -569,7 +567,10 @@ Config::CheckStorageConfigMinioBucket(const std::string& value) {
 /* metric config */
 Status
 Config::CheckMetricConfigEnableMonitor(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_config_enable_monitor_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg =
             "Invalid metric config: " + value + ". Possible reason: metric_config.enable_monitor is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1113,10 +1114,12 @@ Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     value = std::stoll(str);
     return Status::OK();
 }
+
 #endif
 
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::GetGpuResourceConfigEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
@@ -1212,7 +1215,7 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         std::ifstream tracer_config(value);
         Status s = tracer_config.good() ? Status::OK()
                                         : Status(SERVER_INVALID_ARGUMENT, "Failed to open tracer config file " + value +
-                                                                              ": " + std::strerror(errno));
+                                                                          ": " + std::strerror(errno));
         tracer_config.close();
         return s;
     }
@@ -1371,15 +1374,18 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
 }
+
 #endif
 
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigEnable(value));
@@ -1413,6 +1419,7 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
     return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
 }
+
 #endif
 
 }  // namespace server
