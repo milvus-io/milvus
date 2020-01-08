@@ -126,7 +126,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
     if (minio_enable) {
         std::string table_path = options.path_ + TABLES_FOLDER + table_id;
 
-        auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+        auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
         Status stat = storage_inst.DeleteObjects(table_path);
         if (!stat.ok()) {
             return stat;
