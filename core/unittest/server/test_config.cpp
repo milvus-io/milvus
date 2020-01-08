@@ -668,16 +668,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_enable_monitor_fail");
 
-    fiu_enable("check_config_collector_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_collector_fail");
-
-    fiu_enable("check_config_promethus_port_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_promethus_port_fail");
-
     /* cache config */
     fiu_enable("check_config_cpu_cache_capacity_fail", 1, NULL, 0);
     s = config.ValidateConfig();
@@ -746,12 +736,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_TRUE(s.ok());
 
 #ifdef MILVUS_GPU_VERSION
-    fiu_enable("get_config_build_index_resources_empty_value_fail", 1, NULL, 0);
     std::vector<int64_t> empty_value;
-    s = config.GetGpuResourceConfigBuildIndexResources(empty_value);
-    ASSERT_FALSE(s.ok());
-    fiu_disable("get_config_build_index_resources_empty_value_fail");
-
     fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
     empty_value.clear();
     s = config.GetGpuResourceConfigBuildIndexResources(empty_value);
@@ -775,12 +760,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.GetGpuResourceConfigSearchResources(empty_value);
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_gpu_resource_enable_fail");
-
-    fiu_enable("get_gpu_config_search_resources_empty_value_fail", 1, NULL, 0);
-    empty_value.clear();
-    s = config.GetGpuResourceConfigSearchResources(empty_value);
-    ASSERT_FALSE(s.ok());
-    fiu_disable("get_gpu_config_search_resources_empty_value_fail");
 
     int64_t value;
     fiu_enable("check_config_gpu_resource_enable_fail", 1, NULL, 0);
@@ -890,16 +869,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_enable_monitor_fail");
-
-    fiu_enable("check_config_collector_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_collector_fail");
-
-    fiu_enable("check_config_promethus_port_fail", 1, NULL, 0);
-    s = config.ResetDefaultConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_promethus_port_fail");
 
     /* cache config */
     fiu_enable("check_config_cpu_cache_capacity_fail", 1, NULL, 0);

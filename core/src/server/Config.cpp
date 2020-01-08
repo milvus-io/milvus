@@ -498,9 +498,6 @@ Config::CheckStorageConfigPrimaryPath(const std::string& value) {
 Status
 Config::CheckStorageConfigSecondaryPath(const std::string& value) {
     fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
-    if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.db_path is empty.");
-    }
     return Status::OK();
 }
 
@@ -1175,7 +1172,6 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
-    fiu_do_on("get_gpu_config_search_resources_empty_value_fail", res_vec.clear());
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
     }
@@ -1197,7 +1193,6 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
-    fiu_do_on("get_config_build_index_resources_empty_value_fail", res_vec.clear());
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
     }
