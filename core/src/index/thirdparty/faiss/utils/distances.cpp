@@ -147,7 +147,8 @@ void fvec_renorm_L2 (size_t d, size_t nx, float * __restrict x)
 static void knn_inner_product_sse (const float * x,
                         const float * y,
                         size_t d, size_t nx, size_t ny,
-                        float_minheap_array_t * res)
+                        float_minheap_array_t * res,
+                        faiss::ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
     size_t check_period = InterruptCallback::get_period_hint (ny * d);
@@ -187,7 +188,8 @@ static void knn_L2sqr_sse (
                 const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
-                float_maxheap_array_t * res)
+                float_maxheap_array_t * res,
+                faiss::ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
 
@@ -207,11 +209,13 @@ static void knn_L2sqr_sse (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                float disij = fvec_L2sqr (x_i, y_j, d);
+                if(!bitset || bitset->test(j)){
+                    float disij = fvec_L2sqr (x_i, y_j, d);
 
-                if (disij < simi[0]) {
-                    maxheap_pop (k, simi, idxi);
-                    maxheap_push (k, simi, idxi, disij, j);
+                    if (disij < simi[0]) {
+                        maxheap_pop (k, simi, idxi);
+                        maxheap_push (k, simi, idxi, disij, j);
+                    }
                 }
                 y_j += d;
             }
@@ -228,7 +232,8 @@ static void knn_inner_product_blas (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_minheap_array_t * res)
+        float_minheap_array_t * res,
+        faiss::ConcurrentBitsetPtr bitset)
 {
     res->heapify ();
 
@@ -272,7 +277,8 @@ static void knn_L2sqr_blas (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const DistanceCorrection &corr)
+        const DistanceCorrection &corr,
+        faiss::ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -318,19 +324,22 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    float ip = *ip_line++;
-                    float dis = x_norms[i] + y_norms[j] - 2 * ip;
+                    if(!bitset || bitset->test(j)){
+                        float ip = *ip_line;
+                        float dis = x_norms[i] + y_norms[j] - 2 * ip;
 
-                    // negative values can occur for identical vectors
-                    // due to roundoff errors
-                    if (dis < 0) dis = 0;
+                        // negative values can occur for identical vectors
+                        // due to roundoff errors
+                        if (dis < 0) dis = 0;
 
-                    dis = corr (dis, i, j);
+                        dis = corr (dis, i, j);
 
-                    if (dis < simi[0]) {
-                        maxheap_pop (k, simi, idxi);
-                        maxheap_push (k, simi, idxi, dis, j);
+                        if (dis < simi[0]) {
+                            maxheap_pop (k, simi, idxi);
+                            maxheap_push (k, simi, idxi, dis, j);
+                        }
                     }
+                    ip_line++;
                 }
             }
         }
@@ -428,12 +437,13 @@ int distance_compute_blas_threshold = 20;
 void knn_inner_product (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_minheap_array_t * res)
+        float_minheap_array_t * res,
+        faiss::ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-        knn_inner_product_sse (x, y, d, nx, ny, res);
+        knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
     } else {
-        knn_inner_product_blas (x, y, d, nx, ny, res);
+        knn_inner_product_blas (x, y, d, nx, ny, res, bitset);
     }
 }
 
@@ -448,13 +458,14 @@ struct NopDistanceCorrection {
 void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
-                float_maxheap_array_t * res)
+                float_maxheap_array_t * res,
+                faiss::ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-        knn_L2sqr_sse (x, y, d, nx, ny, res);
+        knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
     } else {
         NopDistanceCorrection nop;
-        knn_L2sqr_blas (x, y, d, nx, ny, res, nop);
+        knn_L2sqr_blas (x, y, d, nx, ny, res, nop, bitset);
     }
 }
 

@@ -65,6 +65,32 @@ void IndexFlat::search (idx_t n, const float *x, idx_t k,
     }
 }
 
+void IndexFlat::search(idx_t n, const float* x, idx_t k, float* distances, idx_t* labels,
+                       faiss::ConcurrentBitsetPtr bitset) const
+{
+    // we see the distances and labels as heaps
+
+    if (metric_type == METRIC_INNER_PRODUCT) {
+        float_minheap_array_t res = {
+                size_t(n), size_t(k), labels, distances};
+        knn_inner_product (x, xb.data(), d, n, ntotal, &res);
+    } else if (metric_type == METRIC_L2) {
+        float_maxheap_array_t res = {
+                size_t(n), size_t(k), labels, distances};
+        knn_L2sqr (x, xb.data(), d, n, ntotal, &res, bitset);
+    } else if (metric_type == METRIC_Jaccard) {
+        float_maxheap_array_t res = {
+                size_t(n), size_t(k), labels, distances};
+        knn_jaccard (x, xb.data(), d, n, ntotal, &res);
+    } else {
+        float_maxheap_array_t res = {
+                size_t(n), size_t(k), labels, distances};
+        knn_extra_metrics (x, xb.data(), d, n, ntotal,
+                           metric_type, metric_arg,
+                           &res);
+    }
+}
+
 void IndexFlat::range_search (idx_t n, const float *x, float radius,
                               RangeSearchResult *result) const
 {

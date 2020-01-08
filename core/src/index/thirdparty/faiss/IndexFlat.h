@@ -35,6 +35,14 @@ struct IndexFlat: Index {
         float* distances,
         idx_t* labels) const override;
 
+    void search(
+        idx_t n,
+        const float* x,
+        idx_t k,
+        float* distances,
+        idx_t* labels,
+        faiss::ConcurrentBitsetPtr bitset) const override;
+
     void range_search(
         idx_t n,
         const float* x,

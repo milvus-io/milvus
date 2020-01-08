@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include <faiss/utils/Heap.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 
 namespace faiss {
@@ -170,14 +171,16 @@ void knn_inner_product (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_minheap_array_t * res);
+        float_minheap_array_t * res,
+        faiss::ConcurrentBitsetPtr bitset = nullptr);
 
 /** Same as knn_inner_product, for the L2 distance */
 void knn_L2sqr (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_maxheap_array_t * res);
+        float_maxheap_array_t * res,
+        faiss::ConcurrentBitsetPtr bitset = nullptr);
 
 void knn_jaccard (
         const float * x,

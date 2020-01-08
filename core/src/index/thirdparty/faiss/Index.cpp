@@ -48,6 +48,17 @@ void Index::add_with_ids(
   FAISS_THROW_MSG ("add_with_ids not implemented for this type of index");
 }
 
+void Index::search (idx_t n, const float *x, idx_t k,
+                     float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const{
+    FAISS_THROW_MSG ("search with bitset not implemented for this type of index");
+}
+
+void Index::searchById (idx_t n, const idx_t *xid, idx_t k,
+                         float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const{
+    FAISS_THROW_MSG ("searchById not implemented for this type of index");
+}
+
+
 size_t Index::remove_ids(const IDSelector& /*sel*/) {
   FAISS_THROW_MSG ("remove_ids not implemented for this type of index");
   return -1;
