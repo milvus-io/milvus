@@ -21,7 +21,10 @@ namespace faiss {
 
 ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size) {
     id_type_t bytes_count = (size >> 3) + 1;
-    bitset_.resize(bytes_count, 0);
+    // bitset_.resize(bytes_count, 0);
+    for (auto i = 0; i < bytes_count; ++i) {
+        bitset_[i] = 0;
+    }
 }
 
 bool

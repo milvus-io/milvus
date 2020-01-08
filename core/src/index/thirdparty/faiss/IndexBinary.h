@@ -98,10 +98,10 @@ struct IndexBinary {
                       int32_t *distances, idx_t *labels) const = 0;
 
   virtual void search (idx_t n, const uint8_t *x, idx_t k,
-      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const = 0;
+      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const;
 
-  virtual void searchById (idx_t n, const uint8_t *x, idx_t k,
-      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const = 0;
+  virtual void searchById (idx_t n, const idx_t *xid, idx_t k,
+      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const;
 
 
     /** Query n vectors of dimension d to the index.

@@ -42,6 +42,12 @@ struct IndexIDMapTemplate : IndexT {
         distance_t* distances,
         idx_t* labels) const override;
 
+    void search (idx_t n, const component_t *x, idx_t k,
+                 distance_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const override;
+
+    void searchById (idx_t n, const idx_t *xid, idx_t k,
+                     distance_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const override;
+
     void train(idx_t n, const component_t* x) override;
 
     void reset() override;
