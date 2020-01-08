@@ -17,8 +17,8 @@
 
 #include <chrono>
 
-#include <oatpp/network/server/Server.hpp>
 #include <oatpp-swagger/Controller.hpp>
+#include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/SwaggerComponent.hpp"
