@@ -256,7 +256,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         auto status_dto = handler.CreateTable(body);
-        std::shared_ptr<OutgoingResponse> response;
         if (0 != status_dto->code) {
             return createDtoResponse(Status::CODE_400, status_dto);
         } else {
@@ -357,7 +356,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(IndexOptions)
 
-    ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions, PATH(String, table_name)) {
+    ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions) {
         return createDtoResponse(Status::CODE_200, StatusDto::createShared());
     }
 
@@ -444,7 +443,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(PartitionsOptions)
 
-    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions, PATH(String, table_name)) {
+    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions) {
         return createDtoResponse(Status::CODE_200, StatusDto::createShared());
     }
 
