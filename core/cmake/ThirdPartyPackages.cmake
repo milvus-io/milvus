@@ -1042,7 +1042,6 @@ macro(build_oatpp)
     set(OATPP_DIR_LIB "${OATPP_PREFIX}/lib")
 
     set(OATPP_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_BUILD_TESTS=OFF
@@ -1087,7 +1086,6 @@ macro(build_oatpp_swagger)
     set(OATPP_SWAGGER_INCLUDE_DIR "${OATPP_SWAGGER_PREFIX}/include/oatpp-${OATPP_SWAGGER_VERSION}/oatpp-swagger")
 
     set(OATPP_SWAGGER_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${OATPP_SWAGGER_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_DIR_SRC=${OATPP_DIR_SRC}
