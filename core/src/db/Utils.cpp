@@ -166,7 +166,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
         return Status::OK();
     }
 
-    if (boost::filesystem::exists(file_path)) {
+    if (boost::filesystem::exists(parent_path)) {
         table_file.location_ = file_path;
         return Status::OK();
     }
@@ -174,7 +174,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
     for (auto& path : options.slave_paths_) {
         parent_path = ConstructParentFolder(path, table_file);
         file_path = parent_path + "/" + table_file.file_id_;
-        if (boost::filesystem::exists(file_path)) {
+        if (boost::filesystem::exists(parent_path)) {
             table_file.location_ = file_path;
             return Status::OK();
         }

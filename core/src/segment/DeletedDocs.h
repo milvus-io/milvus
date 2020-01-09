@@ -37,9 +37,9 @@ class DeletedDocs {
     const std::vector<offset_t>&
     GetDeletedDocs() const;
 
-    // TODO
-    const std::string&
-    GetName() const;
+    //    // TODO
+    //    const std::string&
+    //    GetName() const;
 
     size_t
     GetSize() const;
@@ -59,7 +59,7 @@ class DeletedDocs {
  private:
     std::vector<offset_t> deleted_doc_offsets_;
     //    faiss::ConcurrentBitsetPtr bitset_;
-    const std::string name_ = "deleted_docs";
+    //    const std::string name_ = "deleted_docs";
 };
 
 using DeletedDocsPtr = std::shared_ptr<DeletedDocs>;

@@ -398,6 +398,7 @@ DBImpl::Flush(const std::string& table_id) {
     auto status = mem_mgr_->Flush(table_id);
     std::set<std::string> table_ids{table_id};
     Merge(table_ids);
+    return status;
 }
 
 Status
@@ -414,6 +415,7 @@ DBImpl::Flush() {
     std::set<std::string> table_ids;
     auto status = mem_mgr_->Flush(table_ids);
     Merge(table_ids);
+    return status;
 }
 
 Status
@@ -450,6 +452,8 @@ DBImpl::Merge(const std::set<std::string>& table_ids) {
             compact_table_ids_.clear();
         }
     }
+
+    return Status::OK();
 }
 
 Status

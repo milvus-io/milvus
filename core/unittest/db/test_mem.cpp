@@ -222,7 +222,9 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     stat = db_->InsertVectors(GetTableName(), "", xb);
     ASSERT_TRUE(stat.ok());
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
     std::mt19937 gen(rd());

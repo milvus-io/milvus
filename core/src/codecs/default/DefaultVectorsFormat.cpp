@@ -48,7 +48,8 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
             size_t num_bytes = boost::filesystem::file_size(path);
-            std::vector<uint8_t> vector_list(num_bytes);
+            std::vector<uint8_t> vector_list;
+            vector_list.resize(num_bytes);
             ::read(rv_fd, vector_list.data(), num_bytes);
 
             auto found = vectors_read->vectors_map.find(path.stem().string());
@@ -66,8 +67,9 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
             auto file_size = boost::filesystem::file_size(path);
-            auto count = file_size / sizeof(int64_t);
-            std::vector<segment::doc_id_t> uids(count);
+            auto count = file_size / sizeof(segment::doc_id_t);
+            std::vector<segment::doc_id_t> uids;
+            uids.resize(count);
             ::read(uid_fd, uids.data(), file_size);
 
             vectors_read->vectors_map[path.stem().string()]->AddUids(uids);
