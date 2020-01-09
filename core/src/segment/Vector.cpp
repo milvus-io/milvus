@@ -66,5 +66,10 @@ Vector::GetDimension() {
     return data_.size() / GetCount();
 }
 
+size_t
+Vector::Size() {
+    return data_.size() + uids_.size() * sizeof(doc_id_t);
+}
+
 }  // namespace segment
 }  // namespace milvus

@@ -32,7 +32,7 @@ namespace engine {
 
 class VectorSource {
  public:
-    explicit VectorSource(VectorsData& vectors);
+    explicit VectorSource(VectorsData vectors);
 
     Status
     Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
@@ -51,7 +51,7 @@ class VectorSource {
     GetVectorIds();
 
  private:
-    VectorsData& vectors_;
+    VectorsData vectors_;
     IDNumbers vector_ids_;
 
     size_t current_num_vectors_added;

@@ -52,6 +52,9 @@ class Vector {
     void
     Erase(size_t offset, int vector_type_size);
 
+    size_t
+    Size();
+
     // No copy and move
     Vector(const Vector&) = delete;
     Vector(Vector&&) = delete;

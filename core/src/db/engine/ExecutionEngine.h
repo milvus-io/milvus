@@ -78,9 +78,6 @@ class ExecutionEngine {
     Load(bool to_cache = true) = 0;
 
     virtual Status
-    Load(bool to_cache, bool on) = 0;
-
-    virtual Status
     CopyToGpu(uint64_t device_id, bool hybrid) = 0;
 
     virtual Status
@@ -92,8 +89,8 @@ class ExecutionEngine {
     //    virtual std::shared_ptr<ExecutionEngine>
     //    Clone() = 0;
 
-    virtual Status
-    Merge(const std::string& location) = 0;
+    //    virtual Status
+    //    Merge(const std::string& location) = 0;
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels, bool hybrid) = 0;

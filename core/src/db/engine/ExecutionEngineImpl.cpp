@@ -128,18 +128,11 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     if (ec != KNOWHERE_SUCCESS) {
         throw Exception(DB_ERROR, "Build index error");
     }
-
-    std::string segment_dir;
-    utils::GetParentPath(location_, segment_dir);
-    segment_reader_ptr_ = std::make_shared<segment::SegmentReader>(segment_dir);
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
                                          MetricType metric_type, int32_t nlist)
     : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
-    std::string segment_dir;
-    utils::GetParentPath(location_, segment_dir);
-    segment_reader_ptr_ = std::make_shared<segment::SegmentReader>(segment_dir);
 }
 
 VecIndexPtr
@@ -397,13 +390,17 @@ Status
 ExecutionEngineImpl::Load(bool to_cache) {
     // TODO(zhiru): refactor
 
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+
     if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
         index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                         : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
         bool in_cache;
-        auto status = segment_reader_ptr_->LoadCache(in_cache);
+        auto status = segment_reader_ptr->LoadCache(in_cache);
         if (!in_cache) {
-            status = segment_reader_ptr_->Load();
+            status = segment_reader_ptr->Load();
             if (!status.ok()) {
                 std::string msg = "Failed to load segment from " + location_;
                 ENGINE_LOG_ERROR << msg;
@@ -411,8 +408,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
             }
         }
         segment::SegmentPtr segment_ptr;
-        segment_reader_ptr_->GetSegment(segment_ptr);
-        auto& vectors_map = segment_ptr->vectors_ptr_->vectors;
+        segment_reader_ptr->GetSegment(segment_ptr);
+        auto& vectors_map = segment_ptr->vectors_ptr_->vectors_map;
         auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
 
         // TODO(zhiru): Load all vector fields to a single VecIndex
@@ -609,9 +606,9 @@ ExecutionEngineImpl::CopyToCpu() {
 //    return ret;
 //}
 
+/*
 Status
 ExecutionEngineImpl::Merge(const std::string& location) {
-    // TODO(zhiru): merge raw files, applying deletes, contruct bloom filter
     if (location == location_) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
@@ -654,6 +651,7 @@ ExecutionEngineImpl::Merge(const std::string& location) {
         return Status(DB_ERROR, "file index type is not idmap");
     }
 }
+*/
 
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {

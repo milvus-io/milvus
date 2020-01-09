@@ -38,33 +38,58 @@ MemManagerImpl::GetMemByTable(const std::string& table_id) {
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& table_id, VectorsData& vectors) {
-    while (GetCurrentMem() > options_.insert_buffer_size_) {
-        // TODO: force flush instead of stalling
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                              const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
+    flushed_tables.clear();
+    if (GetCurrentMem() > options_.insert_buffer_size_) {
+        Flush(flushed_tables, lsn);
     }
+
+    VectorsData vectors_data;
+    vectors_data.vector_count_ = length;
+    vectors_data.float_data_.resize(length * dim);
+    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
+    vectors_data.id_array_.resize(length);
+    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id, vectors);
+    return InsertVectorsNoLock(table_id, source);
 }
 
 Status
-MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, VectorsData& vectors) {
+MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                              const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
+    flushed_tables.clear();
+    if (GetCurrentMem() > options_.insert_buffer_size_) {
+        Flush(flushed_tables, lsn);
+    }
+
+    VectorsData vectors_data;
+    vectors_data.vector_count_ = length;
+    vectors_data.float_data_.resize(length * dim);
+    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(uint8_t));
+    vectors_data.id_array_.resize(length);
+    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
+
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    return InsertVectorsNoLock(table_id, source);
+}
+
+Status
+MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source) {
     MemTablePtr mem = GetMemByTable(table_id);
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors);
 
     auto status = mem->Add(source);
-    if (status.ok()) {
-        if (vectors.id_array_.empty()) {
-            vectors.id_array_ = source->GetVectorIds();
-        }
-    }
+
     return status;
 }
 
 Status
-MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
+MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(table_id);
 
     auto status = mem->Delete(vector_id);
@@ -72,11 +97,15 @@ MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
 }
 
 Status
-MemManagerImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
+MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(table_id);
 
+    IDNumbers ids;
+    ids.resize(length);
+    memcpy(ids.data(), vector_ids, length * sizeof(IDNumber));
+
     // TODO(zhiru): loop for now
-    for (auto& id : vector_ids) {
+    for (auto& id : ids) {
         auto status = mem->Delete(id);
         if (!status.ok()) {
             return status;
@@ -97,6 +126,7 @@ MemManagerImpl::Flush(const std::string& table_id, uint64_t wal_lsn) {
         mem->Serialize(wal_lsn);
     }
     immu_mem_list_.clear();
+
     return Status::OK();
 }
 
