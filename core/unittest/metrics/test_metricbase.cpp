@@ -62,5 +62,6 @@ TEST(MetricbaseTest, METRICBASE_TEST) {
     instance.ConnectionGaugeIncrement();
     instance.ConnectionGaugeDecrement();
     instance.KeepingAliveCounterIncrement();
+    instance.PushToGateway();
     instance.OctetsSet();
 }

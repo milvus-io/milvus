@@ -28,7 +28,13 @@ endif ()
 set(wrapper_files
         ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp
         ${MILVUS_ENGINE_SRC}/wrapper/VecImpl.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/VecIndex.cpp)
+        ${MILVUS_ENGINE_SRC}/wrapper/VecIndex.cpp
+        )
+
+set(storage_files
+        ${MILVUS_ENGINE_SRC}/storage/file/FileIOReader.cpp
+        ${MILVUS_ENGINE_SRC}/storage/file/FileIOWriter.cpp
+        )
 
 set(util_files
         utils.cpp
@@ -39,6 +45,7 @@ set(util_files
 add_executable(test_wrapper
         ${test_files}
         ${wrapper_files}
+        ${storage_files}
         ${util_files}
         ${common_files})
 
