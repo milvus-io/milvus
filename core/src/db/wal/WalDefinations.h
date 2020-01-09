@@ -47,25 +47,18 @@ enum class MXLogType {
     Delete,
     Update,
     Flush,
-    FlushAll
+    None,
 };
 
-#pragma pack(push)
-#pragma pack(1)
-
-struct MXLogRecord{
-    uint32_t mxl_size;//data length
-    uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
-    uint32_t vector_num;
-    uint16_t table_id_size;//
-    uint16_t dim;//one record contains the same dimension vectors
-    uint8_t mxl_type;//record type, insert/delete/update/flush...
-    //mxl_data include, table_id vecter_ids[vector_num] and float* vectors
-    char mxl_data[];//data address
-//    char* mxl_data;
+struct WALRecord {
+    uint64_t lsn;
+    MXLogType type;
+    std::string table_id;
+    size_t length;
+    const IDNumbers* ids;
+    size_t dim;
+    const void* data;
 };
-
-#pragma pack(pop)
 
 //#define SizeOfMXLogRecordHeader (offsetof(MXLogRecord, mxl_data))
 #define SizeOfMXLogRecordHeader (sizeof(MXLogRecord))
@@ -76,13 +69,7 @@ struct MXLogConfiguration {
     std::string mxlog_path;
 };
 
-struct MXLogBufferHandler {
-    uint64_t lsn;
-    uint32_t max_offset;
-    uint32_t file_no;
-    uint32_t buf_offset;
-    uint8_t buf_idx;
-};
+
 
 } //wal
 } //engine

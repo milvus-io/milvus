@@ -18,138 +18,196 @@
 #include <unistd.h>
 #include <src/server/Config.h>
 #include "WalManager.h"
-#include "WalDefinations.h"
 #include "stdio.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
-std::condition_variable reader_cv;
-std::mutex reader_mutex;
-bool reader_is_waiting = 0;
-
-WalManager::WalManager(const meta::MetaPtr& meta)
-    :meta_ (meta) {
-
+WalManager::WalManager() {
     server::Config& config = server::Config::GetInstance();
     config.GetWalConfigBufferSize(mxlog_config_.buffer_size);
     config.GetWalConfigRecordSize(mxlog_config_.record_size);
     config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
+}
+
+void
+WalManager::Init(const meta::MetaPtr& meta) {
+    uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
-    p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
+    if (p_meta_handler_ != nullptr) {
+        p_meta_handler_->GetMXLogInternalMeta(applied_lsn);
+        last_applied_lsn_ = applied_lsn;
+    }
+
+    std::vector<meta::TableSchema> table_schema_array;
+    if (meta != nullptr) {
+        auto status = meta->AllTables(table_schema_array);
+        if (!status.ok()) {
+            // through exception
+        }
+    }
+
+    // Todo
+    uint64_t recovery_start = applied_lsn;
+    // get recovery start point
+
+    for (auto schema: table_schema_array) {
+        TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
+        recovery_start = std::min(recovery_start, schema.flush_lsn_);
+        tables_[schema.table_id_] = tb_lsn;
+    }
+
+
+    p_buffer_ = std::make_shared<MXLogBuffer>(
+        mxlog_config_.mxlog_path,
+        mxlog_config_.buffer_size,
+        recovery_start,
+        applied_lsn);
 }
 
 void
-WalManager::Start() {
-    std::string table_id;
-    MXLogType mxlog_type;
-    size_t num_of_vectors;
-    size_t vector_dim;
-    float* vectors = NULL;
-    milvus::engine::IDNumbers vector_ids;
-    uint64_t lsn;
-    auto clear = [&]() {
-        table_id = "";
-        num_of_vectors = 0;
-        vector_dim = 0;
-        lsn = 0;
-        if (vectors)
-            free(vectors);
-        vector_ids.clear();
-    };
+WalManager::GetNextRecovery(WALRecord &record) {
+    record.type = MXLogType::None;
 
-    auto work = [&]() {
-        while (is_running_) {
-            if (p_buffer_->Next(table_id, mxlog_type, num_of_vectors, vector_dim, vectors, vector_ids, last_applied_lsn_, lsn)) {
-                reader_is_waiting = false;
-                Dispatch(table_id, mxlog_type, num_of_vectors, vector_dim, vectors, vector_ids, last_applied_lsn_, lsn);
-            } else {
-                // todo: wait-notify
-                reader_is_waiting = true;
-                std::unique_lock<std::mutex> reader_lock(reader_mutex);
-//                reader_cv.wait(reader_lock, [] { return reader_is_waiting;});
-                reader_cv.wait(reader_lock);
+    if (p_buffer_ != nullptr) {
+        do {
+            record.lsn = p_buffer_->Next(last_applied_lsn_,
+                                         record.table_id,
+                                         record.type,
+                                         record.length,
+                                         record.ids,
+                                         record.dim,
+                                         record.data);
+            if (record.lsn == 0) {
+                break;
             }
-        }
-    };
-    is_running_ = true;
-    reader_ = std::thread(work);
-    reader_.join();
+
+            // background thread has not started.
+            // so, needn't lock here.
+            auto it = tables_.find(record.table_id);
+            if (it != tables_.end()) {
+                if (it->second.flush_lsn < record.lsn) {
+                    break;
+                }
+            }
+
+        } while (1);
+    }
 }
 
 void
-WalManager::Stop() {
-    is_running_ = false;
-    // todo: wait-notify
-    reader_cv.notify_one();
+WalManager::GetNextRecord(WALRecord &record) {
+    record.type = MXLogType::None;
+    record.lsn = p_buffer_->Next(last_applied_lsn_);
+
+    std::unique_lock<std::mutex> lck (mutex_);
+    if (flush_info_.second != 0) {
+        if (record.lsn == 0 || record.lsn > flush_info_.second) {
+            record.lsn = flush_info_.second;
+            record.type = MXLogType::Flush;
+            record.table_id = flush_info_.first;
+            return;
+        }
+    }
+    lck.unlock();
+
+    if (p_buffer_ != nullptr) {
+        do {
+            record.lsn = p_buffer_->Next(last_applied_lsn_,
+                                         record.table_id,
+                                         record.type,
+                                         record.length,
+                                         record.ids,
+                                         record.dim,
+                                         record.data);
+            if (record.lsn == 0) {
+                break;
+            }
+
+            lck.lock();
+            auto it = tables_.find(record.table_id);
+            if (it != tables_.end()) {
+                break;
+            }
+            lck.unlock();
+
+        } while (1);
+    }
 }
 
+uint64_t
+WalManager::CreateTable(const std::string &table_id) {
+    std::unique_lock<std::mutex> lck (mutex_);
+    uint64_t applied_lsn = last_applied_lsn_;
+    tables_[table_id] = {applied_lsn, applied_lsn};
+    return applied_lsn;
+}
+
+void
+WalManager::DropTable(const std::string &table_id) {
+    std::unique_lock<std::mutex> lck (mutex_);
+    tables_.erase(table_id);
+}
+
+void
+WalManager::TableFlushed(const std::string &table_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck (mutex_);
+    auto it = tables_.find(table_id);
+    if (it != tables_.end()) {
+        it->second.flush_lsn = lsn;
+    }
+}
+
+template <typename T>
 bool
 WalManager::Insert(const std::string &table_id,
-                   const std::vector<float> &vectors,
-                   const IDNumbers &vector_ids)
+                   const IDNumbers &vector_ids,
+                   const std::vector<T> &vectors)
 {
+    MXLogType log_type;
+    if (std::is_same<T, float>::value) {
+        log_type = MXLogType::InsertVector;
+    } else if (std::is_same<T, uint8_t>::value) {
+        log_type = MXLogType::InsertBinary;
+    } else {
+        return false;
+    }
 
     uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
 
     size_t vector_num = vector_ids.size();
     uint16_t dim = vectors.size() / vector_num;
     //split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim * sizeof(float)) + sizeof(IDNumber));
+    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
     uint64_t new_lsn = 0;
     for (size_t i = 0; i < vector_num; i += vectors_per_record) {
         size_t insert_len = std::min(vector_num - i, vectors_per_record);
         new_lsn = p_buffer_->Append(table_id,
-                                    MXLogType::InsertVector,
+                                    log_type,
                                     insert_len,
                                     dim,
                                     vectors.data() + i * dim,
                                     vector_ids.data() + i);
-        if(new_lsn == -1) {
+        if(new_lsn == 0) {
             return false;
         }
     }
 
+    std::unique_lock<std::mutex> lck (mutex_);
     last_applied_lsn_ = new_lsn;
-    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
-    return true;
-}
-
-bool
-WalManager::Insert(const std::string &table_id,
-                   const std::vector<uint8_t> vectors,
-                   const IDNumbers &vector_ids) {
-    uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
-
-    size_t vector_num = vector_ids.size();
-    uint16_t dim = vectors.size() / vector_num;
-    //split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim * sizeof(uint8_t)) + sizeof(IDNumber));
-    __glibcxx_assert(vectors_per_record > 0);
-
-    uint64_t new_lsn = 0;
-    for (size_t i = 0; i < vector_num; i += vectors_per_record) {
-        size_t insert_len = std::min(vector_num - i, vectors_per_record);
-        new_lsn = p_buffer_->Append(table_id,
-                                    MXLogType::InsertBinary,
-                                    insert_len,
-                                    dim,
-                                    vectors.data() + i * dim,
-                                    vector_ids.data() + i);
-        if(new_lsn == -1) {
-            return false;
-        }
+    auto it = tables_.find(table_id);
+    if (it != tables_.end()) {
+        it->second.wal_lsn = new_lsn;
     }
+    lck.unlock();
 
-    last_applied_lsn_ = new_lsn;
-    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
+    p_meta_handler_->SetMXLogInternalMeta(new_lsn);
     return true;
 }
 
-//TBD
 bool
 WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids) {
     uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
@@ -169,123 +227,53 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
                                     0,
                                     nullptr,
                                     vector_ids.data() + i);
-        if(new_lsn == -1) {
+        if(new_lsn == 0) {
             return false;
         }
     }
 
+    std::unique_lock<std::mutex> lck (mutex_);
     last_applied_lsn_ = new_lsn;
-    p_meta_handler_->SetMXLogInternalMeta(last_applied_lsn_);
+    auto it = tables_.find(table_id);
+    if (it != tables_.end()) {
+        it->second.wal_lsn = new_lsn;
+    }
+    lck.unlock();
+
+    p_meta_handler_->SetMXLogInternalMeta(new_lsn);
     return true;
 }
 
-bool
+uint64_t
 WalManager::Flush(const std::string& table_id) {
-    MXLogType type;
+    std::unique_lock<std::mutex> lck (mutex_, std::defer_lock_t);
+    uint64_t lsn = 0;
     if (table_id.empty()) {
-        type = MXLogType::FlushAll;
+        lck.lock();
+        for (auto &it : tables_) {
+            if (it.second.wal_lsn != it.second.flush_lsn) {
+                lsn = last_applied_lsn_;
+                break;
+            }
+        }
+
     } else {
-        type = MXLogType::Flush;
-    }
-    // todo: flush-wait-notify
-    last_applied_lsn_ = p_buffer_->Append(table_id, type, 0, 0, NULL, NULL);
-}
-
-void
-WalManager::Recovery() {
-    //todo: how to judge that whether system exit normally last time?
-    //todo: if (system.exit.normally) return;
-    //todo: fetch meta
-
-    std::vector<meta::TableSchema> table_schema_array;
-    auto status = meta_->AllTables(table_schema_array);
-    if (!status.ok()) {
-        // through
+        lck.lock();
+        auto it = tables_.find(table_id);
+        if (it != tables_.end()) {
+            if (it->second.wal_lsn != it->second.flush_lsn) {
+                lsn = it->second.wal_lsn;
+            }
+        }
     }
 
-
-
-    p_meta_handler_->GetMXLogInternalMeta(last_applied_lsn_);
-    uint64_t current_recovery_point = 0;
-//    for (auto it = p_table_meta_->begin(), it != p_table_meta_->end(); ++ it) {
-//        start_recovery_point = std::min(start_recovery_point, kv.second);
-//    }
-
-    // todo:
-    // if (last_applied_lsn_ < current_recovery_point) {
-    // read config
-    //   case ignore: let wal lsn = largest flused lsn
-    //   case try recover: let wal lsn = largest flused lsn
-    //   case exit:
-    // }
-
-    while (current_recovery_point <= last_applied_lsn_) {
-        std::string table_id;
-        uint64_t next_lsn;
-        p_buffer_->LoadForRecovery(current_recovery_point);
-        if (p_buffer_->NextInfo(table_id, next_lsn)) {
-            auto meta_schema = p_table_meta_->find(table_id);
-            //todo: wait zhiru's interface
-//            if (meta_schema->second->lsn < current_recovery_point) {
-                Apply(current_recovery_point);
-//            }
-        }
-        current_recovery_point = next_lsn;
+    if (lsn != 0) {
+        flush_info_.first = table_id;
+        flush_info_.second = lsn;
     }
+    lck.unlock();
 
-    p_buffer_->ReSet();
-}
-
-uint64_t WalManager::GetCurrentLsn() {
-    return last_applied_lsn_;
-}
-
-void
-WalManager::Apply(const uint64_t &apply_lsn) {
-    std::string table_id;
-    MXLogType type;
-    size_t num_of_vectors;
-    size_t dim;
-    float* vectors = NULL;
-    milvus::engine::IDNumbers vector_ids;
-    uint64_t lsn;
-    if (p_buffer_->Next(table_id, type, num_of_vectors, dim, vectors, vector_ids, last_applied_lsn_, lsn)) {
-        Dispatch(table_id, type, num_of_vectors, dim, vectors, vector_ids, last_applied_lsn_, lsn);
-    } else {
-        //todo: log error
-    }
-}
-
-void
-WalManager::Dispatch(std::string &table_id,
-                     milvus::engine::wal::MXLogType &mxl_type,
-                     size_t &n,
-                     size_t &dim,
-                     float *vectors,
-                     milvus::engine::IDNumbers &vector_ids,
-                     const uint64_t &last_applied_lsn,
-                     uint64_t &lsn) {
-
-    switch (mxl_type) {
-        case MXLogType::Flush : {
-//            mem_mgr.GetInstance().Flush(table_id);
-            break;
-        }
-        case MXLogType::FlushAll : {
-//            mem_mgr.GetInstance().Flush("");
-            break;
-        }
-        case MXLogType::Insert : {
-//            mem_mgr.GetInstance().Insert(table_id, n, vectors, vector_ids);
-            break;
-        }
-        case MXLogType::Delete : {
-//            mem_mgr.GetInstance().DeleteById(table_id, vector_ids);
-            break;
-        }
-        default:
-            break;
-    }
+    return lsn;
 }
 
 } // wal

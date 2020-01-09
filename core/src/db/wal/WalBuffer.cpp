@@ -104,6 +104,34 @@ uint64_t MXLogBuffer::RecordSize(const size_t n,
 }
 
 uint64_t MXLogBuffer::Append(const std::string &table_id,
+                             const MXLogType record_type,
+                             const size_t n,
+                             const IDNumber* vector_ids,
+                             const size_t dim,
+                             const void *vectors) {
+    return 0;
+}
+
+// if failed, return 0, else return lsn
+uint64_t MXLogBuffer::Next(const uint64_t last_applied_lsn,
+                           std::string &table_id,
+                           MXLogType &record_type,
+                           size_t& n,
+                           const IDNumber* &vector_ids,
+                           size_t &dim,
+                           const void* &vectors) {
+
+    return  0;
+}
+
+// not let read++
+// if failed, return 0, else return lsn
+uint64_t Next(const uint64_t last_applied_lsn) {
+    return 0;
+}
+
+/*
+uint64_t MXLogBuffer::Append(const std::string &table_id,
                          const MXLogType& record_type,
                          const size_t& n,
                          const size_t& dim,
@@ -167,17 +195,7 @@ uint64_t MXLogBuffer::Append(const std::string &table_id,
     return lsn;
 }
 
-/**
- * wal thread invoke this interface get record from writer buffer or load from
- * wal log, then invoke memory table's interface
- * @param table_id
- * @param n
- * @param dim
- * @param vectors
- * @param vector_ids
- * @param lsn
- * @return
- */
+
 bool MXLogBuffer::Next(std::string &table_id,
                        MXLogType& mxl_type,
                        size_t &n,
@@ -255,6 +273,8 @@ bool
 MXLogBuffer::Next() {
 
 }
+
+*/
 
 bool Delete(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids) {
 
