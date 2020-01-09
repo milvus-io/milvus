@@ -19,6 +19,7 @@
 
 #include <boost/filesystem.hpp>
 
+#include "segment/Types.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 

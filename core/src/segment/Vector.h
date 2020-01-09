@@ -20,10 +20,10 @@
 #include <memory>
 #include <vector>
 
-#include "Types.h"
-
 namespace milvus {
 namespace segment {
+
+using doc_id_t = int64_t;
 
 class Vector {
  public:

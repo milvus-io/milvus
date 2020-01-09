@@ -21,12 +21,12 @@ namespace milvus {
 namespace codec {
 
 class IdIndexFormat {
- public:
-    virtual IdIndex
-    read() = 0;
-
-    virtual void
-    write(IdIndex id_index) = 0;
+    // public:
+    //    virtual IdIndex
+    //    read() = 0;
+    //
+    //    virtual void
+    //    write(IdIndex id_index) = 0;
 };
 
 }  // namespace codec

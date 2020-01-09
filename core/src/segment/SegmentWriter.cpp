@@ -158,8 +158,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, int vector_type_size) {
         for (size_t i = 0; i < uids.size(); ++i) {
             auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
             if (found != offsets_to_delete.end()) {
-                auto offset = std::distance(uids.begin(), found);
-                kv.second->Erase(offset, vector_type_size);
+                kv.second->Erase(i, vector_type_size);
             }
         }
         AddVectors(kv.first, kv.second->GetData(), uids);

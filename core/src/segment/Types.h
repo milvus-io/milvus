@@ -19,7 +19,6 @@
 
 #include <memory>
 
-#include "faiss/utils/ConcurrentBitset.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 #include "segment/Vectors.h"

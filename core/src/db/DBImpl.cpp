@@ -344,7 +344,17 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
 
     // insert vectors into target table
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
-    status = mem_mgr_->InsertVectors(target_table_name, vectors);
+    auto lsn = 0;
+    std::set<std::string> flushed_tables;
+    if (vectors.binary_data_.empty()) {
+        auto dim = vectors.float_data_.size() / vectors.vector_count_;
+        status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
+                                         vectors.float_data_.data(), lsn, flushed_tables);
+    } else {
+        auto dim = vectors.binary_data_.size() / vectors.vector_count_;
+        status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
+                                         vectors.binary_data_.data(), lsn, flushed_tables);
+    }
 
     return status;
 }
@@ -356,8 +366,8 @@ DBImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
     }
 
     // TODO(zhiru): Enter WAL. They should call mem_mgr_->DeleteVector
-
-    auto status = mem_mgr_->DeleteVector(table_id, vector_id);
+    auto lsn = 0;
+    auto status = mem_mgr_->DeleteVector(table_id, vector_id, lsn);
 
     return status;
 }
@@ -369,8 +379,8 @@ DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
     }
 
     // TODO(zhiru): Enter WAL. They should call mem_mgr_->DeleteVectors
-
-    auto status = mem_mgr_->DeleteVectors(table_id, vector_ids);
+    auto lsn = 0;
+    auto status = mem_mgr_->DeleteVectors(table_id, vector_ids.size(), vector_ids.data(), lsn);
 
     return status;
 }
