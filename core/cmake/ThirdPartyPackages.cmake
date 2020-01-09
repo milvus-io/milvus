@@ -1105,11 +1105,14 @@ macro(build_oatpp_swagger)
             BUILD_BYPRODUCTS
             ${OATPP_SWAGGER_STATIC_LIB})
 
+    ExternalProject_Add_StepDependencies(oatpp-swagger_ep build oatpp_ep)
+
     file(MAKE_DIRECTORY "${OATPP_SWAGGER_INCLUDE_DIR}")
     add_library(oatpp-swagger STATIC IMPORTED)
     set_target_properties(oatpp-swagger
             PROPERTIES IMPORTED_LOCATION "${OATPP_SWAGGER_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OATPP_SWAGGER_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${OATPP_SWAGGER_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "oatpp")
 
     add_dependencies(oatpp-swagger oatpp-swagger_ep)
 endmacro()
