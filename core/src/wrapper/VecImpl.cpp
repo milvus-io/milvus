@@ -202,7 +202,7 @@ VecIndexImpl::GetDeviceId() {
 }
 
 Status
-VecIndexImpl::SearchById(const int64_t& nq, const float* xq, faiss::ConcurrentBitsetPtr bitset, float* dist,
+VecIndexImpl::SearchById(const int64_t& nq, const int64_t * xq, faiss::ConcurrentBitsetPtr bitset, float* dist,
                          int64_t* ids, const Config& cfg) {
     if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
     } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
@@ -212,7 +212,10 @@ VecIndexImpl::SearchById(const int64_t& nq, const float* xq, faiss::ConcurrentBi
 
     try {
         auto k = cfg->k;
-        auto dataset = GenDataset(nq, dim, xq);
+        auto dataset = std::make_shared<knowhere::Dataset>();
+        dataset->Set(knowhere::meta::ROWS, nq);
+        dataset->Set(knowhere::meta::DIM, dim);
+        dataset->Set(knowhere::meta::IDS, xq);
         dataset->Set("bitset", bitset);
 
         Config search_cfg = cfg;

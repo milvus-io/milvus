@@ -287,7 +287,9 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("not support this kind of config");
     }
 
-    GETTENSOR(dataset)
+    auto dim = dataset->Get<int64_t>(meta::DIM);
+    auto rows = dataset->Get<int64_t>(meta::ROWS); \
+    auto p_data = dataset->Get<const int64_t *>(meta::IDS);
 
     try {
         auto elems = rows * search_cfg->k;
@@ -299,7 +301,7 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
 
         // todo: enable search by id (zhiru)
         auto whitelist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-        index_->searchById(rows, (float*)p_data, search_cfg->k, p_dist, p_id, whitelist);
+        index_->searchById(rows, p_data, search_cfg->k, p_dist, p_id, whitelist);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
