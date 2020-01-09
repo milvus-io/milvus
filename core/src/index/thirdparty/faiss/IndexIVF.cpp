@@ -316,6 +316,22 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
+void IndexIVF::search (idx_t n, const float *x, idx_t k,
+                 float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const {
+    std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
+    std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
+
+    double t0 = getmillisecs();
+    quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
+    indexIVF_stats.quantization_time += getmillisecs() - t0;
+
+    t0 = getmillisecs();
+    invlists->prefetch_lists (idx.get(), n * nprobe);
+
+    search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
+                        distances, labels, false);
+    indexIVF_stats.search_time += getmillisecs() - t0;
+}
 
 
 void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
