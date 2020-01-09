@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -83,7 +84,7 @@ class MemTable {
 
     std::set<segment::doc_id_t> doc_ids_to_delete_;
 
-    uint64_t lsn_;
+    std::atomic<uint64_t> lsn_;
 };  // MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;

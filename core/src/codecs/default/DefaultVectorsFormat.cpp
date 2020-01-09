@@ -122,7 +122,7 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
-        if (::write(uid_fd, it.second->GetUids().data(), sizeof(segment::doc_id_t) * it.second->GetCount() == -1)) {
+        if (::write(uid_fd, it.second->GetUids().data(), sizeof(segment::doc_id_t) * it.second->GetCount()) == -1) {
             std::string err_msg = "Failed to write to file" + uid_file_path;
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);

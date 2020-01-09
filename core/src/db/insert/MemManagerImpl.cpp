@@ -55,7 +55,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id, source);
+    return InsertVectorsNoLock(table_id, source, lsn);
 }
 
 Status

@@ -395,8 +395,7 @@ DBImpl::Flush(const std::string& table_id) {
 
     // TODO: wait till notified by flush_ok_cv
 
-    uint64_t wal_lsn = 0;
-    auto status = mem_mgr_->Flush(table_id, wal_lsn);
+    auto status = mem_mgr_->Flush(table_id);
     std::set<std::string> table_ids{table_id};
     Merge(table_ids);
 }
@@ -412,9 +411,8 @@ DBImpl::Flush() {
 
     // TODO: wait till notified by flush_ok_cv
 
-    uint64_t wal_lsn = 0;
     std::set<std::string> table_ids;
-    auto status = mem_mgr_->Flush(table_ids, wal_lsn);
+    auto status = mem_mgr_->Flush(table_ids);
     Merge(table_ids);
 }
 

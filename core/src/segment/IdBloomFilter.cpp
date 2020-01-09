@@ -55,10 +55,10 @@ IdBloomFilter::Remove(doc_id_t uid) {
     scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid);
 }
 
-const std::string&
-IdBloomFilter::GetName() const {
-    return name_;
-}
+// const std::string&
+// IdBloomFilter::GetName() const {
+//    return name_;
+//}
 
 size_t
 IdBloomFilter::Size() {
