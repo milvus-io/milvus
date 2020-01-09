@@ -166,7 +166,7 @@ DBWrapper::StartService() {
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
                   << ". Possible reason: Meta Tables schema is damaged "
-                  << "or created by in-compatible Milvus version." 
+                  << "or created by in-compatible Milvus version."
                   << std::endl;
         kill(0, SIGUSR1);
     }
