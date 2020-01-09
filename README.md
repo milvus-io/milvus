@@ -24,7 +24,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 ## Get started
 
-See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) for using Docker containers. To install Milvus from source code, see [build from source](install.md).
+See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) for using Docker containers. To install Milvus from source code, see [build from source](INSTALL.md).
 
 To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/v0.6.0/reference/milvus_config.md).
 
