@@ -16,17 +16,14 @@
 // under the License.
 
 #include <getopt.h>
-#include <libgen.h>
-#include <signal.h>
 #include <unistd.h>
+#include <csignal>
 #include <cstring>
 #include <string>
 
 #include "easyloggingpp/easylogging++.h"
-#include "metrics/Metrics.h"
 #include "server/Server.h"
 #include "src/version.h"
-#include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
