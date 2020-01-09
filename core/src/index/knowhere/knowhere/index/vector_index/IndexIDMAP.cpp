@@ -15,10 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <faiss/AutoTune.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
-
-#include <faiss/AutoTune.h>
 #include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
 #include <faiss/index_io.h>
@@ -196,7 +195,10 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETTENSOR(dataset)
+    //    GETTENSOR(dataset)
+    auto dim = dataset->Get<int64_t>(meta::DIM);
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     auto elems = rows * config->k;
     size_t p_id_size = sizeof(int64_t) * elems;
@@ -206,7 +208,8 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
 
     // todo: enable search by id (zhiru)
     auto whitelist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, whitelist);
+    //    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, whitelist);
+    index_->searchById(rows, p_data, config->k, p_dist, p_id, whitelist);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

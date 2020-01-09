@@ -15,14 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/MetaIndexes.h>
-
 #include <faiss/index_factory.h>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 
 namespace knowhere {
 
@@ -165,7 +165,16 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETBINARYTENSOR(dataset)
+
+//    auto search_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
+//    if (search_cfg == nullptr) {
+//        KNOWHERE_THROW_MSG("not support this kind of config");
+//    }
+
+    //    GETBINARYTENSOR(dataset)
+    auto dim = dataset->Get<int64_t>(meta::DIM);
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     auto elems = rows * config->k;
     size_t p_id_size = sizeof(int64_t) * elems;
@@ -173,8 +182,10 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    int32_t* pdistances = (int32_t*)p_dist;
-    index_->searchById(rows, (uint8_t*)p_data, config->k, pdistances, p_id, bitset_);
+    auto* pdistances = (int32_t*)p_dist;
+    //    index_->searchById(rows, (uint8_t*)p_data, config->k, pdistances, p_id, bitset_);
+    auto whitelist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+    index_->searchById(rows, p_data, config->k, pdistances, p_id, whitelist);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
