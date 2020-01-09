@@ -65,7 +65,7 @@ enum StatusCode : int {
     ILLEGAL_METRIC_TYPE = 23,
     OUT_OF_MEMORY = 24,
 
-    //
+    // HTTP status code
     PATH_PARAM_LOSS = 31,
     QUERY_PARAM_LOSS = 32,
     BODY_FIELD_LOSS = 33,
