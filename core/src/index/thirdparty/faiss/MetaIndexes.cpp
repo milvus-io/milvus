@@ -95,6 +95,35 @@ void IndexIDMapTemplate<IndexT>::search
 
 
 template <typename IndexT>
+void IndexIDMapTemplate<IndexT>::search
+    (idx_t n, const typename IndexT::component_t *x, idx_t k,
+     typename IndexT::distance_t *distances, typename IndexT::idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const
+{
+    if(bitset == nullptr){
+        search(n, x, k, distances, labels);
+    } else{
+        index->search(n, x, k, distances, labels, bitset);
+        idx_t *li = labels;
+#pragma omp parallel for
+        for (idx_t i = 0; i < n * k; i++) {
+            li[i] = li[i] < 0 ? li[i] : id_map[li[i]];
+        }
+    }
+}
+
+template <typename IndexT>
+void IndexIDMapTemplate<IndexT>::searchById (idx_t n, const idx_t *xid, idx_t k,
+                                             typename IndexT::distance_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const
+{
+    auto x = new typename IndexT::component_t[n * IndexT::d];
+    for (idx_t i = 0; i < n; i++) {
+        index->reconstruct(xid[i], x + i * IndexT::d);
+    }
+    index->search(n, x, k, distances, labels, bitset);
+    delete []x;
+}
+
+template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::range_search
     (typename IndexT::idx_t n, const typename IndexT::component_t *x,
      typename IndexT::distance_t radius, RangeSearchResult *result) const

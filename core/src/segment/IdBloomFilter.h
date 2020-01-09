@@ -43,6 +43,9 @@ class IdBloomFilter {
     void
     Remove(segment::doc_id_t uid);
 
+    size_t
+    Size();
+
     const std::string&
     GetName() const;
 
