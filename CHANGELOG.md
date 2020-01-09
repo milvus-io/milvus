@@ -31,6 +31,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#860 - Remove redundant checks in CacheMgr's constructor
 - \#908 - Move "primary_path" and "secondary_path" to storage config
 - \#931 - Remove "collector" from config
+- \#966 - Update NOTICE.md
 
 ## Task
 
