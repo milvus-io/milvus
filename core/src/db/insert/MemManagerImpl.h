@@ -41,19 +41,24 @@ class MemManagerImpl : public MemManager {
     }
 
     Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) override;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    DeleteVector(const std::string& table_id, IDNumber vector_id) override;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    Flush(const std::string& table_id, uint64_t wal_lsn) override;
+    DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) override;
 
     Status
-    Flush(std::set<std::string>& table_ids, uint64_t wal_lsn) override;
+    DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    DeleteVectors(const std::string& table_id, IDNumbers vector_ids) override;
+    Flush(const std::string& table_id, uint64_t lsn) override;
+
+    Status
+    Flush(std::set<std::string>& table_ids, uint64_t lsn) override;
 
     //    Status
     //    Serialize(std::set<std::string>& table_ids) override;
@@ -75,7 +80,7 @@ class MemManagerImpl : public MemManager {
     GetMemByTable(const std::string& table_id);
 
     Status
-    InsertVectorsNoLock(const std::string& table_id, VectorsData& vectors);
+    InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source);
 
     Status
     ToImmutable();

@@ -37,7 +37,7 @@ class MemTable {
     MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
-    Add(VectorSourcePtr& source);
+    Add(const VectorSourcePtr& source);
 
     Status
     Delete(segment::doc_id_t doc_id);

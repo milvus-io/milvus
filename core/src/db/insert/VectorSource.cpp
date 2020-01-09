@@ -17,6 +17,8 @@
 
 #include "db/insert/VectorSource.h"
 
+#include <utility>
+
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"
 #include "metrics/Metrics.h"
@@ -25,8 +27,8 @@
 namespace milvus {
 namespace engine {
 
-VectorSource::VectorSource(VectorsData& vectors)
-    : vectors_(vectors), id_generator_(std::make_shared<SimpleIDGenerator>()) {
+VectorSource::VectorSource(VectorsData vectors)
+    : vectors_(std::move(vectors)), id_generator_(std::make_shared<SimpleIDGenerator>()) {
     current_num_vectors_added = 0;
 }
 
@@ -61,6 +63,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         vectors.resize(size);
         memcpy(vectors.data(), vectors_.float_data_.data(), size);
         status = segment_writer_ptr->AddVectors(vectors_.field_name_, vectors, vector_ids_to_add);
+
     } else if (!vectors_.binary_data_.empty()) {
         /*
         status = execution_engine->AddWithIds(
@@ -70,6 +73,8 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         */
         status = segment_writer_ptr->AddVectors(vectors_.field_name_, vectors_.binary_data_, vector_ids_to_add);
     }
+
+    // Clear vector data
 
     if (status.ok()) {
         current_num_vectors_added += num_vectors_added;
