@@ -316,6 +316,22 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
+void IndexIVF::search (idx_t n, const float *x, idx_t k,
+                       float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const{
+    std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
+    std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
+
+    double t0 = getmillisecs();
+    quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
+    indexIVF_stats.quantization_time += getmillisecs() - t0;
+
+    t0 = getmillisecs();
+    invlists->prefetch_lists (idx.get(), n * nprobe);
+
+    search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
+                        distances, labels, false, nullptr,bitset);
+    indexIVF_stats.search_time += getmillisecs() - t0;
+}
 
 
 void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
@@ -323,7 +339,8 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                                    const float *coarse_dis ,
                                    float *distances, idx_t *labels,
                                    bool store_pairs,
-                                   const IVFSearchParameters *params) const
+                                   const IVFSearchParameters *params,
+                                   ConcurrentBitsetPtr bitset) const
 {
     long nprobe = params ? params->nprobe : this->nprobe;
     long max_codes = params ? params->max_codes : this->max_codes;
@@ -373,7 +390,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         // single list scan using the current scanner (with query
         // set porperly) and storing results in simi and idxi
         auto scan_one_list = [&] (idx_t key, float coarse_dis_i,
-                                  float *simi, idx_t *idxi) {
+                                  float *simi, idx_t *idxi, ConcurrentBitsetPtr bitset) {
 
             if (key < 0) {
                 // not enough centroids for multiprobe
@@ -405,7 +422,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
             }
 
             nheap += scanner->scan_codes (list_size, scodes.get(),
-                                          ids, simi, idxi, k);
+                                          ids, simi, idxi, k, bitset);
 
             return list_size;
         };
@@ -438,7 +455,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                     nscan += scan_one_list (
                          keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
-                         simi, idxi
+                         simi, idxi, bitset
                     );
 
                     if (max_codes && nscan >= max_codes) {
@@ -467,7 +484,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                     ndis += scan_one_list
                         (keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
-                         local_dis.data(), local_idx.data());
+                         local_dis.data(), local_idx.data(), bitset);
 
                     // can't do the test on max_codes
                 }

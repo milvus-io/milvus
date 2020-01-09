@@ -376,18 +376,22 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
                        const uint8_t *codes,
                        const idx_t *ids,
                        int32_t *simi, idx_t *idxi,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         using C = CMax<int32_t, idx_t>;
 
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
-            uint32_t dis = hc.hamming (codes);
-            if (dis < simi[0]) {
-                heap_pop<C> (k, simi, idxi);
-                idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                heap_push<C> (k, simi, idxi, dis, id);
-                nup++;
+            if(!bitset || bitset->test(ids[j])){
+                uint32_t dis = hc.hamming (codes);
+
+                if (dis < simi[0]) {
+                    heap_pop<C> (k, simi, idxi);
+                    idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    heap_push<C> (k, simi, idxi, dis, id);
+                    nup++;
+                }
             }
             codes += code_size;
         }
@@ -422,18 +426,22 @@ struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
                        const uint8_t *codes,
                        const idx_t *ids,
                        int32_t *simi, idx_t *idxi,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         using C = CMax<float, idx_t>;
         float* psimi = (float*)simi;
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
-            float dis = hc.jaccard (codes);
-            if (dis < psimi[0]) {
-                heap_pop<C> (k, psimi, idxi);
-                idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                heap_push<C> (k, psimi, idxi, dis, id);
-                nup++;
+            if(!bitset || bitset->test(ids[j])){
+                float dis = hc.jaccard (codes);
+
+                if (dis < psimi[0]) {
+                    heap_pop<C> (k, psimi, idxi);
+                    idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    heap_push<C> (k, psimi, idxi, dis, id);
+                    nup++;
+                }
             }
             codes += code_size;
         }
