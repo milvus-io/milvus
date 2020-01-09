@@ -1362,7 +1362,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_ << " location:" << table_file.location_;
                     table_ids.insert(table_file.table_id_);
 
-                    clean_files++;
+                    ++clean_files;
                 }
             }
             return true;
@@ -1420,7 +1420,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                                                  where(c(&TableFileSchema::table_id_) == table_id));
             if (selected.size() == 0) {
                 utils::DeleteTablePath(options_, table_id);
-                remove_tables++;
+                ++remove_tables;
             }
         }
 
