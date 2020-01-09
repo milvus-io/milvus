@@ -124,7 +124,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(AdvancedConfigOptions)
 
     ENDPOINT("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(GetAdvancedConfig) {
@@ -180,10 +180,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(GPUConfigOptions)
 
     ENDPOINT("OPTIONS", "/config/gpu_resources", GPUConfigOptions) {
-        auto status_dto = StatusDto::createShared();
-        status_dto->code = 0;
-        status_dto->message = "OK";
-        return createDtoResponse(Status::CODE_200, status_dto);
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(GetGPUConfig) {
@@ -236,7 +233,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(TablesOptions)
 
     ENDPOINT("OPTIONS", "/tables", TablesOptions) {
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(CreateTable) {
@@ -290,11 +287,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(TableOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}", TableOptions) {
-        auto status_dto = StatusDto::createShared();
-        status_dto->code = 0;
-        status_dto->message = "OK";
-
-        return createDtoResponse(Status::CODE_200, status_dto);
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(GetTable) {
@@ -356,7 +349,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(IndexOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/indexes", IndexOptions) {
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(CreateIndex) {
@@ -443,7 +436,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(PartitionsOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/partitions", PartitionsOptions) {
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(CreatePartition) {
@@ -515,7 +508,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(PartitionOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", PartitionOptions) {
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(DropPartition) {
@@ -564,7 +557,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(VectorsOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ADD_CORS(Insert)
