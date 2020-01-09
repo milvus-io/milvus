@@ -49,6 +49,16 @@ class SegmentWriter {
     Status
     GetSegment(SegmentPtr& segment_ptr);
 
+    // TODO(zhiru): rewrite and remove vector_type_size
+    Status
+    Merge(const std::string& segment_dir_to_merge, int vector_type_size);
+
+    size_t
+    Size();
+
+    size_t
+    VectorCount();
+
  private:
     Status
     WriteVectors();

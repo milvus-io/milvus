@@ -60,5 +60,10 @@ IdBloomFilter::GetName() const {
     return name_;
 }
 
+size_t
+IdBloomFilter::Size() {
+    return bloom_filter_->num_bytes;
+}
+
 }  // namespace segment
 }  // namespace milvus
