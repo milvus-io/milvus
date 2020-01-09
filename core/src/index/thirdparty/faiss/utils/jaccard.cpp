@@ -44,7 +44,7 @@ namespace faiss {
                 int64_t * __restrict bh_ids_ = ha->ids + i * k;
                 size_t j;
                 for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-                    if(!bitset || bitset->test(bh_ids_[j])){
+                    if(!bitset || bitset->test(j)){
                         dis = hc.jaccard (bs2_);
                         if (dis < bh_val_[0]) {
                             faiss::maxheap_pop<tadis_t> (k, bh_val_, bh_ids_);
