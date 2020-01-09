@@ -1043,6 +1043,7 @@ macro(build_oatpp)
 
     set(OATPP_CMAKE_ARGS
             "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
+            -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_BUILD_TESTS=OFF
             )
@@ -1087,6 +1088,7 @@ macro(build_oatpp_swagger)
 
     set(OATPP_SWAGGER_CMAKE_ARGS
             "-DCMAKE_INSTALL_PREFIX=${OATPP_SWAGGER_PREFIX}"
+            -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_SHARED_LIBS=OFF
             -DOATPP_DIR_SRC=${OATPP_DIR_SRC}
             -DOATPP_DIR_LIB=${OATPP_DIR_LIB}
