@@ -17,15 +17,9 @@
 
 #include <chrono>
 
-#include <oatpp-swagger/Controller.hpp>
 #include <oatpp/network/server/Server.hpp>
 
 #include "server/web_impl/WebServer.h"
-
-#ifdef OATPP_SWAGGER
- #include "server/web_impl/component/SwaggerComponent.hpp"
-#endif
-
 #include "server/web_impl/controller/WebController.hpp"
 
 #include "server/Config.h"
@@ -62,21 +56,11 @@ WebServer::StartService() {
     {
         AppComponent components = AppComponent(std::stoi(port));
 
-        auto doc_endpoints = oatpp::swagger::Controller::Endpoints::createShared();
-
         auto user_controller = WebController::createShared();
 
         /* create ApiControllers and add endpoints to router */
         OATPP_COMPONENT(std::shared_ptr<oatpp::web::server::HttpRouter>, router);
         user_controller->addEndpointsToRouter(router);
-
-#ifdef OATPP_SWAGGER
-        SwaggerComponent swaggerComponent("192.168.1.57", std::stoi(port));
-        doc_endpoints->pushBackAll(user_controller->getEndpoints());
-
-        auto swaggerController = oatpp::swagger::Controller::createShared(doc_endpoints);
-        swaggerController->addEndpointsToRouter(router);
-#endif
 
         /* Get connection handler component */
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::server::ConnectionHandler>, connection_handler);

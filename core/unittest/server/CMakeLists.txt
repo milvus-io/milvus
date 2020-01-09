@@ -31,8 +31,6 @@ link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-add_definitions(-DOATPP_SWAGGER_RES_PATH="${OATPP_SWAGGER_INCLUDE_DIR}/../bin/oatpp-swagger/res")
-
 set(util_files
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
         ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
@@ -64,14 +62,14 @@ set(grpc_lib
         grpc++
         grpc
         grpc_protobuf
-        grpc_protoc)
+        grpc_protoc
+        )
 
 target_link_libraries(test_server
         knowhere
         stdc++
         ${grpc_lib}
         ${unittest_libs}
-        oatpp-swagger
         oatpp
         )
 

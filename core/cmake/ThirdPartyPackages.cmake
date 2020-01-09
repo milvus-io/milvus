@@ -29,8 +29,7 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         Opentracing
         fiu
         AWS
-        oatpp
-        oatpp-swagger)
+        oatpp)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -68,8 +67,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_fiu()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "oatpp")
         build_oatpp()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "oatpp-swagger")
-        build_oatpp_swagger()
     elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
         build_aws()
     else ()
@@ -341,12 +338,6 @@ if (DEFINED ENV{MILVUS_OATPP_URL})
 else ()
 #    set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
     set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/master.zip")
-endif ()
-
-if (DEFINED ENV{MILVUS_OATPP_SWAGGER_URL})
-    set(MILVUS_OATPP_SWAGGER_URL "$ENV{MILVUS_OATPP_SWAGGER_URL}")
-else ()
-    set(OATPP_SWAGGER_SOURCE_URL "https://github.com/oatpp/oatpp-swagger/archive/${OATPP_VERSION}.tar.gz")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -1076,54 +1067,6 @@ if (MILVUS_WITH_OATPP)
 
     get_target_property(OATPP_INCLUDE_DIR oatpp INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${OATPP_INCLUDE_DIR})
-endif ()
-
-# ----------------------------------------------------------------------
-# oatpp-swagger
-macro(build_oatpp_swagger)
-    message(STATUS "Building oatpp-swagger-${OATPP_SWAGGER_VERSION} from source")
-    set(OATPP_SWAGGER_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/oatpp-swagger_ep-prefix/src/oatpp-swagger_ep")
-    set(OATPP_SWAGGER_STATIC_LIB "${OATPP_SWAGGER_PREFIX}/lib/oatpp-${OATPP_SWAGGER_VERSION}/${CMAKE_STATIC_LIBRARY_PREFIX}oatpp-swagger${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(OATPP_SWAGGER_INCLUDE_DIR "${OATPP_SWAGGER_PREFIX}/include/oatpp-${OATPP_SWAGGER_VERSION}/oatpp-swagger")
-
-    set(OATPP_SWAGGER_CMAKE_ARGS
-            "-DCMAKE_INSTALL_PREFIX=${OATPP_SWAGGER_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib
-            -DBUILD_SHARED_LIBS=OFF
-            -DOATPP_DIR_SRC=${OATPP_DIR_SRC}
-            -DOATPP_DIR_LIB=${OATPP_DIR_LIB}
-            -DOATPP_MODULES_LOCATION=CUSTOM
-            -DOATPP_BUILD_TESTS=OFF)
-
-    externalproject_add(oatpp-swagger_ep
-            URL
-            ${OATPP_SWAGGER_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${OATPP_SWAGGER_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${OATPP_SWAGGER_STATIC_LIB})
-
-    ExternalProject_Add_StepDependencies(oatpp-swagger_ep build oatpp_ep)
-
-    file(MAKE_DIRECTORY "${OATPP_SWAGGER_INCLUDE_DIR}")
-    add_library(oatpp-swagger STATIC IMPORTED)
-    set_target_properties(oatpp-swagger
-            PROPERTIES IMPORTED_LOCATION "${OATPP_SWAGGER_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OATPP_SWAGGER_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "oatpp")
-
-    add_dependencies(oatpp-swagger oatpp-swagger_ep)
-endmacro()
-
-if (MILVUS_WITH_OATPP_SWAGGER)
-    resolve_dependency(oatpp-swagger)
-
-    get_target_property(OATPP_SWAGGER_INCLUDE_DIR oatpp-swagger INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${OATPP_SWAGGER_INCLUDE_DIR})
 endif ()
 
 # ----------------------------------------------------------------------
