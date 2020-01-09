@@ -30,7 +30,9 @@ namespace web {
 
 void
 WebServer::Start() {
-    thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
+    if (nullptr == thread_ptr_) {
+        thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
+    }
 }
 
 void
