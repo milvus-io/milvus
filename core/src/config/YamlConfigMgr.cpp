@@ -79,7 +79,7 @@ bool
 YamlConfigMgr::SetSequence(const YAML::Node& node, const std::string& child_name, ConfigNode& config) {
     if (node[child_name].IsDefined()) {
         size_t cnt = node[child_name].size();
-        for (size_t i = 0; i < cnt; i++) {
+        for (size_t i = 0; i < cnt; ++i) {
             config.AddSequenceItem(child_name, node[child_name][i].as<std::string>());
         }
         return true;
