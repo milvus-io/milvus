@@ -68,7 +68,7 @@ class SegmentWriter {
 
  private:
     store::DirectoryPtr directory_ptr_;
-    const SegmentPtr segment_ptr_;
+    SegmentPtr segment_ptr_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;

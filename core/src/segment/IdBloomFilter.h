@@ -48,8 +48,8 @@ class IdBloomFilter {
     size_t
     Size();
 
-    const std::string&
-    GetName() const;
+    //    const std::string&
+    //    GetName() const;
 
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;
@@ -62,7 +62,7 @@ class IdBloomFilter {
 
  private:
     scaling_bloom_t* bloom_filter_;
-    const std::string name_ = "bloom_filter";
+    //    const std::string name_ = "bloom_filter";
     std::mutex mutex_;
 };
 

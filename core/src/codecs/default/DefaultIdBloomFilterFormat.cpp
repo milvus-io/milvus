@@ -30,8 +30,7 @@ void
 DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
                                  segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     std::string dir_path = directory_ptr->GetDirPath();
-    const std::string bloom_filter_file_path =
-        dir_path + "/" + id_bloom_filter_ptr->GetName() + bloom_filter_extension_;
+    const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     auto bloom_filter =
         new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
     if (bloom_filter == nullptr) {
@@ -47,8 +46,7 @@ void
 DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
                                   const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     std::string dir_path = directory_ptr->GetDirPath();
-    const std::string bloom_filter_file_path =
-        dir_path + "/" + id_bloom_filter_ptr->GetName() + bloom_filter_extension_;
+    const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
         std::string err_msg =
             "Failed to write bloom filter to file: " + bloom_filter_file_path + ". " + std::strerror(errno);
@@ -61,8 +59,7 @@ void
 DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
                                    segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     std::string dir_path = directory_ptr->GetDirPath();
-    const std::string bloom_filter_file_path =
-        dir_path + "/" + id_bloom_filter_ptr->GetName() + bloom_filter_extension_;
+    const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     auto bloom_filter =
         new_scaling_bloom(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
     if (bloom_filter == nullptr) {

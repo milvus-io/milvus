@@ -29,9 +29,9 @@ namespace segment {
 typedef int64_t doc_id_t;
 
 struct Segment {
-    VectorsPtr vectors_ptr_;
-    DeletedDocsPtr deleted_docs_ptr_;
-    IdBloomFilterPtr id_bloom_filter_ptr_;
+    VectorsPtr vectors_ptr_ = std::make_shared<Vectors>();
+    DeletedDocsPtr deleted_docs_ptr_ = nullptr;
+    IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };
 
 using SegmentPtr = std::shared_ptr<Segment>;
