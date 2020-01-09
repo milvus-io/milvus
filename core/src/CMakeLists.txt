@@ -105,6 +105,12 @@ set(web_server_files
         ${web_impl_files}
         )
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_definitions(-DOATPP_SWAGGER)
+    ## define path to swagger-ui res folder
+    add_definitions(-DOATPP_SWAGGER_RES_PATH="${OATPP_SWAGGER_INCLUDE_DIR}/../bin/oatpp-swagger/res")
+endif()
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
@@ -263,9 +269,6 @@ set(server_libs
         oatpp-swagger
         oatpp
         )
-
-## define path to swagger-ui res folder
-add_definitions(-DOATPP_SWAGGER_RES_PATH="${OATPP_SWAGGER_INCLUDE_DIR}/../bin/oatpp-swagger/res")
 
 add_executable(milvus_server
         ${config_files}
