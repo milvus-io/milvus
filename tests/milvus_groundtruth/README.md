@@ -1,4 +1,4 @@
-# Quick start
+# Quick Start
 
 - For calculating L2 or IP distance of feature vectors.
 - At below table, the last five parameters  do not need to alter.
