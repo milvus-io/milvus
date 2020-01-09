@@ -42,7 +42,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
                               const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
-        Flush(flushed_tables, lsn);
+        Flush(flushed_tables);
     }
 
     VectorsData vectors_data;
@@ -63,7 +63,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
                               const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
-        Flush(flushed_tables, lsn);
+        Flush(flushed_tables);
     }
 
     VectorsData vectors_data;
@@ -76,12 +76,13 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id, source);
+    return InsertVectorsNoLock(table_id, source, lsn);
 }
 
 Status
-MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source) {
+MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source, uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(table_id);
+    mem->SetLSN(lsn);
 
     auto status = mem->Add(source);
 
@@ -91,7 +92,7 @@ MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSou
 Status
 MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(table_id);
-
+    mem->SetLSN(lsn);
     auto status = mem->Delete(vector_id);
     return status;
 }
@@ -99,6 +100,7 @@ MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id, ui
 Status
 MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(table_id);
+    mem->SetLSN(lsn);
 
     IDNumbers ids;
     ids.resize(length);
@@ -116,14 +118,15 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
 }
 
 Status
-MemManagerImpl::Flush(const std::string& table_id, uint64_t wal_lsn) {
+MemManagerImpl::Flush(const std::string& table_id) {
     auto status = ToImmutable(table_id);
     if (!status.ok()) {
         return Status(DB_ERROR, status.message());
     }
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     for (auto& mem : immu_mem_list_) {
-        mem->Serialize(wal_lsn);
+        auto max_lsn = GetMaxLSN();
+        mem->Serialize(max_lsn);
     }
     immu_mem_list_.clear();
 
@@ -131,12 +134,13 @@ MemManagerImpl::Flush(const std::string& table_id, uint64_t wal_lsn) {
 }
 
 Status
-MemManagerImpl::Flush(std::set<std::string>& table_ids, uint64_t wal_lsn) {
+MemManagerImpl::Flush(std::set<std::string>& table_ids) {
     ToImmutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     table_ids.clear();
     for (auto& mem : immu_mem_list_) {
-        mem->Serialize(wal_lsn);
+        auto max_lsn = GetMaxLSN();
+        mem->Serialize(max_lsn);
         table_ids.insert(mem->GetTableId());
     }
     immu_mem_list_.clear();
@@ -220,6 +224,18 @@ MemManagerImpl::GetCurrentImmutableMem() {
 size_t
 MemManagerImpl::GetCurrentMem() {
     return GetCurrentMutableMem() + GetCurrentImmutableMem();
+}
+
+uint64_t
+MemManagerImpl::GetMaxLSN() {
+    uint64_t max_lsn = 0;
+    for (auto& kv : mem_id_map_) {
+        auto cur_lsn = kv.second->GetLSN();
+        if (kv.second->GetLSN() > max_lsn) {
+            max_lsn = cur_lsn;
+        }
+    }
+    return max_lsn;
 }
 
 }  // namespace engine

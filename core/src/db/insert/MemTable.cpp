@@ -212,5 +212,15 @@ MemTable::ApplyDeletes() {
     return Status::OK();
 }
 
+uint64_t
+MemTable::GetLSN() {
+    return lsn_;
+}
+
+void
+MemTable::SetLSN(uint64_t lsn) {
+    lsn_ = lsn;
+}
+
 }  // namespace engine
 }  // namespace milvus

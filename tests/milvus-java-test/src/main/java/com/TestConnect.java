@@ -22,12 +22,13 @@ public class TestConnect {
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
     public void test_connect_repeat(String host, String port) {
         MilvusGrpcClient client = new MilvusGrpcClient();
-        ConnectParam connectParam = new ConnectParam.Builder()
-                .withHost(host)
-                .withPort(port)
-                .build();
+
         Response res = null;
         try {
+            ConnectParam connectParam = new ConnectParam.Builder()
+                    .withHost(host)
+                    .withPort(port)
+                    .build();
             res = client.connect(connectParam);
             res = client.connect(connectParam);
         } catch (ConnectFailedException e) {
@@ -40,14 +41,14 @@ public class TestConnect {
     @Test(dataProvider="InvalidConnectArgs")
     public void test_connect_invalid_connect_args(String ip, String port) {
         MilvusClient client = new MilvusGrpcClient();
-        ConnectParam connectParam = new ConnectParam.Builder()
-                .withHost(ip)
-                .withPort(port)
-                .build();
         Response res = null;
         try {
+            ConnectParam connectParam = new ConnectParam.Builder()
+                    .withHost(ip)
+                    .withPort(port)
+                    .build();
             res = client.connect(connectParam);
-        } catch (ConnectFailedException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         Assert.assertEquals(res, null);
