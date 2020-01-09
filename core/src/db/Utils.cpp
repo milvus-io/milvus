@@ -196,9 +196,19 @@ DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
 }
 
 Status
+DeleteSegment(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+    utils::GetTableFilePath(options, table_file);
+    std::string segment_dir;
+    GetParentPath(table_file.location_, segment_dir);
+    boost::filesystem::remove_all(segment_dir);
+    return Status::OK();
+}
+
+Status
 GetParentPath(const std::string& path, std::string& parent_path) {
     boost::filesystem::path p(path);
     parent_path = p.parent_path().filename().string();
+    return Status::OK();
 }
 
 bool

@@ -55,10 +55,10 @@ class MemManagerImpl : public MemManager {
     DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    Flush(const std::string& table_id, uint64_t lsn) override;
+    Flush(const std::string& table_id) override;
 
     Status
-    Flush(std::set<std::string>& table_ids, uint64_t lsn) override;
+    Flush(std::set<std::string>& table_ids) override;
 
     //    Status
     //    Serialize(std::set<std::string>& table_ids) override;
@@ -80,13 +80,16 @@ class MemManagerImpl : public MemManager {
     GetMemByTable(const std::string& table_id);
 
     Status
-    InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source);
+    InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source, uint64_t lsn);
 
     Status
     ToImmutable();
 
     Status
     ToImmutable(const std::string& table_id);
+
+    uint64_t
+    GetMaxLSN();
 
     using MemIdMap = std::map<std::string, MemTablePtr>;
     using MemList = std::vector<MemTablePtr>;
