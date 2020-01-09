@@ -17,13 +17,15 @@
 
 #pragma once
 
+#include <memory>
 #include <mutex>
 
 #include "dablooms/dablooms.h"
-#include "segment/Types.h"
 
 namespace milvus {
 namespace segment {
+
+using doc_id_t = int64_t;
 
 class IdBloomFilter {
  public:
@@ -35,13 +37,13 @@ class IdBloomFilter {
     GetBloomFilter();
 
     bool
-    Check(segment::doc_id_t uid);
+    Check(doc_id_t uid);
 
     void
-    Add(segment::doc_id_t uid);
+    Add(doc_id_t uid);
 
     void
-    Remove(segment::doc_id_t uid);
+    Remove(doc_id_t uid);
 
     size_t
     Size();

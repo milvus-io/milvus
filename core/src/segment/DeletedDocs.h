@@ -20,8 +20,6 @@
 #include <memory>
 #include <vector>
 
-#include "Types.h"
-
 namespace milvus {
 namespace segment {
 

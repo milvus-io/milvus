@@ -35,21 +35,21 @@ IdBloomFilter::GetBloomFilter() {
 }
 
 bool
-IdBloomFilter::Check(segment::doc_id_t uid) {
+IdBloomFilter::Check(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     return scaling_bloom_check(bloom_filter_, s.c_str(), s.size());
 }
 
 void
-IdBloomFilter::Add(segment::doc_id_t uid) {
+IdBloomFilter::Add(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid);
 }
 
 void
-IdBloomFilter::Remove(segment::doc_id_t uid) {
+IdBloomFilter::Remove(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid);

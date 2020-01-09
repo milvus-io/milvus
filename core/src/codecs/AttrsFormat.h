@@ -21,12 +21,12 @@ namespace milvus {
 namespace codec {
 
 class AttrsFormat {
- public:
-    virtual Attrs
-    read() = 0;
-
-    virtual void
-    write(Attrs attrs) = 0;
+// public:
+//    virtual Attrs
+//    read() = 0;
+//
+//    virtual void
+//    write(Attrs attrs) = 0;
 };
 
 }  // namespace codec
