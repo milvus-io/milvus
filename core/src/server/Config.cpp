@@ -82,14 +82,14 @@ Config::ValidateConfig() {
     std::string server_port;
     CONFIG_CHECK(GetServerConfigPort(server_port));
 
-    std::string web_port;
-    CONFIG_CHECK(GetServerConfigWebPort(web_port));
-
     std::string server_mode;
     CONFIG_CHECK(GetServerConfigDeployMode(server_mode));
 
     std::string server_time_zone;
     CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
+
+    std::string web_port;
+    CONFIG_CHECK(GetServerConfigWebPort(web_port));
 
     /* db config */
     std::string db_backend_url;
@@ -195,9 +195,9 @@ Config::ResetDefaultConfig() {
     /* server config */
     CONFIG_CHECK(SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT));
     CONFIG_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
-    CONFIG_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
     CONFIG_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
     CONFIG_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
+    CONFIG_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
     CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
@@ -1216,12 +1216,8 @@ Config::SetServerConfigTimeZone(const std::string& value) {
 
 Status
 Config::SetServerConfigWebPort(const std::string& value) {
-    Status s = CheckServerConfigWebPort(value);
-    if (!s.ok()) {
-        return s;
-    }
-    SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
-    return Status::OK();
+    CONFIG_CHECK(CheckServerConfigWebPort(value));
+    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
 }
 
 /* db config */
@@ -1350,7 +1346,6 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
-
 /* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
