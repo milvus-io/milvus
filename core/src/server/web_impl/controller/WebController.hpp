@@ -74,16 +74,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->summary = "API documents";
     }
 
-    ADD_CORS(docs)
-
-    ENDPOINT("GET", "/docs", docs) {
-        auto response = createResponse(Status::CODE_302, "Welcome to milvus");
-        response->putHeader(Header::CONTENT_TYPE, "text/html");
-        // redirect to swagger ui
-        response->putHeader("location", "/swagger/ui");
-        return response;
-    }
-
     ENDPOINT_INFO(State) {
         info->summary = "Server state";
         info->description = "Check web server whether is ready.";
