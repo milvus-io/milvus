@@ -409,8 +409,6 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("GET", "/", root)
 
-    API_CALL("GET", "/docs", docs)
-
     API_CALL("GET", "/state", getState)
 
     API_CALL("GET", "/devices", getDevices)
@@ -603,9 +601,6 @@ class WebControllerTest : public testing::Test {
 TEST_F(WebControllerTest, OPTIONS) {
     auto response = client_ptr->root(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-
-    response = client_ptr->docs(conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_302.code, response->getStatusCode());
 
     response = client_ptr->getState(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
