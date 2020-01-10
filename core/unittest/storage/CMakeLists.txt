@@ -41,4 +41,4 @@ target_link_libraries(test_storage
         ${unittest_libs}
         )
 
-install(TARGETS test_storage DESTINATION bin)
+install(TARGETS test_storage DESTINATION unittest)

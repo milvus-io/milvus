@@ -23,7 +23,7 @@ Milvus [リリースノート](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0
 
 ## はじめに
 
-DockerでMilvusをインストールすることは簡単です。[Milvusインストール案内](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) を参考してください。ソースからMilvusを構築するために、[ソースから構築する](install.md)を参考してください。
+DockerでMilvusをインストールすることは簡単です。[Milvusインストール案内](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) を参考してください。ソースからMilvusを構築するために、[ソースから構築する](INSTALL.md)を参考してください。
 
 Milvusをコンフィグするために、[Milvusコンフィグ](https://www.milvus.io/docs/reference/milvus_config.md)を読んでください。
 
