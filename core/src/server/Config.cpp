@@ -88,8 +88,8 @@ Config::ValidateConfig() {
     std::string server_time_zone;
     CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
 
-    std::string web_port;
-    CONFIG_CHECK(GetServerConfigWebPort(web_port));
+    std::string server_web_port;
+    CONFIG_CHECK(GetServerConfigWebPort(server_web_port));
 
     /* db config */
     std::string db_backend_url;
