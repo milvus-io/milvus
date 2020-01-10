@@ -33,17 +33,15 @@ namespace wal {
 #pragma pack(push)
 #pragma pack(1)
 
-struct MXLogRecord{
-    uint32_t mxl_size;//data length
+struct MXLogRecordHeader{
     uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
     uint32_t vector_num;
     uint16_t table_id_size;//
     uint16_t dim;//one record contains the same dimension vectors
     uint8_t mxl_type;//record type, insert/delete/update/flush...
-    //mxl_data include, table_id vecter_ids[vector_num] and float* vectors
-    char mxl_data[];//data address
-//    char* mxl_data;
 };
+
+#define SizeOfMXLogRecordHeader (sizeof(MXLogRecordHeader))
 
 #pragma pack(pop)
 
@@ -64,6 +62,9 @@ class MXLogBuffer {
                 const uint64_t write_lsn);
     ~MXLogBuffer();
 
+    // TODO: error code
+    bool Init();
+
     // if failed, return 0, else return lsn
     uint64_t Append(const std::string &table_id,
                     const MXLogType record_type,
@@ -81,32 +82,22 @@ class MXLogBuffer {
                   size_t &dim,
                   const void* &vectors);
 
-    // not let read++
-    // if failed, return 0, else return lsn
-    uint64_t Next(const uint64_t last_applied_lsn);
+    uint64_t GetReadLsn();
 
-    void Flush(const std::string& table_id);
-    void SwitchBuffer(MXLogBufferHandler &handler);//switch buffer
-    uint32_t GetWriterFileNo();
-    void SetWriterFileNo(const uint32_t& file_no);
-    void ReSet();
-    bool LoadForRecovery(uint64_t& lsn);
-    bool NextInfo(std::string& table_id, uint64_t& next_lsn);
+    void SetWriteLsn(uint64_t lsn);
 
  private:
-    bool Init();
-    uint64_t SurplusSpace();
-    uint64_t RecordSize(const size_t n, const size_t dim, const size_t table_id_size);
-    void SetBufferSize(const uint64_t& buffer_size);
-    void SetMXLogPath(const std::string& mxlog_path);
-
+    uint32_t SurplusSpace();
+    uint32_t RecordSize(const size_t n,
+                        const size_t no_type_dim,
+                        const size_t table_id_size);
 
  private:
-    uint32_t mxlog_buffer_size_;//from config
-    std::string mxlog_path_;//from config
+    uint32_t mxlog_buffer_size_; //from config
     BufferPtr buf_[2];
-    std::mutex lock_;
-    MXLogBufferHandler mxlog_buffer_reader_, mxlog_buffer_writer_;
+    std::mutex mutex_;
+    MXLogBufferHandler mxlog_buffer_reader_;
+    MXLogBufferHandler mxlog_buffer_writer_;
     MXLogFileHandler mxlog_writer_;
 };
 

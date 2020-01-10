@@ -64,6 +64,9 @@ WalManager::Init(const meta::MetaPtr& meta) {
         mxlog_config_.buffer_size,
         recovery_start,
         applied_lsn);
+
+    // TODO: error code
+    p_buffer_->Init();
 }
 
 void
@@ -99,11 +102,11 @@ WalManager::GetNextRecovery(WALRecord &record) {
 void
 WalManager::GetNextRecord(WALRecord &record) {
     record.type = MXLogType::None;
-    record.lsn = p_buffer_->Next(last_applied_lsn_);
+    record.lsn = p_buffer_->GetReadLsn();
 
     std::unique_lock<std::mutex> lck (mutex_);
     if (flush_info_.second != 0) {
-        if (record.lsn == 0 || record.lsn > flush_info_.second) {
+        if (record.lsn >= flush_info_.second) {
             record.lsn = flush_info_.second;
             record.type = MXLogType::Flush;
             record.table_id = flush_info_.first;
@@ -188,10 +191,11 @@ WalManager::Insert(const std::string &table_id,
         new_lsn = p_buffer_->Append(table_id,
                                     log_type,
                                     insert_len,
+                                    vector_ids.data() + i,
                                     dim,
-                                    vectors.data() + i * dim,
-                                    vector_ids.data() + i);
+                                    vectors.data() + i * dim);
         if(new_lsn == 0) {
+            p_buffer_->SetWriteLsn(last_applied_lsn_);
             return false;
         }
     }
@@ -224,9 +228,9 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
         new_lsn = p_buffer_->Append(table_id,
                                     MXLogType::Delete,
                                     delete_len,
+                                    vector_ids.data() + i,
                                     0,
-                                    nullptr,
-                                    vector_ids.data() + i);
+                                    nullptr);
         if(new_lsn == 0) {
             return false;
         }
@@ -245,8 +249,8 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 }
 
 uint64_t
-WalManager::Flush(const std::string& table_id) {
-    std::unique_lock<std::mutex> lck (mutex_, std::defer_lock_t);
+WalManager::Flush(const std::string table_id) {
+    std::unique_lock<std::mutex> lck (mutex_, std::defer_lock);
     uint64_t lsn = 0;
     if (table_id.empty()) {
         lck.lock();

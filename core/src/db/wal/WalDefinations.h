@@ -33,7 +33,8 @@ extern std::condition_variable reader_cv;
 extern std::mutex reader_mutex;
 extern bool reader_is_waiting;
 
-#define WAL_BUFFER_MIN_SIZE 64
+#define WAL_BUFFER_MAX_SIZE (2 * 1024 * 1024 * 1024)
+#define WAL_BUFFER_MIN_SIZE (64 * 1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 #define WAL_META_AMOUNT 2
 #ifdef offsetof
@@ -55,13 +56,10 @@ struct WALRecord {
     MXLogType type;
     std::string table_id;
     size_t length;
-    const IDNumbers* ids;
+    const IDNumber* ids;
     size_t dim;
     const void* data;
 };
-
-//#define SizeOfMXLogRecordHeader (offsetof(MXLogRecord, mxl_data))
-#define SizeOfMXLogRecordHeader (sizeof(MXLogRecord))
 
 struct MXLogConfiguration {
     uint32_t record_size;
