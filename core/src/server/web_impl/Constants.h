@@ -72,6 +72,7 @@ static const char* VALUE_INDEX_INDEX_TYPE_DEFAULT = NAME_ENGINE_TYPE_FLAT;
 static const int64_t VALUE_INDEX_NLIST_DEFAULT = 16384;
 
 static const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY = 4;
+static const bool VALUE_CONFIG_CACHE_INSERT_DATA = false;
 
 }  // namespace web
 }  // namespace server
