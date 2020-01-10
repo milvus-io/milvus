@@ -21,7 +21,6 @@
 #include <boost/filesystem.hpp>
 #include <thread>
 
-
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/delivery/RequestScheduler.h"
