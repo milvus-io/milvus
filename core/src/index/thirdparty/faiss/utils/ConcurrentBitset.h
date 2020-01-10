@@ -43,7 +43,7 @@ class ConcurrentBitset {
     clear(id_type_t id);
 
  private:
-    std::vector<std::atomic<unsigned char>> bitset_;
+    std::deque<std::atomic<unsigned char>> bitset_;
     id_type_t size_;
 };
 
