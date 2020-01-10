@@ -111,6 +111,9 @@ void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
 
 void
+AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+
+void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
 
 struct FileIOWriter {
