@@ -231,7 +231,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
 
     // insert vectors with wrong dim
-    std::vector<float > record_wrong_dim(TABLE_DIM - 1, 0.5f);
+    std::vector<float> record_wrong_dim(TABLE_DIM - 1, 0.5f);
     ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
     CopyRowRecord(grpc_record, record_wrong_dim);
     handler->Insert(&context, &request, &vector_ids);
