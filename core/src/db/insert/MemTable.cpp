@@ -33,7 +33,7 @@ MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const
 }
 
 Status
-MemTable::Add(VectorSourcePtr& source) {
+MemTable::Add(const VectorSourcePtr& source) {
     while (!source->AllAdded()) {
         MemTableFilePtr current_mem_table_file;
         if (!mem_table_file_list_.empty()) {
@@ -208,8 +208,18 @@ MemTable::ApplyDeletes() {
     }
 
     doc_ids_to_delete_.clear();
-    
+
     return Status::OK();
+}
+
+uint64_t
+MemTable::GetLSN() {
+    return lsn_;
+}
+
+void
+MemTable::SetLSN(uint64_t lsn) {
+    lsn_ = lsn;
 }
 
 }  // namespace engine

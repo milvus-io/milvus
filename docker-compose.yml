@@ -40,7 +40,7 @@ services:
       - milvus
     command: &ubuntu-command >
       /bin/bash -c "
-        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c -i
         /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
   centos-core:
@@ -60,7 +60,7 @@ services:
       - milvus
     command: &centos-command >
       /bin/bash --login -c "
-        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c
+        /milvus/ci/scripts/build.sh -t Release -o ${MILVUS_INSTALL_PREFIX} -l -u -c -i
         /milvus/ci/scripts/coverage.sh -o ${MILVUS_INSTALL_PREFIX} -u root -p 123456 -t mysql"
 
 networks:

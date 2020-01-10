@@ -33,10 +33,10 @@ DeletedDocs::GetDeletedDocs() const {
     return deleted_doc_offsets_;
 }
 
-const std::string&
-DeletedDocs::GetName() const {
-    return name_;
-}
+// const std::string&
+// DeletedDocs::GetName() const {
+//    return name_;
+//}
 
 size_t
 DeletedDocs::GetSize() const {

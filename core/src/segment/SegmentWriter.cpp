@@ -19,6 +19,7 @@
 
 #include <memory>
 
+#include "SegmentReader.h"
 #include "Vector.h"
 #include "codecs/default/DefaultCodec.h"
 #include "store/Directory.h"
@@ -30,18 +31,18 @@ namespace segment {
 
 SegmentWriter::SegmentWriter(const std::string& directory) {
     directory_ptr_ = std::make_shared<store::Directory>(directory);
+    segment_ptr_ = std::make_shared<Segment>();
 }
 
 Status
 SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8_t>& data,
                           const std::vector<doc_id_t>& uids) {
-    auto vectors_ptr = segment_ptr_->vectors_ptr_;
-    auto found = vectors_ptr->vectors.find(field_name);
-    if (found == vectors_ptr->vectors.end()) {
-        vectors_ptr->vectors[field_name] = std::make_shared<Vector>();
+    auto found = segment_ptr_->vectors_ptr_->vectors_map.find(field_name);
+    if (found == segment_ptr_->vectors_ptr_->vectors_map.end()) {
+        segment_ptr_->vectors_ptr_->vectors_map[field_name] = std::make_shared<Vector>();
     }
-    vectors_ptr->vectors[field_name]->AddData(data);
-    vectors_ptr->vectors[field_name]->AddUids(uids);
+    segment_ptr_->vectors_ptr_->vectors_map[field_name]->AddData(data);
+    segment_ptr_->vectors_ptr_->vectors_map[field_name]->AddUids(uids);
 
     return Status::OK();
 }
@@ -76,10 +77,9 @@ SegmentWriter::WriteBloomFilter() {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
-        segment_ptr_->id_bloom_filter_ptr_ = nullptr;
         default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
         // TODO(zhiru): ?
-        for (auto& kv : segment_ptr_->vectors_ptr_->vectors) {
+        for (auto& kv : segment_ptr_->vectors_ptr_->vectors_map) {
             auto& uids = kv.second->GetUids();
             for (auto& uid : uids) {
                 segment_ptr_->id_bloom_filter_ptr_->Add(uid);
@@ -132,6 +132,52 @@ SegmentWriter::Cache() {
 Status
 SegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
     segment_ptr = segment_ptr_;
+}
+
+Status
+SegmentWriter::Merge(const std::string& dir_to_merge, int vector_type_size) {
+    SegmentReader segment_reader_to_merge(dir_to_merge);
+    bool in_cache;
+    auto status = segment_reader_to_merge.LoadCache(in_cache);
+    if (!in_cache) {
+        status = segment_reader_to_merge.Load();
+        if (!status.ok()) {
+            std::string msg = "Failed to load segment from " + dir_to_merge;
+            ENGINE_LOG_ERROR << msg;
+            return Status(DB_ERROR, msg);
+        }
+    }
+    SegmentPtr segment_to_merge;
+    segment_reader_to_merge.GetSegment(segment_to_merge);
+    segment_ptr_->vectors_ptr_->Clear();
+    auto offsets_to_delete = segment_ptr_->deleted_docs_ptr_->GetDeletedDocs();
+    IdBloomFilterPtr id_bloom_filter_ptr;
+    for (auto& kv : segment_to_merge->vectors_ptr_->vectors_map) {
+        auto& uids = kv.second->GetUids();
+        for (size_t i = 0; i < uids.size(); ++i) {
+            auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
+            if (found != offsets_to_delete.end()) {
+                kv.second->Erase(i, vector_type_size);
+            }
+        }
+        AddVectors(kv.first, kv.second->GetData(), uids);
+    }
+
+    return Status::OK();
+}
+
+size_t
+SegmentWriter::Size() {
+    return segment_ptr_->vectors_ptr_->Size() + segment_ptr_->id_bloom_filter_ptr_->Size();
+}
+
+size_t
+SegmentWriter::VectorCount() {
+    size_t count = 0;
+    for (auto& kv : segment_ptr_->vectors_ptr_->vectors_map) {
+        count += kv.second->GetCount();
+    }
+    return count;
 }
 
 }  // namespace segment

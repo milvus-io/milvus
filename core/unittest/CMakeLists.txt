@@ -33,6 +33,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -95,6 +96,13 @@ set(storage_files
         ${storage_s3_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/store store_files)
+
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
@@ -115,6 +123,7 @@ set(common_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+#        ${db_wal_files}
         ${metrics_files}
         ${thirdparty_files}
         ${scheduler_files}
@@ -123,6 +132,10 @@ set(common_files
         ${helper_files}
         ${server_context_files}
         ${tracing_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
+        ${store_files}
         )
 
 set(unittest_libs

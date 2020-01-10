@@ -35,7 +35,7 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     write(const store::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     void
-    create(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override ;
+    create(const store::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     // No copy and move
     DefaultIdBloomFilterFormat(const DefaultIdBloomFilterFormat&) = delete;
@@ -47,7 +47,7 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     operator=(DefaultIdBloomFilterFormat&&) = delete;
 
  private:
-    const std::string bloom_filter_extension_ = "bin";
+    const std::string bloom_filter_filename_ = "bloom_filter";
 };
 
 }  // namespace codec

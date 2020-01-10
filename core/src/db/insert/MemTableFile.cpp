@@ -62,7 +62,7 @@ MemTableFile::CreateTableFile() {
 }
 
 Status
-MemTableFile::Add(VectorSourcePtr& source) {
+MemTableFile::Add(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
@@ -89,14 +89,14 @@ MemTableFile::Add(VectorSourcePtr& source) {
 Status
 MemTableFile::Delete(segment::doc_id_t doc_id) {
     // Use bloom filter to check whether the id is present in this table file
-    std::string segment_dir;
-    utils::GetParentPath(table_file_schema_.location_, segment_dir);
-    segment::SegmentReader segment_reader(segment_dir);
-    segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
-    if (!id_bloom_filter_ptr->Check(doc_id)) {
-        return Status::OK();
-    }
+    //    std::string segment_dir;
+    //    utils::GetParentPath(table_file_schema_.location_, segment_dir);
+    //    segment::SegmentReader segment_reader(segment_dir);
+    //    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+    //    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+    //    if (!id_bloom_filter_ptr->Check(doc_id)) {
+    //        return Status::OK();
+    //    }
 
     // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
     int vector_type_size;
@@ -108,9 +108,9 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
 
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
-    auto vectors_map = segment_ptr->vectors_ptr_->vectors;
+    auto vectors_map = segment_ptr->vectors_ptr_->vectors_map;
     for (auto& it : vectors_map) {
-        // Check wither the doc_id is indeed present, if yes, delete it's corresponding buffer
+        // Check wither the doc_id is present, if yes, delete it's corresponding buffer
         auto uids = it.second->GetUids();
         auto found = std::find(uids.begin(), uids.end(), doc_id);
         if (found != uids.end()) {

@@ -20,10 +20,10 @@
 #include <memory>
 #include <vector>
 
-#include "Types.h"
-
 namespace milvus {
 namespace segment {
+
+using doc_id_t = int64_t;
 
 class Vector {
  public:
@@ -51,6 +51,9 @@ class Vector {
 
     void
     Erase(size_t offset, int vector_type_size);
+
+    size_t
+    Size();
 
     // No copy and move
     Vector(const Vector&) = delete;

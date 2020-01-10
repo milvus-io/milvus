@@ -35,8 +35,8 @@ Vector::AddData(const std::vector<uint8_t>& data) {
 
 void
 Vector::AddUids(const std::vector<doc_id_t>& uids) {
-    data_.reserve(data_.size() + uids.size());
-    data_.insert(data_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
+    uids_.reserve(uids_.size() + uids.size());
+    uids_.insert(uids_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
 }
 
 void
@@ -64,6 +64,11 @@ Vector::GetCount() {
 size_t
 Vector::GetDimension() {
     return data_.size() / GetCount();
+}
+
+size_t
+Vector::Size() {
+    return data_.size() + uids_.size() * sizeof(doc_id_t);
 }
 
 }  // namespace segment

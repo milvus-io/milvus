@@ -26,7 +26,19 @@ namespace milvus {
 namespace segment {
 
 struct Vectors {
-    std::unordered_map<std::string, VectorPtr> vectors;
+    std::unordered_map<std::string, VectorPtr> vectors_map;
+    void
+    Clear() {
+        vectors_map.clear();
+    }
+    size_t
+    Size() {
+        size_t size = 0;
+        for (auto& kv : vectors_map) {
+            size += kv.second->Size();
+        }
+        return size;
+    }
 };
 
 using VectorsPtr = std::shared_ptr<Vectors>;

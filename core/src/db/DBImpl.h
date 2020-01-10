@@ -107,6 +107,9 @@ class DBImpl : public DB {
     Flush() override;
 
     Status
+    Merge(const std::set<std::string>& table_ids) override;
+
+    Status
     CreateIndex(const std::string& table_id, const TableIndex& index) override;
 
     Status
@@ -160,8 +163,6 @@ class DBImpl : public DB {
     BackgroundMergeFiles(const std::string& table_id);
     void
     BackgroundCompaction(std::set<std::string> table_ids);
-    void
-    AddCompactionTask(const std::set<std::string>& table_ids);
 
     void
     StartBuildIndexTask(bool force = false);

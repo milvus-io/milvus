@@ -48,15 +48,16 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
             size_t num_bytes = boost::filesystem::file_size(path);
-            std::vector<uint8_t> vector_list(num_bytes);
+            std::vector<uint8_t> vector_list;
+            vector_list.resize(num_bytes);
             ::read(rv_fd, vector_list.data(), num_bytes);
 
-            auto found = vectors_read->vectors.find(path.stem().string());
-            if (found == vectors_read->vectors.end()) {
-                vectors_read->vectors[path.stem().string()] = std::make_shared<segment::Vector>();
+            auto found = vectors_read->vectors_map.find(path.stem().string());
+            if (found == vectors_read->vectors_map.end()) {
+                vectors_read->vectors_map[path.stem().string()] = std::make_shared<segment::Vector>();
             }
 
-            vectors_read->vectors[path.stem().string()]->AddData(vector_list);
+            vectors_read->vectors_map[path.stem().string()]->AddData(vector_list);
         }
         if (path.extension().string() == user_id_extension_) {
             int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
@@ -66,11 +67,12 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
             auto file_size = boost::filesystem::file_size(path);
-            auto count = file_size / sizeof(int64_t);
-            std::vector<segment::doc_id_t> uids(count);
+            auto count = file_size / sizeof(segment::doc_id_t);
+            std::vector<segment::doc_id_t> uids;
+            uids.resize(count);
             ::read(uid_fd, uids.data(), file_size);
 
-            vectors_read->vectors[path.stem().string()]->AddUids(uids);
+            vectors_read->vectors_map[path.stem().string()]->AddUids(uids);
         }
     }
 }
@@ -78,7 +80,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
 void
 DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
     std::string dir_path = directory_ptr->GetDirPath();
-    for (auto& it : vectors->vectors) {
+    for (auto& it : vectors->vectors_map) {
         const std::string rv_file_path = dir_path + "/" + it.first + "." + raw_vector_extension_;
         const std::string uid_file_path = dir_path + "/" + it.first + "." + user_id_extension_;
 
@@ -122,7 +124,7 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
-        if (::write(uid_fd, it.second->GetUids().data(), sizeof(segment::doc_id_t) * it.second->GetCount() == -1)) {
+        if (::write(uid_fd, it.second->GetUids().data(), sizeof(segment::doc_id_t) * it.second->GetCount()) == -1) {
             std::string err_msg = "Failed to write to file" + uid_file_path;
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);

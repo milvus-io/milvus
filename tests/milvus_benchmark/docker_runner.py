@@ -53,7 +53,6 @@ class DockerRunner(Runner):
                         # milvus.create_index("ivf_sq8", 16384)
                         res = self.do_insert(milvus, table_name, data_type, dimension, table_size, param["ni_per"])
                         logger.info(res)
-
                         # wait for file merge
                         time.sleep(table_size * dimension / 5000000)
                         # Clear up
@@ -71,7 +70,7 @@ class DockerRunner(Runner):
                         container = utils.run_server(self.image, test_type="remote", volume_name=volume_name, db_slave=None)
                         time.sleep(2)
                         milvus = MilvusClient(table_name)
-                        logger.debug(milvus._milvus.show_tables())
+                        logger.debug(milvus.show_tables())
                         # Check has table or not
                         if not milvus.exists_table():
                             logger.warning("Table %s not existed, continue exec next params ..." % table_name)
@@ -103,6 +102,92 @@ class DockerRunner(Runner):
                                     headers.extend([str(top_k) for top_k in top_ks])
                                     utils.print_table(headers, nqs, res)
                         utils.remove_container(container)
+
+        elif run_type == "insert_performance":
+            for op_type, op_value in definition.items():
+                # run docker mode
+                run_count = op_value["run_count"]
+                run_params = op_value["params"]
+                container = None
+                if not run_params:
+                    logger.debug("No run params")
+                    continue
+                for index, param in enumerate(run_params):
+                    logger.info("Definition param: %s" % str(param))
+                    table_name = param["table_name"]
+                    volume_name = param["db_path_prefix"]
+                    print(table_name)
+                    (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
+                    for k, v in param.items():
+                        if k.startswith("server."):
+                            # Update server config
+                            utils.modify_config(k, v, type="server", db_slave=None)
+                    container = utils.run_server(self.image, test_type="remote", volume_name=volume_name, db_slave=None)
+                    time.sleep(2)
+                    milvus = MilvusClient(table_name)
+                    # Check has table or not
+                    if milvus.exists_table():
+                        milvus.delete()
+                        time.sleep(10)
+                    milvus.create_table(table_name, dimension, index_file_size, metric_type)
+                    # debug
+                    # milvus.create_index("ivf_sq8", 16384)
+                    res = self.do_insert(milvus, table_name, data_type, dimension, table_size, param["ni_per"])
+                    logger.info(res)
+                    # wait for file merge
+                    time.sleep(table_size * dimension / 5000000)
+                    # Clear up
+                    utils.remove_container(container)
+
+        elif run_type == "search_performance":
+            for op_type, op_value in definition.items():
+                # run docker mode
+                run_count = op_value["run_count"]
+                run_params = op_value["params"]
+                container = None
+                for index, param in enumerate(run_params):
+                    logger.info("Definition param: %s" % str(param))
+                    table_name = param["dataset"]
+                    volume_name = param["db_path_prefix"]
+                    (data_type, table_size, index_file_size, dimension, metric_type) = parser.table_parser(table_name)
+                    for k, v in param.items():
+                        if k.startswith("server."):                   
+                            utils.modify_config(k, v, type="server")
+                    container = utils.run_server(self.image, test_type="remote", volume_name=volume_name, db_slave=None)
+                    time.sleep(2)
+                    milvus = MilvusClient(table_name)
+                    logger.debug(milvus.show_tables())
+                    # Check has table or not
+                    if not milvus.exists_table():
+                        logger.warning("Table %s not existed, continue exec next params ..." % table_name)
+                        continue
+                    # parse index info
+                    index_types = param["index.index_types"]
+                    nlists = param["index.nlists"]
+                    # parse top-k, nq, nprobe
+                    top_ks, nqs, nprobes = parser.search_params_parser(param)
+                    for index_type in index_types:
+                        for nlist in nlists:
+                            result = milvus.describe_index()
+                            logger.info(result)
+                            # milvus.drop_index()
+                            # milvus.create_index(index_type, nlist)
+                            result = milvus.describe_index()
+                            logger.info(result)
+                            logger.info(milvus.count())
+                            # preload index
+                            milvus.preload_table()
+                            logger.info("Start warm up query")
+                            res = self.do_query(milvus, table_name, [1], [1], 1, 1)
+                            logger.info("End warm up query")
+                            # Run query test
+                            for nprobe in nprobes:
+                                logger.info("index_type: %s, nlist: %s, metric_type: %s, nprobe: %s" % (index_type, nlist, metric_type, nprobe))
+                                res = self.do_query(milvus, table_name, top_ks, nqs, nprobe, run_count)
+                                headers = ["Nq/Top-k"]
+                                headers.extend([str(top_k) for top_k in top_ks])
+                                utils.print_table(headers, nqs, res)
+                    utils.remove_container(container)
 
         elif run_type == "accuracy":
             """
@@ -149,11 +234,9 @@ class DockerRunner(Runner):
                     nlists = param["index.nlists"]
                     # parse top-k, nq, nprobe
                     top_ks, nqs, nprobes = parser.search_params_parser(param)
-
                     if sift_acc is True:
                         # preload groundtruth data
                         true_ids_all = self.get_groundtruth_ids(table_size)
-
                     acc_dict = {}
                     for index_type in index_types:
                         for nlist in nlists:

@@ -42,6 +42,8 @@ Status
 GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status
 DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+Status
+DeleteSegment(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 
 Status
 GetParentPath(const std::string& path, std::string& parent_path);
