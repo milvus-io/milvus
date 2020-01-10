@@ -131,11 +131,11 @@ Config::ValidateConfig() {
     bool metric_enable_monitor;
     CONFIG_CHECK(GetMetricConfigEnableMonitor(metric_enable_monitor));
 
-    std::string metric_collector;
-    CONFIG_CHECK(GetMetricConfigCollector(metric_collector));
+    std::string metric_address;
+    CONFIG_CHECK(GetMetricConfigAddress(metric_address));
 
-    std::string metric_prometheus_port;
-    CONFIG_CHECK(GetMetricConfigPrometheusPort(metric_prometheus_port));
+    std::string metric_port;
+    CONFIG_CHECK(GetMetricConfigPort(metric_port));
 
     /* cache config */
     int64_t cache_cpu_cache_capacity;
@@ -213,8 +213,8 @@ Config::ResetDefaultConfig() {
 
     /* metric config */
     CONFIG_CHECK(SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT));
-    CONFIG_CHECK(SetMetricConfigCollector(CONFIG_METRIC_COLLECTOR_DEFAULT));
-    CONFIG_CHECK(SetMetricConfigPrometheusPort(CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT));
+    CONFIG_CHECK(SetMetricConfigAddress(CONFIG_METRIC_ADDRESS_DEFAULT));
+    CONFIG_CHECK(SetMetricConfigPort(CONFIG_METRIC_PORT_DEFAULT));
 
     /* cache config */
     CONFIG_CHECK(SetCacheConfigCpuCacheCapacity(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT));
@@ -547,26 +547,24 @@ Config::CheckMetricConfigEnableMonitor(const std::string& value) {
 }
 
 Status
-Config::CheckMetricConfigCollector(const std::string& value) {
-    if (value != "prometheus") {
-        std::string msg =
-            "Invalid metric collector: " + value + ". Possible reason: metric_config.collector is invalid.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+Config::CheckMetricConfigAddress(const std::string& value) {
+    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+        std::string msg = "Invalid metric ip: " + value + ". Possible reason: metric_config.ip is invalid.";
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config ip: " + value);
     }
     return Status::OK();
 }
 
 Status
-Config::CheckMetricConfigPrometheusPort(const std::string& value) {
+Config::CheckMetricConfigPort(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid prometheus port: " + value +
-                          ". Possible reason: metric_config.prometheus_config.port is not a number.";
+        std::string msg = "Invalid metric port: " + value + ". Possible reason: metric_config.port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int32_t port = std::stoi(value);
         if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Invalid prometheus port: " + value +
-                              ". Possible reason: metric_config.prometheus_config.port is not in range (1024, 65535).";
+            std::string msg = "Invalid metric port: " + value +
+                              ". Possible reason: metric_config.port is not in range (1024, 65535).";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -934,13 +932,13 @@ Config::GetDBConfigPreloadTable(std::string& value) {
 /* storage config */
 Status
 Config::GetStorageConfigPrimaryPath(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_STORAGE_PRIMARY_PATH, CONFIG_STORAGE_PRIMARY_PATH_DEFAULT);
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_PRIMARY_PATH, CONFIG_STORAGE_PRIMARY_PATH_DEFAULT);
     return CheckStorageConfigPrimaryPath(value);
 }
 
 Status
 Config::GetStorageConfigSecondaryPath(std::string& value) {
-    value = GetConfigStr(CONFIG_DB, CONFIG_STORAGE_SECONDARY_PATH, CONFIG_STORAGE_SECONDARY_PATH_DEFAULT);
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_SECONDARY_PATH, CONFIG_STORAGE_SECONDARY_PATH_DEFAULT);
     return CheckStorageConfigSecondaryPath(value);
 }
 
@@ -994,15 +992,15 @@ Config::GetMetricConfigEnableMonitor(bool& value) {
 }
 
 Status
-Config::GetMetricConfigCollector(std::string& value) {
-    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_COLLECTOR, CONFIG_METRIC_COLLECTOR_DEFAULT);
+Config::GetMetricConfigAddress(std::string& value) {
+    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_ADDRESS, CONFIG_METRIC_ADDRESS_DEFAULT);
     return Status::OK();
 }
 
 Status
-Config::GetMetricConfigPrometheusPort(std::string& value) {
-    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_PORT, CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT);
-    return CheckMetricConfigPrometheusPort(value);
+Config::GetMetricConfigPort(std::string& value) {
+    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_PORT, CONFIG_METRIC_PORT_DEFAULT);
+    return CheckMetricConfigPort(value);
 }
 
 /* cache config */
@@ -1214,19 +1212,19 @@ Config::SetDBConfigInsertBufferSize(const std::string& value) {
 Status
 Config::SetStorageConfigPrimaryPath(const std::string& value) {
     CONFIG_CHECK(CheckStorageConfigPrimaryPath(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_STORAGE_PRIMARY_PATH, value);
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_PRIMARY_PATH, value);
 }
 
 Status
 Config::SetStorageConfigSecondaryPath(const std::string& value) {
     CONFIG_CHECK(CheckStorageConfigSecondaryPath(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_STORAGE_SECONDARY_PATH, value);
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_SECONDARY_PATH, value);
 }
 
 Status
 Config::SetStorageConfigMinioEnable(const std::string& value) {
     CONFIG_CHECK(CheckStorageConfigMinioEnable(value));
-    return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, value);
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ENABLE, value);
 }
 
 Status
@@ -1267,15 +1265,15 @@ Config::SetMetricConfigEnableMonitor(const std::string& value) {
 }
 
 Status
-Config::SetMetricConfigCollector(const std::string& value) {
-    CONFIG_CHECK(CheckMetricConfigCollector(value));
-    return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_COLLECTOR, value);
+Config::SetMetricConfigAddress(const std::string& value) {
+    CONFIG_CHECK(CheckMetricConfigAddress(value));
+    return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ADDRESS, value);
 }
 
 Status
-Config::SetMetricConfigPrometheusPort(const std::string& value) {
-    CONFIG_CHECK(CheckMetricConfigPrometheusPort(value));
-    return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_PROMETHEUS_PORT, value);
+Config::SetMetricConfigPort(const std::string& value) {
+    CONFIG_CHECK(CheckMetricConfigPort(value));
+    return SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_PORT, value);
 }
 
 /* cache config */
