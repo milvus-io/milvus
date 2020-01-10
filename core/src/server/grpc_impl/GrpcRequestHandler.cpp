@@ -195,9 +195,6 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
     Status status = request_handler_.CreateIndex(context_map_[context], request->table_name(),
                                                  request->index().index_type(), request->index().nlist());
 
-    SERVER_LOG_DEBUG << "<CreateIndex>"
-                     << " Done...";
-
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
 }

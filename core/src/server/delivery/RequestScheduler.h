@@ -39,7 +39,6 @@ class RequestScheduler {
     static RequestScheduler&
     GetInstance() {
         static RequestScheduler scheduler;
-
         return scheduler;
     }
 

@@ -137,7 +137,6 @@ Please mark all change in change log and use the issue from GitHub
 - \#258 - Bytes type in proto cause big-endian/little-endian problem
 
 ## Feature
-- \#788 - Add web server into server module
 
 ## Improvement
 - \#204 - improve grpc performance in search
