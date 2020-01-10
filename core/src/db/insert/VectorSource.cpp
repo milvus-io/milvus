@@ -78,6 +78,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
 
     if (status.ok()) {
         current_num_vectors_added += num_vectors_added;
+        // TODO(zhiru): remove
         vector_ids_.insert(vector_ids_.end(), std::make_move_iterator(vector_ids_to_add.begin()),
                            std::make_move_iterator(vector_ids_to_add.end()));
     } else {

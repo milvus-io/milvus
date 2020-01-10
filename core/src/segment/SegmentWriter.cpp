@@ -31,18 +31,18 @@ namespace segment {
 
 SegmentWriter::SegmentWriter(const std::string& directory) {
     directory_ptr_ = std::make_shared<store::Directory>(directory);
+    segment_ptr_ = std::make_shared<Segment>();
 }
 
 Status
 SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8_t>& data,
                           const std::vector<doc_id_t>& uids) {
-    auto vectors_ptr = segment_ptr_->vectors_ptr_;
-    auto found = vectors_ptr->vectors_map.find(field_name);
-    if (found == vectors_ptr->vectors_map.end()) {
-        vectors_ptr->vectors_map[field_name] = std::make_shared<Vector>();
+    auto found = segment_ptr_->vectors_ptr_->vectors_map.find(field_name);
+    if (found == segment_ptr_->vectors_ptr_->vectors_map.end()) {
+        segment_ptr_->vectors_ptr_->vectors_map[field_name] = std::make_shared<Vector>();
     }
-    vectors_ptr->vectors_map[field_name]->AddData(data);
-    vectors_ptr->vectors_map[field_name]->AddUids(uids);
+    segment_ptr_->vectors_ptr_->vectors_map[field_name]->AddData(data);
+    segment_ptr_->vectors_ptr_->vectors_map[field_name]->AddUids(uids);
 
     return Status::OK();
 }
@@ -77,7 +77,6 @@ SegmentWriter::WriteBloomFilter() {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
-        segment_ptr_->id_bloom_filter_ptr_ = nullptr;
         default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
         // TODO(zhiru): ?
         for (auto& kv : segment_ptr_->vectors_ptr_->vectors_map) {
@@ -158,8 +157,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, int vector_type_size) {
         for (size_t i = 0; i < uids.size(); ++i) {
             auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
             if (found != offsets_to_delete.end()) {
-                auto offset = std::distance(uids.begin(), found);
-                kv.second->Erase(offset, vector_type_size);
+                kv.second->Erase(i, vector_type_size);
             }
         }
         AddVectors(kv.first, kv.second->GetData(), uids);

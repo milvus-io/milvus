@@ -24,6 +24,7 @@
 #include <thread>
 
 #include "db/Constants.h"
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "db/insert/MemTable.h"
 #include "db/insert/MemTableFile.h"
@@ -83,18 +84,21 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     milvus::engine::VectorSource source(vectors);
 
     size_t num_vectors_added;
-    milvus::engine::ExecutionEnginePtr execution_engine_ = milvus::engine::EngineFactory::Build(
-        table_file_schema.dimension_, table_file_schema.location_,
-        (milvus::engine::EngineType)table_file_schema.engine_type_,
-        (milvus::engine::MetricType)table_file_schema.metric_type_, table_schema.nlist_);
+    //    milvus::engine::ExecutionEnginePtr execution_engine_ = milvus::engine::EngineFactory::Build(
+    //        table_file_schema.dimension_, table_file_schema.location_,
+    //        (milvus::engine::EngineType)table_file_schema.engine_type_,
+    //        (milvus::engine::MetricType)table_file_schema.metric_type_, table_schema.nlist_);
+    std::string directory;
+    milvus::engine::utils::GetParentPath(table_file_schema.location_, directory);
+    auto segment_writer_ptr = std::make_shared<milvus::segment::SegmentWriter>(directory);
 
-    status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added);
+    status = source.Add(segment_writer_ptr, table_file_schema, 50, num_vectors_added);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(num_vectors_added, 50);
     ASSERT_EQ(source.GetVectorIds().size(), 50);
 
     vectors.id_array_.clear();
-    status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added);
+    status = source.Add(segment_writer_ptr, table_file_schema, 60, num_vectors_added);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(num_vectors_added, 50);
     ASSERT_EQ(source.GetVectorIds().size(), 100);
@@ -128,8 +132,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     milvus::engine::VectorsData vectors_128M;
     BuildVectors(n_max, vectors_128M);
 
-    milvus::engine::VectorSourcePtr source_128M =
-        std::make_shared<milvus::engine::VectorSource>(vectors_128M);
+    milvus::engine::VectorSourcePtr source_128M = std::make_shared<milvus::engine::VectorSource>(vectors_128M);
     vector_ids.clear();
     status = mem_table_file.Add(source_128M);
 
@@ -149,8 +152,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     milvus::engine::VectorsData vectors_100;
     BuildVectors(n_100, vectors_100);
 
-    milvus::engine::VectorSourcePtr source_100 =
-        std::make_shared<milvus::engine::VectorSource>(vectors_100);
+    milvus::engine::VectorSourcePtr source_100 = std::make_shared<milvus::engine::VectorSource>(vectors_100);
 
     milvus::engine::MemTable mem_table(GetTableName(), impl_, options);
 
@@ -169,8 +171,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     BuildVectors(n_max, vectors_128M);
 
     vector_ids.clear();
-    milvus::engine::VectorSourcePtr source_128M =
-        std::make_shared<milvus::engine::VectorSource>(vectors_128M);
+    milvus::engine::VectorSourcePtr source_128M = std::make_shared<milvus::engine::VectorSource>(vectors_128M);
     status = mem_table.Add(source_128M);
     ASSERT_TRUE(status.ok());
 
@@ -196,7 +197,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     int expectedTableFileCount = 2 + std::ceil((n_1G - n_100) * singleVectorMem / milvus::engine::MAX_TABLE_FILE_MEM);
     ASSERT_EQ(mem_table.GetTableFileCount(), expectedTableFileCount);
 
-    status = mem_table.Serialize();
+    status = mem_table.Serialize(0);
     ASSERT_TRUE(status.ok());
 }
 
@@ -221,7 +222,9 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     stat = db_->InsertVectors(GetTableName(), "", xb);
     ASSERT_TRUE(stat.ok());
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -246,8 +249,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids,
-                          result_distances);
+        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], pair.first);
         ASSERT_LT(result_distances[0], 1e-4);
     }
@@ -316,8 +318,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
             START_TIMER;
 
             std::vector<std::string> tags;
-            stat =
-                db_->Query(dummy_context_, GetTableName(), tags, k, 10, qxb, result_ids, result_distances);
+            stat = db_->Query(dummy_context_, GetTableName(), tags, k, 10, qxb, result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 

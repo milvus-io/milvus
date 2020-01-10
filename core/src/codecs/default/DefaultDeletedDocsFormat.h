@@ -42,7 +42,7 @@ class DefaultDeletedDocsFormat : public DeletedDocsFormat {
     operator=(DefaultDeletedDocsFormat&&) = delete;
 
  private:
-    const std::string deleted_docs_extension_ = "del";
+    const std::string deleted_docs_filename_ = "deleted_docs";
 };
 
 }  // namespace codec

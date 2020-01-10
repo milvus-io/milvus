@@ -1343,6 +1343,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
                 // erase from cache, must do this before file deleted,
                 // because GetTableFilePath won't able to generate file path after the file is deleted
+                // TODO(zhiru): clean up
                 utils::GetTableFilePath(options_, table_file);
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
@@ -1351,7 +1352,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
                     // delete file from disk storage
-                    utils::DeleteTableFilePath(options_, table_file);
+                    utils::DeleteSegment(options_, table_file);
 
                     ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_
                                      << " location:" << table_file.location_;

@@ -1937,7 +1937,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
                     // delete file from disk storage
-                    utils::DeleteTableFilePath(options_, table_file);
+                    utils::DeleteSegment(options_, table_file);
                     ENGINE_LOG_DEBUG << "Remove file id:" << table_file.id_ << " location:" << table_file.location_;
 
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
