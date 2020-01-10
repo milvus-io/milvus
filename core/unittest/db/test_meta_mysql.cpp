@@ -29,6 +29,7 @@
 #include <thread>
 #include <fiu-local.h>
 #include <fiu-control.h>
+#include <src/db/OngoingFileChecker.h>
 
 const char* FAILED_CONNECT_SQL_SERVER = "Failed to connect to meta server(mysql)";
 const char* TABLE_ALREADY_EXISTS = "Table already exists and it is in delete state, please wait a second";
@@ -131,10 +132,15 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     auto table_id = "meta_test_table";
     fiu_init(0);
 
+    uint64_t size = 0;
+    auto status = impl_->Size(size);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(size,0);
+
     milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     table.dimension_ = 256;
-    auto status = impl_->CreateTable(table);
+    status = impl_->CreateTable(table);
 
     //CreateTableFile
     milvus::engine::meta::TableFileSchema table_file;
@@ -288,6 +294,20 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     ids.clear();
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
+    ASSERT_TRUE(status.ok());
+
+    sleep(1);
+    std::vector<int> files_to_delete;
+    files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
+    status = impl_->FilesByType(table_id,files_to_delete,files_schema);
+    ASSERT_TRUE(status.ok());
+
+    table_file.table_id_ = table_id;
+    table_file.file_type_= milvus::engine::meta::TableFileSchema::TO_DELETE;
+    milvus::engine::OngoingFileChecker filter;
+    table_file.file_id_ = files_schema.front().file_id_;
+    filter.MarkOngoingFile(table_file);
+    status = impl_->CleanUpFilesWithTTL(1UL, &filter);
     ASSERT_TRUE(status.ok());
 
     status = impl_->DropTable(table_file.table_id_);
@@ -608,6 +628,11 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
 
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
+
+    FIU_ENABLE_FIU("MySQLMetaImpl_DescribeTable_ThrowException");
+    status = impl_->FilesToIndex(files);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("MySQLMetaImpl_DescribeTable_ThrowException");
 
     FIU_ENABLE_FIU("MySQLMetaImpl_FilesToIndex_NUllConnection");
     status = impl_->FilesToIndex(files);

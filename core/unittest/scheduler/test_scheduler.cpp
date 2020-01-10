@@ -16,7 +16,10 @@
 // under the License.
 
 #include <gtest/gtest.h>
+#include <fiu-local.h>
+#include <fiu-control.h>
 
+#include "src/scheduler/SchedInst.h"
 #include "cache/DataObj.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/ResourceFactory.h"
@@ -212,7 +215,7 @@ class SchedulerTest2 : public testing::Test {
 //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 //}
 
-TEST(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
+TEST(SchedulerTestResource, SPECIFIED_RESOURCE_TEST) {
     auto mock_index_ptr = std::make_shared<MockVecIndex>();
     milvus::engine::Config config;
     auto quantizer_ptr = mock_index_ptr->LoadQuantizer(config);
@@ -252,6 +255,17 @@ TEST(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     knowhere::BinarySet empty_set;
     auto res_ptr = LoadVecIndex(IndexType::INVALID, empty_set, 0);
     ASSERT_EQ(res_ptr, nullptr);
+}
+
+TEST_F(SchedulerTest,schedule){
+    scheduler_->Dump();
+}
+
+TEST(SchedulerService,service){
+    fiu_enable("load_simple_config_mock",1, nullptr,0);
+    StartSchedulerService();
+    StopSchedulerService();
+    fiu_disable("load_simple_config_mock");
 }
 
 }  // namespace scheduler

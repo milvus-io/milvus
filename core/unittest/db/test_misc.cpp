@@ -102,6 +102,11 @@ TEST(DBMiscTest, UTILS_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
+    FIU_ENABLE_FIU("CreateTablePath.creat_slave_path");
+    status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("CreateTablePath.creat_slave_path");
+
     status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
@@ -135,6 +140,11 @@ TEST(DBMiscTest, UTILS_TEST) {
     status = milvus::engine::utils::CreateTableFilePath(options,file);
     ASSERT_TRUE(status.ok());
 
+    FIU_ENABLE_FIU("CreateTableFilePath.fail_create");
+    status = milvus::engine::utils::CreateTableFilePath(options,file);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("CreateTableFilePath.fail_create");
+
     status = milvus::engine::utils::GetTableFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());
 
@@ -142,6 +152,11 @@ TEST(DBMiscTest, UTILS_TEST) {
     status = milvus::engine::utils::GetTableFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
+
+    FIU_ENABLE_FIU("GetTableFilePath.enable_minio");
+    status = milvus::engine::utils::GetTableFilePath(options, file);
+    ASSERT_FALSE(file.location_.empty());
+    fiu_disable("GetTableFilePath.enable_minio");
 
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());

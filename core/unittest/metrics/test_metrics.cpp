@@ -21,22 +21,42 @@
 #include <string>
 #include <thread>
 #include <gtest/gtest.h>
+#include <fiu-local.h>
+#include <fiu-control.h>
 
+#define private public
 #include "cache/CpuCacheMgr.h"
 #include "server/Config.h"
-#include "metrics/Metrics.h"
 #include "metrics/utils.h"
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
+#include "metrics/Metrics.h"
 
 TEST_F(MetricTest, METRIC_TEST) {
+    fiu_init(0);
+
+#ifdef MILVUS_GPU_VERSION
+    FIU_ENABLE_FIU("SystemInfo.Init.nvmInit_fail");
+    milvus::server::SystemInfo::GetInstance().initialized_ = false;
+    milvus::server::SystemInfo::GetInstance().Init();
+    fiu_disable("SystemInfo.Init.nvmInit_fail");
+    FIU_ENABLE_FIU("SystemInfo.Init.nvm_getDevice_fail");
+    milvus::server::SystemInfo::GetInstance().initialized_ = false;
+    milvus::server::SystemInfo::GetInstance().Init();
+    fiu_disable("SystemInfo.Init.nvm_getDevice_fail");
+    milvus::server::SystemInfo::GetInstance().initialized_ = false;
+#endif
+
     milvus::server::SystemInfo::GetInstance().Init();
     milvus::server::Metrics::GetInstance().Init();
+
+    std::string system_info ;
+    milvus::server::SystemInfo::GetInstance().GetSysInfoJsonStr(system_info);
 
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
     std::cout << milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
 
-    static const char *group_name = "test_group";
+    static const char* group_name = "test_group";
     static const int group_dim = 256;
 
     milvus::engine::meta::TableSchema group_info;
@@ -53,14 +73,14 @@ TEST_F(MetricTest, METRIC_TEST) {
 
     int d = 256;
     int nb = 50;
-    float *xb = new float[d * nb];
+    float* xb = new float[d * nb];
     for (int i = 0; i < nb; i++) {
         for (int j = 0; j < d; j++) xb[d * i + j] = drand48();
         xb[d * i] += i / 2000.;
     }
 
     int qb = 5;
-    float *qxb = new float[d * qb];
+    float* qxb = new float[d * qb];
     for (int i = 0; i < qb; i++) {
         for (int j = 0; j < d; j++) qxb[d * i + j] = drand48();
         qxb[d * i] += i / 2000.;
@@ -85,7 +105,7 @@ TEST_F(MetricTest, METRIC_TEST) {
 
             START_TIMER;
 //            stat = db_->Query(group_name, tags, k, qb, qxb, result_ids, result_distances);
-            ss << "Search " << j << " With Size " << (float) (count * group_dim * sizeof(float)) / (1024 * 1024)
+            ss << "Search " << j << " With Size " << (float)(count * group_dim * sizeof(float)) / (1024 * 1024)
                << " M";
 
             for (auto k = 0; k < qb; ++k) {
