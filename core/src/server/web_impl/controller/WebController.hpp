@@ -70,10 +70,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT_INFO(docs) {
-        info->summary = "API documents";
-    }
-
     ENDPOINT_INFO(State) {
         info->summary = "Server state";
         info->description = "Check web server whether is ready.";
