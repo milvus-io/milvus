@@ -19,7 +19,7 @@
 
 #include <memory>
 
-#include "Vectors.h"
+#include "Vector.h"
 #include "codecs/default/DefaultCodec.h"
 #include "store/Directory.h"
 #include "utils/Exception.h"
@@ -81,20 +81,6 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         default_codec.GetIdBloomFilterFormat()->read(directory_ptr_, id_bloom_filter_ptr);
     } catch (Exception& e) {
         std::string err_msg = "Failed to load bloom filter. " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
-    }
-    return Status::OK();
-}
-
-Status
-SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
-    codec::DefaultCodec default_codec;
-    try {
-        directory_ptr_->Create();
-        default_codec.GetDeletedDocsFormat()->read(directory_ptr_, deleted_docs_ptr);
-    } catch (Exception& e) {
-        std::string err_msg = "Failed to load deleted docs. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
         return Status(e.code(), err_msg);
     }

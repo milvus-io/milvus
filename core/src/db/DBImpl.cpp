@@ -873,7 +873,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
     for (auto& file : files) {
         server::CollectMergeFilesMetrics metrics;
-        segment_writer_ptr->Merge(file.location_, file.file_id_, vector_type_size);
+        segment_writer_ptr->Merge(file.location_, vector_type_size);
         auto file_schema = file;
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);

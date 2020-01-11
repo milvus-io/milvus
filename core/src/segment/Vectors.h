@@ -17,41 +17,31 @@
 
 #pragma once
 
-#include <string>
+#include <memory>
+#include <unordered_map>
 
-#include "segment/Types.h"
-#include "store/Directory.h"
-#include "utils/Status.h"
+#include "Vector.h"
 
 namespace milvus {
 namespace segment {
 
-class SegmentReader {
- public:
-    explicit SegmentReader(const std::string& directory);
-
-    // TODO(zhiru)
-    Status
-    LoadCache(bool& in_cache);
-
-    Status
-    Load();
-
-    Status
-    LoadUids(std::vector<doc_id_t>& uids);
-
-    Status
-    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
-
-    Status
-    GetSegment(SegmentPtr& segment_ptr);
-
- private:
-    store::DirectoryPtr directory_ptr_;
-    SegmentPtr segment_ptr_;
+struct Vectors {
+    std::unordered_map<std::string, VectorPtr> vectors_map;
+    void
+    Clear() {
+        vectors_map.clear();
+    }
+    size_t
+    Size() {
+        size_t size = 0;
+        for (auto& kv : vectors_map) {
+            size += kv.second->Size();
+        }
+        return size;
+    }
 };
 
-using SegmentReaderPtr = std::shared_ptr<SegmentReader>;
+using VectorsPtr = std::shared_ptr<Vectors>;
 
 }  // namespace segment
 }  // namespace milvus

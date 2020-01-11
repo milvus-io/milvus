@@ -20,58 +20,57 @@
 #include <memory>
 #include <vector>
 
-#include "segment/Types.h"
-#include "store/Directory.h"
-#include "utils/Status.h"
-
 namespace milvus {
 namespace segment {
 
-class SegmentWriter {
+using doc_id_t = int64_t;
+
+class Vector {
  public:
-    explicit SegmentWriter(const std::string& directory);
+    Vector(std::vector<uint8_t> data, std::vector<doc_id_t> uids);
 
-    Status
-    AddVectors(const std::string& field_name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
+    Vector() = default;
 
-    Status
-    WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
+    void
+    AddData(const std::vector<uint8_t>& data);
 
-    Status
-    WriteDeletedDocs(const DeletedDocsPtr& deleted_docs);
+    void
+    AddUids(const std::vector<doc_id_t>& uids);
 
-    Status
-    Serialize();
+    const std::vector<uint8_t>&
+    GetData() const;
 
-    Status
-    Cache();
+    const std::vector<doc_id_t>&
+    GetUids() const;
 
-    Status
-    GetSegment(SegmentPtr& segment_ptr);
+    size_t
+    GetCount();
 
-    // TODO(zhiru): rewrite and remove vector_type_size
-    Status
-    Merge(const std::string& segment_dir_to_merge, int vector_type_size);
+    size_t
+    GetDimension();
+
+    void
+    Erase(size_t offset, int vector_type_size);
 
     size_t
     Size();
 
-    size_t
-    VectorCount();
+    // No copy and move
+    Vector(const Vector&) = delete;
+    Vector(Vector&&) = delete;
+
+    Vector&
+    operator=(const Vector&) = delete;
+    Vector&
+    operator=(Vector&&) = delete;
 
  private:
-    Status
-    WriteVectors();
-
-    Status
-    WriteBloomFilter();
-
- private:
-    store::DirectoryPtr directory_ptr_;
-    SegmentPtr segment_ptr_;
+    std::vector<uint8_t> data_;
+    // TODO: since all vector fields should correspond to the same set of uids, save them in Vectors instead?
+    std::vector<doc_id_t> uids_;
 };
 
-using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;
+using VectorPtr = std::shared_ptr<Vector>;
 
 }  // namespace segment
 }  // namespace milvus
