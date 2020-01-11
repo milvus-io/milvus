@@ -66,6 +66,9 @@ class SegmentWriter {
     Status
     WriteBloomFilter();
 
+    Status
+    WriteDeletedDocs();
+
  private:
     store::DirectoryPtr directory_ptr_;
     SegmentPtr segment_ptr_;

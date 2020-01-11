@@ -52,6 +52,11 @@ SegmentWriter::Serialize() {
         return status;
     }
     status = WriteBloomFilter();
+    if (!status.ok()) {
+        return status;
+    }
+    // Write an empty deleted doc
+    status = WriteDeletedDocs();
     return status;
 }
 
@@ -86,7 +91,22 @@ SegmentWriter::WriteBloomFilter() {
         return Status(e.code(), err_msg);
     }
     return Status::OK();
-}  // namespace segment
+}
+
+Status
+SegmentWriter::WriteDeletedDocs() {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
+        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs_ptr);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
 
 Status
 SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {

@@ -353,7 +353,7 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         server::MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
-        if(file_schema.segment_id_.empty()) {
+        if (file_schema.segment_id_.empty()) {
             file_schema.segment_id_ = file_schema.file_id_;
         }
         file_schema.dimension_ = table_schema.dimension_;
@@ -881,9 +881,9 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
 
     try {
         auto select_columns =
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
-                    &TableFileSchema::date_, &TableFileSchema::engine_type_);
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
+                    &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_);
 
         auto match_tableid = c(&TableFileSchema::table_id_) == table_id;
 
@@ -953,12 +953,13 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
         for (auto& file : selected) {
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.file_type_ = std::get<3>(file);
-            table_file.file_size_ = std::get<4>(file);
-            table_file.row_count_ = std::get<5>(file);
-            table_file.date_ = std::get<6>(file);
-            table_file.engine_type_ = std::get<7>(file);
+            table_file.segment_id_ = std::get<2>(file);
+            table_file.file_id_ = std::get<3>(file);
+            table_file.file_type_ = std::get<4>(file);
+            table_file.file_size_ = std::get<5>(file);
+            table_file.row_count_ = std::get<6>(file);
+            table_file.date_ = std::get<7>(file);
+            table_file.engine_type_ = std::get<8>(file);
             table_file.dimension_ = table_schema.dimension_;
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.nlist_ = table_schema.nlist_;

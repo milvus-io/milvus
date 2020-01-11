@@ -30,6 +30,7 @@ namespace segment {
 
 SegmentReader::SegmentReader(const std::string& directory) {
     directory_ptr_ = std::make_shared<store::Directory>(directory);
+    segment_ptr_ = std::make_shared<Segment>();
 }
 
 Status
@@ -47,9 +48,7 @@ SegmentReader::Load() {
         default_codec.GetVectorsFormat()->read(directory_ptr_, segment_ptr_->vectors_ptr_);
         default_codec.GetDeletedDocsFormat()->read(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (Exception& e) {
-        std::string err_msg = "Failed to load segment. " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(e.code(), e.what());
     }
     return Status::OK();
 }

@@ -355,6 +355,9 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
                                          vectors.binary_data_.data(), lsn, flushed_tables);
     }
+    if (!flushed_tables.empty()) {
+        Merge(flushed_tables);
+    }
 
     return status;
 }

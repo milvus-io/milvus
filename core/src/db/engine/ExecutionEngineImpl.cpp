@@ -359,7 +359,7 @@ ExecutionEngineImpl::Serialize() {
 /*
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         try {
@@ -390,7 +390,7 @@ Status
 ExecutionEngineImpl::Load(bool to_cache) {
     // TODO(zhiru): refactor
 
-    std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         std::string segment_dir;
@@ -424,7 +424,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             }
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 std::vector<float> float_vectors;
-                float_vectors.resize(vectors->GetCount());
+                float_vectors.resize(vectors_data.size() / sizeof(float));
                 memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
                 status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                   float_vectors.data(), Config());
