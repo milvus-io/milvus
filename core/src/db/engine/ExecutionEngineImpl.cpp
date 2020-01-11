@@ -390,34 +390,33 @@ Status
 ExecutionEngineImpl::Load(bool to_cache) {
     // TODO(zhiru): refactor
 
-    std::string segment_dir;
-    utils::GetParentPath(location_, segment_dir);
-    auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+    std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    bool already_in_cache = (index_ != nullptr);
+    if (!already_in_cache) {
+        std::string segment_dir;
+        utils::GetParentPath(location_, segment_dir);
+        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
 
-    if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
-        index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
-                                                        : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
-        bool in_cache;
-        auto status = segment_reader_ptr->LoadCache(in_cache);
-        if (!in_cache) {
-            status = segment_reader_ptr->Load();
+        if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
+            index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
+                                                            : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+
+            auto status = segment_reader_ptr->Load();
             if (!status.ok()) {
                 std::string msg = "Failed to load segment from " + location_;
                 ENGINE_LOG_ERROR << msg;
                 return Status(DB_ERROR, msg);
             }
-        }
-        segment::SegmentPtr segment_ptr;
-        segment_reader_ptr->GetSegment(segment_ptr);
-        auto& vectors_map = segment_ptr->vectors_ptr_->vectors_map;
-        auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
 
-        // TODO(zhiru): Load all vector fields to a single VecIndex
-        for (auto& kv : vectors_map) {
-            auto vectors = kv.second->GetData();
+            segment::SegmentPtr segment_ptr;
+            segment_reader_ptr->GetSegment(segment_ptr);
+            auto& vectors = segment_ptr->vectors_ptr_;
+            auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
+
+            auto vectors_data = vectors->GetData();
 
             faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-                std::make_shared<faiss::ConcurrentBitset>(kv.second->GetCount());
+                std::make_shared<faiss::ConcurrentBitset>(vectors->GetCount());
             for (auto& offset : deleted_docs) {
                 if (!concurrent_bitset_ptr->test(offset)) {
                     concurrent_bitset_ptr->set(offset);
@@ -425,31 +424,43 @@ ExecutionEngineImpl::Load(bool to_cache) {
             }
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 std::vector<float> float_vectors;
-                float_vectors.resize(kv.second->GetCount());
-                memcpy(float_vectors.data(), vectors.data(), vectors.size());
-                status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(kv.second->GetCount(),
+                float_vectors.resize(vectors->GetCount());
+                memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
+                status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
-                status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(kv.second->GetCount(),
-                                                                                     vectors.data(), Config());
+                status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
+                                                                                     vectors_data.data(), Config());
                 status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
             }
             if (!status.ok()) {
                 return status;
             }
-        }
-        if (!in_cache && to_cache) {
-            Cache();
-        }
-    } else {
-        std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
-        bool already_in_cache = (index_ != nullptr);
-        if (!already_in_cache) {
+
+        } else {
             try {
                 double physical_size = PhysicalSize();
                 server::CollectExecutionEngineMetrics metrics(physical_size);
                 index_ = read_index(location_);
+
+                segment::DeletedDocsPtr deleted_docs_ptr;
+                auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+                if (!status.ok()) {
+                    std::string msg = "Failed to load deleted docs from " + location_;
+                    ENGINE_LOG_ERROR << msg;
+                    return Status(DB_ERROR, msg);
+                }
+                auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+                faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                    std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+                for (auto& offset : deleted_docs) {
+                    if (!concurrent_bitset_ptr->test(offset)) {
+                        concurrent_bitset_ptr->set(offset);
+                    }
+                }
+
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;
                     ENGINE_LOG_ERROR << msg;
@@ -462,13 +473,13 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 return Status(DB_ERROR, e.what());
             }
         }
+    }
 
-        if (!already_in_cache && to_cache) {
-            Cache();
-        }
+    if (!already_in_cache && to_cache) {
+        Cache();
     }
     return Status::OK();
-}
+}  // namespace engine
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
