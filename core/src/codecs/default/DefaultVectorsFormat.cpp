@@ -76,8 +76,8 @@ void
 DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
     std::string dir_path = directory_ptr->GetDirPath();
 
-    const std::string rv_file_path = dir_path + "/" + vectors->GetName() + "." + raw_vector_extension_;
-    const std::string uid_file_path = dir_path + "/" + vectors->GetName() + "." + user_id_extension_;
+    const std::string rv_file_path = dir_path + "/" + vectors->GetName() + raw_vector_extension_;
+    const std::string uid_file_path = dir_path + "/" + vectors->GetName() + user_id_extension_;
 
     /*
     FILE* rv_file = fopen(rv_file_path.c_str(), "wb");
@@ -146,6 +146,7 @@ DefaultVectorsFormat::readUids(const store::DirectoryPtr& directory_ptr, std::ve
             }
             auto file_size = boost::filesystem::file_size(path);
             auto count = file_size / sizeof(segment::doc_id_t);
+            uids.resize(count);
             ::read(uid_fd, uids.data(), file_size);
         }
     }

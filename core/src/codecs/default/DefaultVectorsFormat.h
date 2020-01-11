@@ -46,8 +46,8 @@ class DefaultVectorsFormat : public VectorsFormat {
     operator=(DefaultVectorsFormat&&) = delete;
 
  private:
-    const std::string raw_vector_extension_ = "rv";
-    const std::string user_id_extension_ = "uid";
+    const std::string raw_vector_extension_ = ".rv";
+    const std::string user_id_extension_ = ".uid";
 };
 
 }  // namespace codec

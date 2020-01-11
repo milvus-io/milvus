@@ -147,6 +147,8 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // TODO(zhiru):
     //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     //    table_file_schema_.row_count_ = execution_engine_->Count();
+    table_file_schema_.file_size_ = segment_writer_ptr_->Size();
+    table_file_schema_.row_count_ = segment_writer_ptr_->VectorCount();
 
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
