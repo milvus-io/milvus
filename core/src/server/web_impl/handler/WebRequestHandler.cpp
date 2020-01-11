@@ -134,7 +134,7 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
     std::vector<uint64_t> device_mems = system_info.GPUMemoryTotal();
 
     if (count != device_mems.size()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(UNEXPECTED_ERROR, "Can't obtain GPU info"));
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Can't obtain GPU info");
     }
 
     for (size_t i = 0; i < count; i++) {
