@@ -28,7 +28,8 @@ namespace faiss {
             const uint8_t * b,
             size_t nb,
             size_t ncodes,
-            int ordered);
+            int ordered,
+            ConcurrentBitsetPtr bitset = nullptr);
 
 } //namespace faiss
 
