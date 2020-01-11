@@ -62,7 +62,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         auto size = vectors_.float_data_.size() * sizeof(float);
         vectors.resize(size);
         memcpy(vectors.data(), vectors_.float_data_.data(), size);
-        status = segment_writer_ptr->AddVectors(vectors_.field_name_, vectors, vector_ids_to_add);
+        status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
 
     } else if (!vectors_.binary_data_.empty()) {
         /*
@@ -71,7 +71,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
             vectors_.binary_data_.data() + current_num_vectors_added * SingleVectorSize(table_file_schema.dimension_),
             vector_ids_to_add.data());
         */
-        status = segment_writer_ptr->AddVectors(vectors_.field_name_, vectors_.binary_data_, vector_ids_to_add);
+        status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors_.binary_data_, vector_ids_to_add);
     }
 
     // Clear vector data

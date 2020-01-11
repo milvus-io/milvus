@@ -32,7 +32,7 @@ class SegmentWriter {
     explicit SegmentWriter(const std::string& directory);
 
     Status
-    AddVectors(const std::string& field_name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
+    AddVectors(const std::string& name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
 
     Status
     WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
@@ -51,7 +51,7 @@ class SegmentWriter {
 
     // TODO(zhiru): rewrite and remove vector_type_size
     Status
-    Merge(const std::string& segment_dir_to_merge, int vector_type_size);
+    Merge(const std::string& segment_dir_to_merge, const std::string& name, int vector_type_size);
 
     size_t
     Size();
