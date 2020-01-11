@@ -42,7 +42,7 @@ std::mutex index_file_counter_mutex;
 static std::string
 ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
-    std::string partition_path = table_path + "/" + table_file.file_id_;
+    std::string partition_path = table_path + "/" + table_file.segment_id_;
     return partition_path;
 }
 

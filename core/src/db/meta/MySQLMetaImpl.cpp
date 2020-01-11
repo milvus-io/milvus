@@ -160,6 +160,7 @@ static const MetaSchema TABLES_SCHEMA(META_TABLES, {
 static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
                                                                MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
                                                                MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("segment_id", "VARCHAR(255)", "NOT NULL"),
                                                                MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
                                                                MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
                                                                MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
@@ -631,6 +632,9 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         server::MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
+        if(file_schema.segment_id_.empty()) {
+            file_schema.segment_id_ = file_schema.file_id_;
+        }
         file_schema.dimension_ = table_schema.dimension_;
         file_schema.file_size_ = 0;
         file_schema.row_count_ = 0;
