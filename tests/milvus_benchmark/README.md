@@ -31,7 +31,7 @@ The following are the searching performance test suite：
    - run_count: search count
    - search_params: params of search_vectors
 
-## 测试结果：
+## Test result：
 
 The result of searching performance![](assets/milvus-nightly-performance-new-jenkins.png)
 
