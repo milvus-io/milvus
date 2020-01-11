@@ -187,7 +187,7 @@ class DBImpl : public DB {
  private:
     const DBOptions options_;
 
-    std::atomic<bool> shutting_down_;
+    std::atomic<bool> initialized_;
 
     std::thread bg_timer_thread_;
 
