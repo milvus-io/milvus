@@ -79,6 +79,7 @@ StoragePrototype(const std::string& path) {
         make_table(
             META_TABLEFILES, make_column("id", &TableFileSchema::id_, primary_key()),
             make_column("table_id", &TableFileSchema::table_id_),
+            make_column("segment_id", &TableFileSchema::segment_id_, default_value("")),
             make_column("engine_type", &TableFileSchema::engine_type_),
             make_column("file_id", &TableFileSchema::file_id_), make_column("file_type", &TableFileSchema::file_type_),
             make_column("file_size", &TableFileSchema::file_size_, default_value(0)),
@@ -352,6 +353,9 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         server::MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
+        if(file_schema.segment_id_.empty()) {
+            file_schema.segment_id_ = file_schema.file_id_;
+        }
         file_schema.dimension_ = table_schema.dimension_;
         file_schema.file_size_ = 0;
         file_schema.row_count_ = 0;

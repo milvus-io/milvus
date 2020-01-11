@@ -113,6 +113,7 @@ XBuildIndexTask::Execute() {
         // step 2: create table file
         engine::meta::TableFileSchema table_file;
         table_file.table_id_ = file_->table_id_;
+        table_file.segment_id_ = file_->file_id_;
         table_file.date_ = file_->date_;
         table_file.file_type_ = engine::meta::TableFileSchema::NEW_INDEX;
 
