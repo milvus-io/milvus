@@ -18,8 +18,8 @@
 #pragma once
 
 #include <atomic>
-#include <memory>
 #include <deque>
+#include <memory>
 
 namespace faiss {
 
@@ -43,6 +43,7 @@ class ConcurrentBitset {
     clear(id_type_t id);
 
  private:
+    // TODO(zhiru)
     std::deque<std::atomic<unsigned char>> bitset_;
     id_type_t size_;
 };
