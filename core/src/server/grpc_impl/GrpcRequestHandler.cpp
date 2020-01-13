@@ -114,27 +114,29 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
     auto trace_context = std::make_shared<tracing::TraceContext>(span);
     auto context = std::make_shared<Context>(request_id);
     context->SetTraceContext(trace_context);
-    context_map_[server_rpc_info->server_context()] = context;
+    SetContext(server_rpc_info->server_context(), context);
 }
 
 void
 GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
                                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
+    std::lock_guard<std::mutex> lock(context_map_mutex_);
     context_map_[server_rpc_info->server_context()]->GetTraceContext()->GetSpan()->Finish();
     auto search = context_map_.find(server_rpc_info->server_context());
     if (search != context_map_.end()) {
-        std::lock_guard<std::mutex> lock(context_map_mutex_);
         context_map_.erase(search);
     }
 }
 
 const std::shared_ptr<Context>&
 GrpcRequestHandler::GetContext(::grpc::ServerContext* server_context) {
+    std::lock_guard<std::mutex> lock(context_map_mutex_);
     return context_map_[server_context];
 }
 
 void
 GrpcRequestHandler::SetContext(::grpc::ServerContext* server_context, const std::shared_ptr<Context>& context) {
+    std::lock_guard<std::mutex> lock(context_map_mutex_);
     context_map_[server_context] = context;
 }
 

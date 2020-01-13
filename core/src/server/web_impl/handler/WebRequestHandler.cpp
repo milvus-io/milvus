@@ -423,8 +423,6 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
         RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required");
     }
 
-    response_dto->tables = response_dto->tables->createShared();
-
     if (offset < 0 || page_size < 0) {
         ASSIGN_RETURN_STATUS_DTO(
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
@@ -436,30 +434,34 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    response_dto->tables = response_dto->tables->createShared();
+
+    if (offset >= tables.size()) {
+        ASSIGN_RETURN_STATUS_DTO(Status::OK());
+    }
+
     response_dto->count = tables.size();
 
-    if (offset < tables.size()) {
-        int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
-                                                                                    : page_size->getValue();
-        for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
-            std::map<std::string, std::string> table_info;
+    int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
+                                                                                : page_size->getValue();
+    for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
+        std::map<std::string, std::string> table_info;
 
-            status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
-            if (!status.ok()) {
-                break;
-            }
-
-            auto table_fields_dto = TableFieldsDto::createShared();
-            table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
-            table_fields_dto->dimension = std::stol(table_info[std::string(KEY_TABLE_DIMENSION)]);
-            table_fields_dto->index_file_size = std::stol(table_info[std::string(KEY_TABLE_INDEX_FILE_SIZE)]);
-            table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
-            table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
-            table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
-            table_fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
-
-            response_dto->tables->pushBack(table_fields_dto);
+        status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
+        if (!status.ok()) {
+            break;
         }
+
+        auto table_fields_dto = TableFieldsDto::createShared();
+        table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
+        table_fields_dto->dimension = std::stol(table_info[std::string(KEY_TABLE_DIMENSION)]);
+        table_fields_dto->index_file_size = std::stol(table_info[std::string(KEY_TABLE_INDEX_FILE_SIZE)]);
+        table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
+        table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
+        table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
+        table_fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
+
+        response_dto->tables->pushBack(table_fields_dto);
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -539,21 +541,27 @@ WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size,
         RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required!");
     }
 
+    if (offset->getValue() < 0 || page_size->getValue() < 0) {
+        ASSIGN_RETURN_STATUS_DTO(
+            Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
+    }
+
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
-    if (status.ok()) {
-        partition_list_dto->partitions = partition_list_dto->partitions->createShared();
+    partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
-        if (offset->getValue() < partitions.size()) {
-            int64_t size = (offset->getValue() + page_size->getValue() > partitions.size()) ? partitions.size() - offset
-                                                                                            : page_size->getValue();
-            for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
-                auto partition_dto = PartitionFieldsDto::createShared();
-                partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
-                partition_dto->partition_tag = partitions.at(i).tag_.c_str();
-                partition_list_dto->partitions->pushBack(partition_dto);
-            }
+    if (offset->getValue() < partitions.size()) {
+        int64_t size = (offset->getValue() + page_size->getValue() > partitions.size()) ? partitions.size() - offset
+                                                                                        : page_size->getValue();
+        for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
+            auto partition_dto = PartitionFieldsDto::createShared();
+            partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
+            partition_dto->partition_tag = partitions.at(i).tag_.c_str();
+            partition_list_dto->partitions->pushBack(partition_dto);
         }
     }
 
@@ -642,10 +650,9 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     }
 
     size_t tal_size = 0;
-    search_request->records->forEach(
-        [&tal_size](const OList<OFloat32>::ObjectWrapper& item) {
-            tal_size += item->count();
-        });
+    search_request->records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& item) {
+        tal_size += item->count();
+    });
 
     std::vector<float> datas(tal_size);
     size_t index_offset = 0;
