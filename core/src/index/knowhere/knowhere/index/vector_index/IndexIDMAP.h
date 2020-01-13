@@ -78,6 +78,9 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr list);
 
+    void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
+
  protected:
     virtual void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);

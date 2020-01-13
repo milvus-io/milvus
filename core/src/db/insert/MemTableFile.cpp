@@ -99,12 +99,12 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
     //    }
 
     // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
-    int vector_type_size;
-    if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
-        vector_type_size = sizeof(uint8_t);
-    } else {
-        vector_type_size = sizeof(float);
-    }
+    //    int vector_type_size;
+    //    if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
+    //        vector_type_size = sizeof(uint8_t);
+    //    } else {
+    //        vector_type_size = sizeof(float);
+    //    }
 
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
@@ -113,7 +113,7 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
     auto found = std::find(uids.begin(), uids.end(), doc_id);
     if (found != uids.end()) {
         auto offset = std::distance(uids.begin(), found);
-        segment_ptr->vectors_ptr_->Erase(offset, vector_type_size);
+        segment_ptr->vectors_ptr_->Erase(offset);
     }
 
     return Status::OK();

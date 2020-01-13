@@ -76,6 +76,9 @@ class VecIndexImpl : public VecIndex {
     Status
     SetBlacklist(faiss::ConcurrentBitsetPtr list) override;
 
+    Status
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list) override;
+
  protected:
     int64_t dim = 0;
 
