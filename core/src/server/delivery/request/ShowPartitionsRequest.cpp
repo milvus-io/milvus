@@ -49,9 +49,9 @@ ShowPartitionsRequest::OnExecute() {
     }
 
     std::vector<engine::meta::TableSchema> schema_array;
-    auto statuts = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
-    if (!statuts.ok()) {
-        return statuts;
+    status = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
+    if (!status.ok()) {
+        return status;
     }
 
     for (auto& schema : schema_array) {

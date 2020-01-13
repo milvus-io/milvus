@@ -18,7 +18,7 @@
 #pragma once
 
 #include "SystemInfo.h"
-#include "utils/Error.h"
+#include "utils/Status.h"
 
 #include <string>
 
@@ -32,8 +32,9 @@ class MetricsBase {
         return instance;
     }
 
-    virtual ErrorCode
+    virtual Status
     Init() {
+        return Status::OK();
     }
 
     virtual void
@@ -202,6 +203,10 @@ class MetricsBase {
 
     virtual void
     CPUTemperature() {
+    }
+
+    virtual void
+    PushToGateway() {
     }
 };
 

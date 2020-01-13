@@ -49,6 +49,8 @@ static const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+static const char* CONFIG_SERVER_WEB_PORT = "web_port";
+static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
@@ -95,11 +97,10 @@ static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 static const char* CONFIG_METRIC = "metric_config";
 static const char* CONFIG_METRIC_ENABLE_MONITOR = "enable_monitor";
 static const char* CONFIG_METRIC_ENABLE_MONITOR_DEFAULT = "false";
-static const char* CONFIG_METRIC_COLLECTOR = "collector";
-static const char* CONFIG_METRIC_COLLECTOR_DEFAULT = "prometheus";
-static const char* CONFIG_METRIC_PROMETHEUS = "prometheus_config";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
+static const char* CONFIG_METRIC_ADDRESS = "address";
+static const char* CONFIG_METRIC_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_METRIC_PORT = "port";
+static const char* CONFIG_METRIC_PORT_DEFAULT = "9091";
 
 /* engine config */
 static const char* CONFIG_ENGINE = "engine_config";
@@ -177,6 +178,8 @@ class Config {
     CheckServerConfigDeployMode(const std::string& value);
     Status
     CheckServerConfigTimeZone(const std::string& value);
+    Status
+    CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
     Status
@@ -210,9 +213,9 @@ class Config {
     Status
     CheckMetricConfigEnableMonitor(const std::string& value);
     Status
-    CheckMetricConfigCollector(const std::string& value);
+    CheckMetricConfigAddress(const std::string& value);
     Status
-    CheckMetricConfigPrometheusPort(const std::string& value);
+    CheckMetricConfigPort(const std::string& value);
 
     /* cache config */
     Status
@@ -263,6 +266,8 @@ class Config {
     GetServerConfigDeployMode(std::string& value);
     Status
     GetServerConfigTimeZone(std::string& value);
+    Status
+    GetServerConfigWebPort(std::string& value);
 
     /* db config */
     Status
@@ -298,9 +303,9 @@ class Config {
     Status
     GetMetricConfigEnableMonitor(bool& value);
     Status
-    GetMetricConfigCollector(std::string& value);
+    GetMetricConfigAddress(std::string& value);
     Status
-    GetMetricConfigPrometheusPort(std::string& value);
+    GetMetricConfigPort(std::string& value);
 
     /* cache config */
     Status
@@ -347,6 +352,8 @@ class Config {
     SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
+    Status
+    SetServerConfigWebPort(const std::string& value);
 
     /* db config */
     Status
@@ -380,9 +387,9 @@ class Config {
     Status
     SetMetricConfigEnableMonitor(const std::string& value);
     Status
-    SetMetricConfigCollector(const std::string& value);
+    SetMetricConfigAddress(const std::string& value);
     Status
-    SetMetricConfigPrometheusPort(const std::string& value);
+    SetMetricConfigPort(const std::string& value);
 
     /* cache config */
     Status

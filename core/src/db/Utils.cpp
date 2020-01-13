@@ -57,7 +57,7 @@ GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSche
         // round robin according to a file counter
         std::lock_guard<std::mutex> lock(index_file_counter_mutex);
         index = index_file_counter % path_count;
-        index_file_counter++;
+        ++index_file_counter;
     } else {
         // for other type files, they could be merged or deleted
         // so we round robin according to their file id
@@ -126,7 +126,7 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
     if (minio_enable) {
         std::string table_path = options.path_ + TABLES_FOLDER + table_id;
 
-        auto storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+        auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
         Status stat = storage_inst.DeleteObjects(table_path);
         if (!stat.ok()) {
             return stat;

@@ -135,6 +135,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetServerConfigPort(str_val).ok());
     ASSERT_TRUE(str_val == server_port);
 
+    std::string web_port = "19999";
+    ASSERT_TRUE(config.SetServerConfigWebPort(web_port).ok());
+    ASSERT_TRUE(config.GetServerConfigWebPort(str_val).ok());
+    ASSERT_TRUE(str_val == web_port);
+
     std::string server_mode = "cluster_readonly";
     ASSERT_TRUE(config.SetServerConfigDeployMode(server_mode).ok());
     ASSERT_TRUE(config.GetServerConfigDeployMode(str_val).ok());
@@ -177,7 +182,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetStorageConfigSecondaryPath(str_val).ok());
     ASSERT_TRUE(str_val == storage_secondary_path);
 
-    bool storage_minio_enable = false;
+    bool storage_minio_enable = true;
     ASSERT_TRUE(config.SetStorageConfigMinioEnable(std::to_string(storage_minio_enable)).ok());
     ASSERT_TRUE(config.GetStorageConfigMinioEnable(bool_val).ok());
     ASSERT_TRUE(bool_val == storage_minio_enable);
@@ -213,15 +218,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetMetricConfigEnableMonitor(bool_val).ok());
     ASSERT_TRUE(bool_val == metric_enable_monitor);
 
-    std::string metric_collector = "prometheus";
-    ASSERT_TRUE(config.SetMetricConfigCollector(metric_collector).ok());
-    ASSERT_TRUE(config.GetMetricConfigCollector(str_val).ok());
-    ASSERT_TRUE(str_val == metric_collector);
+    std::string metric_address = "192.168.0.2";
+    ASSERT_TRUE(config.SetMetricConfigAddress(metric_address).ok());
+    ASSERT_TRUE(config.GetMetricConfigAddress(str_val).ok());
+    ASSERT_TRUE(str_val == metric_address);
 
-    std::string metric_prometheus_port = "2222";
-    ASSERT_TRUE(config.SetMetricConfigPrometheusPort(metric_prometheus_port).ok());
-    ASSERT_TRUE(config.GetMetricConfigPrometheusPort(str_val).ok());
-    ASSERT_TRUE(str_val == metric_prometheus_port);
+    std::string metric_port = "2222";
+    ASSERT_TRUE(config.SetMetricConfigPort(metric_port).ok());
+    ASSERT_TRUE(config.GetMetricConfigPort(str_val).ok());
+    ASSERT_TRUE(str_val == metric_port);
 
     /* cache config */
     int64_t cache_cpu_cache_capacity = 1;
@@ -298,12 +303,14 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
 #endif
 }
 
-std::string gen_get_command(const std::string& parent_node, const std::string& child_node) {
+std::string
+gen_get_command(const std::string& parent_node, const std::string& child_node) {
     std::string cmd = "get_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node;
     return cmd;
 }
 
-std::string gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
+std::string
+gen_set_command(const std::string& parent_node, const std::string& child_node, const std::string& value) {
     std::string cmd = "set_config " + parent_node + ms::CONFIG_NODE_DELIMITER + child_node + " " + value;
     return cmd;
 }
@@ -477,6 +484,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetServerConfigPort("a").ok());
     ASSERT_FALSE(config.SetServerConfigPort("99999").ok());
 
+    ASSERT_FALSE(config.SetServerConfigWebPort("a").ok());
+    ASSERT_FALSE(config.SetServerConfigWebPort("99999").ok());
+    ASSERT_FALSE(config.SetServerConfigWebPort("-1").ok());
+
     ASSERT_FALSE(config.SetServerConfigDeployMode("cluster").ok());
 
     ASSERT_FALSE(config.SetServerConfigTimeZone("GM").ok());
@@ -517,9 +528,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     /* metric config */
     ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
 
-    ASSERT_FALSE(config.SetMetricConfigCollector("zilliz").ok());
+    ASSERT_FALSE(config.SetMetricConfigAddress("127.0.0").ok());
 
-    ASSERT_FALSE(config.SetMetricConfigPrometheusPort("0xff").ok());
+    ASSERT_FALSE(config.SetMetricConfigPort("0xff").ok());
 
     /* cache config */
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("a").ok());
