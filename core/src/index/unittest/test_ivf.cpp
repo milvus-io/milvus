@@ -108,15 +108,15 @@ TEST_P(IVFTest, ivf_basic) {
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
-//    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-//            std::make_shared<faiss::ConcurrentBitset>(nb);
-//    for (int64_t i = 0; i < nq; ++i) {
-//        concurrent_bitset_ptr->clear(i);
-//    }
-//    index_->SetBlacklist(concurrent_bitset_ptr);
-//
-//    auto re_re_result = index_->Search(query_dataset, conf);
-//    AssertAneq(re_re_result, nq, k);
+    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+            std::make_shared<faiss::ConcurrentBitset>(nb);
+    for (int64_t i = 0; i < nq; ++i) {
+        concurrent_bitset_ptr->clear(i);
+    }
+    index_->SetBlacklist(concurrent_bitset_ptr);
+
+    auto re_re_result = index_->Search(query_dataset, conf);
+    AssertAneq(re_re_result, nq, k);
 }
 
 TEST_P(IVFTest, ivf_serialize) {
