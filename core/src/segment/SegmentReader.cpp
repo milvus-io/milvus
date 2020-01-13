@@ -19,7 +19,7 @@
 
 #include <memory>
 
-#include "Vector.h"
+#include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
 #include "store/Directory.h"
 #include "utils/Exception.h"
@@ -30,6 +30,7 @@ namespace segment {
 
 SegmentReader::SegmentReader(const std::string& directory) {
     directory_ptr_ = std::make_shared<store::Directory>(directory);
+    segment_ptr_ = std::make_shared<Segment>();
 }
 
 Status
@@ -47,9 +48,7 @@ SegmentReader::Load() {
         default_codec.GetVectorsFormat()->read(directory_ptr_, segment_ptr_->vectors_ptr_);
         default_codec.GetDeletedDocsFormat()->read(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (Exception& e) {
-        std::string err_msg = "Failed to load segment. " + std::string(e.what());
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(e.code(), e.what());
     }
     return Status::OK();
 }
@@ -81,6 +80,20 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         default_codec.GetIdBloomFilterFormat()->read(directory_ptr_, id_bloom_filter_ptr);
     } catch (Exception& e) {
         std::string err_msg = "Failed to load bloom filter. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        default_codec.GetDeletedDocsFormat()->read(directory_ptr_, deleted_docs_ptr);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to load deleted docs. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
         return Status(e.code(), err_msg);
     }

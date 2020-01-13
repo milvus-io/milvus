@@ -355,6 +355,9 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
                                          vectors.binary_data_.data(), lsn, flushed_tables);
     }
+    if (!flushed_tables.empty()) {
+        Merge(flushed_tables);
+    }
 
     return status;
 }
@@ -873,7 +876,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
     for (auto& file : files) {
         server::CollectMergeFilesMetrics metrics;
-        segment_writer_ptr->Merge(file.location_, vector_type_size);
+        segment_writer_ptr->Merge(file.location_, file.file_id_, vector_type_size);
         auto file_schema = file;
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);

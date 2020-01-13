@@ -15,60 +15,77 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Vector.h"
+#include "Vectors.h"
 
 #include <utility>
-
-#include "Vectors.h"
 
 namespace milvus {
 namespace segment {
 
-Vector::Vector(std::vector<uint8_t> data, std::vector<doc_id_t> uids) : data_(std::move(data)), uids_(std::move(uids)) {
+Vectors::Vectors(std::vector<uint8_t> data, std::vector<doc_id_t> uids, const std::string& name)
+    : data_(std::move(data)), uids_(std::move(uids)), name_(name) {
 }
 
 void
-Vector::AddData(const std::vector<uint8_t>& data) {
+Vectors::AddData(const std::vector<uint8_t>& data) {
     data_.reserve(data_.size() + data.size());
     data_.insert(data_.end(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
 }
 
 void
-Vector::AddUids(const std::vector<doc_id_t>& uids) {
+Vectors::AddUids(const std::vector<doc_id_t>& uids) {
     uids_.reserve(uids_.size() + uids.size());
     uids_.insert(uids_.end(), std::make_move_iterator(uids.begin()), std::make_move_iterator(uids.end()));
 }
 
 void
-Vector::Erase(size_t offset, int vector_type_size) {
+Vectors::Erase(size_t offset, int vector_type_size) {
     auto step = offset * GetDimension() * vector_type_size;
     data_.erase(data_.begin() + step, data_.begin() + step * 2);
     uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
 }
 
 const std::vector<uint8_t>&
-Vector::GetData() const {
+Vectors::GetData() const {
     return data_;
 }
 
 const std::vector<doc_id_t>&
-Vector::GetUids() const {
+Vectors::GetUids() const {
     return uids_;
 }
 
 size_t
-Vector::GetCount() {
+Vectors::GetCount() {
     return uids_.size();
 }
 
 size_t
-Vector::GetDimension() {
+Vectors::GetDimension() {
     return data_.size() / GetCount();
 }
 
 size_t
-Vector::Size() {
+Vectors::Size() {
     return data_.size() + uids_.size() * sizeof(doc_id_t);
+}
+
+void
+Vectors::SetName(const std::string& name) {
+    name_ = name;
+}
+
+const std::string&
+Vectors::GetName() const {
+    return name_;
+}
+
+void
+Vectors::Clear() {
+    data_.clear();
+    data_.shrink_to_fit();
+    uids_.clear();
+    uids_.shrink_to_fit();
 }
 
 }  // namespace segment
