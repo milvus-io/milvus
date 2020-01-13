@@ -1201,24 +1201,26 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
 
 /* wal config */
 Status
-Config::GetWalConfigEnable(std::string &wal_enable) {
+Config::GetWalConfigEnable(bool &wal_enable) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_ENABLE, CONFIG_WAL_ENABLE_DEFAULT);
     Status s = CheckWalConfigEnable(str);
     if (!s.ok()) {
         return s;
     }
-    wal_enable = str;
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    wal_enable = (str == "true" || str == "on" || str == "yes" || str == "1");
     return Status::OK();
 }
 
 Status
-Config::GetWalConfigRecoveryErrorIgnore(std::string &recovery_error_ignore) {
+Config::GetWalConfigRecoveryErrorIgnore(bool &recovery_error_ignore) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
     Status s = CheckWalConfigRecoveryErrorIgnore(str);
     if (!s.ok()) {
         return s;
     }
-    recovery_error_ignore = str;
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    recovery_error_ignore = (str == "true" || str == "on" || str == "yes" || str == "1");
     return Status::OK();
 }
 

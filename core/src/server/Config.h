@@ -360,10 +360,10 @@ class Config {
 
     /* wal config */
     Status
-    GetWalConfigEnable(std::string& wal_enable);
+    GetWalConfigEnable(bool& wal_enable);
 
     Status
-    GetWalConfigRecoveryErrorIgnore(std::string& recovery_error_ignore);
+    GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore);
 
     Status
     GetWalConfigBufferSize(uint32_t& buffer_size);

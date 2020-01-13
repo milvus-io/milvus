@@ -75,7 +75,9 @@ DBImpl::DBImpl(const DBOptions& options)
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
-    wal_enable_ = true; // todo: read config
+    server::Config& config = server::Config::GetInstance();
+//    wal_enable_ = true; // todo: read config
+    config.GetWalConfigEnable(wal_enable_);
     if (wal_enable_) {
         wal_mgr_ = std::make_shared<wal::WalManager>();
     }
@@ -108,6 +110,8 @@ DBImpl::Start() {
     // wal
     if (wal_enable_ && wal_mgr_ != nullptr) {
         bool recovery_error_ignore = true; // todo: read config
+        server::Config& config = server::Config::GetInstance();
+        config.GetWalConfigRecoveryErrorIgnore(recovery_error_ignore);
 
         auto init_rst = wal_mgr_->Init(meta_ptr_, recovery_error_ignore);
         if (init_rst != WAL_SUCCESS) {
