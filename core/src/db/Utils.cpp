@@ -57,7 +57,7 @@ GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSche
         // round robin according to a file counter
         std::lock_guard<std::mutex> lock(index_file_counter_mutex);
         index = index_file_counter % path_count;
-        index_file_counter++;
+        ++index_file_counter;
     } else {
         // for other type files, they could be merged or deleted
         // so we round robin according to their file id

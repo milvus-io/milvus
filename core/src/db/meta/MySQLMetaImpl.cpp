@@ -216,7 +216,7 @@ MySQLMetaImpl::ValidateMetaSchema() {
 
         try {
             mysqlpp::StoreQueryResult res = query_statement.store();
-            for (size_t i = 0; i < res.num_rows(); i++) {
+            for (size_t i = 0; i < res.num_rows(); ++i) {
                 const mysqlpp::Row& row = res[i];
                 std::string name, type;
                 row["Field"].to_string(name);
@@ -1445,7 +1445,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
-                to_merge_files++;
+                ++to_merge_files;
             }
 
             files[table_file.date_].push_back(table_file);
@@ -1589,28 +1589,28 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
                     case (int)TableFileSchema::RAW:
-                        raw_count++;
+                        ++raw_count;
                         break;
                     case (int)TableFileSchema::NEW:
-                        new_count++;
+                        ++new_count;
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        new_merge_count++;
+                        ++new_merge_count;
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        new_index_count++;
+                        ++new_index_count;
                         break;
                     case (int)TableFileSchema::TO_INDEX:
-                        to_index_count++;
+                        ++to_index_count;
                         break;
                     case (int)TableFileSchema::INDEX:
-                        index_count++;
+                        ++index_count;
                         break;
                     case (int)TableFileSchema::BACKUP:
-                        backup_count++;
+                        ++backup_count;
                         break;
                     default:
-                        break;
+                        return Status(DB_ERROR, "Unknown file type.");
                 }
             }
 
@@ -1639,7 +1639,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
                     default:
-                        break;
+                        return Status(DB_ERROR, "Unknown file type!");
                 }
             }
             ENGINE_LOG_DEBUG << msg;
@@ -1838,7 +1838,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);
 
-                    clean_files++;
+                    ++clean_files;
                 }
             }
 
@@ -1896,7 +1896,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     resRow["table_id"].to_string(table_id);
 
                     utils::DeleteTablePath(options_, table_id, false);  // only delete empty folder
-                    remove_tables++;
+                    ++remove_tables;
                     idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
                 }
                 std::string idsToDeleteStr = idsToDeleteSS.str();
