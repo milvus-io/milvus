@@ -17,12 +17,13 @@
 
 #pragma once
 
+#include <faiss/utils/ConcurrentBitset.h>
+
 #include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
 
-#include <faiss/utils/ConcurrentBitset.h>
 #include "FaissBaseBinaryIndex.h"
 #include "VectorIndex.h"
 
@@ -74,6 +75,9 @@ class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
 
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr list);
+
+    void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
 
  protected:
     virtual void

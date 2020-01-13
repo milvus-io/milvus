@@ -199,6 +199,16 @@ BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, faiss::ConcurrentBi
     return Status::OK();
 }
 
+Status
+BinVecImpl::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIVF>(index_)) {
+        raw_index->GetBlacklist(list);
+    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {
+        raw_index->GetBlacklist(list);
+    }
+    return Status::OK();
+}
+
 ErrorCode
 BinBFIndex::Build(const Config& cfg) {
     try {

@@ -267,6 +267,16 @@ VecIndexImpl::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
     return Status::OK();
 }
 
+Status
+VecIndexImpl::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
+        raw_index->GetBlacklist(list);
+    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
+        raw_index->GetBlacklist(list);
+    }
+    return Status::OK();
+}
+
 const float*
 BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);

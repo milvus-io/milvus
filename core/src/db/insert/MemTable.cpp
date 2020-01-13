@@ -17,7 +17,9 @@
 
 #include "db/insert/MemTable.h"
 
-#include <src/segment/SegmentReader.h>
+#include <cache/CpuCacheMgr.h>
+#include <segment/SegmentReader.h>
+#include <wrapper/VecIndex.h>
 
 #include <memory>
 #include <string>
@@ -131,17 +133,23 @@ MemTable::GetCurrentMem() {
 
 Status
 MemTable::ApplyDeletes() {
-    // Applying deletes to other segments on disk:
-    // For each id in delete list:
-    //     For each segment in table:
-    //         Load its bloom filter
+    // Applying deletes to other segments on disk and their corresponding cache:
+    // For each segment in table:
+    //     Load its bloom filter
+    //     For each id in delete list:
     //         If present, add the uid to segment's uid list
     // For each segment
+    //     Get its cache if exists
     //     Load its uids file.
-    //     Scan the uids, if any uid in segment's uid list exists, add its offset to deletedDoc
+    //     Scan the uids, if any uid in segment's uid list exists:
+    //         add its offset to deletedDoc
+    //         remove the id from bloom filter
+    //         set black list in cache
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
+    //     Serialize bloom filter
 
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::BACKUP};
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::BACKUP};
     meta::TableFilesSchema table_files_schema;
     auto status = meta_->FilesByType(table_id_, file_types, table_files_schema);
     if (!status.ok()) {
@@ -151,22 +159,32 @@ MemTable::ApplyDeletes() {
     }
     std::unordered_map<std::string, std::vector<segment::doc_id_t>> ids_to_check_map;
 
-    for (auto& id : doc_ids_to_delete_) {
-        for (auto& table_file : table_files_schema) {
-            std::string segment_dir;
-            utils::GetParentPath(table_file.location_, segment_dir);
+    for (auto& table_file : table_files_schema) {
+        std::string segment_dir;
+        utils::GetParentPath(table_file.location_, segment_dir);
 
-            segment::SegmentReader segment_reader(segment_dir);
-            segment::IdBloomFilterPtr id_bloom_filter_ptr;
-            segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+        segment::SegmentReader segment_reader(segment_dir);
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+        for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {
-                ids_to_check_map[segment_dir].emplace_back(id);
+                ids_to_check_map[table_file.location_].emplace_back(id);
             }
         }
     }
 
     for (auto& kv : ids_to_check_map) {
-        segment::SegmentReader segment_reader(kv.first);
+        std::string segment_dir;
+        utils::GetParentPath(kv.first, segment_dir);
+        segment::SegmentReader segment_reader(segment_dir);
+
+        auto index = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(kv.first));
+        faiss::ConcurrentBitsetPtr blacklist = nullptr;
+        if (index != nullptr) {
+            status = index->GetBlacklist(blacklist);
+        }
+
         std::vector<segment::doc_id_t> uids;
         status = segment_reader.LoadUids(uids);
         if (!status.ok()) {
@@ -186,11 +204,21 @@ MemTable::ApplyDeletes() {
             if (std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]) != ids_to_check.end()) {
                 deleted_docs->AddDeletedDoc(i);
                 id_bloom_filter_ptr->Remove(uids[i]);
+
+                if (blacklist != nullptr) {
+                    if (!blacklist->test(i)) {
+                        blacklist->set(i);
+                    }
+                }
             }
         }
 
+        if (index != nullptr) {
+            index->SetBlacklist(blacklist);
+        }
+
         segment::Segment tmp_segment;
-        segment::SegmentWriter segment_writer(kv.first);
+        segment::SegmentWriter segment_writer(segment_dir);
         status = segment_writer.WriteDeletedDocs(deleted_docs);
         if (!status.ok()) {
             break;
