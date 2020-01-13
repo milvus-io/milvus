@@ -1,42 +1,38 @@
 # Quick start
 
-## 运行
+### Description：
 
-### 运行说明：
+- Test cases can be organized with `yaml `
+- Test can run with local mode or helm mode
 
-- 用于进行大数据集的准确性、性能、以及稳定性等相关测试
-- 可以运行两种模式：基于K8S+Jenkins的测试模式，以及local模式
+### Demos：
 
-### 运行示例：
-
-1. 基于K8S+Jenkins的测试方式：
+1. Using jenkins + helm mode：
 
    ![](assets/Parameters.png)
 
-2. 本地测试：
+2. Local test：
 
    `python3 main.py --local --host=*.* --port=19530 --suite=suites/gpu_search_performance_random50m.yaml`
 
-### 测试集配置文件：
+### Definitions of test suites：
 
-在进行自定义的测试集或测试参数时，需要编写测试集配置文件。
+Testers need to write test suite config if adding a customizised test into the current test framework
 
-下面是搜索性能的测试集配置文件：
+The following are the searching performance test suite：
 
 ![](assets/gpu_search_performance_random50m-yaml.png)
 
-1. search_performance: 定义测试类型，还包括`build_performance`,`insert_performance`,`accuracy`,`stability`,`search_stability`
-2. tables: 定义测试集列表
-3. 对于`search_performance`这类测试，每个table下都包含：
+1. search_performance: the test type，also we have`build_performance`,`insert_performance`,`accuracy`,`stability`,`search_stability`
+2. tables: list of test cases
+3. The following fields are in the `table` field：
    - server: milvus的server_config
-   - table_name: 表名，当前框架仅支持单表操作
-   - run_count: 搜索运行次数，并取搜索时间的最小值作为指标
-   - search_params: 向量搜索参数
+   - table_name: currently support one table
+   - run_count: search count
+   - search_params: params of search_vectors
 
-## 测试结果：
+## Test result：
 
-搜索性能的结果输出：
+The result of searching performance![](assets/milvus-nightly-performance-new-jenkins.png)
 
-![](assets/milvus-nightly-performance-new-jenkins.png)
-
-在K8S测试模式下时，除打印上面的输出外，还会进行数据上报
+Test result will be uploaded, and will be used to judge if the test run pass or failed
