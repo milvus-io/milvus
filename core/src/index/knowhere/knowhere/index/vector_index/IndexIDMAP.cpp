@@ -106,7 +106,8 @@ IDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset)
+    auto rows = dataset->Get<int64_t >(meta::ROWS);
+    auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {

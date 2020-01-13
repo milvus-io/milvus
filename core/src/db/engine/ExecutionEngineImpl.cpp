@@ -401,7 +401,28 @@ ExecutionEngineImpl::Load(bool to_cache) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
 
-            auto status = segment_reader_ptr->Load();
+            TempMetaConf temp_conf;
+            temp_conf.gpu_id = gpu_num_;
+            temp_conf.dim = dim_;
+            auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
+            if (!status.ok()) {
+                return status;
+            }
+
+            auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+            auto conf = adapter->Match(temp_conf);
+
+            ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
+            if (auto bf_index = std::dynamic_pointer_cast<BFIndex>(index_)) {
+                ec = bf_index->Build(conf);
+            } else if (auto bf_bin_index = std::dynamic_pointer_cast<BinBFIndex>(index_)) {
+                ec = bf_bin_index->Build(conf);
+            }
+            if (ec != KNOWHERE_SUCCESS) {
+                return status;
+            }
+
+            status = segment_reader_ptr->Load();
             if (!status.ok()) {
                 std::string msg = "Failed to load segment from " + location_;
                 ENGINE_LOG_ERROR << msg;

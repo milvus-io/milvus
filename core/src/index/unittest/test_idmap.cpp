@@ -71,6 +71,16 @@ TEST_F(IDMAPTest, idmap_basic) {
     auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
     //    PrintResult(re_result, nq, k);
+
+    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+            std::make_shared<faiss::ConcurrentBitset>(nb);
+    for (int64_t i = 0; i < nq; ++i) {
+        concurrent_bitset_ptr->clear(i);
+    }
+    index_->SetBlacklist(concurrent_bitset_ptr);
+
+    auto re_re_result = index_->Search(query_dataset, conf);
+    AssertAneq(re_re_result, nq, k);
 }
 
 TEST_F(IDMAPTest, idmap_serialize) {

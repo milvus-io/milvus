@@ -1060,7 +1060,8 @@ struct IVFPQScanner:
                        const uint8_t *codes,
                        const idx_t *ids,
                        float *heap_sim, idx_t *heap_ids,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         KnnSearchResults<C> res = {
             /* key */      this->key,
