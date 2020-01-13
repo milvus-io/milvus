@@ -105,7 +105,8 @@ struct IndexBinaryIVF : IndexBinary {
                             const int32_t *centroid_dis,
                             int32_t *distances, idx_t *labels,
                             bool store_pairs,
-                            const IVFSearchParameters *params=nullptr
+                            const IVFSearchParameters *params=nullptr,
+                            ConcurrentBitsetPtr bitset = nullptr
                             ) const;
 
     virtual BinaryInvertedListScanner *get_InvertedListScanner (
@@ -204,7 +205,8 @@ struct BinaryInvertedListScanner {
                                const uint8_t *codes,
                                const idx_t *ids,
                                int32_t *distances, idx_t *labels,
-                               size_t k) const = 0;
+                               size_t k,
+                               ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
     virtual ~BinaryInvertedListScanner () {}
 

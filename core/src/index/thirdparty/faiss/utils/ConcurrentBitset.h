@@ -19,13 +19,13 @@
 
 #include <atomic>
 #include <memory>
-#include <vector>
+#include <deque>
 
 namespace faiss {
 
 class ConcurrentBitset {
  public:
-    using id_type_t = int32_t;
+    using id_type_t = int64_t;
 
     explicit ConcurrentBitset(id_type_t size);
 
@@ -43,7 +43,7 @@ class ConcurrentBitset {
     clear(id_type_t id);
 
  private:
-    std::vector<std::atomic<char>> bitset_;
+    std::deque<std::atomic<unsigned char>> bitset_;
     id_type_t size_;
 };
 

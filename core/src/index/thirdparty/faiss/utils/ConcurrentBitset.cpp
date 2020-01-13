@@ -23,7 +23,7 @@ ConcurrentBitset::ConcurrentBitset(id_type_t size) : size_(size) {
     id_type_t bytes_count = (size >> 3) + 1;
     // bitset_.resize(bytes_count, 0);
     for (auto i = 0; i < bytes_count; ++i) {
-        bitset_[i] = 0;
+        bitset_.emplace_back(0xff);
     }
 }
 
@@ -34,7 +34,7 @@ ConcurrentBitset::test(id_type_t id) {
 
 void
 ConcurrentBitset::set(id_type_t id) {
-    bitset_[id >> 3].fetch_or(0x1 << (id & 0x7));
+    bitset_[id >> 3].fetch_or(~(0x1 << (id & 0x7)));
 }
 
 void
