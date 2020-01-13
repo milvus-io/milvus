@@ -57,26 +57,28 @@ RequestScheduler::Start() {
 
 void
 RequestScheduler::Stop() {
-    if (stopped_) {
+    if (stopped_ && request_groups_.empty() && execute_threads_.empty()) {
         return;
     }
 
     SERVER_LOG_INFO << "Scheduler gonna stop...";
     {
         std::lock_guard<std::mutex> lock(queue_mtx_);
-        for (auto iter : request_groups_) {
+        for (auto& iter : request_groups_) {
             if (iter.second != nullptr) {
                 iter.second->Put(nullptr);
             }
         }
     }
 
-    for (auto iter : execute_threads_) {
+    for (auto& iter : execute_threads_) {
         if (iter == nullptr)
             continue;
 
         iter->join();
     }
+    request_groups_.clear();
+    execute_threads_.clear();
     stopped_ = true;
     SERVER_LOG_INFO << "Scheduler stopped";
 }

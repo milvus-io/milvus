@@ -49,6 +49,8 @@ static const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+static const char* CONFIG_SERVER_WEB_PORT = "web_port";
+static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
@@ -176,6 +178,8 @@ class Config {
     CheckServerConfigDeployMode(const std::string& value);
     Status
     CheckServerConfigTimeZone(const std::string& value);
+    Status
+    CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
     Status
@@ -262,6 +266,8 @@ class Config {
     GetServerConfigDeployMode(std::string& value);
     Status
     GetServerConfigTimeZone(std::string& value);
+    Status
+    GetServerConfigWebPort(std::string& value);
 
     /* db config */
     Status
@@ -346,6 +352,8 @@ class Config {
     SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
+    Status
+    SetServerConfigWebPort(const std::string& value);
 
     /* db config */
     Status

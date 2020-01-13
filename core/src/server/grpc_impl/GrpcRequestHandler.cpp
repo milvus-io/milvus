@@ -23,6 +23,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
+#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
