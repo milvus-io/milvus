@@ -168,7 +168,7 @@ MemManagerImpl::ToImmutable() {
     MemIdMap temp_map;
     for (auto& kv : mem_id_map_) {
         if (kv.second->Empty()) {
-            // empty table, no need to serialize
+            // empty table without any deletes, no need to serialize
             temp_map.insert(kv);
         } else {
             immu_mem_list_.push_back(kv.second);

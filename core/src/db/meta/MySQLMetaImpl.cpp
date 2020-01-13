@@ -632,7 +632,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         server::MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
-        if(file_schema.segment_id_.empty()) {
+        if (file_schema.segment_id_.empty()) {
             file_schema.segment_id_ = file_schema.file_id_;
         }
         file_schema.dimension_ = table_schema.dimension_;
@@ -764,10 +764,11 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
             }
 
             mysqlpp::Query getTableFileQuery = connectionPtr->query();
-            getTableFileQuery << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                              << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
-                              << " AND (" << idStr << ")"
-                              << " AND file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
+            getTableFileQuery
+                << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id << " AND ("
+                << idStr << ")"
+                << " AND file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
 
@@ -938,9 +939,9 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& tab
             }
 
             mysqlpp::Query filesToIndexQuery = connectionPtr->query();
-            filesToIndexQuery
-                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                << " FROM " << META_TABLEFILES << " WHERE flush_lsn = " << flush_lsn << ";";
+            filesToIndexQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
+                                 "row_count, date, created_on"
+                              << " FROM " << META_TABLEFILES << " WHERE flush_lsn = " << flush_lsn << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
 
@@ -1412,8 +1413,9 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
             }
 
             mysqlpp::Query filesToSearchQuery = connectionPtr->query();
-            filesToSearchQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
-                               << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id;
+            filesToSearchQuery
+                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
+                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id;
 
             if (!dates.empty()) {
                 std::stringstream partitionListSS;
@@ -1517,10 +1519,11 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
             }
 
             mysqlpp::Query filesToMergeQuery = connectionPtr->query();
-            filesToMergeQuery
-                << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, engine_type, created_on"
-                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
-                << " AND file_type = " << std::to_string(TableFileSchema::RAW) << " ORDER BY row_count DESC;";
+            filesToMergeQuery << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, "
+                                 "engine_type, created_on"
+                              << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
+                              << " AND file_type = " << std::to_string(TableFileSchema::RAW)
+                              << " ORDER BY row_count DESC;";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToMerge: " << filesToMergeQuery.str();
 
@@ -1588,10 +1591,10 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
             }
 
             mysqlpp::Query filesToIndexQuery = connectionPtr->query();
-            filesToIndexQuery
-                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(TableFileSchema::TO_INDEX)
-                << ";";
+            filesToIndexQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
+                                 "row_count, date, created_on"
+                              << " FROM " << META_TABLEFILES
+                              << " WHERE file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
 
@@ -1652,6 +1655,8 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
         return Status(DB_ERROR, "file types array is empty");
     }
 
+    Status ret = Status::OK();
+
     try {
         table_files.clear();
 
@@ -1698,6 +1703,11 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 file_schema.row_count_ = resRow["row_count"];
                 file_schema.date_ = resRow["date"];
                 file_schema.created_on_ = resRow["created_on"];
+
+                auto status = utils::GetTableFilePath(options_, file_schema);
+                if (!status.ok()) {
+                    ret = status;
+                }
 
                 table_files.emplace_back(file_schema);
 
@@ -1763,7 +1773,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
         return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
     }
 
-    return Status::OK();
+    return ret;
 }
 
 // TODO(myh): Support swap to cloud storage

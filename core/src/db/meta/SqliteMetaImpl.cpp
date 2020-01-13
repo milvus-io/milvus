@@ -438,11 +438,10 @@ SqliteMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<siz
         table_files.clear();
         auto files = ConnectorPtr->select(
             columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_,
-                    &TableFileSchema::file_size_, &TableFileSchema::row_count_, &TableFileSchema::date_,
-                    &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
+                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
+                    &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
             where(c(&TableFileSchema::table_id_) == table_id and in(&TableFileSchema::id_, ids) and
-                  c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE));
+                  c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
@@ -501,7 +500,7 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_
     try {
         server::MetricCollector metric;
 
-        ConnectorPtr->update_all(set(c(&TableSchema::flag_) = flush_lsn),
+        ConnectorPtr->update_all(set(c(&TableSchema::flush_lsn_) = flush_lsn),
                                  where(c(&TableSchema::table_id_) == table_id));
         ENGINE_LOG_DEBUG << "Successfully update table flush_lsn, table id = " << table_id;
     } catch (std::exception& e) {
@@ -520,10 +519,10 @@ SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& ta
         server::MetricCollector metric;
 
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
-                    &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
-                    &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
+                    &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_,
+                    &TableFileSchema::created_on_),
             where(c(&TableFileSchema::flush_lsn_) == flush_lsn));
 
         std::map<std::string, TableSchema> groups;
@@ -835,8 +834,8 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
         server::MetricCollector metric;
 
         auto partitions = ConnectorPtr->select(columns(&TableSchema::table_id_),
-                                               where(c(&TableSchema::owner_table_) == table_id
-                                                     and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+                                               where(c(&TableSchema::owner_table_) == table_id and
+                                                     c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (size_t i = 0; i < partitions.size(); ++i) {
             std::string partition_name = std::get<0>(partitions[i]);
             meta::TableSchema partition_schema;
@@ -885,8 +884,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
 
     try {
         auto select_columns =
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
-                    &TableFileSchema::segment_id_,
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
                     &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
                     &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_);
 
@@ -1011,11 +1009,10 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
 
         // get files to merge
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
-                    &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
-                    &TableFileSchema::date_, &TableFileSchema::created_on_),
-            where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
+                    &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::created_on_),
+            where(c(&TableFileSchema::file_type_) == (int)TableFileSchema::RAW and
                   c(&TableFileSchema::table_id_) == table_id),
             order_by(&TableFileSchema::file_size_).desc());
 
@@ -1072,11 +1069,11 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema& files) {
         server::MetricCollector metric;
 
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
-                    &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
-                    &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
-            where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX));
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
+                    &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_,
+                    &TableFileSchema::created_on_),
+            where(c(&TableFileSchema::file_type_) == (int)TableFileSchema::TO_INDEX));
 
         std::map<std::string, TableSchema> groups;
         TableFileSchema table_file;
@@ -1131,13 +1128,14 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
         return Status(DB_ERROR, "file types array is empty");
     }
 
+    Status ret = Status::OK();
+
     try {
         table_files.clear();
         auto selected = ConnectorPtr->select(
             columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_,
-                    &TableFileSchema::file_size_, &TableFileSchema::row_count_, &TableFileSchema::date_,
-                    &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
+                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
+                    &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
             where(in(&TableFileSchema::file_type_, file_types) and c(&TableFileSchema::table_id_) == table_id));
 
         if (selected.size() >= 1) {
@@ -1182,6 +1180,11 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                         return Status(DB_ERROR, "Unknown file type.");
                 }
 
+                auto status = utils::GetTableFilePath(options_, file_schema);
+                if (!status.ok()) {
+                    ret = status;
+                }
+
                 table_files.emplace_back(file_schema);
             }
 
@@ -1218,7 +1221,8 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
     } catch (std::exception& e) {
         return HandleException("Encounter exception when check non index files", e.what());
     }
-    return Status::OK();
+
+    return ret;
 }
 
 // TODO(myh): Support swap to cloud storage
@@ -1334,12 +1338,11 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         // collect files to be deleted
-        auto files =
-            ConnectorPtr->select(columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
-                                         &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                                         &TableFileSchema::file_type_, &TableFileSchema::date_),
-                                 where(in(&TableFileSchema::file_type_, file_types) and
-                                       c(&TableFileSchema::updated_time_) < now - seconds * US_PS));
+        auto files = ConnectorPtr->select(
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::date_),
+            where(in(&TableFileSchema::file_type_, file_types) and
+                  c(&TableFileSchema::updated_time_) < now - seconds * US_PS));
 
         int64_t clean_files = 0;
         auto commited = ConnectorPtr->transaction([&]() mutable {
