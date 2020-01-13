@@ -831,9 +831,9 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
         server::MetricCollector metric;
 
         auto partitions = ConnectorPtr->select(columns(&TableSchema::table_id_),
-                                               where(c(&TableSchema::owner_table_) == table_id and
-                                                     c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
-        for (size_t i = 0; i < partitions.size(); i++) {
+                                               where(c(&TableSchema::owner_table_) == table_id
+                                                     and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+        for (size_t i = 0; i < partitions.size(); ++i) {
             std::string partition_name = std::get<0>(partitions[i]);
             meta::TableSchema partition_schema;
             partition_schema.table_id_ = partition_name;
@@ -1045,7 +1045,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
             }
 
             files[table_file.date_].push_back(table_file);
-            to_merge_files++;
+            ++to_merge_files;
         }
 
         if (to_merge_files > 0) {
@@ -1147,28 +1147,28 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
 
                 switch (file_schema.file_type_) {
                     case (int)TableFileSchema::RAW:
-                        raw_count++;
+                        ++raw_count;
                         break;
                     case (int)TableFileSchema::NEW:
-                        new_count++;
+                        ++new_count;
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        new_merge_count++;
+                        ++new_merge_count;
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        new_index_count++;
+                        ++new_index_count;
                         break;
                     case (int)TableFileSchema::TO_INDEX:
-                        to_index_count++;
+                        ++to_index_count;
                         break;
                     case (int)TableFileSchema::INDEX:
-                        index_count++;
+                        ++index_count;
                         break;
                     case (int)TableFileSchema::BACKUP:
-                        backup_count++;
+                        ++backup_count;
                         break;
                     default:
-                        break;
+                        return Status(DB_ERROR, "Unknown file type.");
                 }
 
                 table_files.emplace_back(file_schema);
@@ -1199,7 +1199,7 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
                     default:
-                        break;
+                        return Status(DB_ERROR, "Unknown file type!");
                 }
             }
             ENGINE_LOG_DEBUG << msg;
@@ -1363,7 +1363,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                                      << " location:" << table_file.location_;
                     table_ids.insert(table_file.table_id_);
 
-                    clean_files++;
+                    ++clean_files;
                 }
             }
             return true;
@@ -1421,7 +1421,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                                                  where(c(&TableFileSchema::table_id_) == table_id));
             if (selected.size() == 0) {
                 utils::DeleteTablePath(options_, table_id);
-                remove_tables++;
+                ++remove_tables;
             }
         }
 
