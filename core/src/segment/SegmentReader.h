@@ -44,6 +44,9 @@ class SegmentReader {
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status
+    LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);
+
+    Status
     GetSegment(SegmentPtr& segment_ptr);
 
  private:

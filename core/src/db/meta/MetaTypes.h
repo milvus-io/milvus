@@ -79,6 +79,7 @@ struct TableFileSchema {
 
     size_t id_ = 0;
     std::string table_id_;
+    std::string segment_id_;
     std::string file_id_;
     int32_t file_type_ = NEW;
     size_t file_size_ = 0;

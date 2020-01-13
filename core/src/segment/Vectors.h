@@ -18,27 +18,65 @@
 #pragma once
 
 #include <memory>
-#include <unordered_map>
-
-#include "Vector.h"
+#include <vector>
 
 namespace milvus {
 namespace segment {
 
-struct Vectors {
-    std::unordered_map<std::string, VectorPtr> vectors_map;
+using doc_id_t = int64_t;
+
+class Vectors {
+ public:
+    Vectors(std::vector<uint8_t> data, std::vector<doc_id_t> uids, const std::string& name);
+
+    Vectors() = default;
+
     void
-    Clear() {
-        vectors_map.clear();
-    }
+    AddData(const std::vector<uint8_t>& data);
+
+    void
+    AddUids(const std::vector<doc_id_t>& uids);
+
+    void
+    SetName(const std::string& name);
+
+    const std::vector<uint8_t>&
+    GetData() const;
+
+    const std::vector<doc_id_t>&
+    GetUids() const;
+
+    const std::string&
+    GetName() const;
+
     size_t
-    Size() {
-        size_t size = 0;
-        for (auto& kv : vectors_map) {
-            size += kv.second->Size();
-        }
-        return size;
-    }
+    GetCount();
+
+    size_t
+    GetDimension();
+
+    void
+    Erase(size_t offset, int vector_type_size);
+
+    size_t
+    Size();
+
+    void
+    Clear();
+
+    // No copy and move
+    Vectors(const Vectors&) = delete;
+    Vectors(Vectors&&) = delete;
+
+    Vectors&
+    operator=(const Vectors&) = delete;
+    Vectors&
+    operator=(Vectors&&) = delete;
+
+ private:
+    std::vector<uint8_t> data_;
+    std::vector<doc_id_t> uids_;
+    std::string name_;
 };
 
 using VectorsPtr = std::shared_ptr<Vectors>;

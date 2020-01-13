@@ -108,15 +108,12 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
 
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
-    auto vectors_map = segment_ptr->vectors_ptr_->vectors_map;
-    for (auto& it : vectors_map) {
-        // Check wither the doc_id is present, if yes, delete it's corresponding buffer
-        auto uids = it.second->GetUids();
-        auto found = std::find(uids.begin(), uids.end(), doc_id);
-        if (found != uids.end()) {
-            auto offset = std::distance(uids.begin(), found);
-            it.second->Erase(offset, vector_type_size);
-        }
+    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    auto found = std::find(uids.begin(), uids.end(), doc_id);
+    if (found != uids.end()) {
+        auto offset = std::distance(uids.begin(), found);
+        segment_ptr->vectors_ptr_->Erase(offset, vector_type_size);
     }
 
     return Status::OK();
@@ -150,6 +147,8 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // TODO(zhiru):
     //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     //    table_file_schema_.row_count_ = execution_engine_->Count();
+    table_file_schema_.file_size_ = segment_writer_ptr_->Size();
+    table_file_schema_.row_count_ = segment_writer_ptr_->VectorCount();
 
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index

@@ -20,7 +20,7 @@
 #include <memory>
 
 #include "SegmentReader.h"
-#include "Vector.h"
+#include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
 #include "store/Directory.h"
 #include "utils/Exception.h"
@@ -35,14 +35,11 @@ SegmentWriter::SegmentWriter(const std::string& directory) {
 }
 
 Status
-SegmentWriter::AddVectors(const std::string& field_name, const std::vector<uint8_t>& data,
+SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& data,
                           const std::vector<doc_id_t>& uids) {
-    auto found = segment_ptr_->vectors_ptr_->vectors_map.find(field_name);
-    if (found == segment_ptr_->vectors_ptr_->vectors_map.end()) {
-        segment_ptr_->vectors_ptr_->vectors_map[field_name] = std::make_shared<Vector>();
-    }
-    segment_ptr_->vectors_ptr_->vectors_map[field_name]->AddData(data);
-    segment_ptr_->vectors_ptr_->vectors_map[field_name]->AddUids(uids);
+    segment_ptr_->vectors_ptr_->AddData(data);
+    segment_ptr_->vectors_ptr_->AddUids(uids);
+    segment_ptr_->vectors_ptr_->SetName(name);
 
     return Status::OK();
 }
@@ -55,6 +52,11 @@ SegmentWriter::Serialize() {
         return status;
     }
     status = WriteBloomFilter();
+    if (!status.ok()) {
+        return status;
+    }
+    // Write an empty deleted doc
+    status = WriteDeletedDocs();
     return status;
 }
 
@@ -78,17 +80,28 @@ SegmentWriter::WriteBloomFilter() {
     try {
         directory_ptr_->Create();
         default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
-        // TODO(zhiru): ?
-        for (auto& kv : segment_ptr_->vectors_ptr_->vectors_map) {
-            auto& uids = kv.second->GetUids();
-            for (auto& uid : uids) {
-                segment_ptr_->id_bloom_filter_ptr_->Add(uid);
-            }
+        auto& uids = segment_ptr_->vectors_ptr_->GetUids();
+        for (auto& uid : uids) {
+            segment_ptr_->id_bloom_filter_ptr_->Add(uid);
         }
         default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
-
     } catch (Exception& e) {
         std::string err_msg = "Failed to write vectors. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
+SegmentWriter::WriteDeletedDocs() {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
+        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs_ptr);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
         return Status(e.code(), err_msg);
     }
@@ -135,7 +148,7 @@ SegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
 }
 
 Status
-SegmentWriter::Merge(const std::string& dir_to_merge, int vector_type_size) {
+SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name, int vector_type_size) {
     SegmentReader segment_reader_to_merge(dir_to_merge);
     bool in_cache;
     auto status = segment_reader_to_merge.LoadCache(in_cache);
@@ -152,16 +165,15 @@ SegmentWriter::Merge(const std::string& dir_to_merge, int vector_type_size) {
     segment_ptr_->vectors_ptr_->Clear();
     auto offsets_to_delete = segment_ptr_->deleted_docs_ptr_->GetDeletedDocs();
     IdBloomFilterPtr id_bloom_filter_ptr;
-    for (auto& kv : segment_to_merge->vectors_ptr_->vectors_map) {
-        auto& uids = kv.second->GetUids();
-        for (size_t i = 0; i < uids.size(); ++i) {
-            auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
-            if (found != offsets_to_delete.end()) {
-                kv.second->Erase(i, vector_type_size);
-            }
+
+    auto& uids = segment_to_merge->vectors_ptr_->GetUids();
+    for (size_t i = 0; i < uids.size(); ++i) {
+        auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
+        if (found != offsets_to_delete.end()) {
+            segment_to_merge->vectors_ptr_->Erase(i, vector_type_size);
         }
-        AddVectors(kv.first, kv.second->GetData(), uids);
     }
+    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), uids);
 
     return Status::OK();
 }
@@ -173,11 +185,7 @@ SegmentWriter::Size() {
 
 size_t
 SegmentWriter::VectorCount() {
-    size_t count = 0;
-    for (auto& kv : segment_ptr_->vectors_ptr_->vectors_map) {
-        count += kv.second->GetCount();
-    }
-    return count;
+    return segment_ptr_->vectors_ptr_->GetCount();
 }
 
 }  // namespace segment
