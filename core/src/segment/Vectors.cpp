@@ -17,6 +17,7 @@
 
 #include "Vectors.h"
 
+#include <iostream>
 #include <utility>
 
 namespace milvus {
@@ -39,9 +40,10 @@ Vectors::AddUids(const std::vector<doc_id_t>& uids) {
 }
 
 void
-Vectors::Erase(size_t offset, int vector_type_size) {
-    auto step = offset * GetDimension() * vector_type_size;
-    data_.erase(data_.begin() + step, data_.begin() + step * 2);
+Vectors::Erase(size_t offset) {
+    auto dim = GetCodeLength();
+    auto step = offset * dim;
+    data_.erase(data_.begin() + step, data_.begin() + step + dim);
     uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
 }
 
@@ -56,13 +58,13 @@ Vectors::GetUids() const {
 }
 
 size_t
-Vectors::GetCount() {
+Vectors::GetCount() const {
     return uids_.size();
 }
 
 size_t
-Vectors::GetDimension() {
-    return data_.size() / GetCount();
+Vectors::GetCodeLength() const {
+    return data_.size() / uids_.size();
 }
 
 size_t
