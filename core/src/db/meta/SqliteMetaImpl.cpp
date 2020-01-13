@@ -437,11 +437,12 @@ SqliteMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<siz
     try {
         table_files.clear();
         auto files = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::file_id_, &TableFileSchema::file_type_,
+            columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
+                    &TableFileSchema::file_type_,
                     &TableFileSchema::file_size_, &TableFileSchema::row_count_, &TableFileSchema::date_,
                     &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
             where(c(&TableFileSchema::table_id_) == table_id and in(&TableFileSchema::id_, ids) and
-                  c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
+                  c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE));
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
@@ -454,13 +455,14 @@ SqliteMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<siz
             TableFileSchema file_schema;
             file_schema.table_id_ = table_id;
             file_schema.id_ = std::get<0>(file);
-            file_schema.file_id_ = std::get<1>(file);
-            file_schema.file_type_ = std::get<2>(file);
-            file_schema.file_size_ = std::get<3>(file);
-            file_schema.row_count_ = std::get<4>(file);
-            file_schema.date_ = std::get<5>(file);
-            file_schema.engine_type_ = std::get<6>(file);
-            file_schema.created_on_ = std::get<7>(file);
+            file_schema.segment_id_ = std::get<1>(file);
+            file_schema.file_id_ = std::get<2>(file);
+            file_schema.file_type_ = std::get<3>(file);
+            file_schema.file_size_ = std::get<4>(file);
+            file_schema.row_count_ = std::get<5>(file);
+            file_schema.date_ = std::get<6>(file);
+            file_schema.engine_type_ = std::get<7>(file);
+            file_schema.created_on_ = std::get<8>(file);
             file_schema.dimension_ = table_schema.dimension_;
             file_schema.index_file_size_ = table_schema.index_file_size_;
             file_schema.nlist_ = table_schema.nlist_;
@@ -518,7 +520,8 @@ SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& ta
         server::MetricCollector metric;
 
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
+                    &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
                     &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
                     &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
             where(c(&TableFileSchema::flush_lsn_) == flush_lsn));
@@ -530,13 +533,14 @@ SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& ta
         for (auto& file : selected) {
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.file_type_ = std::get<3>(file);
-            table_file.file_size_ = std::get<4>(file);
-            table_file.row_count_ = std::get<5>(file);
-            table_file.date_ = std::get<6>(file);
-            table_file.engine_type_ = std::get<7>(file);
-            table_file.created_on_ = std::get<8>(file);
+            table_file.segment_id_ = std::get<2>(file);
+            table_file.file_id_ = std::get<3>(file);
+            table_file.file_type_ = std::get<4>(file);
+            table_file.file_size_ = std::get<5>(file);
+            table_file.row_count_ = std::get<6>(file);
+            table_file.date_ = std::get<7>(file);
+            table_file.engine_type_ = std::get<8>(file);
+            table_file.created_on_ = std::get<9>(file);
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if (!status.ok()) {
@@ -881,7 +885,8 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
 
     try {
         auto select_columns =
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
+                    &TableFileSchema::segment_id_,
                     &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
                     &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_);
 
@@ -1006,10 +1011,11 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
 
         // get files to merge
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
+                    &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
                     &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
                     &TableFileSchema::date_, &TableFileSchema::created_on_),
-            where(c(&TableFileSchema::file_type_) == (int)TableFileSchema::RAW and
+            where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
                   c(&TableFileSchema::table_id_) == table_id),
             order_by(&TableFileSchema::file_size_).desc());
 
@@ -1024,11 +1030,12 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
 
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.file_type_ = std::get<3>(file);
-            table_file.row_count_ = std::get<5>(file);
-            table_file.date_ = std::get<6>(file);
-            table_file.created_on_ = std::get<7>(file);
+            table_file.segment_id_ = std::get<2>(file);
+            table_file.file_id_ = std::get<3>(file);
+            table_file.file_type_ = std::get<4>(file);
+            table_file.row_count_ = std::get<6>(file);
+            table_file.date_ = std::get<7>(file);
+            table_file.created_on_ = std::get<8>(file);
             table_file.dimension_ = table_schema.dimension_;
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.nlist_ = table_schema.nlist_;
@@ -1065,10 +1072,11 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema& files) {
         server::MetricCollector metric;
 
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
+                    &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
                     &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
                     &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
-            where(c(&TableFileSchema::file_type_) == (int)TableFileSchema::TO_INDEX));
+            where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX));
 
         std::map<std::string, TableSchema> groups;
         TableFileSchema table_file;
@@ -1077,13 +1085,14 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema& files) {
         for (auto& file : selected) {
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.file_type_ = std::get<3>(file);
-            table_file.file_size_ = std::get<4>(file);
-            table_file.row_count_ = std::get<5>(file);
-            table_file.date_ = std::get<6>(file);
-            table_file.engine_type_ = std::get<7>(file);
-            table_file.created_on_ = std::get<8>(file);
+            table_file.segment_id_ = std::get<2>(file);
+            table_file.file_id_ = std::get<3>(file);
+            table_file.file_type_ = std::get<4>(file);
+            table_file.file_size_ = std::get<5>(file);
+            table_file.row_count_ = std::get<6>(file);
+            table_file.date_ = std::get<7>(file);
+            table_file.engine_type_ = std::get<8>(file);
+            table_file.created_on_ = std::get<9>(file);
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if (!status.ok()) {
@@ -1125,7 +1134,8 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
     try {
         table_files.clear();
         auto selected = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::file_id_, &TableFileSchema::file_type_,
+            columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
+                    &TableFileSchema::file_type_,
                     &TableFileSchema::file_size_, &TableFileSchema::row_count_, &TableFileSchema::date_,
                     &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
             where(in(&TableFileSchema::file_type_, file_types) and c(&TableFileSchema::table_id_) == table_id));
@@ -1137,13 +1147,14 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                 TableFileSchema file_schema;
                 file_schema.table_id_ = table_id;
                 file_schema.id_ = std::get<0>(file);
-                file_schema.file_id_ = std::get<1>(file);
-                file_schema.file_type_ = std::get<2>(file);
-                file_schema.file_size_ = std::get<3>(file);
-                file_schema.row_count_ = std::get<4>(file);
-                file_schema.date_ = std::get<5>(file);
-                file_schema.engine_type_ = std::get<6>(file);
-                file_schema.created_on_ = std::get<7>(file);
+                file_schema.segment_id_ = std::get<1>(file);
+                file_schema.file_id_ = std::get<2>(file);
+                file_schema.file_type_ = std::get<3>(file);
+                file_schema.file_size_ = std::get<4>(file);
+                file_schema.row_count_ = std::get<5>(file);
+                file_schema.date_ = std::get<6>(file);
+                file_schema.engine_type_ = std::get<7>(file);
+                file_schema.created_on_ = std::get<8>(file);
 
                 switch (file_schema.file_type_) {
                     case (int)TableFileSchema::RAW:
@@ -1324,7 +1335,8 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
 
         // collect files to be deleted
         auto files =
-            ConnectorPtr->select(columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::file_id_,
+            ConnectorPtr->select(columns(&TableFileSchema::id_, &TableFileSchema::table_id_,
+                                         &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
                                          &TableFileSchema::file_type_, &TableFileSchema::date_),
                                  where(in(&TableFileSchema::file_type_, file_types) and
                                        c(&TableFileSchema::updated_time_) < now - seconds * US_PS));
@@ -1335,9 +1347,10 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             for (auto& file : files) {
                 table_file.id_ = std::get<0>(file);
                 table_file.table_id_ = std::get<1>(file);
-                table_file.file_id_ = std::get<2>(file);
-                table_file.file_type_ = std::get<3>(file);
-                table_file.date_ = std::get<4>(file);
+                table_file.segment_id_ = std::get<2>(file);
+                table_file.file_id_ = std::get<3>(file);
+                table_file.file_type_ = std::get<4>(file);
+                table_file.date_ = std::get<5>(file);
 
                 // check if the file can be deleted
                 if (filter && filter->IsIgnored(table_file)) {
