@@ -70,6 +70,7 @@ SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
 Status
 SegmentReader::GetSegment(SegmentPtr& segment_ptr) {
     segment_ptr = segment_ptr_;
+    return Status::OK();
 }
 
 Status

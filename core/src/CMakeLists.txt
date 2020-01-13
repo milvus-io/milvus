@@ -130,10 +130,10 @@ set(engine_files
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
-#        ${codecs_files}
-#        ${codecs_default_files}
-#        ${segment_files}
-#        ${store_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
+        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
