@@ -668,6 +668,26 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
+Config::CheckWalConfigEnable(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid wal config: " + value + ". Possible reason: wal_config.recovery_error_ignore is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
 Config::CheckWalConfigBufferSize(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid wal buffer size: " + value +
@@ -1181,13 +1201,24 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
 
 /* wal config */
 Status
-Config::GetWalConfigBufferSize(uint32_t& buffer_size) {
-    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
-    Status s = CheckWalConfigBufferSize(str);
+Config::GetWalConfigEnable(std::string &wal_enable) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_ENABLE, CONFIG_WAL_ENABLE_DEFAULT);
+    Status s = CheckWalConfigEnable(str);
     if (!s.ok()) {
         return s;
     }
-    buffer_size = (uint32_t)std::stoul(str);
+    wal_enable = str;
+    return Status::OK();
+}
+
+Status
+Config::GetWalConfigRecoveryErrorIgnore(std::string &recovery_error_ignore) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
+    Status s = CheckWalConfigRecoveryErrorIgnore(str);
+    if (!s.ok()) {
+        return s;
+    }
+    recovery_error_ignore = str;
     return Status::OK();
 }
 

@@ -134,6 +134,10 @@ static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 /* wal config */
 static const char* CONFIG_WAL = "wal_config";
+static const char* CONFIG_WAL_ENABLE = "enable";
+static const char* CONFIG_WAL_ENABLE_DEFAULT = "false";
+static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
+static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "128";
 static const char* CONFIG_WAL_RECORD_SIZE = "record_size";
@@ -236,6 +240,10 @@ class Config {
     CheckEngineConfigOmpThreadNum(const std::string& value);
 
     /* wal config */
+    Status
+    CheckWalConfigEnable(const std::string& value);
+    Status
+    CheckWalConfigRecoveryErrorIgnore(const std::string& value);
     Status
     CheckWalConfigBufferSize(const std::string& value);
     Status
@@ -351,6 +359,12 @@ class Config {
     GetTracingConfigJsonConfigPath(std::string& value);
 
     /* wal config */
+    Status
+    GetWalConfigEnable(std::string& wal_enable);
+
+    Status
+    GetWalConfigRecoveryErrorIgnore(std::string& recovery_error_ignore);
+
     Status
     GetWalConfigBufferSize(uint32_t& buffer_size);
 
