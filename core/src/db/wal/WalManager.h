@@ -37,8 +37,8 @@ class WalManager {
      * init
      * @param meta
      */
-    void
-    Init(const meta::MetaPtr& meta);
+    bool
+    Init(const meta::MetaPtr& meta, bool ignore_error);
 
     /*
      * Get next recovery

@@ -109,15 +109,18 @@ uint32_t
 MXLogFileHandler::GetFileSize() {
     if (file_size_)
         return file_size_;
+
     struct stat statbuf;
-    stat(file_name_.c_str(), &statbuf);
-    file_size_ = (uint32_t)statbuf.st_size;
+    if (0 == stat((file_path_ + file_name_).c_str(), &statbuf)) {
+        file_size_ = (uint32_t) statbuf.st_size;
+    }
+
     return file_size_;
 }
 
 void
 MXLogFileHandler::DeleteFile() {
-    remove(((file_path_ + file_name_)).c_str());
+    remove((file_path_ + file_name_).c_str());
     p_file_ = NULL;
     file_size_ = 0;
     file_name_ = "";
@@ -125,7 +128,7 @@ MXLogFileHandler::DeleteFile() {
 
 bool
 MXLogFileHandler::FileExists() {
-    return access(((file_path_ + file_name_)).c_str(), 0) != -1;
+    return access((file_path_ + file_name_).c_str(), 0) != -1;
 }
 
 void

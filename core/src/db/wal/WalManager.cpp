@@ -31,8 +31,8 @@ WalManager::WalManager() {
     config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
 }
 
-void
-WalManager::Init(const meta::MetaPtr& meta) {
+bool
+WalManager::Init(const meta::MetaPtr& meta, bool ignore_error) {
     uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     if (p_meta_handler_ != nullptr) {
@@ -48,25 +48,25 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
     }
 
-    // Todo
+    // Todo: get recovery start point
     uint64_t recovery_start = applied_lsn;
-    // get recovery start point
 
     for (auto schema: table_schema_array) {
         TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
-        recovery_start = std::min(recovery_start, schema.flush_lsn_);
         tables_[schema.table_id_] = tb_lsn;
-    }
 
+        recovery_start = std::min(recovery_start, schema.flush_lsn_);
+    }
 
     p_buffer_ = std::make_shared<MXLogBuffer>(
         mxlog_config_.mxlog_path,
-        mxlog_config_.buffer_size,
-        recovery_start,
-        applied_lsn);
+        mxlog_config_.buffer_size);
 
-    // TODO: error code
-    p_buffer_->Init();
+    bool rst = p_buffer_->Init(recovery_start, applied_lsn);
+    if (!rst && ignore_error) {
+        p_buffer_->Reset(applied_lsn);
+    }
+    return rst;
 }
 
 void

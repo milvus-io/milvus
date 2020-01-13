@@ -33,8 +33,8 @@ extern std::condition_variable reader_cv;
 extern std::mutex reader_mutex;
 extern bool reader_is_waiting;
 
-#define WAL_BUFFER_MAX_SIZE (2 * 1024 * 1024 * 1024)
-#define WAL_BUFFER_MIN_SIZE (64 * 1024 * 1024)
+#define WAL_BUFFER_MAX_SIZE ((uint32_t)2 * 1024 * 1024 * 1024)
+#define WAL_BUFFER_MIN_SIZE ((uint32_t)64 * 1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 #define WAL_META_AMOUNT 2
 #ifdef offsetof

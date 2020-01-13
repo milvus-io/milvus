@@ -57,13 +57,14 @@ using BufferPtr = std::shared_ptr<char>;
 class MXLogBuffer {
  public:
     MXLogBuffer(const std::string& mxlog_path,
-                const uint32_t buffer_size,
-                const uint64_t read_lsn,
-                const uint64_t write_lsn);
+                const uint32_t buffer_size);
     ~MXLogBuffer();
 
-    // TODO: error code
-    bool Init();
+    bool Init(uint64_t read_lsn,
+              uint64_t write_lsn);
+
+    // ignore all old wal file
+    void Reset(uint64_t lsn);
 
     // if failed, return 0, else return lsn
     uint64_t Append(const std::string &table_id,
@@ -84,7 +85,7 @@ class MXLogBuffer {
 
     uint64_t GetReadLsn();
 
-    void SetWriteLsn(uint64_t lsn);
+    bool SetWriteLsn(uint64_t lsn);
 
  private:
     uint32_t SurplusSpace();
