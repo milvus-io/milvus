@@ -59,7 +59,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
     } else {
         auto best_device_id = count_ % gpus.size();
         SERVER_LOG_DEBUG << "FaissFlatPass: nq > gpu_search_threshold, specify gpu" << best_device_id << " to search!";
-        count_++;
+        ++count_;
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpus[best_device_id]);
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr);
