@@ -117,11 +117,10 @@ WebRequestHandler::GetTaleInfo(const std::shared_ptr<Context>& context, const st
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto getgb = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
-    devices_dto->cpu->memory = getgb(system_info.GetPhysicalMemory());
+    devices_dto->cpu->memory = system_info.GetPhysicalMemory() >> 30;
 
     devices_dto->gpus = devices_dto->gpus->createShared();
 
@@ -136,7 +135,7 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
-        device_dto->memory = getgb(device_mems.at(i));
+        device_dto->memory = device_mems.at(i) >> 30;
         devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 
@@ -311,7 +310,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
+        [&search_resources](const OString& res) {
+            search_resources.emplace_back(res->toLowerCase()->std_str());
+        });
 
     std::string search_resources_value;
     for (auto& res : search_resources) {
@@ -332,7 +333,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     }
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
+        [&build_resources](const OString& res) {
+            build_resources.emplace_back(res->toLowerCase()->std_str());
+        });
 
     std::string build_resources_value;
     for (auto& res : build_resources) {
@@ -419,43 +422,43 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
     if (nullptr == page_size.get()) {
         RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required");
     }
-    std::vector<std::string> tables;
-    Status status = Status::OK();
 
     response_dto->tables = response_dto->tables->createShared();
 
     if (offset < 0 || page_size < 0) {
         ASSIGN_RETURN_STATUS_DTO(
-            Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should bigger than 0"));
-    } else {
-        status = request_handler_.ShowTables(context_ptr_, tables);
-        if (!status.ok()) {
-            ASSIGN_RETURN_STATUS_DTO(status)
-        }
-        if (offset < tables.size()) {
-            int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
-                                                                                        : page_size->getValue();
-            for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
-                std::map<std::string, std::string> table_info;
+            Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
+    }
 
-                status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
-                if (!status.ok()) {
-                    break;
-                }
+    std::vector<std::string> tables;
+    auto status = request_handler_.ShowTables(context_ptr_, tables);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
-                auto table_fields_dto = TableFieldsDto::createShared();
-                table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
-                table_fields_dto->dimension = std::stol(table_info[std::string(KEY_TABLE_DIMENSION)]);
-                table_fields_dto->index_file_size = std::stol(table_info[std::string(KEY_TABLE_INDEX_FILE_SIZE)]);
-                table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
-                table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
-                table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
-                table_fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
+    response_dto->count = tables.size();
 
-                response_dto->tables->pushBack(table_fields_dto);
+    if (offset < tables.size()) {
+        int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
+                                                                                    : page_size->getValue();
+        for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
+            std::map<std::string, std::string> table_info;
+
+            status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
+            if (!status.ok()) {
+                break;
             }
 
-            response_dto->count = tables.size();
+            auto table_fields_dto = TableFieldsDto::createShared();
+            table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
+            table_fields_dto->dimension = std::stol(table_info[std::string(KEY_TABLE_DIMENSION)]);
+            table_fields_dto->index_file_size = std::stol(table_info[std::string(KEY_TABLE_INDEX_FILE_SIZE)]);
+            table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
+            table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
+            table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
+            table_fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
+
+            response_dto->tables->pushBack(table_fields_dto);
         }
     }
 
@@ -622,12 +625,16 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     std::vector<std::string> file_id_list;
 
     if (nullptr != search_request->tags.get()) {
-        search_request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
+        search_request->tags->forEach([&tag_list](const OString& tag) {
+            tag_list.emplace_back(tag->std_str());
+        });
     }
 
     if (nullptr != search_request->file_ids.get()) {
         search_request->file_ids->forEach(
-            [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
+            [&file_id_list](const OString& id) {
+                file_id_list.emplace_back(id->std_str());
+            });
     }
 
     if (nullptr == search_request->records.get()) {
@@ -636,7 +643,9 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     size_t tal_size = 0;
     search_request->records->forEach(
-        [&tal_size](const OList<OFloat32>::ObjectWrapper& item) { tal_size += item->count(); });
+        [&tal_size](const OList<OFloat32>::ObjectWrapper& item) {
+            tal_size += item->count();
+        });
 
     std::vector<float> datas(tal_size);
     size_t index_offset = 0;
