@@ -600,7 +600,7 @@ DBImpl::WaitBuildIndexFinish() {
 void
 DBImpl::StartMetricTask() {
     static uint64_t metric_clock_tick = 0;
-    metric_clock_tick++;
+    ++metric_clock_tick;
     if (metric_clock_tick % METRIC_ACTION_INTERVAL != 0) {
         return;
     }
@@ -654,7 +654,7 @@ DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
 void
 DBImpl::StartCompactionTask() {
     static uint64_t compact_clock_tick = 0;
-    compact_clock_tick++;
+    ++compact_clock_tick;
     if (compact_clock_tick % COMPACT_ACTION_INTERVAL != 0) {
         return;
     }
@@ -844,7 +844,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 void
 DBImpl::StartBuildIndexTask(bool force) {
     static uint64_t index_clock_tick = 0;
-    index_clock_tick++;
+    ++index_clock_tick;
     if (!force && (index_clock_tick % INDEX_ACTION_INTERVAL != 0)) {
         return;
     }
@@ -924,7 +924,7 @@ DBImpl::GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>
             (*it).row_count_ < meta::BUILD_INDEX_THRESHOLD) {
             it = files.erase(it);
         } else {
-            it++;
+            ++it;
         }
     }
 
@@ -1054,7 +1054,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
 
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10 * 1000, times * 100)));
         GetFilesToBuildIndex(table_id, file_types, table_files);
-        times++;
+        ++times;
 
         index_failed_checker_.IgnoreFailedIndexFiles(table_files);
     }
