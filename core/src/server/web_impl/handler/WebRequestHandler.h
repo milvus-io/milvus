@@ -82,14 +82,17 @@ class WebRequestHandler {
         return context_ptr;
     }
 
+ protected:
+    Status
+    GetTaleInfo(const std::string& table_name, std::map<std::string, std::string>& table_info);
+
+    Status
+    CommandLine(const std::string& cmd, std::string& reply);
+
  public:
     WebRequestHandler() {
         context_ptr_ = GenContextPtr("Web Handler");
     }
-
-    Status
-    GetTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
-                std::map<std::string, std::string>& table_info);
 
     StatusDto::ObjectWrapper
     GetDevices(DevicesDto::ObjectWrapper& devices);
@@ -150,6 +153,7 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);
 
+ public:
     WebRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;

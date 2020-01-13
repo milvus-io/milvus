@@ -17,13 +17,13 @@
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
-#include <boost/algorithm/string.hpp>
 #include <cmath>
 #include <string>
 #include <vector>
 
 #include "metrics/SystemInfo.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 #include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
@@ -82,8 +82,7 @@ WebErrorMap(ErrorCode code) {
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 
 Status
-WebRequestHandler::GetTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
-                               std::map<std::string, std::string>& table_info) {
+WebRequestHandler::GetTaleInfo(const std::string& table_name, std::map<std::string, std::string>& table_info) {
     TableSchema schema;
     auto status = request_handler_.DescribeTable(context_ptr_, table_name, schema);
     if (!status.ok()) {
@@ -113,6 +112,11 @@ WebRequestHandler::GetTaleInfo(const std::shared_ptr<Context>& context, const st
     table_info[KEY_TABLE_COUNT] = std::to_string(count);
 }
 
+Status
+WebRequestHandler::CommandLine(const std::string& cmd, std::string& reply) {
+    return request_handler_.Cmd(context_ptr_, cmd, reply);
+}
+
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
 
 StatusDto::ObjectWrapper
@@ -130,7 +134,7 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
     std::vector<uint64_t> device_mems = system_info.GPUMemoryTotal();
 
     if (count != device_mems.size()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(UNEXPECTED_ERROR, "Can't obtain GPU info"));
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Can't obtain GPU info");
     }
 
     for (size_t i = 0; i < count; i++) {
@@ -147,35 +151,39 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
     Config& config = Config::GetInstance();
+    std::string reply;
+    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
 
-    int64_t value;
-    auto status = config.GetCacheConfigCpuCacheCapacity(value);
+    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
+    auto status = CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
-    advanced_config->cpu_cache_capacity = value;
+    advanced_config->cpu_cache_capacity = std::stol(reply);
 
-    bool ok;
-    status = config.GetCacheConfigCacheInsertData(ok);
+    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA);
+    CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    advanced_config->cache_insert_data = ok;
+    advanced_config->cache_insert_data = ("1" == reply || "true" == reply);
 
-    status = config.GetEngineConfigUseBlasThreshold(value);
+    auto engine_cmd_prefix = "get_config " + std::string(CONFIG_ENGINE) + ".";
+
+    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
+    CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    advanced_config->use_blas_threshold = value;
+    advanced_config->use_blas_threshold = std::stol(reply);
 
 #ifdef MILVUS_GPU_VERSION
-
-    status = config.GetEngineConfigGpuSearchThreshold(value);
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
+    CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    advanced_config->gpu_search_threshold = value;
-
+    advanced_config->gpu_search_threshold = std::stol(reply);
 #endif
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -183,44 +191,57 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    Config& config = Config::GetInstance();
-
     if (nullptr == advanced_config->cpu_cache_capacity.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
-    }
-    auto status =
-        config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
     }
 
     if (nullptr == advanced_config->cache_insert_data.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
     }
-    status = config.SetCacheConfigCacheInsertData(std::to_string(advanced_config->cache_insert_data->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
 
     if (nullptr == advanced_config->use_blas_threshold.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
     }
-    status = config.SetEngineConfigUseBlasThreshold(std::to_string(advanced_config->use_blas_threshold->getValue()));
+
+#ifdef MILVUS_GPU_VERSION
+    if (nullptr == advanced_config->gpu_search_threshold.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
+    }
+#endif
+
+    std::string reply;
+    std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
+
+    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY)
+        + " " + std::to_string(advanced_config->cpu_cache_capacity->getValue());
+    auto status = CommandLine(cache_cmd_string, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA)
+        + " " + std::to_string(advanced_config->cache_insert_data->getValue());
+    status = CommandLine(cache_cmd_string, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
+
+    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD)
+        + " " + std::to_string(advanced_config->use_blas_threshold->getValue());
+    status = CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
 #ifdef MILVUS_GPU_VERSION
-
-    if (nullptr == advanced_config->gpu_search_threshold.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
-    }
-    status =
-        config.SetEngineConfigGpuSearchThreshold(std::to_string(advanced_config->gpu_search_threshold->getValue()));
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD)
+                             + " " + std::to_string(advanced_config->gpu_search_threshold->getValue());
+    CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-
 #endif
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -230,46 +251,52 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    Config& config = Config::GetInstance();
+    std::string reply;
+    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
 
-    bool enable;
-    auto status = config.GetGpuResourceConfigEnable(enable);
+    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE);
+    auto status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
-    gpu_config_dto->enable = enable;
+    gpu_config_dto->enable = reply == "1" || reply == "true";
 
-    if (!enable) {
+    if (!gpu_config_dto->enable->getValue()) {
         ASSIGN_RETURN_STATUS_DTO(Status::OK());
     }
 
-    int64_t capacity;
-    status = config.GetGpuResourceConfigCacheCapacity(capacity);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
-    gpu_config_dto->cache_capacity = capacity;
+    gpu_config_dto->cache_capacity = std::stol(reply);
 
-    std::vector<int64_t> values;
-    status = config.GetGpuResourceConfigSearchResources(values);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
+
+    std::vector<std::string> gpu_entry;
+    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
 
     gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
-    for (auto& device_id : values) {
-        gpu_config_dto->search_resources->pushBack("GPU" + OString(std::to_string(device_id).c_str()));
+    for (auto& device_id : gpu_entry) {
+        gpu_config_dto->search_resources->pushBack(OString(device_id.c_str())->toUpperCase());
     }
+    gpu_entry.clear();
 
-    values.clear();
-    status = config.GetGpuResourceConfigBuildIndexResources(values);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
+    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
     gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-    for (auto& device_id : values) {
-        gpu_config_dto->build_index_resources->pushBack("GPU" + OString(std::to_string(device_id).c_str()));
+    for (auto& device_id : gpu_entry) {
+        gpu_config_dto->build_index_resources->pushBack(OString(device_id.c_str())->toUpperCase());
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
@@ -278,34 +305,46 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
 #endif
 
 #ifdef MILVUS_GPU_VERSION
-
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    Config& config = Config::GetInstance();
-
+    // Step 1: Check config param
     if (nullptr == gpu_config_dto->enable.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
-    }
-    auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    if (!gpu_config_dto->enable->getValue()) {
-        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources false");
     }
 
     if (nullptr == gpu_config_dto->cache_capacity.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
     }
-    status = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_config_dto->cache_capacity->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
 
     if (nullptr == gpu_config_dto->search_resources.get()) {
         gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
         gpu_config_dto->search_resources->pushBack("GPU0");
+    }
+
+    if (nullptr == gpu_config_dto->build_index_resources.get()) {
+        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+        gpu_config_dto->build_index_resources->pushBack("GPU0");
+    }
+
+    // Step 2: Set config
+    std::string reply;
+    std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE)
+                                  + " " + std::to_string(gpu_config_dto->enable->getValue());
+    auto status = CommandLine(gpu_cmd_request, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    if (!gpu_config_dto->enable->getValue()) {
+        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
+    }
+
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY)
+                      + " " + std::to_string(gpu_config_dto->cache_capacity->getValue());
+    status = CommandLine(gpu_cmd_request, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
     }
 
     std::vector<std::string> search_resources;
@@ -322,15 +361,14 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     if (len > 0) {
         search_resources_value.erase(len - 1);
     }
-    status = config.SetGpuResourceConfigSearchResources(search_resources_value);
+
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES)
+                      + " " + search_resources_value;
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
-    if (nullptr == gpu_config_dto->build_index_resources.get()) {
-        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-        gpu_config_dto->build_index_resources->pushBack("GPU0");
-    }
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
         [&build_resources](const OString& res) {
@@ -346,7 +384,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         build_resources_value.erase(len - 1);
     }
 
-    status = config.SetGpuResourceConfigBuildIndexResources(build_resources_value);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES)
+                      + " " + build_resources_value;
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
@@ -396,7 +436,7 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
 
     // TODO: query string field `fields` npt used here
     std::map<std::string, std::string> table_info;
-    status = GetTaleInfo(context_ptr_, table_name->std_str(), table_info);
+    status = GetTaleInfo(table_name->std_str(), table_info);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -447,7 +487,7 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
     for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
         std::map<std::string, std::string> table_info;
 
-        status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
+        status = GetTaleInfo(tables.at(i), table_info);
         if (!status.ok()) {
             break;
         }
@@ -697,7 +737,7 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 StatusDto::ObjectWrapper
 WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
     std::string reply_str;
-    auto status = request_handler_.Cmd(context_ptr_, cmd->std_str(), reply_str);
+    auto status = CommandLine(cmd->std_str(), reply_str);
 
     if (status.ok()) {
         cmd_dto->reply = reply_str.c_str();
