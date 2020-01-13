@@ -51,7 +51,7 @@ class SegmentWriter {
 
     // TODO(zhiru): rewrite and remove vector_type_size
     Status
-    Merge(const std::string& segment_dir_to_merge, const std::string& name, int vector_type_size);
+    Merge(const std::string& segment_dir_to_merge, const std::string& name);
 
     size_t
     Size();

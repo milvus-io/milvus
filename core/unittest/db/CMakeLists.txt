@@ -26,6 +26,7 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_mysql.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_misc.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_search.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_delete.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
 add_executable(test_db

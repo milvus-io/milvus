@@ -70,6 +70,8 @@ MemTable::Delete(segment::doc_id_t doc_id) {
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
     doc_ids_to_delete_.insert(doc_id);
+
+    return Status::OK();
 }
 
 void
