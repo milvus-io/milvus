@@ -86,13 +86,15 @@ MemTable::GetTableFileCount() {
 
 Status
 MemTable::Serialize(uint64_t wal_lsn) {
-    auto status = ApplyDeletes();
-    if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
+    if (!doc_ids_to_delete_.empty()) {
+        auto status = ApplyDeletes();
+        if (!status.ok()) {
+            return Status(DB_ERROR, status.message());
+        }
     }
 
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
-        status = (*mem_table_file)->Serialize(wal_lsn);
+        auto status = (*mem_table_file)->Serialize(wal_lsn);
         if (!status.ok()) {
             std::string err_msg = "Insert data serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
@@ -102,20 +104,22 @@ MemTable::Serialize(uint64_t wal_lsn) {
             std::lock_guard<std::mutex> lock(mutex_);
             mem_table_file = mem_table_file_list_.erase(mem_table_file);
         }
-        // Update flush lsn
-        status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
-        if (!status.ok()) {
-            std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
-            ENGINE_LOG_ERROR << err_msg;
-            return Status(DB_ERROR, err_msg);
-        }
     }
+
+    // Update flush lsn
+    auto status = meta_->UpdateTableFlushLSN(table_id_, wal_lsn);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
     return Status::OK();
 }
 
 bool
 MemTable::Empty() {
-    return mem_table_file_list_.empty();
+    return mem_table_file_list_.empty() && doc_ids_to_delete_.empty();
 }
 
 const std::string&
