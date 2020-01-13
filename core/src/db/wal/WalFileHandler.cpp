@@ -25,9 +25,7 @@ namespace wal {
 
 MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path)
 : file_path_(mxlog_path)
-{
-//    OpenFile();
-    file_size_ = 0;
+, file_size_(0) {
 }
 
 MXLogFileHandler::~MXLogFileHandler() {
@@ -47,34 +45,43 @@ MXLogFileHandler::OpenFile() {
 }
 
 bool
-MXLogFileHandler::Load(char *buf) {
+MXLogFileHandler::Load(char *buf,
+                       uint32_t data_offset,
+                       uint32_t data_size) {
     if(!IsOpen()) {
         if (!OpenFile())
             return false;
     }
-    auto res = fread(buf, 1, file_size_, p_file_);
-    __glibcxx_assert(res == file_size_);
+
+    if (data_offset != 0) {
+        fseek(p_file_, data_offset, SEEK_SET);
+    }
+
+    if (data_size != 0) {
+        auto res = fread(buf, 1, data_size, p_file_);
+        return (res == data_size);
+    }
+
     return true;
 }
 
 bool
 MXLogFileHandler::Write(char *buf,
-                        const uint64_t &data_size,
+                        uint32_t data_size,
                         bool is_sync) {
     if(!IsOpen()) {
         if (!OpenFile())
             return false;
     }
     auto res = fwrite(buf, 1, data_size, p_file_);
-    __glibcxx_assert(res == file_size_);
-    return true;
+    return (res == file_size_);
 }
 
-void
-MXLogFileHandler::ReBorn(const uint64_t& new_file_no) {
+bool
+MXLogFileHandler::ReBorn(const std::string& file_name) {
     CloseFile();
-    file_name_ = std::to_string(new_file_no) + ".wal";
-    OpenFile();
+    SetFileName(file_name);
+    return OpenFile();
 }
 
 bool
@@ -98,19 +105,22 @@ MXLogFileHandler::IsOpen() {
     return p_file_ != NULL;
 }
 
-uint64_t
+uint32_t
 MXLogFileHandler::GetFileSize() {
     if (file_size_)
         return file_size_;
+
     struct stat statbuf;
-    stat(file_name_.c_str(), &statbuf);
-    file_size_ = (uint64_t)statbuf.st_size;
+    if (0 == stat((file_path_ + file_name_).c_str(), &statbuf)) {
+        file_size_ = (uint32_t) statbuf.st_size;
+    }
+
     return file_size_;
 }
 
 void
 MXLogFileHandler::DeleteFile() {
-    remove(((file_path_ + file_name_) + ".wal").c_str());
+    remove((file_path_ + file_name_).c_str());
     p_file_ = NULL;
     file_size_ = 0;
     file_name_ = "";
@@ -118,7 +128,7 @@ MXLogFileHandler::DeleteFile() {
 
 bool
 MXLogFileHandler::FileExists() {
-    return access(((file_path_ + file_name_) + ".wal").c_str(), 0) != -1;
+    return access((file_path_ + file_name_).c_str(), 0) != -1;
 }
 
 void
@@ -128,12 +138,15 @@ MXLogFileHandler::SetFileOpenMode(const std::string& open_mode) {
 
 void
 MXLogFileHandler::SetFileName(const std::string& file_name) {
-    file_mode_ = file_name;
+    file_name_ = file_name;
 }
 
 void
 MXLogFileHandler::SetFilePath(const std::string& file_path) {
     file_path_ = file_path;
+    if (!file_path_.empty() && file_path_.back() != '/') {
+        file_path_ += '/';
+    }
 }
 
 } // wal

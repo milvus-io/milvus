@@ -18,9 +18,7 @@
 #pragma once
 
 #include <atomic>
-#include <thread>
-#include <condition_variable>
-//#include <src/sdk/include/MilvusApi.h>
+#include <map>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
@@ -32,54 +30,117 @@ namespace wal {
 
 class WalManager {
  public:
-    WalManager* GetInstance();
     WalManager();
     ~WalManager();
 
+    /*
+     * init
+     * @param meta
+     */
+    bool
+    Init(const meta::MetaPtr& meta, bool ignore_error);
 
-    void Init();
-    void Run();
-    void Start();
-    void Stop();
-    //todo: return error code
-    bool
-    CreateTable();
-    bool
-    DropTable();
+    /*
+     * Get next recovery
+     * @param record[out]: record
+     */
+    void
+    GetNextRecovery(WALRecord &record);
+
+    /*
+     * Get next record
+     * @param record[out]: record
+     */
+    void
+    GetNextRecord(WALRecord &record);
+
+    /*
+     * Create table
+     * @param table_id: table id
+     * @retval lsn
+     */
+    uint64_t
+    CreateTable(const std::string &table_id);
+
+    /*
+     * Drop table
+     * @param table_id: table id
+     * @retval none
+     */
+    void
+    DropTable(const std::string &table_id);
+
+    /*
+     * Table is flushed
+     * @param table_id: table id
+     * @param lsn: flushed lsn
+     */
+    void
+    TableFlushed(const std::string &table_id, uint64_t lsn);
+
+    /*
+     * Insert
+     * @param table_id: table id
+     * @param vector_ids: vector ids
+     * @param vectors: vectors
+     */
+    template <typename T>
     bool
     Insert(const std::string &table_id,
-           size_t n,
-           const float *vectors,
-           milvus::engine::IDNumbers &vector_ids);
-    void DeleteById(const std::string& table_id, const milvus::engine::IDNumbers& vector_ids);
-    //not support right now
-    void UpdateById(const std::string& table_id, const float* vectors, const milvus::engine::IDNumbers& vector_ids);
-    void Flush(const std::string& table_id = "");
-    void Apply(const uint64_t& apply_lsn);
-    void Dispatch(std::string &table_id,
-                  MXLogType& mxl_type,
-                  size_t &n,
-                  size_t &dim,
-                  float *vectors,
-                  milvus::engine::IDNumbers &vector_ids,
-                  const uint64_t& last_applied_lsn,
-                  uint64_t &lsn);
+           const IDNumbers &vector_ids,
+           const std::vector<T> &vectors);
 
-    void Recovery();
+    /*
+     * Insert
+     * @param table_id: table id
+     * @param vector_ids: vector ids
+     */
+    bool
+    DeleteById(const std::string& table_id,
+               const IDNumbers &vector_ids);
+
+    /*
+     * Get flush lsn
+     * @param table_id: table id (empty means all tables)
+     * @retval if there is something not flushed, return lsn;
+     *         else, return 0
+     */
+    uint64_t
+    Flush(const std::string table_id = "");
+
 
  private:
+    WalManager operator = (WalManager&);
 
-    bool is_running_;
     MXLogConfiguration mxlog_config_;
-    uint64_t last_applied_lsn_;
-    uint32_t current_file_no_;
-    TableMetaPtr p_table_meta_;
+
     MXLogBufferPtr p_buffer_;
-    MXLogMetaHandler meta_handler_;
+    MXLogMetaHandlerPtr p_meta_handler_;
 
-    std::thread reader_;
+    struct TableLsn {
+        uint64_t flush_lsn;
+        uint64_t wal_lsn;
+    };
+    std::mutex mutex_;
+    std::map<std::string, TableLsn> tables_;
+    std::atomic<uint64_t> last_applied_lsn_;
 
+    // if multi-thread call Flush(), use list
+    std::pair<std::string, uint64_t> flush_info_;
 };
+
+extern template bool
+WalManager::Insert<float>(
+       const std::string &table_id,
+       const IDNumbers &vector_ids,
+       const std::vector<float> &vectors);
+
+extern template bool
+WalManager::Insert<uint8_t>(
+    const std::string &table_id,
+    const IDNumbers &vector_ids,
+    const std::vector<uint8_t> &vectors);
+
 } // wal
 } // engine
 } // milvus

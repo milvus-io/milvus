@@ -29,43 +29,37 @@ namespace wal {
 
 using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
-std::condition_variable reader_cv;
-std::mutex reader_mutex;
-bool reader_is_waiting;
-bool is_recoverying;
+extern std::condition_variable reader_cv;
+extern std::mutex reader_mutex;
+extern bool reader_is_waiting;
 
-#define WAL_BUFFER_MIN_SIZE 64
+#define WAL_BUFFER_MAX_SIZE ((uint32_t)2 * 1024 * 1024 * 1024)
+#define WAL_BUFFER_MIN_SIZE ((uint32_t)64 * 1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 #define WAL_META_AMOUNT 2
+#ifdef offsetof
+#undef offsetof
+#endif
 #define offsetof(type, field) ((long) &((type *)0)->field)
 
 enum class MXLogType {
-    Insert,
+    InsertBinary,
+    InsertVector,
     Delete,
     Update,
     Flush,
-    FlushAll
+    None,
 };
 
-#pragma pack(push)
-#pragma pack(1)
-
-struct MXLogRecord{
-    uint32_t mxl_size;//data length
-    uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
-    uint32_t vector_num;
-    uint16_t table_id_size;//
-    uint16_t dim;//one record contains the same dimension vectors
-    uint8_t mxl_type;//record type, insert/delete/update/flush...
-    //mxl_data include vecter_ids[vector_num], table_id and float* vectors
-    char mxl_data[];//data address
-//    char* mxl_data;
+struct WALRecord {
+    uint64_t lsn;
+    MXLogType type;
+    std::string table_id;
+    size_t length;
+    const IDNumber* ids;
+    size_t dim;
+    const void* data;
 };
-
-#pragma pack(pop)
-
-//#define SizeOfMXLogRecordHeader (offsetof(MXLogRecord, mxl_data))
-#define SizeOfMXLogRecordHeader (sizeof(MXLogRecord))
 
 struct MXLogConfiguration {
     uint32_t record_size;
@@ -73,13 +67,7 @@ struct MXLogConfiguration {
     std::string mxlog_path;
 };
 
-struct MXLogBufferHandler {
-    uint64_t lsn;
-    uint32_t max_offset;
-    uint32_t file_no;
-    uint32_t buf_offset;
-    uint8_t buf_idx;
-};
+
 
 } //wal
 } //engine

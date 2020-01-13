@@ -30,55 +30,75 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
+#pragma pack(push)
+#pragma pack(1)
+
+struct MXLogRecordHeader{
+    uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
+    uint32_t vector_num;
+    uint16_t table_id_size;//
+    uint16_t dim;//one record contains the same dimension vectors
+    uint8_t mxl_type;//record type, insert/delete/update/flush...
+};
+
+#define SizeOfMXLogRecordHeader (sizeof(MXLogRecordHeader))
+
+#pragma pack(pop)
+
+struct MXLogBufferHandler {
+    uint32_t max_offset;
+    uint32_t file_no;
+    uint32_t buf_offset;
+    uint8_t buf_idx;
+};
+
 using BufferPtr = std::shared_ptr<char>;
 
 class MXLogBuffer {
  public:
-    MXLogBuffer(const std::string& mxlog_path, const uint32_t& buffer_size);
+    MXLogBuffer(const std::string& mxlog_path,
+                const uint32_t buffer_size);
     ~MXLogBuffer();
 
-    bool Append(const std::string &table_id,
-                const MXLogType& record_type,
-                const size_t& n,
-                const size_t& dim,
-                const float *vectors,
-                const milvus::engine::IDNumbers& vector_ids,
-                const size_t& vector_ids_offset,
-                bool update_file_no,
-                MXLogMetaHandler& meta_handler,
-                uint64_t& lsn);
+    bool Init(uint64_t read_lsn,
+              uint64_t write_lsn);
 
-    bool Next(std::string &table_id,
-              MXLogType& mxl_type,
-              size_t &n,
-              size_t &dim,
-              float *vectors,
-              milvus::engine::IDNumbers &vector_ids,
-              const uint64_t& last_applied_lsn,
-              uint64_t &lsn);
-    bool Next();
-    void Flush(const std::string& table_id);
-    void SwitchBuffer(MXLogBufferHandler &handler);//switch buffer
-    uint32_t GetWriterFileNo();
-    void SetWriterFileNo(const uint32_t& file_no);
-    void ReSet();
-    bool LoadForRecovery(const uint64_t& lsn);
-    bool NextInfo(std::string& table_id, uint64_t& next_lsn);
+    // ignore all old wal file
+    void Reset(uint64_t lsn);
 
- private:
-    bool Init();
-    uint64_t SurplusSpace();
-    uint64_t RecordSize(const size_t n, const size_t dim, const size_t table_id_size);
-    void SetBufferSize(const uint64_t& buffer_size);
-    void SetMXLogPath(const std::string& mxlog_path);
+    // if failed, return 0, else return lsn
+    uint64_t Append(const std::string &table_id,
+                    const MXLogType record_type,
+                    const size_t n,
+                    const IDNumber* vector_ids,
+                    const size_t dim,
+                    const void *vectors);
 
+    // if failed, return 0, else return lsn
+    uint64_t Next(const uint64_t last_applied_lsn,
+                  std::string &table_id,
+                  MXLogType &record_type,
+                  size_t& n,
+                  const IDNumber* &vector_ids,
+                  size_t &dim,
+                  const void* &vectors);
+
+    uint64_t GetReadLsn();
+
+    bool SetWriteLsn(uint64_t lsn);
 
  private:
-    uint32_t mxlog_buffer_size_;//from config
-    std::string mxlog_path_;//from config
+    uint32_t SurplusSpace();
+    uint32_t RecordSize(const size_t n,
+                        const size_t no_type_dim,
+                        const size_t table_id_size);
+
+ private:
+    uint32_t mxlog_buffer_size_; //from config
     BufferPtr buf_[2];
-    std::mutex lock_;
-    MXLogBufferHandler mxlog_buffer_reader_, mxlog_buffer_writer_;
+    std::mutex mutex_;
+    MXLogBufferHandler mxlog_buffer_reader_;
+    MXLogBufferHandler mxlog_buffer_writer_;
     MXLogFileHandler mxlog_writer_;
 };
 

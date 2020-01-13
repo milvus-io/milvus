@@ -22,54 +22,46 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogMetaHandler::MXLogMetaHandler() : wal_lsn_(0), wal_file_no_(0) {
+MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
+    wal_meta_fp_ = fopen(internal_meta_file_path.c_str(), "r+");
+    if (wal_meta_fp_ == nullptr) {
+        wal_meta_fp_ = fopen(internal_meta_file_path.c_str(), "w");
+    }
 
+    if (wal_meta_fp_ == nullptr) {
+        // through
+    }
+}
+
+MXLogMetaHandler::~MXLogMetaHandler() {
+    if (wal_meta_fp_ != nullptr) {
+        fclose(wal_meta_fp_);
+        wal_meta_fp_ = nullptr;
+    }
 }
 
 void
-MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn, uint32_t &wal_file_no) {
-    auto meta_file_size = wal_meta_.GetFileSize();
-    char *p_meta_buf = (char*)malloc(meta_file_size + 1);
-    __glibcxx_assert(p_meta_buf != NULL);
-    wal_meta_.Load(p_meta_buf);
-    p_meta_buf[meta_file_size] = 0;
-    uint64_t tmp_meta[WAL_META_AMOUNT];
-    memset(tmp_meta, 0, sizeof(tmp_meta));
-    char* p_buf = p_meta_buf;
-    int idx = 0;
-    do {
-        while (*p_buf && (*p_buf) != '\n') {
-            tmp_meta[idx] = tmp_meta[idx] * 10 + (*p_buf++ - '0');
-        }
-        idx ++;
-        if (*p_buf)
-            ++ p_buf;
-    }while (*p_buf);
-    //hard code right now
-    wal_lsn = tmp_meta[0];
-    wal_file_no = (uint32_t)tmp_meta[1];
-    free(p_meta_buf);
+MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn) {
+    // todo: add crc
+
+    fseek(wal_meta_fp_, 0, SEEK_SET);
+    size_t read_len = fread(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_);
+    if (read_len != sizeof(wal_lsn)) {
+        wal_lsn = 0;
+    }
 }
 
 void
-MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t &wal_lsn, const uint32_t &wal_file_no) {
-    char* p_meta_buf = (char*)malloc(100);
-    __glibcxx_assert(p_meta_buf != NULL);
-    memset(p_meta_buf, 0, 100);
-    sprintf(p_meta_buf, "%uld\n%u\n", wal_lsn, wal_file_no);
-    wal_meta_.Write(p_meta_buf, sizeof(p_meta_buf));
-    free(p_meta_buf);
+MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t &wal_lsn) {
+    // todo: add crc
+
+    fseek(wal_meta_fp_, 0, SEEK_SET);
+    size_t write_len = fwrite(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_);
+    if (write_len != sizeof(wal_lsn)) {
+        // through
+    }
 }
 
-void
-MXLogMetaHandler::GetMXLogExternalMeta(TableMetaPtr global_meta) {
-    //todo: wait interfaces from @zhiru
-}
-
-void
-MXLogMetaHandler::SetMXLogInternalMetaFilePath(const std::string &internal_meta_file_path) {
-    wal_meta_.SetFilePath(internal_meta_file_path);
-}
 
 } // wal
 } // engine
