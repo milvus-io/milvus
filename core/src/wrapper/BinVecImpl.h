@@ -46,6 +46,9 @@ class BinVecImpl : public VecIndexImpl {
     Status
     SetBlacklist(faiss::ConcurrentBitsetPtr list) override;
 
+    Status
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list) override;
+
     //    Status
     //    SearchById(const int64_t& nq, const uint8_t* xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t* ids,
     //               const Config& cfg) override;

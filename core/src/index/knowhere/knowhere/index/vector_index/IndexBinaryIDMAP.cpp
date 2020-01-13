@@ -166,10 +166,10 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-//    auto search_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
-//    if (search_cfg == nullptr) {
-//        KNOWHERE_THROW_MSG("not support this kind of config");
-//    }
+    //    auto search_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
+    //    if (search_cfg == nullptr) {
+    //        KNOWHERE_THROW_MSG("not support this kind of config");
+    //    }
 
     //    GETBINARYTENSOR(dataset)
     auto dim = dataset->Get<int64_t>(meta::DIM);
@@ -196,6 +196,11 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
 void
 BinaryIDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
     bitset_ = std::move(list);
+}
+
+void
+BinaryIDMAP::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    list = bitset_;
 }
 
 }  // namespace knowhere
