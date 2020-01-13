@@ -50,13 +50,13 @@ class Vectors {
     GetName() const;
 
     size_t
-    GetCount();
+    GetCount() const;
 
     size_t
-    GetDimension();
+    GetCodeLength() const;
 
     void
-    Erase(size_t offset, int vector_type_size);
+    Erase(size_t offset);
 
     size_t
     Size();

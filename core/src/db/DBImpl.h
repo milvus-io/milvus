@@ -34,6 +34,7 @@
 #include "db/Types.h"
 #include "db/insert/MemManager.h"
 #include "utils/ThreadPool.h"
+#include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
@@ -201,16 +202,26 @@ class DBImpl : public DB {
     Status
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
+    Status
+    ExecWalRecord(const wal::WALRecord &record);
+
+    void
+    BackgroundWalTask();
+
  private:
     const DBOptions options_;
 
-    std::atomic<bool> shutting_down_;
+    std::atomic<bool> initialized_;
 
     std::thread bg_timer_thread_;
 
     meta::MetaPtr meta_ptr_;
     MemManagerPtr mem_mgr_;
     std::mutex mem_serialize_mutex_;
+
+    bool wal_enable_;
+    std::shared_ptr<wal::WalManager> wal_mgr_;
+    std::thread bg_wal_thread_;
 
     ThreadPool compact_thread_pool_;
     std::mutex compact_result_mutex_;

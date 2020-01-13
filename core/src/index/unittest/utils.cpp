@@ -216,6 +216,14 @@ AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
 }
 
 void
+AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    for (auto i = 0; i < nq; i++) {
+        EXPECT_NE(i, *((int64_t*)(ids) + i * k));
+    }
+}
+
+void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
     auto dist = result->Get<float*>(knowhere::meta::DISTANCE);

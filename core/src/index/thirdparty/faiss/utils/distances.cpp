@@ -18,7 +18,7 @@
 
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
-
+#include <faiss/utils/ConcurrentBitset.h>
 
 
 #ifndef FINTEGER

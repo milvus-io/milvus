@@ -92,7 +92,7 @@ class MySQLMetaImpl : public Meta {
     DropTableIndex(const std::string& table_id) override;
 
     Status
-    CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag) override;
+    CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag, uint64_t lsn) override;
 
     Status
     DropPartition(const std::string& partition_name) override;

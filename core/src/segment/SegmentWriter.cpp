@@ -145,10 +145,11 @@ SegmentWriter::Cache() {
 Status
 SegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
     segment_ptr = segment_ptr_;
+    return Status::OK();
 }
 
 Status
-SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name, int vector_type_size) {
+SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     SegmentReader segment_reader_to_merge(dir_to_merge);
     bool in_cache;
     auto status = segment_reader_to_merge.LoadCache(in_cache);
@@ -170,7 +171,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name, i
     for (size_t i = 0; i < uids.size(); ++i) {
         auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
         if (found != offsets_to_delete.end()) {
-            segment_to_merge->vectors_ptr_->Erase(i, vector_type_size);
+            segment_to_merge->vectors_ptr_->Erase(i);
         }
     }
     AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), uids);

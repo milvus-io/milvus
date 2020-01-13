@@ -174,6 +174,12 @@ class VecIndex : public cache::DataObj {
         return Status::OK();
     }
 
+    virtual Status
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+        ENGINE_LOG_ERROR << "GetBlacklist not support";
+        return Status::OK();
+    }
+
  private:
     int64_t size_ = 0;
 };

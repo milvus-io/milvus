@@ -16,6 +16,7 @@
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss {
 

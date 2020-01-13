@@ -401,7 +401,18 @@ ExecutionEngineImpl::Load(bool to_cache) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
 
-            auto status = segment_reader_ptr->Load();
+            TempMetaConf temp_conf;
+            temp_conf.gpu_id = gpu_num_;
+            temp_conf.dim = dim_;
+            auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
+            if (!status.ok()) {
+                return status;
+            }
+
+            auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+            auto conf = adapter->Match(temp_conf);
+
+            status = segment_reader_ptr->Load();
             if (!status.ok()) {
                 std::string msg = "Failed to load segment from " + location_;
                 ENGINE_LOG_ERROR << msg;
@@ -422,14 +433,24 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     concurrent_bitset_ptr->set(offset);
                 }
             }
+
+            ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 std::vector<float> float_vectors;
                 float_vectors.resize(vectors_data.size() / sizeof(float));
                 memcpy(float_vectors.data(), vectors_data.data(), vectors_data.size());
+                ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
+                if (ec != KNOWHERE_SUCCESS) {
+                    return status;
+                }
                 status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
+                ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
+                if (ec != KNOWHERE_SUCCESS) {
+                    return status;
+                }
                 status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                      vectors_data.data(), Config());
                 status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);

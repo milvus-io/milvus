@@ -221,7 +221,7 @@ MySQLMetaImpl::ValidateMetaSchema() {
 
         try {
             mysqlpp::StoreQueryResult res = query_statement.store();
-            for (size_t i = 0; i < res.num_rows(); i++) {
+            for (size_t i = 0; i < res.num_rows(); ++i) {
                 const mysqlpp::Row& row = res[i];
                 std::string name, type;
                 row["Field"].to_string(name);
@@ -764,7 +764,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
             }
 
             mysqlpp::Query getTableFileQuery = connectionPtr->query();
-            getTableFileQuery << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+            getTableFileQuery << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
                               << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
                               << " AND (" << idStr << ")"
                               << " AND file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
@@ -783,6 +783,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
             TableFileSchema file_schema;
             file_schema.id_ = resRow["id"];
             file_schema.table_id_ = table_id;
+            resRow["segment_id"].to_string(file_schema.segment_id_);
             file_schema.index_file_size_ = table_schema.index_file_size_;
             file_schema.engine_type_ = resRow["engine_type"];
             file_schema.nlist_ = table_schema.nlist_;
@@ -938,7 +939,7 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& tab
 
             mysqlpp::Query filesToIndexQuery = connectionPtr->query();
             filesToIndexQuery
-                << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
                 << " FROM " << META_TABLEFILES << " WHERE flush_lsn = " << flush_lsn << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
@@ -952,6 +953,7 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& tab
         for (auto& resRow : res) {
             table_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(table_file.table_id_);
+            resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(table_file.file_id_);
             table_file.file_type_ = resRow["file_type"];
@@ -1266,7 +1268,8 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
 }
 
 Status
-MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag) {
+MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name,
+                               const std::string& tag, uint64_t lsn) {
     server::MetricCollector metric;
 
     TableSchema table_schema;
@@ -1305,6 +1308,7 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
     table_schema.created_on_ = utils::GetMicroSecTimeStamp();
     table_schema.owner_table_ = table_id;
     table_schema.partition_tag_ = valid_tag;
+    table_schema.flush_lsn_ = lsn;
 
     status = CreateTable(table_schema);
     if (status.code() == DB_ALREADY_EXIST) {
@@ -1410,7 +1414,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
             }
 
             mysqlpp::Query filesToSearchQuery = connectionPtr->query();
-            filesToSearchQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date"
+            filesToSearchQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
                                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id;
 
             if (!dates.empty()) {
@@ -1457,6 +1461,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
         for (auto& resRow : res) {
             table_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(table_file.table_id_);
+            resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.engine_type_ = resRow["engine_type"];
             table_file.nlist_ = table_schema.nlist_;
@@ -1515,7 +1520,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
 
             mysqlpp::Query filesToMergeQuery = connectionPtr->query();
             filesToMergeQuery
-                << "SELECT id, table_id, file_id, file_type, file_size, row_count, date, engine_type, created_on"
+                << "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date, engine_type, created_on"
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
                 << " AND file_type = " << std::to_string(TableFileSchema::RAW) << " ORDER BY row_count DESC;";
 
@@ -1535,6 +1540,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
 
             table_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(table_file.table_id_);
+            resRow["segment_id"].to_string(table_file.segment_id_);
             resRow["file_id"].to_string(table_file.file_id_);
             table_file.file_type_ = resRow["file_type"];
             table_file.row_count_ = resRow["row_count"];
@@ -1554,7 +1560,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
-                to_merge_files++;
+                ++to_merge_files;
             }
 
             files[table_file.date_].push_back(table_file);
@@ -1585,7 +1591,7 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
 
             mysqlpp::Query filesToIndexQuery = connectionPtr->query();
             filesToIndexQuery
-                << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
                 << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(TableFileSchema::TO_INDEX)
                 << ";";
 
@@ -1600,6 +1606,7 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
         for (auto& resRow : res) {
             table_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(table_file.table_id_);
+            resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.engine_type_ = resRow["engine_type"];
             resRow["file_id"].to_string(table_file.file_id_);
             table_file.file_type_ = resRow["file_type"];
@@ -1669,7 +1676,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
             mysqlpp::Query hasNonIndexFilesQuery = connectionPtr->query();
             // since table_id is a unique column we just need to check whether it exists or not
             hasNonIndexFilesQuery
-                << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
                 << " AND file_type in (" << types << ");";
 
@@ -1685,6 +1692,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 TableFileSchema file_schema;
                 file_schema.id_ = resRow["id"];
                 file_schema.table_id_ = table_id;
+                resRow["segment_id"].to_string(file_schema.segment_id_);
                 file_schema.engine_type_ = resRow["engine_type"];
                 resRow["file_id"].to_string(file_schema.file_id_);
                 file_schema.file_type_ = resRow["file_type"];
@@ -1698,28 +1706,28 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 int32_t file_type = resRow["file_type"];
                 switch (file_type) {
                     case (int)TableFileSchema::RAW:
-                        raw_count++;
+                        ++raw_count;
                         break;
                     case (int)TableFileSchema::NEW:
-                        new_count++;
+                        ++new_count;
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        new_merge_count++;
+                        ++new_merge_count;
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        new_index_count++;
+                        ++new_index_count;
                         break;
                     case (int)TableFileSchema::TO_INDEX:
-                        to_index_count++;
+                        ++to_index_count;
                         break;
                     case (int)TableFileSchema::INDEX:
-                        index_count++;
+                        ++index_count;
                         break;
                     case (int)TableFileSchema::BACKUP:
-                        backup_count++;
+                        ++backup_count;
                         break;
                     default:
-                        break;
+                        return Status(DB_ERROR, "Unknown file type.");
                 }
             }
 
@@ -1748,7 +1756,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
                     default:
-                        break;
+                        return Status(DB_ERROR, "Unknown file type!");
                 }
             }
             ENGINE_LOG_DEBUG << msg;
@@ -1907,7 +1915,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             }
 
             mysqlpp::Query query = connectionPtr->query();
-            query << "SELECT id, table_id, file_id, file_type, date"
+            query << "SELECT id, table_id, segment_id, file_id, file_type, date"
                   << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
                   << std::to_string(TableFileSchema::TO_DELETE) << "," << std::to_string(TableFileSchema::BACKUP) << ")"
                   << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
@@ -1923,6 +1931,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             for (auto& resRow : res) {
                 table_file.id_ = resRow["id"];  // implicit conversion
                 resRow["table_id"].to_string(table_file.table_id_);
+                resRow["segment_id"].to_string(table_file.segment_id_);
                 resRow["file_id"].to_string(table_file.file_id_);
                 table_file.date_ = resRow["date"];
                 table_file.file_type_ = resRow["file_type"];
@@ -1947,7 +1956,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);
 
-                    clean_files++;
+                    ++clean_files;
                 }
             }
 
@@ -2005,7 +2014,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     resRow["table_id"].to_string(table_id);
 
                     utils::DeleteTablePath(options_, table_id, false);  // only delete empty folder
-                    remove_tables++;
+                    ++remove_tables;
                     idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
                 }
                 std::string idsToDeleteStr = idsToDeleteSS.str();
