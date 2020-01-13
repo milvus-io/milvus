@@ -20,7 +20,7 @@ version: 0.1
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Server Config        | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# address              | IP address that Milvus server monitors.                    | String     | 0.0.0.0         |
+# address              | IP address that Milvus server monitors.                    | IP         | 0.0.0.0         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # port                 | Port that Milvus server monitors. Port range (1024, 65535) | Integer    | 19530           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -29,11 +29,15 @@ version: 0.1
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # time_zone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# web_port             | Port that Milvus web server monitors.                      | Integer    | 19121           |
+#                      | Port range (1024, 65535)                                   |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 server_config:
   address: 0.0.0.0
   port: 19530
   deploy_mode: single
   time_zone: UTC+8
+  web_port: 19121
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # DataBase Config      | Description                                                | Type       | Default         |
@@ -68,7 +72,7 @@ db_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # minio_enable         | Enable MinIO storage or not.                               | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_address        | MinIO storage service IP address.                          | String     | 127.0.0.1       |
+# minio_address        | MinIO storage service IP address.                          | IP         | 127.0.0.1       |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # minio_port           | MinIO storage service port. Port range (1024, 65535)       | Integer    | 9000            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -93,20 +97,19 @@ storage_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # enable_monitor       | Enable monitoring function or not.                         | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# collector            | Connected monitoring system to collect metrics.            | String     | Prometheus      |
+# address              | Pushgateway address                                        | IP         | 127.0.0.1       +
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# port                 | Port to visit Prometheus, port range (1024, 65535)         | Integer    | 8080            |
+# port                 | Pushgateway port, port range (1024, 65535)                 | Integer    | 9091            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 metric_config:
   enable_monitor: false
-  collector: prometheus
-  prometheus_config:
-    port: 8080
+  address: 127.0.0.1
+  port: 9091
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Cache Config         | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# cpu_cache_capacity   | The size of CPU memory used for caching data for faster    | Integet    | 4 (GB)          |
+# cpu_cache_capacity   | The size of CPU memory used for caching data for faster    | Integer    | 4 (GB)          |
 #                      | query. The sum of 'cpu_cache_capacity' and                 |            |                 |
 #                      | 'insert_buffer_size' must be less than system memory size. |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+

@@ -8,6 +8,7 @@
 ![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
 [![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
 [![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
 
@@ -23,7 +24,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 ## Get started
 
-See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) for using Docker containers. To install Milvus from source code, see [build from source](install.md).
+See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) for using Docker containers. To install Milvus from source code, see [build from source](INSTALL.md).
 
 To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/v0.6.0/reference/milvus_config.md).
 

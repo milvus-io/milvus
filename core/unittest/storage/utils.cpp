@@ -18,6 +18,7 @@
 #include <fstream>
 #include <string>
 
+#include "server/Config.h"
 #include "storage/utils.h"
 #include "utils/CommonUtil.h"
 
@@ -50,7 +51,11 @@ void
 StorageTest::SetUp() {
     std::string config_path(CONFIG_PATH);
     milvus::server::CommonUtil::CreateDirectory(config_path);
-    WriteToFile(config_path + CONFIG_FILE, CONFIG_STR);
+    config_path += CONFIG_FILE;
+    WriteToFile(config_path, CONFIG_STR);
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
 }
 
 void

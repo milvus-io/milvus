@@ -1,23 +1,38 @@
-# Requirements
+# Quick start
 
-- python 3.6+
-- pip install -r requirements.txt
+### Description：
 
-# How to use this Test Project
+- Test cases can be organized with `yaml `
+- Test can run with local mode or helm mode
 
-This project is used to test performance / accuracy /  stability of milvus server
+### Demos：
 
-1. update your test configuration in suites_*.yaml
-2. run command
+1. Using jenkins + helm mode：
 
-```shell
-### docker mode:
-python main.py --image=milvusdb/milvus:latest --run-count=2 --run-type=performance
+   ![](assets/Parameters.png)
 
-### local mode:
-python main.py --local --run-count=2 --run-type=performance --ip=127.0.0.1 --port=19530
-```
+2. Local test：
 
-# Contribution getting started
+   `python3 main.py --local --host=*.* --port=19530 --suite=suites/gpu_search_performance_random50m.yaml`
 
-- Follow PEP-8 for naming and black for formatting.
+### Definitions of test suites：
+
+Testers need to write test suite config if adding a customizised test into the current test framework
+
+The following are the searching performance test suite：
+
+![](assets/gpu_search_performance_random50m-yaml.png)
+
+1. search_performance: the test type，also we have`build_performance`,`insert_performance`,`accuracy`,`stability`,`search_stability`
+2. tables: list of test cases
+3. The following fields are in the `table` field：
+   - server: milvus的server_config
+   - table_name: currently support one table
+   - run_count: search count
+   - search_params: params of search_vectors
+
+## Test result：
+
+The result of searching performance![](assets/milvus-nightly-performance-new-jenkins.png)
+
+Test result will be uploaded, and will be used to judge if the test run pass or failed

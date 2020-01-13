@@ -55,6 +55,7 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     void
     UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
+        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, 20);
     }
 
     void
@@ -102,9 +103,8 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
-    RequestHandler handler;
     GrpcRequestHandler service(opentracing::Tracer::Global());
-    service.RegisterRequestHandler(handler);
+    service.RegisterRequestHandler(RequestHandler());
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
