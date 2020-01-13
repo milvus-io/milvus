@@ -288,8 +288,8 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
     }
 
     auto dim = dataset->Get<int64_t>(meta::DIM);
-    auto rows = dataset->Get<int64_t>(meta::ROWS); \
-    auto p_data = dataset->Get<const int64_t *>(meta::IDS);
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     try {
         auto elems = rows * search_cfg->k;
@@ -330,6 +330,11 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
 void
 IVF::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
     bitset_ = std::move(list);
+}
+
+void
+IVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    list = bitset_;
 }
 
 IVFIndexModel::IVFIndexModel(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {

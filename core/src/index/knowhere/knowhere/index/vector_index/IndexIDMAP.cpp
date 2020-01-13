@@ -106,7 +106,7 @@ IDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    auto rows = dataset->Get<int64_t >(meta::ROWS);
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
     std::vector<int64_t> new_ids(rows);
@@ -221,6 +221,11 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
 void
 IDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
     bitset_ = std::move(list);
+}
+
+void
+IDMAP::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    list = bitset_;
 }
 
 }  // namespace knowhere

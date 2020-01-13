@@ -68,6 +68,9 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr list);
 
+    void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
+
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config);
