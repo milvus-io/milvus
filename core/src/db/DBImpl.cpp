@@ -44,6 +44,7 @@
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Log.h"
+#include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
@@ -73,6 +74,12 @@ DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
+
+    wal_enable_ = true; // todo: read config
+    if (wal_enable_) {
+        wal_mgr_ = std::make_shared<wal::WalManager>();
+    }
+
     Start();
 }
 
@@ -98,6 +105,26 @@ DBImpl::Start() {
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
 
+    // wal
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        bool recovery_error_ignore = true; // todo: read config
+
+        auto init_rst = wal_mgr_->Init(meta_ptr_, recovery_error_ignore);
+        if (init_rst != WAL_SUCCESS) {
+            throw Exception(init_rst, "Wal init error!");
+        }
+
+        // recovery
+        // todo: need to check error
+        wal::WALRecord record;
+        while (wal_mgr_->GetNextRecovery(record), (record.lsn != 0)) {
+            ExecWalRecord(record);
+        }
+
+        // background thread
+        bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalTask, this);
+    }
+
     return Status::OK();
 }
 
@@ -121,6 +148,8 @@ DBImpl::Stop() {
         meta_ptr_->CleanUpShadowFiles();
     }
 
+    bg_wal_thread_.join();
+
     // ENGINE_LOG_TRACE << "DB service stop";
     return Status::OK();
 }
@@ -138,6 +167,10 @@ DBImpl::CreateTable(meta::TableSchema& table_schema) {
 
     meta::TableSchema temp_schema = table_schema;
     temp_schema.index_file_size_ *= ONE_MB;  // store as MB
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        temp_schema.flush_lsn_ = wal_mgr_->CreateTable(table_schema.table_id_);
+    }
+
     return meta_ptr_->CreateTable(temp_schema);
 }
 
@@ -274,7 +307,14 @@ DBImpl::CreatePartition(const std::string& table_id, const std::string& partitio
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->CreatePartition(table_id, partition_name, partition_tag);
+    uint64_t lsn = 0;
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        if (!partition_name.empty()) {
+            lsn = wal_mgr_->CreateTable(partition_name);
+        }
+    }
+
+    return meta_ptr_->CreatePartition(table_id, partition_name, partition_tag, lsn);
 }
 
 Status
@@ -291,6 +331,12 @@ DBImpl::DropPartition(const std::string& partition_name) {
     scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(partition_name, meta_ptr_, nres);
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitAndDelete();
+
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        if (!partition_name.empty()) {
+            wal_mgr_->DropTable(partition_name);
+        }
+    }
 
     return Status::OK();
 }
@@ -339,23 +385,31 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         }
     }
 
-    // TODO(zhiru): Enter WAL. They should call mem_mgr_->InsertVectors
-
-    // insert vectors into target table
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
-    auto lsn = 0;
-    std::set<std::string> flushed_tables;
-    if (vectors.binary_data_.empty()) {
-        auto dim = vectors.float_data_.size() / vectors.vector_count_;
-        status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
-                                         vectors.float_data_.data(), lsn, flushed_tables);
+
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        if (!vectors.float_data_.empty()) {
+            wal_mgr_->Insert(target_table_name, vectors.id_array_, vectors.float_data_);
+        } else if (!vectors.binary_data_.empty()) {
+            wal_mgr_->Insert(target_table_name, vectors.id_array_, vectors.binary_data_);
+        }
+
     } else {
-        auto dim = vectors.binary_data_.size() / vectors.vector_count_;
-        status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
-                                         vectors.binary_data_.data(), lsn, flushed_tables);
-    }
-    if (!flushed_tables.empty()) {
-        Merge(flushed_tables);
+        // insert vectors into target table
+        auto lsn = 0;
+        std::set<std::string> flushed_tables;
+        if (vectors.binary_data_.empty()) {
+            auto dim = vectors.float_data_.size() / vectors.vector_count_;
+            status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
+                                            vectors.float_data_.data(), lsn, flushed_tables);
+        } else {
+            auto dim = vectors.binary_data_.size() / vectors.vector_count_;
+            status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
+                                            vectors.binary_data_.data(), lsn, flushed_tables);
+        }
+        if (!flushed_tables.empty()) {
+            Merge(flushed_tables);
+        }
     }
 
     return status;
@@ -367,9 +421,16 @@ DBImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
         return SHUTDOWN_ERROR;
     }
 
-    // TODO(zhiru): Enter WAL. They should call mem_mgr_->DeleteVector
-    auto lsn = 0;
-    auto status = mem_mgr_->DeleteVector(table_id, vector_id, lsn);
+    Status status;
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        IDNumbers ids;
+        ids.push_back(vector_id);
+        wal_mgr_->DeleteById(table_id, ids);
+
+    } else {
+        auto lsn = 0;
+        status = mem_mgr_->DeleteVector(table_id, vector_id, lsn);
+    }
 
     return status;
 }
@@ -380,9 +441,14 @@ DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
         return SHUTDOWN_ERROR;
     }
 
-    // TODO(zhiru): Enter WAL. They should call mem_mgr_->DeleteVectors
-    auto lsn = 0;
-    auto status = mem_mgr_->DeleteVectors(table_id, vector_ids.size(), vector_ids.data(), lsn);
+    Status status;
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        wal_mgr_->DeleteById(table_id, vector_ids);
+
+    } else {
+        auto lsn = 0;
+        status = mem_mgr_->DeleteVectors(table_id, vector_ids.size(), vector_ids.data(), lsn);
+    }
 
     return status;
 }
@@ -393,13 +459,21 @@ DBImpl::Flush(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    // TODO(zhiru): Enter WAL. They should call mem_mgr_->Flush and provide a LSN
+    Status status;
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        auto lsn = wal_mgr_->Flush(table_id);
+        if (lsn == 0) {
+            return status;
+        }
 
-    // TODO: wait till notified by flush_ok_cv
+        
+    
+    } else {
+        status = mem_mgr_->Flush(table_id);
+        std::set<std::string> table_ids{table_id};
+        Merge(table_ids);
+    }
 
-    auto status = mem_mgr_->Flush(table_id);
-    std::set<std::string> table_ids{table_id};
-    Merge(table_ids);
     return status;
 }
 
@@ -409,14 +483,21 @@ DBImpl::Flush() {
         return SHUTDOWN_ERROR;
     }
 
-    // TODO(zhiru): Enter WAL. They should call mem_mgr_->Flush and provide a LSN
-    //    WAL->Flush
+    Status status;
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        auto lsn = wal_mgr_->Flush();
+        if (lsn == 0) {
+            return status;
+        }
 
-    // TODO: wait till notified by flush_ok_cv
 
-    std::set<std::string> table_ids;
-    auto status = mem_mgr_->Flush(table_ids);
-    Merge(table_ids);
+    
+    } else {
+        std::set<std::string> table_ids;
+        status = mem_mgr_->Flush(table_ids);
+        Merge(table_ids);
+    }
+
     return status;
 }
 
@@ -1190,6 +1271,10 @@ DBImpl::DropTableRecursively(const std::string& table_id, const meta::DatesT& da
 
     Status status;
     if (dates.empty()) {
+        if (wal_enable_ && wal_mgr_ != nullptr) {
+            wal_mgr_->DropTable(table_id);
+        }
+
         status = mem_mgr_->EraseMemVector(table_id);  // not allow insert
         status = meta_ptr_->DropTable(table_id);      // soft delete table
         index_failed_checker_.CleanFailedIndexFileOfTable(table_id);
@@ -1342,6 +1427,54 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
     }
 
     return Status::OK();
+}
+
+Status
+DBImpl::ExecWalRecord(const wal::WALRecord &record) {
+    Status status;
+    switch (record.type) {
+        case wal::MXLogType::InsertBinary: {
+            std::set<std::string> flushed_tables;
+            status = mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, record.dim,
+                                             (const u_int8_t*)record.data, record.lsn, flushed_tables);
+            // even though !status.ok, run Merge
+            if (!flushed_tables.empty()) {
+                Merge(flushed_tables);
+            }
+            break;
+        }
+
+        case wal::MXLogType::InsertVector: {
+            std::set<std::string> flushed_tables;
+            status = mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, record.dim,
+                                             (const float*)record.data, record.lsn, flushed_tables);
+            if (!flushed_tables.empty()) {
+                Merge(flushed_tables);
+            }
+            break;
+        }
+
+        case wal::MXLogType::Delete: {
+            if (record.length == 1) {
+                status = mem_mgr_->DeleteVector(record.table_id, *record.ids, record.lsn);
+            } else {
+                status = mem_mgr_->DeleteVectors(record.table_id, record.length, record.ids, record.lsn);
+            }
+            break;
+        }
+
+        case wal::MXLogType::Flush: {
+            // todo
+            break;
+        }
+    }
+
+    return status;
+}
+
+void
+DBImpl::BackgroundWalTask() {
+
 }
 
 }  // namespace engine

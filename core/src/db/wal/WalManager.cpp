@@ -31,7 +31,11 @@ WalManager::WalManager() {
     config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
 }
 
-bool
+WalManager::~WalManager() {
+
+}
+
+ErrorCode
 WalManager::Init(const meta::MetaPtr& meta, bool ignore_error) {
     uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
@@ -44,7 +48,7 @@ WalManager::Init(const meta::MetaPtr& meta, bool ignore_error) {
     if (meta != nullptr) {
         auto status = meta->AllTables(table_schema_array);
         if (!status.ok()) {
-            // through exception
+            return WAL_META_ERROR;
         }
     }
 
@@ -63,10 +67,14 @@ WalManager::Init(const meta::MetaPtr& meta, bool ignore_error) {
         mxlog_config_.buffer_size);
 
     bool rst = p_buffer_->Init(recovery_start, applied_lsn);
-    if (!rst && ignore_error) {
+    if (!rst) {
+        if (!ignore_error) {
+            return WAL_FILE_ERROR;
+        }
         p_buffer_->Reset(applied_lsn);
     }
-    return rst;
+
+    return WAL_SUCCESS;
 }
 
 void
@@ -255,7 +263,7 @@ WalManager::Flush(const std::string table_id) {
     if (table_id.empty()) {
         lck.lock();
         for (auto &it : tables_) {
-            if (it.second.wal_lsn != it.second.flush_lsn) {
+            if (it.second.wal_lsn > it.second.flush_lsn) {
                 lsn = last_applied_lsn_;
                 break;
             }
@@ -265,7 +273,7 @@ WalManager::Flush(const std::string table_id) {
         lck.lock();
         auto it = tables_.find(table_id);
         if (it != tables_.end()) {
-            if (it->second.wal_lsn != it->second.flush_lsn) {
+            if (it->second.wal_lsn > it->second.flush_lsn) {
                 lsn = it->second.wal_lsn;
             }
         }

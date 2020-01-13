@@ -49,6 +49,14 @@ ToKnowhereErrorCode(const ErrorCode error_code) {
     return KNOWHERE_ERROR_CODE_BASE + error_code;
 }
 
+constexpr ErrorCode WAL_SUCCESS = 0;
+constexpr ErrorCode WAL_ERROR_CODE_BASE = 60000;
+
+constexpr ErrorCode
+ToWalErrorCode(const ErrorCode error_code) {
+    return WAL_ERROR_CODE_BASE + error_code;
+}
+
 // server error code
 constexpr ErrorCode SERVER_UNEXPECTED_ERROR = ToServerErrorCode(1);
 constexpr ErrorCode SERVER_UNSUPPORTED_ERROR = ToServerErrorCode(2);
@@ -95,6 +103,11 @@ constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
 constexpr ErrorCode KNOWHERE_INVALID_ARGUMENT = ToKnowhereErrorCode(2);
 constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
 constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
+
+// knowhere error code
+constexpr ErrorCode WAL_ERROR = ToWalErrorCode(1);
+constexpr ErrorCode WAL_META_ERROR = ToWalErrorCode(2);
+constexpr ErrorCode WAL_FILE_ERROR = ToWalErrorCode(3);
 
 namespace server {
 class ServerException : public std::exception {

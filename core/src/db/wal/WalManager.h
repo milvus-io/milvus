@@ -23,6 +23,7 @@
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
 #include "WalBuffer.h"
+#include "utils/Error.h"
 
 namespace milvus {
 namespace engine {
@@ -36,8 +37,9 @@ class WalManager {
     /*
      * init
      * @param meta
+     * @param ignore_error: whether to ignore recovery error
      */
-    bool
+    ErrorCode
     Init(const meta::MetaPtr& meta, bool ignore_error);
 
     /*

@@ -1268,7 +1268,8 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
 }
 
 Status
-MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag) {
+MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name,
+                               const std::string& tag, uint64_t lsn) {
     server::MetricCollector metric;
 
     TableSchema table_schema;
@@ -1307,6 +1308,7 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
     table_schema.created_on_ = utils::GetMicroSecTimeStamp();
     table_schema.owner_table_ = table_id;
     table_schema.partition_tag_ = valid_tag;
+    table_schema.flush_lsn_ = lsn;
 
     status = CreateTable(table_schema);
     if (status.code() == DB_ALREADY_EXIST) {
