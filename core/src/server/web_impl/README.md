@@ -919,7 +919,7 @@ Gets information about the Milvus server.
 
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
-| `msg` |  Type of the message to return.     |   Yes     |
+| `msg` |  Type of the message to return. You can use `status` or `version`.     |   Yes     |
 
 #### Example
 
