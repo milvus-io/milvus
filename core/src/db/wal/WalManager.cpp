@@ -16,7 +16,6 @@
 // under the License.
 
 #include <unistd.h>
-#include <src/server/Config.h>
 #include "WalManager.h"
 #include "stdio.h"
 
@@ -25,10 +24,13 @@ namespace engine {
 namespace wal {
 
 WalManager::WalManager() {
-    server::Config& config = server::Config::GetInstance();
-    config.GetWalConfigBufferSize(mxlog_config_.buffer_size);
-    config.GetWalConfigRecordSize(mxlog_config_.record_size);
-    config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
+    mxlog_config_.buffer_size = 64*1024*1024;
+    mxlog_config_.record_size = 2*1024*1024;
+    mxlog_config_.mxlog_path = "/tmp/milvus/wal/";
+//    server::Config& config = server::Config::GetInstance();
+//    config.GetWalConfigBufferSize(mxlog_config_.buffer_size);
+//    config.GetWalConfigRecordSize(mxlog_config_.record_size);
+//    config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
 }
 
 WalManager::~WalManager() {
@@ -287,6 +289,18 @@ WalManager::Flush(const std::string table_id) {
 
     return lsn;
 }
+
+template bool
+WalManager::Insert<float>(
+        const std::string &table_id,
+        const IDNumbers &vector_ids,
+        const std::vector<float> &vectors);
+
+template bool
+WalManager::Insert<uint8_t>(
+        const std::string &table_id,
+        const IDNumbers &vector_ids,
+        const std::vector<uint8_t> &vectors);
 
 } // wal
 } // engine
