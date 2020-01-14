@@ -670,17 +670,15 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     int64_t nprobe_t = search_request->nprobe->getValue();
 
     std::vector<std::string> tag_list;
-    std::vector<std::string> file_id_list;
-
     if (nullptr != search_request->tags.get()) {
         search_request->tags->forEach([&tag_list](const OString& tag) {
             tag_list.emplace_back(tag->std_str());
         });
     }
 
+    std::vector<std::string> file_id_list;
     if (nullptr != search_request->file_ids.get()) {
-        search_request->file_ids->forEach(
-            [&file_id_list](const OString& id) {
+        search_request->file_ids->forEach([&file_id_list](const OString& id) {
                 file_id_list.emplace_back(id->std_str());
             });
     }
