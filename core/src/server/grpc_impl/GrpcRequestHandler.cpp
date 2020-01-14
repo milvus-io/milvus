@@ -72,6 +72,49 @@ ErrorMap(ErrorCode code) {
     }
 }
 
+namespace {
+void
+CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecord>& grpc_records,
+               const google::protobuf::RepeatedField<google::protobuf::int64>& grpc_id_array,
+               engine::VectorsData& vectors) {
+    // step 1: copy vector data
+    int64_t float_data_size = 0, binary_data_size = 0;
+    for (auto& record : grpc_records) {
+        float_data_size += record.float_data_size();
+        binary_data_size += record.binary_data().size();
+    }
+
+    std::vector<float> float_array(float_data_size, 0.0f);
+    std::vector<uint8_t> binary_array(binary_data_size, 0);
+    int64_t float_offset = 0, binary_offset = 0;
+    if (float_data_size > 0) {
+        for (auto& record : grpc_records) {
+            memcpy(&float_array[float_offset], record.float_data().data(), record.float_data_size() * sizeof(float));
+            float_offset += record.float_data_size();
+        }
+    } else if (binary_data_size > 0) {
+        for (auto& record : grpc_records) {
+            memcpy(&binary_array[binary_offset], record.binary_data().data(), record.binary_data().size());
+            binary_offset += record.binary_data().size();
+        }
+    }
+
+    // step 2: copy id array
+    std::vector<int64_t> id_array;
+    if (grpc_id_array.size() > 0) {
+        id_array.resize(grpc_id_array.size());
+        memcpy(id_array.data(), grpc_id_array.data(), grpc_id_array.size() * sizeof(int64_t));
+    }
+
+    // step 3: contruct vectors
+    vectors.vector_count_ = grpc_records.size();
+    vectors.float_data_.swap(float_array);
+    vectors.binary_data_.swap(binary_array);
+    vectors.id_array_.swap(id_array);
+}
+
+}  // namespace
+
 GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
     : tracer_(tracer), random_num_generator_() {
     std::random_device random_device;
@@ -206,30 +249,18 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::VectorIds* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    int64_t record_data_size = 0;
-    for (auto& record : request->row_record_array()) {
-        record_data_size += record.vector_data_size();
-    }
+    // step 1: copy vector data
+    engine::VectorsData vectors;
+    CopyRowRecords(request->row_record_array(), request->row_id_array(), vectors);
 
-    std::vector<float> record_array(record_data_size, 0.0f);
-    int64_t offset = 0;
-    for (auto& record : request->row_record_array()) {
-        memcpy(&record_array[offset], record.vector_data().data(), record.vector_data_size() * sizeof(float));
-        offset += record.vector_data_size();
-    }
-
-    std::vector<int64_t> id_array;
-    if (request->row_id_array_size() > 0) {
-        id_array.resize(request->row_id_array_size());
-        memcpy(id_array.data(), request->row_id_array().data(), request->row_id_array_size() * sizeof(int64_t));
-    }
-
+    // step 2: insert vectors
     Status status =
-        request_handler_.Insert(context_map_[context], request->table_name(), request->row_record_array_size(),
-                                record_array, request->partition_tag(), id_array);
+        request_handler_.Insert(context_map_[context], request->table_name(), vectors, request->partition_tag());
 
-    response->mutable_vector_id_array()->Resize(static_cast<int>(id_array.size()), 0);
-    memcpy(response->mutable_vector_id_array()->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
+    // step 3: return id array
+    response->mutable_vector_id_array()->Resize(static_cast<int>(vectors.id_array_.size()), 0);
+    memcpy(response->mutable_vector_id_array()->mutable_data(), vectors.id_array_.data(),
+           vectors.id_array_.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
     return ::grpc::Status::OK;
@@ -240,36 +271,29 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
                            ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    int64_t record_data_size = 0;
-    for (auto& record : request->query_record_array()) {
-        record_data_size += record.vector_data_size();
-    }
+    // step 1: copy vector data
+    engine::VectorsData vectors;
+    CopyRowRecords(request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
 
-    std::vector<float> record_array(record_data_size);
-    int64_t offset = 0;
-    for (auto& record : request->query_record_array()) {
-        memcpy(&record_array[offset], record.vector_data().data(), record.vector_data_size() * sizeof(float));
-        offset += record.vector_data_size();
-    }
-
+    // deprecated
     std::vector<Range> ranges;
     for (auto& range : request->query_range_array()) {
         ranges.emplace_back(range.start_value(), range.end_value());
     }
 
+    // step 2: partition tags
     std::vector<std::string> partitions;
     for (auto& partition : request->partition_tag_array()) {
         partitions.emplace_back(partition);
     }
 
+    // step 3: search vectors
     std::vector<std::string> file_ids;
     TopKQueryResult result;
+    Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors, ranges,
+                                            request->topk(), request->nprobe(), partitions, file_ids, result);
 
-    Status status =
-        request_handler_.Search(context_map_[context], request->table_name(), request->query_record_array_size(),
-                                record_array, ranges, request->topk(), request->nprobe(), partitions, file_ids, result);
-
-    // construct result
+    // step 4: construct and return result
     response->set_row_num(result.row_num_);
 
     response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
@@ -289,42 +313,38 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    std::vector<std::string> file_ids;
-    for (auto& file_id : request->file_id_array()) {
-        file_ids.emplace_back(file_id);
-    }
-
     auto* search_request = &request->search_param();
 
-    int64_t record_data_size = 0;
-    for (auto& record : search_request->query_record_array()) {
-        record_data_size += record.vector_data_size();
-    }
+    // step 1: copy vector data
+    engine::VectorsData vectors;
+    CopyRowRecords(search_request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(),
+                   vectors);
 
-    std::vector<float> record_array(record_data_size);
-    int64_t offset = 0;
-    for (auto& record : search_request->query_record_array()) {
-        memcpy(&record_array[offset], record.vector_data().data(), record.vector_data_size() * sizeof(float));
-        offset += record.vector_data_size();
-    }
-
+    // deprecated
     std::vector<Range> ranges;
     for (auto& range : search_request->query_range_array()) {
         ranges.emplace_back(range.start_value(), range.end_value());
     }
 
+    // step 2: copy file id array
+    std::vector<std::string> file_ids;
+    for (auto& file_id : request->file_id_array()) {
+        file_ids.emplace_back(file_id);
+    }
+
+    // step 3: partition tags
     std::vector<std::string> partitions;
     for (auto& partition : search_request->partition_tag_array()) {
         partitions.emplace_back(partition);
     }
 
+    // step 4: search vectors
     TopKQueryResult result;
+    Status status =
+        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, ranges,
+                                search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
 
-    Status status = request_handler_.Search(
-        context_map_[context], search_request->table_name(), search_request->query_record_array_size(), record_array,
-        ranges, search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
-
-    // construct result
+    // step 5: construct and return result
     response->set_row_num(result.row_num_);
 
     response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);

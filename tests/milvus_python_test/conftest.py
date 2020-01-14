@@ -136,3 +136,73 @@ def ip_table(request, connect):
     request.addfinalizer(teardown)
 
     return table_name
+
+
+@pytest.fixture(scope="function")
+def jac_table(request, connect):
+    ori_table_name = getattr(request.module, "table_id", "test")
+    table_name = gen_unique_str(ori_table_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'table_name': table_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.JACCARD}
+    status = connect.create_table(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("Table can not be created, exit pytest ...")
+
+    def teardown():
+        status, table_names = connect.show_tables()
+        for table_name in table_names:
+            connect.delete_table(table_name)
+
+    request.addfinalizer(teardown)
+
+    return table_name
+
+@pytest.fixture(scope="function")
+def ham_table(request, connect):
+    ori_table_name = getattr(request.module, "table_id", "test")
+    table_name = gen_unique_str(ori_table_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'table_name': table_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.HAMMING}
+    status = connect.create_table(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("Table can not be created, exit pytest ...")
+
+    def teardown():
+        status, table_names = connect.show_tables()
+        for table_name in table_names:
+            connect.delete_table(table_name)
+
+    request.addfinalizer(teardown)
+
+    return table_name
+
+@pytest.fixture(scope="function")
+def tanimoto_table(request, connect):
+    ori_table_name = getattr(request.module, "table_id", "test")
+    table_name = gen_unique_str(ori_table_name)
+    dim = getattr(request.module, "dim", "128")
+    param = {'table_name': table_name,
+             'dimension': dim,
+             'index_file_size': index_file_size,
+             'metric_type': MetricType.TANIMOTO}
+    status = connect.create_table(param)
+    # logging.getLogger().info(status)
+    if not status.OK():
+        pytest.exit("Table can not be created, exit pytest ...")
+
+    def teardown():
+        status, table_names = connect.show_tables()
+        for table_name in table_names:
+            connect.delete_table(table_name)
+
+    request.addfinalizer(teardown)
+
+    return table_name

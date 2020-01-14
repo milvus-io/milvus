@@ -29,7 +29,7 @@ constexpr uint64_t T = K * G;
 
 constexpr uint64_t MAX_TABLE_FILE_MEM = 128 * M;
 
-constexpr int VECTOR_TYPE_SIZE = sizeof(float);
+constexpr int FLOAT_TYPE_SIZE = sizeof(float);
 
 static constexpr uint64_t ONE_KB = K;
 static constexpr uint64_t ONE_MB = ONE_KB * ONE_KB;
