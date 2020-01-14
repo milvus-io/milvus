@@ -75,8 +75,8 @@ DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
-
-    wal_enable_ = true;  // todo: read config
+    
+    wal_enable_ = false;  // todo: read config
     if (wal_enable_) {
         wal_mgr_ = std::make_shared<wal::WalManager>();
     }
@@ -149,7 +149,9 @@ DBImpl::Stop() {
         meta_ptr_->CleanUpShadowFiles();
     }
 
-    bg_wal_thread_.join();
+    if (wal_enable_) {
+        bg_wal_thread_.join();
+    }
 
     // ENGINE_LOG_TRACE << "DB service stop";
     return Status::OK();
