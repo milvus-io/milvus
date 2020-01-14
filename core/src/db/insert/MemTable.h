@@ -36,7 +36,7 @@ class MemTable {
     MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
-    Add(VectorSourcePtr& source, IDNumbers& vector_ids);
+    Add(VectorSourcePtr& source);
 
     void
     GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);

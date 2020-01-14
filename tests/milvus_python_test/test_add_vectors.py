@@ -17,6 +17,7 @@ nprobe = 1
 epsilon = 0.0001
 tag = "1970-01-01"
 
+
 class TestAddBase:
     """
     ******************************************************************
@@ -27,12 +28,12 @@ class TestAddBase:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, args):
-        if "internal" not in args:
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in open source")
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("Skip PQ Temporary")
+                pytest.skip("sq8h not support in cpu mode")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_add_vector_create_table(self, connect, table):
@@ -680,10 +681,12 @@ class TestAddIP:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, args):
-        if "internal" not in args:
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in open source")
+                pytest.skip("sq8h not support in cpu mode")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_add_vector_create_table(self, connect, ip_table):
@@ -1242,7 +1245,6 @@ class TestAddIP:
                 assert status.OK()
 
 class TestAddAdvance:
-
     @pytest.fixture(
         scope="function",
         params=[
@@ -1279,6 +1281,42 @@ class TestAddAdvance:
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
         status, ids = connect.add_vectors(ip_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_much_jaccard(self, connect, jac_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_much_hamming(self, connect, ham_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(ham_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_much_tanimoto(self, connect, tanimoto_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(tanimoto_table, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1344,3 +1382,17 @@ class TestAddTableVectorsInvalid(object):
         tmp_vectors[1][1] = gen_vector
         with pytest.raises(Exception) as e:
             status, result = connect.add_vectors(table, tmp_vectors)
+
+    @pytest.mark.level(2)
+    def test_add_vectors_with_invalid_vectors_jaccard(self, connect, jac_table, gen_vector):
+        tmp_vectors = copy.deepcopy(self.vectors)
+        tmp_vectors[1][1] = gen_vector
+        with pytest.raises(Exception) as e:
+            status, result = connect.add_vectors(jac_table, tmp_vectors)
+
+    @pytest.mark.level(2)
+    def test_add_vectors_with_invalid_vectors_hamming(self, connect, ham_table, gen_vector):
+        tmp_vectors = copy.deepcopy(self.vectors)
+        tmp_vectors[1][1] = gen_vector
+        with pytest.raises(Exception) as e:
+            status, result = connect.add_vectors(ham_table, tmp_vectors)

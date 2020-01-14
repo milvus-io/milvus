@@ -265,7 +265,7 @@ class TestConnect:
         assert not milvus.connected()
 
     # Disable, (issue: https://github.com/milvus-io/milvus/issues/288)
-    def test_connect_param_priority_both_hostip_uri(self, args):
+    def _test_connect_param_priority_both_hostip_uri(self, args):
         '''
         target: both host_ip_port / uri are both given, and not null, use the uri params
         method: check if wrong uri connection is ok
