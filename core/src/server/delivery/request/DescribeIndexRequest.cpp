@@ -56,6 +56,14 @@ DescribeIndexRequest::OnExecute() {
             return status;
         }
 
+        // for binary vector, IDMAP and IVFLAT will be treated as BIN_IDMAP and BIN_IVFLAT internally
+        // return IDMAP and IVFLAT for outside caller
+        if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) {
+            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IDMAP;
+        } else if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT) {
+            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IVFFLAT;
+        }
+
         index_param_.table_name_ = table_name_;
         index_param_.index_type_ = index.engine_type_;
         index_param_.nlist_ = index.nlist_;

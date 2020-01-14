@@ -41,10 +41,12 @@ AdapterMgr::RegisterAdapter() {
     init_ = true;
 
     REGISTER_CONF_ADAPTER(ConfAdapter, IndexType::FAISS_IDMAP, idmap);
+    REGISTER_CONF_ADAPTER(BinIDMAPConfAdapter, IndexType::FAISS_BIN_IDMAP, idmap_bin);
 
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_IVFFLAT_CPU, ivf_cpu);
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_IVFFLAT_GPU, ivf_gpu);
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexType::FAISS_IVFFLAT_MIX, ivf_mix);
+    REGISTER_CONF_ADAPTER(BinIVFConfAdapter, IndexType::FAISS_BIN_IVFLAT_CPU, ivf_bin_cpu);
 
     REGISTER_CONF_ADAPTER(IVFSQConfAdapter, IndexType::FAISS_IVFSQ8_CPU, ivfsq8_cpu);
     REGISTER_CONF_ADAPTER(IVFSQConfAdapter, IndexType::FAISS_IVFSQ8_GPU, ivfsq8_gpu);

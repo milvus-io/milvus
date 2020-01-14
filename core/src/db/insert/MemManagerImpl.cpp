@@ -37,26 +37,25 @@ MemManagerImpl::GetMemByTable(const std::string& table_id) {
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& table_id_, size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+MemManagerImpl::InsertVectors(const std::string& table_id, VectorsData& vectors) {
     while (GetCurrentMem() > options_.insert_buffer_size_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
 
-    return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);
+    return InsertVectorsNoLock(table_id, vectors);
 }
 
 Status
-MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, size_t n, const float* vectors,
-                                    IDNumbers& vector_ids) {
+MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, VectorsData& vectors) {
     MemTablePtr mem = GetMemByTable(table_id);
-    VectorSourcePtr source = std::make_shared<VectorSource>(n, vectors);
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors);
 
-    auto status = mem->Add(source, vector_ids);
+    auto status = mem->Add(source);
     if (status.ok()) {
-        if (vector_ids.empty()) {
-            vector_ids = source->GetVectorIds();
+        if (vectors.id_array_.empty()) {
+            vectors.id_array_ = source->GetVectorIds();
         }
     }
     return status;

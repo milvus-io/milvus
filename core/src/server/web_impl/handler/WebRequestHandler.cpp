@@ -79,6 +79,78 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
+namespace {
+Status
+CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData& vectors) {
+    vectors.float_data_.clear();
+    vectors.binary_data_.clear();
+    vectors.id_array_.clear();
+    vectors.vector_count_ = param->records->count();
+
+    // step 1: copy vector data
+    if (nullptr == param->records.get()) {
+        return Status(SERVER_INVALID_ROWRECORD_ARRAY, "");
+    }
+
+    size_t tal_size = 0;
+    for (int64_t i = 0; i < param->records->count(); i++) {
+        tal_size += param->records->get(i)->count();
+    }
+
+    std::vector<float>& datas = vectors.float_data_;
+    datas.resize(tal_size);
+    size_t index_offset = 0;
+    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
+        row_item->forEach([&datas, &index_offset](const OFloat32& item) {
+            datas[index_offset] = item->getValue();
+            index_offset++;
+        });
+    });
+
+    // step 2: copy id array
+    if (nullptr == param->ids.get()) {
+        return Status(SERVER_ILLEGAL_VECTOR_ID, "");
+    }
+
+    for (int64_t i = 0; i < param->ids->count(); i++) {
+        vectors.id_array_.emplace_back(param->ids->get(i)->getValue());
+    }
+
+    return Status::OK();
+}
+
+Status
+CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData& vectors) {
+    vectors.float_data_.clear();
+    vectors.binary_data_.clear();
+    vectors.id_array_.clear();
+    vectors.vector_count_ = param->records->count();
+
+    // step 1: copy vector data
+    if (nullptr == param->records.get()) {
+        return Status(SERVER_INVALID_ROWRECORD_ARRAY, "");
+    }
+
+    size_t tal_size = 0;
+    for (int64_t i = 0; i < param->records->count(); i++) {
+        tal_size += param->records->get(i)->count();
+    }
+
+    std::vector<float>& datas = vectors.float_data_;
+    datas.resize(tal_size);
+    size_t index_offset = 0;
+    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
+        row_item->forEach([&datas, &index_offset](const OFloat32& item) {
+            datas[index_offset] = item->getValue();
+            index_offset++;
+        });
+    });
+
+    return Status::OK();
+}
+
+}  // namespace
+
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
 
 Status
@@ -567,37 +639,17 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
 StatusDto::ObjectWrapper
 WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
                           VectorIdsDto::ObjectWrapper& ids_dto) {
-    std::vector<int64_t> ids;
-    if (nullptr != param->ids.get() && param->ids->count() > 0) {
-        for (int64_t i = 0; i < param->ids->count(); i++) {
-            ids.emplace_back(param->ids->get(i)->getValue());
-        }
-    }
-
-    if (nullptr == param->records.get()) {
+    engine::VectorsData vectors;
+    auto status = CopyRowRecords(param, vectors);
+    if (status.code() == SERVER_INVALID_ROWRECORD_ARRAY) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
     }
 
-    size_t tal_size = 0;
-    for (int64_t i = 0; i < param->records->count(); i++) {
-        tal_size += param->records->get(i)->count();
-    }
-
-    std::vector<float> datas(tal_size);
-    size_t index_offset = 0;
-    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
-        row_item->forEach([&datas, &index_offset](const OFloat32& item) {
-            datas[index_offset] = item->getValue();
-            index_offset++;
-        });
-    });
-
-    auto status = request_handler_.Insert(context_ptr_, table_name->std_str(), param->records->count(), datas,
-                                          param->tag->std_str(), ids);
+    status = request_handler_.Insert(context_ptr_, table_name->std_str(), vectors, param->tag->std_str());
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
-        for (auto& id : ids) {
+        for (auto& id : vectors.id_array_) {
             ids_dto->ids->pushBack(std::to_string(id).c_str());
         }
     }
@@ -634,25 +686,18 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill query vectors")
     }
 
-    size_t tal_size = 0;
-    search_request->records->forEach(
-        [&tal_size](const OList<OFloat32>::ObjectWrapper& item) { tal_size += item->count(); });
-
-    std::vector<float> datas(tal_size);
-    size_t index_offset = 0;
-    search_request->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& elem) {
-        elem->forEach([&datas, &index_offset](const OFloat32& item) {
-            datas[index_offset] = item->getValue();
-            index_offset++;
-        });
-    });
+    engine::VectorsData vectors;
+    auto status = CopyRowRecords(search_request, vectors);
+    if (status.code() == SERVER_INVALID_ROWRECORD_ARRAY) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
+    }
 
     std::vector<Range> range_list;
 
     TopKQueryResult result;
     auto context_ptr = GenContextPtr("Web Handler");
-    auto status = request_handler_.Search(context_ptr, table_name->std_str(), search_request->records->count(), datas,
-                                          range_list, topk_t, nprobe_t, tag_list, file_id_list, result);
+    status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, range_list, topk_t, nprobe_t,
+                                     tag_list, file_id_list, result);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

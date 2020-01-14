@@ -48,7 +48,7 @@ class ConfAdapter {
 
  protected:
     static void
-    MatchBase(knowhere::Config conf);
+    MatchBase(knowhere::Config conf, knowhere::METRICTYPE defalut_metric = knowhere::METRICTYPE::L2);
 };
 
 using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
@@ -63,7 +63,7 @@ class IVFConfAdapter : public ConfAdapter {
 
  protected:
     static int64_t
-    MatchNlist(const int64_t& size, const int64_t& nlist);
+    MatchNlist(const int64_t& size, const int64_t& nlist, const int64_t& per_nlist);
 };
 
 class IVFSQConfAdapter : public IVFConfAdapter {
@@ -110,6 +110,18 @@ class SPTAGBKTConfAdapter : public ConfAdapter {
 
     knowhere::Config
     MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
+};
+
+class BinIDMAPConfAdapter : public ConfAdapter {
+ public:
+    knowhere::Config
+    Match(const TempMetaConf& metaconf) override;
+};
+
+class BinIVFConfAdapter : public IVFConfAdapter {
+ public:
+    knowhere::Config
+    Match(const TempMetaConf& metaconf) override;
 };
 
 }  // namespace engine

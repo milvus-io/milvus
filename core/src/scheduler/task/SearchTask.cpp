@@ -103,8 +103,10 @@ CollectFileMetrics(int file_type, size_t file_size) {
 XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
-        if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
-            metric_l2 = false;
+        // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
+        // similarity -- infinity value means two vectors equal, descending reduce, IP
+        if (file_->metric_type_ == static_cast<int>(MetricType::IP)) {
+            ascending_reduce = false;
         }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
                                              (MetricType)file_->metric_type_, file_->nlist_);
@@ -207,7 +209,7 @@ XSearchTask::Execute() {
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
         uint64_t nprobe = search_job->nprobe();
-        const float* vectors = search_job->vectors();
+        const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
@@ -221,8 +223,14 @@ XSearchTask::Execute() {
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
                 hybrid = true;
             }
-            Status s =
-                index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
+            Status s;
+            if (!vectors.float_data_.empty()) {
+                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
+            } else if (!vectors.binary_data_.empty()) {
+                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
+            }
             if (!s.ok()) {
                 search_job->GetStatus() = s;
                 search_job->SearchDone(index_id_);
@@ -236,7 +244,7 @@ XSearchTask::Execute() {
             auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
-                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
+                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 

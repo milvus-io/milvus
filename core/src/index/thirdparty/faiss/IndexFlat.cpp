@@ -52,6 +52,10 @@ void IndexFlat::search (idx_t n, const float *x, idx_t k,
         float_maxheap_array_t res = {
             size_t(n), size_t(k), labels, distances};
         knn_L2sqr (x, xb.data(), d, n, ntotal, &res);
+    } else if (metric_type == METRIC_Jaccard) {
+        float_maxheap_array_t res = {
+                size_t(n), size_t(k), labels, distances};
+        knn_jaccard (x, xb.data(), d, n, ntotal, &res);
     } else {
         float_maxheap_array_t res = {
             size_t(n), size_t(k), labels, distances};
