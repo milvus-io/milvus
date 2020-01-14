@@ -32,6 +32,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "db/IDGenerator.h"
 #include "engine/EngineFactory.h"
 #include "insert/MemMenagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -43,8 +44,8 @@
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentWriter.h"
-#include "utils/Log.h"
 #include "utils/Exception.h"
+#include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
@@ -75,7 +76,7 @@ DBImpl::DBImpl(const DBOptions& options)
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
-    wal_enable_ = true; // todo: read config
+    wal_enable_ = true;  // todo: read config
     if (wal_enable_) {
         wal_mgr_ = std::make_shared<wal::WalManager>();
     }
@@ -107,7 +108,7 @@ DBImpl::Start() {
 
     // wal
     if (wal_enable_ && wal_mgr_ != nullptr) {
-        bool recovery_error_ignore = true; // todo: read config
+        bool recovery_error_ignore = true;  // todo: read config
 
         auto init_rst = wal_mgr_->Init(meta_ptr_, recovery_error_ignore);
         if (init_rst != WAL_SUCCESS) {
@@ -396,16 +397,21 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
 
     } else {
         // insert vectors into target table
+        // TODO(zhiru): generate ids
+        if (vectors.id_array_.empty()) {
+            auto id_generator = std::make_shared<SimpleIDGenerator>();
+            id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+        }
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
             auto dim = vectors.float_data_.size() / vectors.vector_count_;
             status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
-                                            vectors.float_data_.data(), lsn, flushed_tables);
+                                             vectors.float_data_.data(), lsn, flushed_tables);
         } else {
             auto dim = vectors.binary_data_.size() / vectors.vector_count_;
             status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
-                                            vectors.binary_data_.data(), lsn, flushed_tables);
+                                             vectors.binary_data_.data(), lsn, flushed_tables);
         }
         if (!flushed_tables.empty()) {
             Merge(flushed_tables);
@@ -466,8 +472,6 @@ DBImpl::Flush(const std::string& table_id) {
             return status;
         }
 
-        
-    
     } else {
         status = mem_mgr_->Flush(table_id);
         std::set<std::string> table_ids{table_id};
@@ -490,8 +494,6 @@ DBImpl::Flush() {
             return status;
         }
 
-
-    
     } else {
         std::set<std::string> table_ids;
         status = mem_mgr_->Flush(table_ids);
@@ -1430,7 +1432,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 }
 
 Status
-DBImpl::ExecWalRecord(const wal::WALRecord &record) {
+DBImpl::ExecWalRecord(const wal::WALRecord& record) {
     Status status;
     switch (record.type) {
         case wal::MXLogType::InsertBinary: {
@@ -1474,7 +1476,6 @@ DBImpl::ExecWalRecord(const wal::WALRecord &record) {
 
 void
 DBImpl::BackgroundWalTask() {
-
 }
 
 }  // namespace engine
