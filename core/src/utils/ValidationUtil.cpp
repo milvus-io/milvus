@@ -216,7 +216,7 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
         if (valid_tag.empty()) {
             std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
             SERVER_LOG_ERROR << msg;
-            return Status(SERVER_INVALID_NPROBE, msg);
+            return Status(SERVER_INVALID_TABLE_NAME, msg);
         }
     }
 
