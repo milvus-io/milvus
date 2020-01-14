@@ -8,3 +8,4 @@
 *src/grpc*
 *thirdparty*
 *milvus/include*
+*unittest/server/test_web.cpp
