@@ -148,7 +148,9 @@ DBImpl::Stop() {
         meta_ptr_->CleanUpShadowFiles();
     }
 
-    bg_wal_thread_.join();
+    if (wal_enable_) {
+        bg_wal_thread_.join();
+    }
 
     // ENGINE_LOG_TRACE << "DB service stop";
     return Status::OK();
