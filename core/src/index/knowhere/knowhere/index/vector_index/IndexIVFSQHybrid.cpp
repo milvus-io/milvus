@@ -22,7 +22,7 @@
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 #include <utility>
-
+#include <fiu-local.h>
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
@@ -300,7 +300,7 @@ IVFSQHybrid::SerializeImpl() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-
+    fiu_do_on()
     if (gpu_mode == 0) {
         MemoryIOWriter writer;
         faiss::write_index(index_.get(), &writer);

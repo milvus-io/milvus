@@ -95,18 +95,9 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
     std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
 #endif
-    std::make_tuple("IVF", ParameterType::ivf), std::make_tuple("IVFPQ", ParameterType::ivfpq),
+    std::make_tuple("IVF", ParameterType::ivf),
+    std::make_tuple("IVFPQ", ParameterType::ivfpq),
     std::make_tuple("IVFSQ", ParameterType::ivfsq)));
-
-//#ifdef MILVUS_GPU_VERSION
-//class TestGpuIndexInvalid : public DataGen, public TestGpuIndexBase {
-// protected:
-//    void SetUp() override {
-//        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
-//        Generate(DIM, NB, NQ);
-//    }
-//};
-//#endif
 
 TEST_P(IVFTest, ivf_basic) {
     assert(!xb.empty());
@@ -136,6 +127,7 @@ TEST_P(IVFTest, ivf_basic) {
 }
 
 TEST_P(IVFTest, ivf_serialize) {
+    fiu_init(0);
     auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
@@ -156,6 +148,10 @@ TEST_P(IVFTest, ivf_serialize) {
         auto model = index_->Train(base_dataset, conf);
         auto binaryset = model->Serialize();
         auto bin = binaryset.GetByName("IVF");
+
+        fiu_enable("FaissBaseIndex.SerializeImpl.throw_exception", 1, nullptr, 0);
+        ASSERT_ANY_THROW(model->Serialize());
+        fiu_disable("FaissBaseIndex.SerializeImpl.throw_exception");
 
         std::string filename = "/tmp/ivf_test_model_serialize.bin";
         auto load_data = new uint8_t[bin->size];
@@ -283,6 +279,7 @@ TEST_P(IVFTest, clone_test) {
                                 AssertEqual(result, clone_result);
                                 std::cout << "clone C <=> G [" << index_type << "] success" << std::endl;
                             });
+            EXPECT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_, -1, knowhere::Config()));
         } else {
             EXPECT_THROW(
                 {
@@ -366,11 +363,11 @@ TEST_P(IVFTest, invalid_gpu_source) {
     auto binaryset = model->Serialize();
 
     fiu_init(0);
-    fiu_enable("GPUIVF.SerializeImpl.throw_exception",1, nullptr,0);
+    fiu_enable("GPUIVF.SerializeImpl.throw_exception", 1, nullptr, 0);
     ASSERT_ANY_THROW(index_->Serialize());
     fiu_disable("GPUIVF.SerializeImpl.throw_exception");
 
-    fiu_enable("GPUIVF.search_impl.invald_index",1, nullptr,0);
+    fiu_enable("GPUIVF.search_impl.invald_index", 1, nullptr, 0);
     ASSERT_ANY_THROW(index_->Search(base_dataset, invalid_conf));
     fiu_disable("GPUIVF.search_impl.invald_index");
 
@@ -385,5 +382,41 @@ TEST_P(IVFTest, invalid_gpu_source) {
     ASSERT_ANY_THROW(index_->Load(binaryset));
     ASSERT_ANY_THROW(index_->Train(base_dataset, invalid_conf));
 }
+
+#ifdef  CUSTOMIZATION
+TEST_P(IVFTest, IVFSQHybrid_test) {
+    std::vector<std::string> support_idx_vec{"IVFSQHybrid"};
+    auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
+    if (finder == support_idx_vec.cend()) {
+        return;
+    }
+    fiu_init(0);
+
+    knowhere::cloner::CopyGpuToCpu(index_, conf);
+    fiu_enable("FaissGpuResourceMgr.GetRes.ret_null", 1, nullptr, 0);
+    ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
+    ASSERT_ANY_THROW(index_->CopyCpuToGpu(DEVICEID, conf));
+    fiu_disable("FaissGpuResourceMgr.GetRes.ret_null");
+
+    auto model = index_->Train(base_dataset, conf);
+    index_->set_index_model(model);
+
+    auto index = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_);
+    ASSERT_TRUE(index != nullptr);
+    ASSERT_ANY_THROW(index->UnsetQuantizer());
+
+    knowhere::QuantizerConfig config = std::make_shared<knowhere::QuantizerCfg>();
+    config->gpu_id = knowhere::INVALID_VALUE;
+
+    //mode = -1
+    ASSERT_ANY_THROW(index->LoadQuantizer(config));
+    config->mode = 1;
+    ASSERT_ANY_THROW(index->LoadQuantizer(config));
+    config->gpu_id = DEVICEID;
+//    index->LoadQuantizer(config);
+    ASSERT_ANY_THROW(index->SetQuantizer(nullptr));
+}
+
+#endif
 
 #endif

@@ -126,6 +126,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             config.GetGpuResourceConfigEnable(gpu_resource_enable);
             if (gpu_resource_enable) {
                 index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+                fiu_do_on("GetVecIndexFactory.IVFSQHybrid.mock",index = std::make_shared<knowhere::IVF>());
                 return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
             } else {
                 throw Exception(DB_ERROR, "No GPU resources for IndexType::FAISS_IVFSQ8_HYBRID");
