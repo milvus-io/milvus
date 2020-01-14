@@ -350,11 +350,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST",
-             "/tables/{table_name}/indexes",
-             CreateIndex,
-             PATH(String, table_name),
-             BODY_DTO(IndexRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("POST", "/tables/{table_name}/indexes", CreateIndex,
+             PATH(String, table_name), BODY_DTO(IndexRequestDto::ObjectWrapper, body)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.CreateIndex(table_name, body);
@@ -469,12 +466,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(ShowPartitions)
 
-    ENDPOINT("GET",
-             "/tables/{table_name}/partitions",
-             ShowPartitions,
-             PATH(String, table_name),
-             QUERY(Int64, offset, "offset"),
-             QUERY(Int64, page_size, "page_size")) {
+    ENDPOINT("GET", "/tables/{table_name}/partitions", ShowPartitions,
+             PATH(String, table_name), QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
         auto status_dto = StatusDto::createShared();
         auto partition_list_dto = PartitionListDto::createShared();
         auto handler = WebRequestHandler();
@@ -510,11 +503,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(DropPartition)
 
-    ENDPOINT("DELETE",
-             "/tables/{table_name}/partitions/{partition_tag}",
-             DropPartition,
-             PATH(String, table_name),
-             PATH(String, partition_tag)) {
+    ENDPOINT("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition,
+             PATH(String, table_name), PATH(String, partition_tag)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.DropPartition(table_name, partition_tag);
@@ -548,11 +538,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(Insert)
 
-    ENDPOINT("POST",
-             "/tables/{table_name}/vectors",
-             Insert,
-             PATH(String, table_name),
-             BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
+             PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
         auto ids_dto = VectorIdsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
@@ -582,11 +569,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(Search)
 
-    ENDPOINT("PUT",
-             "/tables/{table_name}/vectors",
-             Search,
-             PATH(String, table_name),
-             BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("PUT", "/tables/{table_name}/vectors", Search,
+             PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
         auto results_dto = TopkResultsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());

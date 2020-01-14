@@ -59,7 +59,7 @@ class TableListFieldsDto : public OObject {
     DTO_INIT(TableListFieldsDto, Object)
 
     DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, tables);
-    DTO_FIELD(Int64, count);
+    DTO_FIELD(Int64, count) = 0;
 };
 
 class TablesResponseDto : public OObject {
