@@ -112,6 +112,7 @@ class RpcHandlerTest : public testing::Test {
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
         handler->SetContext(&context, dummy_context);
+        handler->random_id();
         ::grpc::Status grpc_status = handler->CreateTable(&context, &request, &status);
     }
 

@@ -124,6 +124,10 @@ TEST_P(IVFTest, ivf_basic) {
 
     knowhere::Graph graph;
     index_->GenGraph(xb.data(), 10, graph, conf);
+
+#ifdef MILVUS_GPU_VERSION
+    knowhere::FaissGpuResourceMgr::GetInstance().Dump();
+#endif
 }
 
 TEST_P(IVFTest, ivf_serialize) {
@@ -393,6 +397,8 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
     fiu_init(0);
 
     knowhere::cloner::CopyGpuToCpu(index_, conf);
+    ASSERT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_,-1,conf));
+
     fiu_enable("FaissGpuResourceMgr.GetRes.ret_null", 1, nullptr, 0);
     ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
     ASSERT_ANY_THROW(index_->CopyCpuToGpu(DEVICEID, conf));
