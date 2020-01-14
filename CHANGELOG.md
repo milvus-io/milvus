@@ -22,7 +22,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#788 - Add web server into server module
 - \#813 - Add push mode for prometheus monitor
 - \#815 - Support MinIO storage
-- \#823 - Support binary vector tanimoto metric
+- \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#910 - Change Milvus c++ standard to c++17
 
 ## Improvement
