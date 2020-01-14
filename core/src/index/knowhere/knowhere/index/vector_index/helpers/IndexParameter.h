@@ -82,12 +82,26 @@ struct IVFCfg : public Cfg {
     std::stringstream
     DumpImpl() override;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using IVFConfig = std::shared_ptr<IVFCfg>;
+
+struct IVFBinCfg : public IVFCfg {
+    bool
+    CheckValid() override {
+        if (metric_type == METRICTYPE::HAMMING || metric_type == METRICTYPE::TANIMOTO ||
+            metric_type == METRICTYPE::JACCARD) {
+            return true;
+        }
+        std::stringstream ss;
+        ss << "MetricType: " << int(metric_type) << " not support!";
+        KNOWHERE_THROW_MSG(ss.str());
+        return false;
+    }
+};
 
 struct IVFSQCfg : public IVFCfg {
     // TODO(linxj): cpu only support SQ4 SQ6 SQ8 SQ16, gpu only support SQ4, SQ8, SQ16
@@ -103,10 +117,10 @@ struct IVFSQCfg : public IVFCfg {
 
     IVFSQCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using IVFSQConfig = std::shared_ptr<IVFSQCfg>;
 
@@ -126,10 +140,10 @@ struct IVFPQCfg : public IVFCfg {
 
     IVFPQCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using IVFPQConfig = std::shared_ptr<IVFPQCfg>;
 
@@ -154,10 +168,10 @@ struct NSGCfg : public IVFCfg {
     std::stringstream
     DumpImpl() override;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using NSGConfig = std::shared_ptr<NSGCfg>;
 
@@ -193,10 +207,10 @@ struct KDTCfg : public SPTAGCfg {
 
     KDTCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using KDTConfig = std::shared_ptr<KDTCfg>;
 
@@ -207,11 +221,25 @@ struct BKTCfg : public SPTAGCfg {
 
     BKTCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using BKTConfig = std::shared_ptr<BKTCfg>;
+
+struct BinIDMAPCfg : public Cfg {
+    bool
+    CheckValid() override {
+        if (metric_type == METRICTYPE::HAMMING || metric_type == METRICTYPE::TANIMOTO ||
+            metric_type == METRICTYPE::JACCARD) {
+            return true;
+        }
+        std::stringstream ss;
+        ss << "MetricType: " << int(metric_type) << " not support!";
+        KNOWHERE_THROW_MSG(ss.str());
+        return false;
+    }
+};
 
 }  // namespace knowhere

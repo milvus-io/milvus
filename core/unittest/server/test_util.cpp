@@ -283,9 +283,9 @@ TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
               milvus::SERVER_INVALID_VECTOR_DIMENSION);
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(0).code(),
               milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(16385).code(),
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(32769).code(),
               milvus::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(16384).code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(32768).code(), milvus::SERVER_SUCCESS);
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableDimension(1).code(), milvus::SERVER_SUCCESS);
 }
 

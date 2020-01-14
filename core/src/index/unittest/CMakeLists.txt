@@ -58,6 +58,9 @@ set(ivf_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseIndex.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexBinaryIDMAP.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexBinaryIVF.cpp
         )
 if (KNOWHERE_GPU_VERSION)
     set(ivf_srcs ${ivf_srcs}
@@ -74,12 +77,23 @@ if (NOT TARGET test_ivf)
 endif ()
 target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 
+if (NOT TARGET test_binaryivf)
+    add_executable(test_binaryivf test_binaryivf.cpp ${ivf_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_binaryivf ${depend_libs} ${unittest_libs} ${basic_libs})
+
 
 #<IDMAP-TEST>
 if (NOT TARGET test_idmap)
     add_executable(test_idmap test_idmap.cpp ${ivf_srcs} ${util_srcs})
 endif ()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
+
+#<BinaryIDMAP-TEST>
+if (NOT TARGET test_binaryidmap)
+    add_executable(test_binaryidmap test_binaryidmap.cpp ${ivf_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_binaryidmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
 #<SPTAG-TEST>
 set(sptag_srcs
@@ -104,7 +118,9 @@ if (KNOWHERE_GPU_VERSION)
 endif ()
 
 install(TARGETS test_ivf DESTINATION unittest)
+install(TARGETS test_binaryivf DESTINATION unittest)
 install(TARGETS test_idmap DESTINATION unittest)
+install(TARGETS test_binaryidmap DESTINATION unittest)
 install(TARGETS test_sptag DESTINATION unittest)
 if (KNOWHERE_GPU_VERSION)
     install(TARGETS test_gpuresource DESTINATION unittest)

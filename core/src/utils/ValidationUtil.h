@@ -40,6 +40,9 @@ class ValidationUtil {
     static Status
     ValidateTableIndexType(int32_t index_type);
 
+    static bool
+    IsBinaryIndexType(int32_t index_type);
+
     static Status
     ValidateTableIndexNlist(int32_t nlist);
 
@@ -48,6 +51,9 @@ class ValidationUtil {
 
     static Status
     ValidateTableIndexMetricType(int32_t metric_type);
+
+    static bool
+    IsBinaryMetricType(int32_t metric_type);
 
     static Status
     ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
