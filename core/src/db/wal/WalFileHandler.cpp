@@ -86,7 +86,13 @@ MXLogFileHandler::ReBorn(const std::string& file_name) {
 
 bool
 MXLogFileHandler::CloseFile() {
-    return fclose(p_file_) == 0;
+    if (p_file_ != nullptr) {
+        int ret = fclose(p_file_);
+        p_file_ = nullptr;
+        return ret == 0;
+    } else {
+        return true;
+    }
 }
 
 
