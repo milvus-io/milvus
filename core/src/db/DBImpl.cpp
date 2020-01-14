@@ -1020,7 +1020,9 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
     for (auto& file : files) {
         server::CollectMergeFilesMetrics metrics;
-        segment_writer_ptr->Merge(file.location_, file.file_id_);
+        std::string segment_dir_to_merge;
+        utils::GetParentPath(file.location_, segment_dir_to_merge);
+        segment_writer_ptr->Merge(segment_dir_to_merge, file.file_id_);
         auto file_schema = file;
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);

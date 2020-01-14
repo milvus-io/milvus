@@ -27,6 +27,7 @@
 #include "db/DBFactory.h"
 #include "db/DBImpl.h"
 #include "db/meta/MetaConsts.h"
+#include "db/IDGenerator.h"
 #include "db/utils.h"
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
@@ -59,6 +60,9 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
         for (int64_t j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
         data[TABLE_DIM * i] += i / 2000.;
     }
+
+    milvus::engine::SimpleIDGenerator id_gen;
+    id_gen.GetNextIDNumbers(n, vectors.id_array_);
 }
 
 std::string
@@ -194,6 +198,7 @@ TEST_F(DBTest, DB_TEST) {
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
+            ASSERT_EQ(result_ids.size(), qb);
             for (auto i = 0; i < qb; ++i) {
                 ss.str("");
                 ss << "Result [" << i << "]:";
@@ -211,14 +216,16 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
-            qxb.id_array_.clear();
             db_->InsertVectors(TABLE_NAME, "", qxb);
             ASSERT_EQ(qxb.id_array_.size(), qb);
         } else {
-            xb.id_array_.clear();
             db_->InsertVectors(TABLE_NAME, "", xb);
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
+
+        stat = db_->Flush();
+        ASSERT_TRUE(stat.ok());
+
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
