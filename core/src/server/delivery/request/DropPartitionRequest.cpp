@@ -79,7 +79,7 @@ DropPartitionRequest::OnExecute() {
 
         return DBWrapper::DB()->DropPartition(partition_name);
     } else {
-        auto status = ValidationUtil::ValidateTableName(table_name);
+        status = ValidationUtil::ValidateTableName(table_name);
         if (!status.ok()) {
             return status;
         }
