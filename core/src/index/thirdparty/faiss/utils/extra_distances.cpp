@@ -206,7 +206,7 @@ void knn_extra_metrics_template (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                if(!bitset || bitset->test(j)){
+                if(!bitset || !bitset->test(j)){
                     float disij = vd (x_i, y_j);
 
                     if (disij < simi[0]) {

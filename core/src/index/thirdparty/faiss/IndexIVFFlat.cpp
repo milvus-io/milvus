@@ -154,7 +154,7 @@ struct IVFFlatScanner: InvertedListScanner {
         const float *list_vecs = (const float*)codes;
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
-            if(!bitset || bitset->test(ids[j])){
+            if(!bitset || !bitset->test(ids[j])){
                 const float * yj = list_vecs + d * j;
                 float dis = metric == METRIC_INNER_PRODUCT ?
                             fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);

@@ -292,7 +292,7 @@ void hammings_knn_hc (
         int64_t * __restrict bh_ids_ = ha->ids + i * k;
         size_t j;
         for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-            if(!bitset || bitset->test(j)){
+            if(!bitset || !bitset->test(j)){
                 dis = hc.hamming (bs2_);
                 if (dis < bh_val_[0]) {
                     faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
@@ -340,7 +340,7 @@ void hammings_knn_mc (
 #pragma omp parallel for
     for (size_t i = 0; i < na; ++i) {
       for (size_t j = j0; j < j1; ++j) {
-          if(!bitset || bitset->test(j)){
+          if(!bitset || !bitset->test(j)){
               cs[i].update_counter(b + j * bytes_per_code, j);
           }
       }
@@ -397,7 +397,7 @@ void hammings_knn_hc_1 (
         int64_t * bh_ids_ = ha->ids + i * k;
         size_t j;
         for (j = 0; j < n2; j++, bs2_+= nwords) {
-            if(!bitset || bitset->test(j)){
+            if(!bitset || !bitset->test(j)){
                 dis = popcount64 (bs1_ ^ *bs2_);
                 if (dis < bh_val_0) {
                     faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
