@@ -169,7 +169,7 @@ static void knn_inner_product_sse (const float * x,
             minheap_heapify (k, simi, idxi);
 
             for (size_t j = 0; j < ny; j++) {
-                if(!bitset || bitset->test(j)){
+                if(!bitset || !bitset->test(j)){
                     float ip = fvec_inner_product (x_i, y_j, d);
 
                     if (ip > simi[0]) {
@@ -211,7 +211,7 @@ static void knn_L2sqr_sse (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                if(!bitset || bitset->test(j)){
+                if(!bitset || !bitset->test(j)){
                     float disij = fvec_L2sqr (x_i, y_j, d);
 
                     if (disij < simi[0]) {
@@ -275,7 +275,7 @@ static void knn_inner_product_blas (
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for(size_t j = j0; j < j1; j++){
-                    if(!bitset || bitset->test(j)){
+                    if(!bitset || !bitset->test(j)){
                         float dis = *ip_line;
 
                         if(dis > simi[0]){
@@ -346,7 +346,7 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    if(!bitset || bitset->test(j)){
+                    if(!bitset || !bitset->test(j)){
                         float ip = *ip_line;
                         float dis = x_norms[i] + y_norms[j] - 2 * ip;
 
@@ -423,7 +423,7 @@ static void knn_jaccard_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    if(!bitset || bitset->test(j)){
+                    if(!bitset || !bitset->test(j)){
                         float ip = *ip_line;
                         float dis = 1.0 - ip / (x_norms[i] + y_norms[j] - ip);
 
