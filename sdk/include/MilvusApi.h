@@ -43,8 +43,11 @@ enum class IndexType {
 };
 
 enum class MetricType {
-    L2 = 1,
-    IP = 2,
+    L2 = 1,         // Euclidean Distance
+    IP = 2,         // Cosine Similarity
+    HAMMING = 3,    // Hamming Distance
+    JACCARD = 4,    // Jaccard Distance
+    TANIMOTO = 5,   // Tanimoto Distance
 };
 
 /**
@@ -78,7 +81,8 @@ struct Range {
  * @brief Record inserted
  */
 struct RowRecord {
-    std::vector<float> data;  ///< Vector raw data
+    std::vector<float> float_data;  ///< Vector raw float data
+    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
 /**

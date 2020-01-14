@@ -8,23 +8,45 @@
 // Copyright 2004-present Facebook. All Rights Reserved
 // -*- c++ -*-
 
+#include <faiss/Index.h>
+#include <faiss/IndexFlat.h>
 #include <faiss/IndexBinaryIVF.h>
 
 #include <cstdio>
 #include <memory>
+#include <cmath>
 
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/jaccard.h>
 #include <faiss/utils/utils.h>
+#include <faiss/utils/Heap.h>
 
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
-#include <faiss/IndexFlat.h>
 
 
 namespace faiss {
 
 IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist)
     : IndexBinary(d),
+      invlists(new ArrayInvertedLists(nlist, code_size)),
+      own_invlists(true),
+      nprobe(1),
+      max_codes(0),
+      maintain_direct_map(false),
+      quantizer(quantizer),
+      nlist(nlist),
+      own_fields(false),
+      clustering_index(nullptr)
+{
+  FAISS_THROW_IF_NOT (d == quantizer->d);
+  is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
+
+  cp.niter = 10;
+}
+
+IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist, MetricType metric)
+    : IndexBinary(d, metric),
       invlists(new ArrayInvertedLists(nlist, code_size)),
       own_invlists(true),
       nprobe(1),
@@ -270,7 +292,13 @@ void IndexBinaryIVF::train(idx_t n, const uint8_t *x) {
     std::unique_ptr<float[]> x_f(new float[n * d]);
     binary_to_real(n * d, x, x_f.get());
 
-    IndexFlatL2 index_tmp(d);
+    IndexFlat index_tmp;
+
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
+        index_tmp = IndexFlat(d, METRIC_Jaccard);
+    } else {
+        index_tmp = IndexFlat(d, METRIC_L2);
+    }
 
     if (clustering_index && verbose) {
       printf("using clustering_index of dimension %d to do the clustering\n",
@@ -369,6 +397,50 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
 
 };
 
+template<class JaccardComputer, bool store_pairs>
+struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
+
+    JaccardComputer hc;
+    size_t code_size;
+
+    IVFBinaryScannerJaccard (size_t code_size): code_size (code_size)
+    {}
+
+    void set_query (const uint8_t *query_vector) override {
+        hc.set (query_vector, code_size);
+    }
+
+    idx_t list_no;
+    void set_list (idx_t list_no, uint8_t /* coarse_dis */) override {
+        this->list_no = list_no;
+    }
+
+    uint32_t distance_to_code (const uint8_t *code) const override {
+    }
+
+    size_t scan_codes (size_t n,
+                       const uint8_t *codes,
+                       const idx_t *ids,
+                       int32_t *simi, idx_t *idxi,
+                       size_t k) const override
+    {
+        using C = CMax<float, idx_t>;
+        float* psimi = (float*)simi;
+        size_t nup = 0;
+        for (size_t j = 0; j < n; j++) {
+            float dis = hc.jaccard (codes);
+            if (dis < psimi[0]) {
+                heap_pop<C> (k, psimi, idxi);
+                idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                heap_push<C> (k, psimi, idxi, dis, id);
+                nup++;
+            }
+            codes += code_size;
+        }
+        return nup;
+    }
+
+};
 
 template <bool store_pairs>
 BinaryInvertedListScanner *select_IVFBinaryScannerL2 (size_t code_size) {
@@ -395,6 +467,23 @@ BinaryInvertedListScanner *select_IVFBinaryScannerL2 (size_t code_size) {
             return new IVFBinaryScannerL2<HammingComputerDefault,
                 store_pairs> (code_size);
         }
+    }
+}
+
+template <bool store_pairs>
+BinaryInvertedListScanner *select_IVFBinaryScannerJaccard (size_t code_size) {
+    switch (code_size) {
+#define HANDLE_CS(cs)                                                  \
+    case cs:                                                            \
+        return new IVFBinaryScannerJaccard<JaccardComputer ## cs, store_pairs> (cs);
+     HANDLE_CS(16)
+     HANDLE_CS(32)
+     HANDLE_CS(64)
+     HANDLE_CS(128)
+#undef HANDLE_CS
+    default:
+        return new IVFBinaryScannerJaccard<JaccardComputerDefault,
+            store_pairs>(code_size);
     }
 }
 
@@ -480,6 +569,89 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
             } else {
                 heap_reorder<HeapForL2> (k, simi, idxi);
             }
+
+        } // parallel for
+    } // parallel
+
+    indexIVF_stats.nq += n;
+    indexIVF_stats.nlist += nlistv;
+    indexIVF_stats.ndis += ndis;
+    indexIVF_stats.nheap_updates += nheap;
+
+}
+
+void search_knn_jaccard_heap(const IndexBinaryIVF& ivf,
+                             size_t n,
+                             const uint8_t *x,
+                             idx_t k,
+                             const idx_t *keys,
+                             const float * coarse_dis,
+                             float *distances, idx_t *labels,
+                             bool store_pairs,
+                             const IVFSearchParameters *params)
+{
+    long nprobe = params ? params->nprobe : ivf.nprobe;
+    long max_codes = params ? params->max_codes : ivf.max_codes;
+    MetricType metric_type = ivf.metric_type;
+
+    // almost verbatim copy from IndexIVF::search_preassigned
+
+    size_t nlistv = 0, ndis = 0, nheap = 0;
+    using HeapForJaccard = CMax<float, idx_t>;
+
+#pragma omp parallel if(n > 1) reduction(+: nlistv, ndis, nheap)
+    {
+        std::unique_ptr<BinaryInvertedListScanner> scanner
+            (ivf.get_InvertedListScannerJaccard (store_pairs));
+
+#pragma omp for
+        for (size_t i = 0; i < n; i++) {
+            const uint8_t *xi = x + i * ivf.code_size;
+            scanner->set_query(xi);
+
+            const idx_t * keysi = keys + i * nprobe;
+            float * simi = distances + k * i;
+            idx_t * idxi = labels + k * i;
+
+            heap_heapify<HeapForJaccard> (k, simi, idxi);
+
+            size_t nscan = 0;
+
+            for (size_t ik = 0; ik < nprobe; ik++) {
+                idx_t key = keysi[ik];  /* select the list  */
+                if (key < 0) {
+                    // not enough centroids for multiprobe
+                    continue;
+                }
+                FAISS_THROW_IF_NOT_FMT
+                (key < (idx_t) ivf.nlist,
+                 "Invalid key=%ld  at ik=%ld nlist=%ld\n",
+                 key, ik, ivf.nlist);
+
+                scanner->set_list (key, (int32_t)coarse_dis[i * nprobe + ik]);
+
+                nlistv++;
+
+                size_t list_size = ivf.invlists->list_size(key);
+                InvertedLists::ScopedCodes scodes (ivf.invlists, key);
+                std::unique_ptr<InvertedLists::ScopedIds> sids;
+                const Index::idx_t * ids = nullptr;
+
+                if (!store_pairs) {
+                    sids.reset (new InvertedLists::ScopedIds (ivf.invlists, key));
+                    ids = sids->get();
+                }
+
+                nheap += scanner->scan_codes (list_size, scodes.get(),
+                                              ids, (int32_t*)simi, idxi, k);
+
+                nscan += list_size;
+                if (max_codes && nscan >= max_codes)
+                    break;
+            }
+
+            ndis += nscan;
+            heap_reorder<HeapForJaccard> (k, simi, idxi);
 
         } // parallel for
     } // parallel
@@ -634,6 +806,16 @@ BinaryInvertedListScanner *IndexBinaryIVF::get_InvertedListScanner
     }
 }
 
+BinaryInvertedListScanner *IndexBinaryIVF::get_InvertedListScannerJaccard
+      (bool store_pairs) const
+{
+    if (store_pairs) {
+        return select_IVFBinaryScannerJaccard<true> (code_size);
+    } else {
+        return select_IVFBinaryScannerJaccard<false> (code_size);
+    }
+}
+
 void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                         const idx_t *idx,
                                         const int32_t * coarse_dis,
@@ -642,17 +824,38 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                         const IVFSearchParameters *params
                                         ) const {
 
-    if (use_heap) {
-        search_knn_hamming_heap (*this, n, x, k, idx, coarse_dis,
-                                 distances, labels, store_pairs,
-                                 params);
-    } else {
-        if (store_pairs) {
-            search_knn_hamming_count_1<true>
-                (*this, n, x, idx, k, distances, labels, params);
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
+        if (use_heap) {
+            float *D = new float[k * n];
+            float *c_dis = new float [n * nprobe];
+            memcpy(c_dis, coarse_dis, sizeof(float) * n * nprobe);
+            search_knn_jaccard_heap (*this, n, x, k, idx, c_dis ,
+                                     D, labels, store_pairs,
+                                     params);
+            if (metric_type == METRIC_Tanimoto) {
+                for (int i = 0; i < k * n; i++) {
+                    D[i] = -log2(1-D[i]);
+                }
+            }
+            memcpy(distances, D, sizeof(float) * n * k);
+            delete [] D;
+            delete [] c_dis;
         } else {
-            search_knn_hamming_count_1<false>
-                (*this, n, x, idx, k, distances, labels, params);
+            //not implemented
+        }
+    } else {
+        if (use_heap) {
+            search_knn_hamming_heap (*this, n, x, k, idx, coarse_dis,
+                                     distances, labels, store_pairs,
+                                     params);
+        } else {
+            if (store_pairs) {
+                search_knn_hamming_count_1<true>
+                        (*this, n, x, idx, k, distances, labels, params);
+            } else {
+                search_knn_hamming_count_1<false>
+                        (*this, n, x, idx, k, distances, labels, params);
+            }
         }
     }
 }

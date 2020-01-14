@@ -84,25 +84,22 @@ class DB {
     ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) = 0;
 
     virtual Status
-    InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,
-                  IDNumbers& vector_ids_) = 0;
+    InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) = 0;
 
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-          const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+          ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-          const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-          ResultDistances& result_distances) = 0;
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
-                  const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-                  ResultDistances& result_distances) = 0;
+                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+                  const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;

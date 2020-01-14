@@ -21,9 +21,13 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
+
 #ifdef MILVUS_GPU_VERSION
+
 #include <cuda_runtime.h>
+
 #endif
+
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -33,7 +37,7 @@ namespace milvus {
 namespace server {
 
 constexpr size_t TABLE_NAME_SIZE_LIMIT = 255;
-constexpr int64_t TABLE_DIMENSION_LIMIT = 16384;
+constexpr int64_t TABLE_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
 
 Status
@@ -78,7 +82,8 @@ Status
 ValidationUtil::ValidateTableDimension(int64_t dimension) {
     if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
         std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
-                          "The table dimension must be within the range of 1 ~ 16384.";
+                          "The table dimension must be within the range of 1 ~ " +
+                          std::to_string(TABLE_DIMENSION_LIMIT) + ".";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     } else {
@@ -108,6 +113,12 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     return Status::OK();
 }
 
+bool
+ValidationUtil::IsBinaryIndexType(int32_t index_type) {
+    return (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP)) ||
+           (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT));
+}
+
 Status
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if (nlist <= 0) {
@@ -135,14 +146,20 @@ ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
 
 Status
 ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
-    if (metric_type != static_cast<int32_t>(engine::MetricType::L2) &&
-        metric_type != static_cast<int32_t>(engine::MetricType::IP)) {
+    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
         std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
-                          "Make sure the metric type is either MetricType.L2 or MetricType.IP.";
+                          "Make sure the metric type is in MetricType list.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
     return Status::OK();
+}
+
+bool
+ValidationUtil::IsBinaryMetricType(int32_t metric_type) {
+    return (metric_type == static_cast<int32_t>(engine::MetricType::HAMMING)) ||
+           (metric_type == static_cast<int32_t>(engine::MetricType::JACCARD)) ||
+           (metric_type == static_cast<int32_t>(engine::MetricType::TANIMOTO));
 }
 
 Status
@@ -219,6 +236,7 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     cudaDeviceProp deviceProp;
@@ -233,6 +251,7 @@ ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     memory = deviceProp.totalGlobalMem;
     return Status::OK();
 }
+
 #endif
 
 Status

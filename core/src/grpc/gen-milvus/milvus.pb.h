@@ -1314,26 +1314,39 @@ class RowRecord :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kVectorDataFieldNumber = 1,
+    kFloatDataFieldNumber = 1,
+    kBinaryDataFieldNumber = 2,
   };
-  // repeated float vector_data = 1;
-  int vector_data_size() const;
-  void clear_vector_data();
-  float vector_data(int index) const;
-  void set_vector_data(int index, float value);
-  void add_vector_data(float value);
+  // repeated float float_data = 1;
+  int float_data_size() const;
+  void clear_float_data();
+  float float_data(int index) const;
+  void set_float_data(int index, float value);
+  void add_float_data(float value);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
-      vector_data() const;
+      float_data() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
-      mutable_vector_data();
+      mutable_float_data();
+
+  // bytes binary_data = 2;
+  void clear_binary_data();
+  const std::string& binary_data() const;
+  void set_binary_data(const std::string& value);
+  void set_binary_data(std::string&& value);
+  void set_binary_data(const char* value);
+  void set_binary_data(const void* value, size_t size);
+  std::string* mutable_binary_data();
+  std::string* release_binary_data();
+  void set_allocated_binary_data(std::string* binary_data);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.RowRecord)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > vector_data_;
-  mutable std::atomic<int> _vector_data_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > float_data_;
+  mutable std::atomic<int> _float_data_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr binary_data_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -3907,34 +3920,85 @@ inline void Range::set_allocated_end_value(std::string* end_value) {
 
 // RowRecord
 
-// repeated float vector_data = 1;
-inline int RowRecord::vector_data_size() const {
-  return vector_data_.size();
+// repeated float float_data = 1;
+inline int RowRecord::float_data_size() const {
+  return float_data_.size();
 }
-inline void RowRecord::clear_vector_data() {
-  vector_data_.Clear();
+inline void RowRecord::clear_float_data() {
+  float_data_.Clear();
 }
-inline float RowRecord::vector_data(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.RowRecord.vector_data)
-  return vector_data_.Get(index);
+inline float RowRecord::float_data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.RowRecord.float_data)
+  return float_data_.Get(index);
 }
-inline void RowRecord::set_vector_data(int index, float value) {
-  vector_data_.Set(index, value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.RowRecord.vector_data)
+inline void RowRecord::set_float_data(int index, float value) {
+  float_data_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.RowRecord.float_data)
 }
-inline void RowRecord::add_vector_data(float value) {
-  vector_data_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.vector_data)
+inline void RowRecord::add_float_data(float value) {
+  float_data_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.grpc.RowRecord.float_data)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
-RowRecord::vector_data() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.RowRecord.vector_data)
-  return vector_data_;
+RowRecord::float_data() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.RowRecord.float_data)
+  return float_data_;
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
-RowRecord::mutable_vector_data() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.RowRecord.vector_data)
-  return &vector_data_;
+RowRecord::mutable_float_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.RowRecord.float_data)
+  return &float_data_;
+}
+
+// bytes binary_data = 2;
+inline void RowRecord::clear_binary_data() {
+  binary_data_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& RowRecord::binary_data() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.RowRecord.binary_data)
+  return binary_data_.GetNoArena();
+}
+inline void RowRecord::set_binary_data(const std::string& value) {
+  
+  binary_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.RowRecord.binary_data)
+}
+inline void RowRecord::set_binary_data(std::string&& value) {
+  
+  binary_data_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.RowRecord.binary_data)
+}
+inline void RowRecord::set_binary_data(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  binary_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.RowRecord.binary_data)
+}
+inline void RowRecord::set_binary_data(const void* value, size_t size) {
+  
+  binary_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.RowRecord.binary_data)
+}
+inline std::string* RowRecord::mutable_binary_data() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.RowRecord.binary_data)
+  return binary_data_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* RowRecord::release_binary_data() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.RowRecord.binary_data)
+  
+  return binary_data_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void RowRecord::set_allocated_binary_data(std::string* binary_data) {
+  if (binary_data != nullptr) {
+    
+  } else {
+    
+  }
+  binary_data_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), binary_data);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.RowRecord.binary_data)
 }
 
 // -------------------------------------------------------------------

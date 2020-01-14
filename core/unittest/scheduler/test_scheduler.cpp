@@ -48,7 +48,7 @@ class MockVecIndex : public engine::VecIndex {
     }
 
     engine::IndexType
-    GetType() override {
+    GetType() const override {
         return engine::IndexType::INVALID;
     }
 
