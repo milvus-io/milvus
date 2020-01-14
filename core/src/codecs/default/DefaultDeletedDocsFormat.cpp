@@ -38,10 +38,10 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
     }
 
     auto file_size = boost::filesystem::file_size(boost::filesystem::path(del_file_path));
-    auto deleted_docs_size = file_size / sizeof(segment::doc_id_t);
-    std::vector<segment::offset_t> deleted_docs_list;
+    auto deleted_docs_size = file_size / sizeof(segment::offset_t);
+    std::vector<segment::offset_t > deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
-    fread((void*)(deleted_docs_list.data()), sizeof(segment::doc_id_t), deleted_docs_size, del_file);
+    fread((void*)(deleted_docs_list.data()), sizeof(segment::offset_t), deleted_docs_size, del_file);
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
     fclose(del_file);
 }
@@ -58,7 +58,7 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
     }
 
     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-    fwrite((void*)(deleted_docs_list.data()), sizeof(segment::doc_id_t), deleted_docs->GetSize(), del_file);
+    fwrite((void*)(deleted_docs_list.data()), sizeof(segment::offset_t), deleted_docs->GetSize(), del_file);
     fclose(del_file);
 }
 

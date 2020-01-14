@@ -67,7 +67,7 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 }
 }  // namespace
 
-TEST_F(DeleteTest, basic) {
+TEST_F(DeleteTest, delete_in_mem) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -184,8 +184,8 @@ TEST_F(DeleteTest, delete_on_disk) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
-//        ASSERT_NE(result_ids[0], pair.first);
+        ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
-//        ASSERT_GT(result_distances[0], 1);
+        ASSERT_GT(result_distances[0], 1);
     }
 }

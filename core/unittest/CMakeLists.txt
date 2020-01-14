@@ -123,7 +123,7 @@ set(common_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
-#        ${db_wal_files}
+        ${db_wal_files}
         ${metrics_files}
         ${thirdparty_files}
         ${scheduler_files}

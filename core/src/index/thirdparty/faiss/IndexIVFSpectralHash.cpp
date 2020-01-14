@@ -266,7 +266,7 @@ struct IVFScanner: InvertedListScanner {
     {
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
-            if(!bitset || bitset->test(ids[j])){
+            if(!bitset || !bitset->test(ids[j])){
                 float dis = hc.hamming (codes);
 
                 if (dis < simi [0]) {
