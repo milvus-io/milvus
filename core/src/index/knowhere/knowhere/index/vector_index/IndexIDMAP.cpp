@@ -197,7 +197,6 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     //    GETTENSOR(dataset)
-    auto dim = dataset->Get<int64_t>(meta::DIM);
     auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 

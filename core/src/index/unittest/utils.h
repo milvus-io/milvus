@@ -47,6 +47,7 @@ class DataGen {
     std::vector<int64_t> ids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
+    knowhere::DatasetPtr id_dataset = nullptr;
 };
 
 class BinaryDataGen {
@@ -103,6 +104,9 @@ generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_
 
 knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, const float* xb);
+
+knowhere::DatasetPtr
+generate_id_dataset(int64_t nb, const int64_t* ids);
 
 knowhere::DatasetPtr
 generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb);
