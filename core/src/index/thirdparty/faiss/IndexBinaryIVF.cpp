@@ -147,7 +147,7 @@ void IndexBinaryIVF::make_direct_map(bool new_maintain_direct_map) {
 }
 
 void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
-                            int32_t *distances, idx_t *labels) const {
+                            int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const {
   std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
   std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 
@@ -159,7 +159,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
   invlists->prefetch_lists(idx.get(), n * nprobe);
 
   search_preassigned(n, x, k, idx.get(), coarse_dis.get(),
-                     distances, labels, false);
+                     distances, labels, false, nullptr, bitset);
   indexIVF_stats.search_time += getmillisecs() - t0;
 }
 

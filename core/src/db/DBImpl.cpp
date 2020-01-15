@@ -32,6 +32,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "db/IDGenerator.h"
 #include "engine/EngineFactory.h"
 #include "insert/MemMenagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -43,8 +44,8 @@
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentWriter.h"
-#include "utils/Log.h"
 #include "utils/Exception.h"
+#include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 #include "wal/WalDefinations.h"
@@ -76,8 +77,6 @@ DBImpl::DBImpl(const DBOptions& options)
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
-//    server::Config& config = server::Config::GetInstance();
-//    config.GetWalConfigEnable(wal_enable_);
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.record_size = options_.record_size_;
@@ -273,7 +272,16 @@ DBImpl::PreloadTable(const std::string& table_id) {
                      << " files need to be pre-loaded";
     TimeRecorderAuto rc("Pre-load table:" + table_id);
     for (auto& file : files_array) {
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+        EngineType engine_type;
+        if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
+            file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                        : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file.engine_type_;
+        }
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
                                                          (MetricType)file.metric_type_, file.nlist_);
         if (engine == nullptr) {
             ENGINE_LOG_ERROR << "Invalid engine type";
@@ -400,16 +408,21 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         }
 
         // insert vectors into target table
+        // TODO(zhiru): generate ids
+        if (vectors.id_array_.empty()) {
+            auto id_generator = std::make_shared<SimpleIDGenerator>();
+            id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+        }
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
             auto dim = vectors.float_data_.size() / vectors.vector_count_;
             status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
-                                            vectors.float_data_.data(), lsn, flushed_tables);
+                                             vectors.float_data_.data(), lsn, flushed_tables);
         } else {
             auto dim = vectors.binary_data_.size() / vectors.vector_count_;
             status = mem_mgr_->InsertVectors(target_table_name, vectors.vector_count_, vectors.id_array_.data(), dim,
-                                            vectors.binary_data_.data(), lsn, flushed_tables);
+                                             vectors.binary_data_.data(), lsn, flushed_tables);
         }
         if (!flushed_tables.empty()) {
             Merge(flushed_tables);
@@ -495,7 +508,6 @@ DBImpl::Flush() {
             wal_task_swn_.Notify();
             flush_task_swn_.Wait();
         }
-    
     } else {
         std::set<std::string> table_ids;
         status = mem_mgr_->Flush(table_ids);
@@ -1454,7 +1466,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 }
 
 Status
-DBImpl::ExecWalRecord(const wal::MXLogRecord &record) {
+DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     Status status;
 
     switch (record.type) {
@@ -1466,8 +1478,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord &record) {
             }
 
             std::set<std::string> flushed_tables;
-            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids, (record.data_size / sizeof(uint8_t)),
-                                             (const u_int8_t*)record.data, record.lsn, flushed_tables);
+            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
+                                             (record.data_size / sizeof(uint8_t)), (const u_int8_t*)record.data,
+                                             record.lsn, flushed_tables);
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
                 Merge(flushed_tables);
@@ -1483,8 +1496,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord &record) {
             }
 
             std::set<std::string> flushed_tables;
-            status = mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, (record.data_size / sizeof(float)),
-                                             (const float*)record.data, record.lsn, flushed_tables);
+            status =
+                mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, (record.data_size / sizeof(float)),
+                                        (const float*)record.data, record.lsn, flushed_tables);
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
                 Merge(flushed_tables);
@@ -1542,7 +1556,6 @@ DBImpl::BackgroundWalTask() {
         }
     }
 }
-
 
 }  // namespace engine
 }  // namespace milvus

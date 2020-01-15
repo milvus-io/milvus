@@ -17,7 +17,8 @@
 
 #include "scheduler/task/SearchTask.h"
 
-#include <src/scheduler/SchedInst.h>
+#include <scheduler/SchedInst.h>
+#include <utils/ValidationUtil.h>
 
 #include <algorithm>
 #include <memory>
@@ -110,7 +111,18 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
         if (file_->metric_type_ == static_cast<int>(MetricType::IP)) {
             ascending_reduce = false;
         }
-        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
+
+        EngineType engine_type;
+        if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                         : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file->engine_type_;
+        }
+
+        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                              (MetricType)file_->metric_type_, file_->nlist_);
     }
 }

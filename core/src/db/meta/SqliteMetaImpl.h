@@ -73,6 +73,9 @@ class SqliteMetaImpl : public Meta {
     UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) override;
 
     Status
+    GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) override;
+
+    Status
     GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) override;
 
     Status
@@ -133,6 +136,12 @@ class SqliteMetaImpl : public Meta {
 
     Status
     Count(const std::string& table_id, uint64_t& result) override;
+
+    Status
+    SetGlobalLastLSN(uint64_t lsn) override;
+
+    Status
+    GetGlobalLastLSN(uint64_t& lsn) override;
 
  private:
     Status

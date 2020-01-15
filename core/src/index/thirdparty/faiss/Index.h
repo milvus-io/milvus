@@ -134,15 +134,13 @@ struct Index {
      * @param x           input vectors to search, size n * d
      * @param labels      output labels of the NNs, size n*k
      * @param distances   output pairwise distances, size n*k
+     * @param bitset      flags to check the validity of vectors
      */
     virtual void search (idx_t n, const float *x, idx_t k,
-                         float *distances, idx_t *labels) const = 0;
-
-    virtual void search (idx_t n, const float *x, idx_t k,
-                         float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const;
+                         float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
     virtual void searchById (idx_t n, const idx_t *xid, idx_t k,
-                         float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const;
+                         float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const;
 
     /** query n vectors of dimension d to the index.
      *

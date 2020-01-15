@@ -34,6 +34,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/ValidationUtil.h"
+
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
@@ -447,7 +448,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
-                ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
+                ec = std::static_pointer_cast<BinBFIndex>(index_)->Build(conf);
                 if (ec != KNOWHERE_SUCCESS) {
                     return status;
                 }
@@ -481,6 +482,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
                         concurrent_bitset_ptr->set(offset);
                     }
                 }
+
+                index_->SetBlacklist(concurrent_bitset_ptr);
 
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;

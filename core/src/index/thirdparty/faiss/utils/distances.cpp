@@ -148,7 +148,7 @@ static void knn_inner_product_sse (const float * x,
                         const float * y,
                         size_t d, size_t nx, size_t ny,
                         float_minheap_array_t * res,
-                        faiss::ConcurrentBitsetPtr bitset = nullptr)
+                        ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
     size_t check_period = InterruptCallback::get_period_hint (ny * d);
@@ -191,7 +191,7 @@ static void knn_L2sqr_sse (
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                faiss::ConcurrentBitsetPtr bitset = nullptr)
+                ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
 
@@ -235,7 +235,7 @@ static void knn_inner_product_blas (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        faiss::ConcurrentBitsetPtr bitset = nullptr)
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -300,7 +300,7 @@ static void knn_L2sqr_blas (const float * x,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
         const DistanceCorrection &corr,
-        faiss::ConcurrentBitsetPtr bitset = nullptr)
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -377,7 +377,7 @@ static void knn_jaccard_blas (const float * x,
                               size_t d, size_t nx, size_t ny,
                               float_maxheap_array_t * res,
                               const DistanceCorrection &corr,
-                              faiss::ConcurrentBitsetPtr bitset = nullptr)
+                              ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -445,7 +445,6 @@ static void knn_jaccard_blas (const float * x,
         InterruptCallback::check ();
     }
     res->reorder ();
-
 }
 
 
@@ -464,7 +463,7 @@ void knn_inner_product (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        faiss::ConcurrentBitsetPtr bitset)
+        ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
@@ -485,7 +484,7 @@ void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                faiss::ConcurrentBitsetPtr bitset)
+                ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
         knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
@@ -499,7 +498,7 @@ void knn_jaccard (const float * x,
                   const float * y,
                   size_t d, size_t nx, size_t ny,
                   float_maxheap_array_t * res,
-                  faiss::ConcurrentBitsetPtr bitset)
+                  ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);
@@ -507,6 +506,20 @@ void knn_jaccard (const float * x,
     } else {
         NopDistanceCorrection nop;
         knn_jaccard_blas (x, y, d, nx, ny, res, nop, bitset);
+    }
+}
+
+void knn_jaccard (const float * x,
+                  const float * y,
+                  size_t d, size_t nx, size_t ny,
+                  float_maxheap_array_t * res)
+{
+    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+//        knn_jaccard_sse (x, y, d, nx, ny, res);
+        printf("sse_not implemented!\n");
+    } else {
+        NopDistanceCorrection nop;
+        knn_jaccard_blas (x, y, d, nx, ny, res, nop);
     }
 }
 

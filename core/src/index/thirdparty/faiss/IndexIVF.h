@@ -184,10 +184,7 @@ struct IndexIVF: Index, Level1Quantizer {
 
     /** assign the vectors, then call search_preassign */
     void search (idx_t n, const float *x, idx_t k,
-                 float *distances, idx_t *labels) const override;
-
-    void search (idx_t n, const float *x, idx_t k,
-                 float *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const override;
+                 float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void range_search (idx_t n, const float* x, float radius,
                        RangeSearchResult* result) const override;

@@ -58,7 +58,7 @@ struct IndexLattice: Index {
     /// not implemented
     void add(idx_t n, const float* x) override;
     void search(idx_t n, const float* x, idx_t k,
-                float* distances, idx_t* labels) const override;
+                float* distances, idx_t* labels, ConcurrentBitsetPtr bitset = nullptr) const override;
     void reset() override;
 
 };
