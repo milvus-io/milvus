@@ -334,8 +334,7 @@ DBImpl::CreatePartition(const std::string& table_id, const std::string& partitio
     }
 
     uint64_t lsn = 0;
-    // TODO: get table flush lsn by table id
-
+    meta_ptr_->GetTableFlushLSN(table_id, lsn);
     return meta_ptr_->CreatePartition(table_id, partition_name, partition_tag, lsn);
 }
 
@@ -392,6 +391,13 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     Status status;
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
 
+    // insert vectors into target table
+    // (zhiru): generate ids
+    if (vectors.id_array_.empty()) {
+        auto id_generator = std::make_shared<SimpleIDGenerator>();
+        id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+    }
+
     if (wal_enable_ && wal_mgr_ != nullptr) {
         if (!vectors.float_data_.empty()) {
             wal_mgr_->Insert(table_id, partition_tag, vectors.id_array_, vectors.float_data_);
@@ -407,12 +413,6 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
             return status;
         }
 
-        // insert vectors into target table
-        // TODO(zhiru): generate ids
-        if (vectors.id_array_.empty()) {
-            auto id_generator = std::make_shared<SimpleIDGenerator>();
-            id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
-        }
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
@@ -1483,6 +1483,18 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 }
 
 Status
+DBImpl::UpdateWALTableFlushed(const std::set<std::string>& table_id) {
+    for (auto &it : table_id) {
+        uint64_t lsn = 0;
+        auto status = meta_ptr_->GetTableFlushLSN(it, lsn);
+        if (status.ok()) {
+            wal_mgr_->TableFlushed(it, lsn);
+        }
+    }
+    return Status::OK();
+}
+
+Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     Status status;
 
@@ -1500,6 +1512,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                                              record.lsn, flushed_tables);
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
+                UpdateWALTableFlushed(flushed_tables);
                 Merge(flushed_tables);
             }
             break;
@@ -1518,6 +1531,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                                         (const float*)record.data, record.lsn, flushed_tables);
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
+                UpdateWALTableFlushed(flushed_tables);
                 Merge(flushed_tables);
             }
             break;
@@ -1538,6 +1552,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 table_ids.insert(record.table_id);
             }
             status = mem_mgr_->Flush(table_ids);
+            UpdateWALTableFlushed(table_ids);
             Merge(table_ids);
             break;
         }

@@ -42,26 +42,34 @@ WalManager::Init(const meta::MetaPtr& meta) {
     uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     if (p_meta_handler_ != nullptr) {
-        p_meta_handler_->GetMXLogInternalMeta(applied_lsn);
+        if (!p_meta_handler_->GetMXLogInternalMeta(applied_lsn)) {
+            return WAL_META_ERROR;
+        }
         last_applied_lsn_ = applied_lsn;
     }
 
-    std::vector<meta::TableSchema> table_schema_array;
+    uint64_t recovery_start = 0;
     if (meta != nullptr) {
+        std::vector<meta::TableSchema> table_schema_array;
         auto status = meta->AllTables(table_schema_array);
         if (!status.ok()) {
             return WAL_META_ERROR;
         }
-    }
 
-    // Todo: get recovery start point
-    uint64_t recovery_start = applied_lsn;
+        uint64_t max_flused_lsn = 0;
+        for (auto schema: table_schema_array) {
+            TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
+            tables_[schema.table_id_] = tb_lsn;
 
-    for (auto schema: table_schema_array) {
-        TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
-        tables_[schema.table_id_] = tb_lsn;
+            if (max_flused_lsn < schema.flush_lsn_) {
+                max_flused_lsn = schema.flush_lsn_;
+            }
+        }
 
-        recovery_start = std::min(recovery_start, schema.flush_lsn_);
+        meta->GetGlobalLastLSN(recovery_start);
+        if (recovery_start < max_flused_lsn) {
+            recovery_start = max_flused_lsn;
+        }
     }
 
     p_buffer_ = std::make_shared<MXLogBuffer>(
@@ -230,8 +238,7 @@ WalManager::Insert(const std::string &table_id,
     }
     lck.unlock();
 
-    p_meta_handler_->SetMXLogInternalMeta(new_lsn);
-    return true;
+    return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
 
 bool
@@ -272,8 +279,7 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
     }
     lck.unlock();
 
-    p_meta_handler_->SetMXLogInternalMeta(new_lsn);
-    return true;
+    return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
 
 uint64_t

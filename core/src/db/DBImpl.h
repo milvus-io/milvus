@@ -212,6 +212,9 @@ class DBImpl : public DB {
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
     Status
+    UpdateWALTableFlushed(const std::set<std::string>& table_id);
+
+    Status
     ExecWalRecord(const wal::MXLogRecord& record);
 
     void

@@ -36,8 +36,8 @@ class MXLogMetaHandler {
     MXLogMetaHandler(const std::string& internal_meta_file_path);
     ~MXLogMetaHandler();
 
-    void GetMXLogInternalMeta(uint64_t& wal_lsn);
-    void SetMXLogInternalMeta(const uint64_t& wal_lsn);
+    bool GetMXLogInternalMeta(uint64_t& wal_lsn);
+    bool SetMXLogInternalMeta(const uint64_t& wal_lsn);
 
  private:
     FILE *wal_meta_fp_;
