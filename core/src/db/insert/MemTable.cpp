@@ -74,6 +74,20 @@ MemTable::Delete(segment::doc_id_t doc_id) {
     return Status::OK();
 }
 
+Status
+MemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+    // Locate which table file the doc id lands in
+    for (auto& table_file : mem_table_file_list_) {
+        table_file->Delete(doc_ids);
+    }
+    // Add the id to delete list so it can be applied to other segments on disk during the next flush
+    for (auto& id : doc_ids) {
+        doc_ids_to_delete_.insert(id);
+    }
+
+    return Status::OK();
+}
+
 void
 MemTable::GetCurrentMemTableFile(MemTableFilePtr& mem_table_file) {
     mem_table_file = mem_table_file_list_.back();

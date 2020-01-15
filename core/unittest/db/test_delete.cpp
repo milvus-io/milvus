@@ -238,10 +238,11 @@ TEST_F(DeleteTest, delete_with_index) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
+    milvus::engine::IDNumbers ids_to_delete;
     for (auto& kv : search_vectors) {
-        stat = db_->DeleteVector(GetTableName(), kv.first);
-        ASSERT_TRUE(stat.ok());
+        ids_to_delete.emplace_back(kv.first);
     }
+    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
