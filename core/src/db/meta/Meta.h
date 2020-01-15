@@ -31,6 +31,7 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
+static const char* META_ENVIRONMENT= "Environment";
 static const char* META_TABLES = "Tables";
 static const char* META_TABLEFILES = "TableFiles";
 
@@ -141,6 +142,12 @@ class Meta {
 
     virtual Status
     Count(const std::string& table_id, uint64_t& result) = 0;
+
+    virtual Status
+    SetGlobalLastLsn(uint64_t lsn) = 0;
+
+    virtual Status
+    GetGlobalLastLsn(uint64_t& lsn) = 0;
 };  // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;
