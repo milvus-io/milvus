@@ -119,6 +119,23 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
     return Status::OK();
 }
 
+Status
+MemTableFile::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    for (auto& doc_id : doc_ids) {
+        auto found = std::find(uids.begin(), uids.end(), doc_id);
+        if (found != uids.end()) {
+            auto offset = std::distance(uids.begin(), found);
+            segment_ptr->vectors_ptr_->Erase(offset);
+        }
+    }
+
+    return Status::OK();
+}
+
 size_t
 MemTableFile::GetCurrentMem() {
     return current_mem_;

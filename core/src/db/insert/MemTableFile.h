@@ -40,6 +40,9 @@ class MemTableFile {
     Status
     Delete(segment::doc_id_t doc_id);
 
+    Status
+    Delete(const std::vector<segment::doc_id_t>& doc_ids);
+
     size_t
     GetCurrentMem();
 
