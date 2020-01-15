@@ -88,6 +88,9 @@ Config::ValidateConfig() {
     std::string server_time_zone;
     CONFIG_CHECK(GetServerConfigTimeZone(server_time_zone));
 
+    std::string server_web_port;
+    CONFIG_CHECK(GetServerConfigWebPort(server_web_port));
+
     /* db config */
     std::string db_backend_url;
     CONFIG_CHECK(GetDBConfigBackendUrl(db_backend_url));
@@ -194,6 +197,7 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT));
     CONFIG_CHECK(SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT));
     CONFIG_CHECK(SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT));
+    CONFIG_CHECK(SetServerConfigWebPort(CONFIG_SERVER_WEB_PORT_DEFAULT));
 
     /* db config */
     CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
@@ -399,6 +403,23 @@ Config::CheckServerConfigTimeZone(const std::string& value) {
             } catch (...) {
                 return Status(SERVER_INVALID_ARGUMENT, "Invalid server_config.time_zone: " + value);
             }
+        }
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckServerConfigWebPort(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg =
+            "Invalid web server port: " + value + ". Possible reason: server_config.web_port is not a number.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int32_t port = std::stoi(value);
+        if (!(port > 1024 && port < 65535)) {
+            std::string msg = "Invalid web server port: " + value +
+                              ". Possible reason: server_config.web_port is not in range [1025, 65534].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
     return Status::OK();
@@ -690,6 +711,7 @@ Config::CheckWalConfigRecordSize(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::CheckEngineConfigGpuSearchThreshold(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
@@ -811,6 +833,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 
     return Status::OK();
 }
+
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -910,6 +933,12 @@ Status
 Config::GetServerConfigTimeZone(std::string& value) {
     value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
     return CheckServerConfigTimeZone(value);
+}
+
+Status
+Config::GetServerConfigWebPort(std::string& value) {
+    value = GetConfigStr(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, CONFIG_SERVER_WEB_PORT_DEFAULT);
+    return CheckServerConfigWebPort(value);
 }
 
 /* DB config */
@@ -1073,6 +1102,7 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::GetEngineConfigGpuSearchThreshold(int64_t& value) {
     std::string str =
@@ -1162,6 +1192,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     }
     return Status::OK();
 }
+
 #endif
 
 /* tracing config */
@@ -1226,6 +1257,12 @@ Status
 Config::SetServerConfigTimeZone(const std::string& value) {
     CONFIG_CHECK(CheckServerConfigTimeZone(value));
     return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
+}
+
+Status
+Config::SetServerConfigWebPort(const std::string& value) {
+    CONFIG_CHECK(CheckServerConfigWebPort(value));
+    return SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_WEB_PORT, value);
 }
 
 /* db config */
@@ -1354,6 +1391,7 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+/* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(value));

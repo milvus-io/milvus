@@ -23,7 +23,6 @@
 #include <vector>
 
 #include <faiss/utils/ConcurrentBitset.h>
-
 #include "FaissBaseBinaryIndex.h"
 #include "VectorIndex.h"
 #include "faiss/IndexIVF.h"

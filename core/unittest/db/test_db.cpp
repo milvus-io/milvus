@@ -412,6 +412,7 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
         uint64_t nb = VECTOR_COUNT;
         milvus::engine::VectorsData xb;
         BuildVectors(nb, i, xb);
+
         db_->InsertVectors(TABLE_NAME, "", xb);
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
