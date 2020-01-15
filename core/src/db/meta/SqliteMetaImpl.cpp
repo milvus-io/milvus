@@ -775,8 +775,8 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
 }
 
 Status
-SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name,
-                                const std::string& tag, uint64_t lsn) {
+SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag,
+                                uint64_t lsn) {
     server::MetricCollector metric;
 
     TableSchema table_schema;
@@ -1377,8 +1377,10 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     // delete file from disk storage
                     utils::DeleteSegment(options_, table_file);
 
-                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_
-                                     << " location:" << table_file.location_;
+                    std::string segment_dir;
+                    utils::GetParentPath(table_file.location_, segment_dir);
+                    ENGINE_LOG_DEBUG << "Remove segment:" << table_file.segment_id_ << " directory:" << segment_dir;
+
                     table_ids.insert(table_file.table_id_);
 
                     ++clean_files;

@@ -75,7 +75,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
             std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
-        concurrent_bitset_ptr->clear(i);
+        concurrent_bitset_ptr->set(i);
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 

@@ -91,7 +91,7 @@ struct IndexHNSW : Index {
 
     /// entry point for search
     void search (idx_t n, const float *x, idx_t k,
-                 float *distances, idx_t *labels) const override;
+                 float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void reconstruct(idx_t key, float* recons) const override;
 
@@ -162,7 +162,7 @@ struct IndexHNSW2Level : IndexHNSW {
 
     /// entry point for search
     void search (idx_t n, const float *x, idx_t k,
-                 float *distances, idx_t *labels) const override;
+                 float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
 };
 

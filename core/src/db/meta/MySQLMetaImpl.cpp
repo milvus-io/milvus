@@ -1269,8 +1269,8 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
 }
 
 Status
-MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name,
-                               const std::string& tag, uint64_t lsn) {
+MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag,
+                               uint64_t lsn) {
     server::MetricCollector metric;
 
     TableSchema table_schema;
@@ -1961,7 +1961,9 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
                     // delete file from disk storage
                     utils::DeleteSegment(options_, table_file);
-                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.id_ << " location:" << table_file.location_;
+                    std::string segment_dir;
+                    utils::GetParentPath(table_file.location_, segment_dir);
+                    ENGINE_LOG_DEBUG << "Remove segment:" << table_file.segment_id_ << " directory:" << segment_dir;
 
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);
