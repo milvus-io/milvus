@@ -615,6 +615,23 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
+DBImpl::QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                   const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
+                   const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    meta::DatesT dates = {utils::GetDate()};
+    VectorsData vectors_data;
+    vectors_data.id_array_ = vector_ids;
+    vectors_data.vector_count_ = vector_ids.size();
+    Status result =
+        Query(context, table_id, partition_tags, k, nprobe, vectors_data, dates, result_ids, result_distances);
+    return result;
+}
+
+Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
               const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
               ResultIds& result_ids, ResultDistances& result_distances) {
