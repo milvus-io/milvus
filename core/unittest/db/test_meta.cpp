@@ -380,10 +380,24 @@ TEST_F(MetaTest, INDEX_TEST) {
 }
 
 TEST_F(MetaTest, LSN_TEST) {
+    auto table_id = "lsn_test";
     uint64_t lsn = 42949672960;
-    auto status = impl_->SetGlobalLastLsn(lsn);
+
+    milvus::engine::meta::TableSchema table;
+    table.table_id_ = table_id;
+    auto status = impl_->CreateTable(table);
+
+    status = impl_->UpdateTableFlushLSN(table_id, lsn);
     ASSERT_TRUE(status.ok());
+
     uint64_t temp_lsb = 0;
-    status = impl_->GetGlobalLastLsn(temp_lsb);
+    status = impl_->GetTableFlushLSN(table_id, temp_lsb);
+    ASSERT_EQ(temp_lsb, lsn);
+
+    status = impl_->SetGlobalLastLSN(lsn);
+    ASSERT_TRUE(status.ok());
+
+    temp_lsb = 0;
+    status = impl_->GetGlobalLastLSN(temp_lsb);
     ASSERT_EQ(temp_lsb, lsn);
 }
