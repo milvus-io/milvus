@@ -186,6 +186,9 @@ struct IndexIVF: Index, Level1Quantizer {
     void search (idx_t n, const float *x, idx_t k,
                  float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
+    void searchById (idx_t n, const idx_t *xid, idx_t k,
+                     float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) override;
+
     void range_search (idx_t n, const float* x, float radius,
                        RangeSearchResult* result) const override;
 

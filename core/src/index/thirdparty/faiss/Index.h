@@ -140,7 +140,7 @@ struct Index {
                          float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
     virtual void searchById (idx_t n, const idx_t *xid, idx_t k,
-                         float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const;
+                         float *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr);
 
     /** query n vectors of dimension d to the index.
      *

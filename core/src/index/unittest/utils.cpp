@@ -55,7 +55,7 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
-    id_dataset = generate_id_dataset(nb, ids.data());
+    id_dataset = generate_id_dataset(nq, ids.data());
 }
 
 void
