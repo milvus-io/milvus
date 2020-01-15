@@ -208,9 +208,9 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     auto p_dist = (float*)malloc(p_dist_size);
 
     // todo: enable search by id (zhiru)
-    auto whitelist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    //    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, whitelist);
-    index_->searchById(rows, p_data, config->k, p_dist, p_id, whitelist);
+    auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+    //    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, blacklist);
+    index_->searchById(rows, p_data, config->k, p_dist, p_id, blacklist);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

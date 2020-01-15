@@ -75,7 +75,7 @@ DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
-    
+
     wal_enable_ = false;  // todo: read config
     if (wal_enable_) {
         wal_mgr_ = std::make_shared<wal::WalManager>();

@@ -184,8 +184,8 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
 
     auto* pdistances = (int32_t*)p_dist;
     //    index_->searchById(rows, (uint8_t*)p_data, config->k, pdistances, p_id, bitset_);
-    auto whitelist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    index_->searchById(rows, p_data, config->k, pdistances, p_id, whitelist);
+    auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+    index_->searchById(rows, p_data, config->k, pdistances, p_id, blacklist);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
