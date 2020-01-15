@@ -30,10 +30,6 @@ MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
     if (wal_meta_fp_ == nullptr) {
         wal_meta_fp_ = fopen(file_full_path.c_str(), "w");
     }
-
-    if (wal_meta_fp_ == nullptr) {
-        // through
-    }
 }
 
 MXLogMetaHandler::~MXLogMetaHandler() {
@@ -43,26 +39,27 @@ MXLogMetaHandler::~MXLogMetaHandler() {
     }
 }
 
-void
+bool
 MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn) {
-    // todo: add crc
+    if (wal_meta_fp_ == nullptr) {
+        return false;
+    }
 
+    // todo: add crc
     fseek(wal_meta_fp_, 0, SEEK_SET);
     size_t read_len = fread(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_);
     if (read_len != sizeof(wal_lsn)) {
         wal_lsn = 0;
     }
+    return true;
 }
 
-void
+bool
 MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t &wal_lsn) {
     // todo: add crc
 
     fseek(wal_meta_fp_, 0, SEEK_SET);
-    size_t write_len = fwrite(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_);
-    if (write_len != sizeof(wal_lsn)) {
-        // through
-    }
+    return (sizeof(wal_lsn) == fwrite(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_));
 }
 
 
