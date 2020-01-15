@@ -19,6 +19,7 @@
 
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/MetaIndexes.h>
+
 #include <faiss/index_factory.h>
 
 #include "knowhere/adapter/VectorAdapter.h"

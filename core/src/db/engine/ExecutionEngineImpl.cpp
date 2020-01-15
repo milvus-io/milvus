@@ -34,6 +34,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/ValidationUtil.h"
+
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"

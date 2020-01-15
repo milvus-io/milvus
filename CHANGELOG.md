@@ -10,17 +10,19 @@ Please mark all change in change log and use the issue from GitHub
 - \#770 - Server unittest run failed on low-end server
 - \#805 - IVFTest.gpu_seal_test unittest failed
 - \#831 - Judge branch error in CommonUtil.cpp
+- \#977 - Server crash when create tables concurrently
 
 ## Feature
 - \#216 - Add CLI to get server info
 - \#343 - Add Opentracing
 - \#665 - Support get/set config via CLI
+- \#759 - Put C++ sdk out of milvus/core
 - \#766 - If partition tag is similar, wrong partition is searched
 - \#771 - Add server build commit info interface
-- \#759 - Put C++ sdk out of milvus/core
+- \#788 - Add web server into server module
 - \#813 - Add push mode for prometheus monitor
 - \#815 - Support MinIO storage
-- \#823 - Support binary vector tanimoto metric
+- \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#910 - Change Milvus c++ standard to c++17
 
 ## Improvement

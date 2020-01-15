@@ -355,6 +355,7 @@ void knn_extra_metrics (
         knn_extra_metrics_template(vd, x, y, nx, ny, res, bitset);
         break;
     }
+
     default:
         FAISS_THROW_MSG ("metric type not implemented");
     }

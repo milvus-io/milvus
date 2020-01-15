@@ -36,6 +36,7 @@ add_executable(test_db
 
 target_link_libraries(test_db
         knowhere
+        metrics
         ${unittest_libs})
 
 install(TARGETS test_db DESTINATION unittest)
