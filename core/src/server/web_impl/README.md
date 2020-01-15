@@ -181,7 +181,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/config/advanced`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -191,7 +191,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/config/advanced" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/config/advanced"
 ```
 
 ### `/config/gpu_resources` (GET)
@@ -215,7 +215,7 @@ Gets the parameter values in `gpu_resource_threshold` of the Milvus configuratio
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/config/gpu_resources" -H "accept: text/plain"
+$ curl -X GET "http://192.168.1.65:19122/config/gpu_resources" -H "accept: application/json"
 ```
 
 ##### Response
@@ -248,6 +248,15 @@ Updates the parameter values in `gpu_resource_config` of the Milvus configuratio
 
 </table>
 
+##### Body Parameters
+
+| Parameter  | Description  |  Required? |
+|-----------------|---|------|
+| `enable`     |   Specifies whether to enable GPU resources.  | Yes   |
+| `cache_capacity`  | Size of GPU memory per card used for cache in GBs.  |  Yes  | 
+| `search_resources`    |  GPU devices used for search computation, must be in format `gpux`.  |  Yes |
+| `build_index_resources`    |   GPU devices used for index building, must be in format `gpux`.   |   Yes  |
+
 #### Example
 
 ##### Request
@@ -273,7 +282,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/config/gpu_resources`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -282,7 +291,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/config/gpu_resources" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/config/gpu_resources"
 ```
 
 ### `/tables` (GET)
@@ -381,7 +390,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/tables`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -391,7 +400,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/tables"
 ```
 
 ### `/tables/{table_name}` (GET)
@@ -468,7 +477,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|-----|
 | Name     | `/tables/{table_name}`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -484,7 +493,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table"
 ```
 
 ### `/tables/{table_name}/indexes` (GET)
@@ -545,8 +554,8 @@ Updates the index type and nlist of a table.
 
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
-| `index_type`     | The type of indexing method to query the table. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes.  | Yes   |
-| `nlist`     |  Number of vector buckets in a file.   | Yes   |
+| `index_type`     | The type of indexing method to query the table. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT".  | No   |
+| `nlist`     |  Number of vector buckets in a file. The default is 16384.   | No   |
 
 ##### Query Parameters
 
@@ -608,7 +617,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/tables/{table_name}/indexes`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -623,7 +632,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/indexes" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/indexes"
 ```
 
 ### `/tables/{table_name}/partitions` (GET)
@@ -698,7 +707,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/tables/{table_name}/partitions`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -714,7 +723,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/partitions" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/partitions"
 ```
 
 ### `/tables/{table_name}/partitions/{partition_tag}` (DELETE)
@@ -742,7 +751,7 @@ Deletes a partition by tag.
 ##### Request
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19122/tables/test_table/partitions/tags_01" -H "accept: text/plain"
+$ curl -X DELETE "http://192.168.1.65:19122/tables/test_table/partitions/tags_01" -H "accept: application/json"
 ```
 
 The deletion is successful if no information is returned.
@@ -756,7 +765,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/tables/{table_name}/partitions/{partition_tag}`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A  |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -772,7 +781,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/partitions/tag" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/partitions/tag"
 ```
 
 ### `/tables/{table_name}/vectors` (PUT)
@@ -890,7 +899,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 | Request Component     | Value  |
 |-----------------|---|
 | Name     | `/tables/{table_name}/vectors`  |
-| Header  | `accept: application/json`  |
+| Header  | N/A |
 | Body    |   N/A |
 | Method    |   OPTIONS |
 
@@ -899,7 +908,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/vectors" -H "accept: text/plain"
+$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/vectors"
 ```
 
 ### `/system/{msg}` (GET)
