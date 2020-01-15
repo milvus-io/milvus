@@ -482,6 +482,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     }
                 }
 
+                index_->SetBlacklist(concurrent_bitset_ptr);
+
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;
                     ENGINE_LOG_ERROR << msg;

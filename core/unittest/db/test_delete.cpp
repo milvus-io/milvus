@@ -51,8 +51,8 @@ BuildTableSchema() {
     milvus::engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
     table_info.table_id_ = GetTableName();
-    table_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
-    table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
+    table_info.metric_type_ = (int32_t)milvus::engine::MetricType::L2;
+    table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     return table_info;
 }
 
