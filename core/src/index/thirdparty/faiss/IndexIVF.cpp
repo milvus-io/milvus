@@ -314,6 +314,20 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
+void IndexIVF::searchById (idx_t n, const idx_t *xid, idx_t k,
+                           float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) {
+    if(!maintain_direct_map){
+        make_direct_map(true);
+    }
+
+    auto x = new float[n * d];
+    for (idx_t i = 0; i < n; ++i) {
+        reconstruct(xid[i], x + i * d);
+    }
+
+    search(n, x, k, distances, labels, bitset);
+    delete []x;
+}
 
 void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                                    const idx_t *keys,
