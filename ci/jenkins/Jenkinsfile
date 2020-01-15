@@ -87,6 +87,7 @@ pipeline {
                                         steps {
                                             container("milvus-${BINARY_VERSION}-build-env") {
                                                 script {
+                                                    boolean isNightlyTest = isTimeTriggeredBuild()
                                                     if ("${BINARY_VERSION}" == "gpu") {
                                                         load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
                                                     } else {
