@@ -31,6 +31,7 @@
     - [`/tables/{table_name}/vectors` (POST)](#tablestable_namevectors-post)
     - [`/tables/{table_name}/vectors` (OPTIONS)](#tablestable_namevectors-options)
     - [`/system/{msg}` (GET)](#systemmsg-get)
+- [Error Codes](#error-codes) 
 
 <!-- /TOC -->
 
@@ -53,6 +54,11 @@ Checks whether the web server is running.
 | Body    |   N/A |
 | Method    |   GET    |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
 
 #### Example
 
@@ -81,6 +87,14 @@ Gets CPU/GPU information from the host.
 | Body    |   N/A |
 | Method    |   GET    |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+
+
 #### Example
 
 ##### Request
@@ -95,7 +109,6 @@ $ curl -X GET "http://192.168.1.65:19122/devices" -H "accept: application/json"
 {"cpu":{"memory":31},"gpus":{"GPU0":{"memory":5}}}
 ```
 
-
 ### `/config/advanced` (GET)
 
 Gets the values of parameters in `cache_config` and `engine_config` of the Milvus configuration file.
@@ -109,6 +122,12 @@ Gets the values of parameters in `cache_config` and `engine_config` of the Milvu
 | Body    |   N/A |
 | Method    |   GET |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
 
 #### Example
 
@@ -157,6 +176,12 @@ Updates the values of parameters in `cache_config` and `engine_config` of the Mi
 | `use_blas_threshold`    |  Value of `use_blas_threshold` in the Milvus configuration file. The default is 1100.   |  No |
 | `gpu_search_threshold`    |  Value of `gpu_search_threshold` in the Milvus configuration file. The default is 1000.     |   No  |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
 
 #### Example
 
@@ -167,6 +192,7 @@ $ curl -X PUT "http://192.168.1.65:19122/config/advanced" -H "accept: applicatio
 ```
 
 ##### Response
+
 
 ```json
 {"message": "OK","code": 0}
@@ -209,6 +235,12 @@ Gets the parameter values in `gpu_resource_threshold` of the Milvus configuratio
 | Body    |   N/A |
 | Method    |   GET |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
 
 #### Example
 
@@ -219,6 +251,7 @@ $ curl -X GET "http://192.168.1.65:19122/config/gpu_resources" -H "accept: appli
 ```
 
 ##### Response
+
 
 ```json
 {"enable":true,"cache_capacity":1,"search_resources":["GPU0"],"build_index_resources":["GPU0"]}
@@ -256,6 +289,13 @@ Updates the parameter values in `gpu_resource_config` of the Milvus configuratio
 | `cache_capacity`  | Size of GPU memory per card used for cache in GBs.  |  Yes  | 
 | `search_resources`    |  GPU devices used for search computation, must be in format `gpux`.  |  Yes |
 | `build_index_resources`    |   GPU devices used for index building, must be in format `gpux`.   |   Yes  |
+
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
 
 #### Example
 
@@ -318,6 +358,13 @@ Gets information about all tables.
 `offset` and `page_size` are optional in other SDKs
 -->
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+
 #### Example
 
 ##### Request
@@ -364,6 +411,12 @@ Creates a table.
 | `index_file_size`    |  Threshold value that triggers index building for raw data files. The default is 1024.   |  No |
 | `metric_type`    |   The method vector distances are compared in Milvus. The default is L2. Currently supported metrics include L2 (Euclidean distance) and IP (Inner Product).    |   No  |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 201     | Created |
+| 400     | The request is incorrect. Refer to the error message for details. |
 
 #### Example
 
@@ -379,7 +432,6 @@ $ curl -X POST "http://192.168.1.65:19122/tables" -H "accept: application/json" 
 ```json
 {"message":"OK","code":0}
 ```
-
 
 ### `/tables` (OPTIONS)
 
@@ -424,6 +476,14 @@ Gets all information about a table by name.
 | `table_name`     | Name of the table.   | Yes   |
 
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
+
 #### Example
 
 ##### Request
@@ -457,10 +517,18 @@ Drops a table by name.
 |-----------------|---|------|
 | `table_name`     | Name of the table.   | Yes   |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
 ##### Request
+
 
 ```shell
 $ curl -X DELETE "http://192.168.1.65:19122/tables/test_table" -H "accept: application/json"
@@ -515,6 +583,13 @@ Gets the index type and nlist of a table.
 |-----------------|---|------|
 | `table_name`     | Name of the table.   | Yes   |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
@@ -525,6 +600,7 @@ $ curl -X GET "http://192.168.1.65:19122/tables/test_table/indexes" -H "accept: 
 ```
 
 ##### Response
+
 
 ```json
 {"index_type":"FLAT","nlist":16384}
@@ -563,6 +639,21 @@ Updates the index type and nlist of a table.
 |-----------------|---|------|
 | `table_name`     | Name of the table.   | Yes   |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 201     | Created |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
+
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 201     | Created |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
@@ -597,6 +688,14 @@ Drops an index for a table.
 |-----------------|---|------|
 | `table_name`     | Name of the table.   | Yes   |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 204     | Deleted |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | Resource not available |
+
 
 #### Example
 
@@ -607,6 +706,7 @@ $ curl -X DELETE "http://192.168.1.65:19122/tables/test_table/indexes" -H "accep
 ```
 
 If the deletion is successful, no message will be returned.
+
 
 ### `/tables/{table_name}/indexes` (OPTIONS)
 
@@ -656,6 +756,13 @@ Gets all partitions in a table.
 | `offset`     |  Row offset from which the data page starts.    | Yes   |
 | `page_size`  |  Size of the data page.   |  Yes  |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
@@ -683,6 +790,14 @@ Creates a partition in a table.
 | Header  | `accept: application/json`  |
 | Body    |   N/A |
 | Method    |   POST |
+
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 201     | Created |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
@@ -745,6 +860,14 @@ Deletes a partition by tag.
 |-----------------|---|------|
 | `table_name`              |        Name of the table that contains the partition.               |   Yes     |
 | `partition_tag` |    Tag of the partition to delete.      |   yes |
+
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 204     | Deleted |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The requested resource does not exist. |
 
 #### Example
 
@@ -826,6 +949,13 @@ Searches vectors in a table.
 |-----------------|---|------|
 | `table_name` |  Name of the table.      |   Yes     |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
@@ -874,6 +1004,14 @@ Inserts vectors to a table.
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
 | `table_name` |  Name of the table.      |   Yes     |
+
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 201     | Created |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
 
 #### Example
 
@@ -930,6 +1068,13 @@ Gets information about the Milvus server.
 |-----------------|---|------|
 | `msg` |  Type of the message to return. You can use `status` or `version`.     |   Yes     |
 
+#### Response
+
+| Status code    | Type  |
+|-----------------|---|
+| 200     | The request is successful.|
+| 400     | The request is incorrect. Refer to the error message for details. |
+
 #### Example
 
 ##### Request
@@ -943,3 +1088,39 @@ $ curl -X GET "http://192.168.1.65:19122/system/version" -H "accept: application
 ```json
 {"reply":"0.6.0"}
 ```
+
+## Error Codes
+
+The RESTful API returns error messages as JSON text. Each type of error message has a specific error code.
+
+| Type    | Code  |
+|----------|------|
+SUCCESS | 0 |
+UNEXPECTED_ERROR | 1 |
+CONNECT_FAILED | 2 |
+PERMISSION_DENIED | 3 |
+TABLE_NOT_EXISTS | 4 |
+ILLEGAL_ARGUMENT | 5 |
+ILLEGAL_RANGE | 6 |
+ILLEGAL_DIMENSION | 7 |
+ILLEGAL_INDEX_TYPE | 8 |
+ILLEGAL_TABLE_NAME | 9 |
+ILLEGAL_TOPK | 10 |
+ILLEGAL_ROWRECORD | 11 |
+ILLEGAL_VECTOR_ID | 12 |
+ILLEGAL_SEARCH_RESULT | 13 |
+FILE_NOT_FOUND | 14 |
+META_FAILED | 15 |
+CACHE_FAILED | 16 |
+CANNOT_CREATE_FOLDER | 17 |
+CANNOT_CREATE_FILE | 18 |
+CANNOT_DELETE_FOLDER | 19 |
+CANNOT_DELETE_FILE | 20 |
+BUILD_INDEX_ERROR | 21 |
+ILLEGAL_NLIST | 22 |
+ILLEGAL_METRIC_TYPE | 23 |
+OUT_OF_MEMORY | 24 |
+PATH_PARAM_LOSS | 31 |
+QUERY_PARAM_LOSS | 32 |
+BODY_FIELD_LOSS | 33 |
+ILLEGAL_QUERY_PARAM | 36 |
