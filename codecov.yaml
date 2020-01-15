@@ -19,6 +19,10 @@ comment:
   behavior: default
   require_changes: no
 
+flags:
+  nightly:
+    joined: false
+
 ignore:
   - "LICENSES"
   - ".git"
