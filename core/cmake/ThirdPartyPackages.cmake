@@ -28,7 +28,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         ZLIB
         Opentracing
         fiu
-        AWS)
+        AWS
+        oatpp)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -64,6 +65,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_opentracing()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
         build_fiu()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "oatpp")
+        build_oatpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
         build_aws()
     else ()
@@ -328,6 +331,13 @@ if (DEFINED ENV{MILVUS_FIU_URL})
 else ()
     set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz"
                        "https://gitee.com/quicksilver/libfiu/repository/archive/${FIU_VERSION}.zip")
+endif ()
+
+if (DEFINED ENV{MILVUS_OATPP_URL})
+    set(MILVUS_OATPP_URL "$ENV{MILVUS_OATPP_URL}")
+else ()
+#    set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
+    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/master.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -973,7 +983,6 @@ endif ()
 
 # ----------------------------------------------------------------------
 # fiu
-
 macro(build_fiu)
     message(STATUS "Building FIU-${FIU_VERSION} from source")
     set(FIU_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep")
@@ -1012,6 +1021,53 @@ resolve_dependency(fiu)
 
 get_target_property(FIU_INCLUDE_DIR fiu INTERFACE_INCLUDE_DIRECTORIES)
 include_directories(SYSTEM ${FIU_INCLUDE_DIR})
+
+# ----------------------------------------------------------------------
+# oatpp
+macro(build_oatpp)
+    message(STATUS "Building oatpp-${OATPP_VERSION} from source")
+    set(OATPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/oatpp_ep-prefix/src/oatpp_ep")
+    set(OATPP_STATIC_LIB "${OATPP_PREFIX}/lib/oatpp-${OATPP_VERSION}/${CMAKE_STATIC_LIBRARY_PREFIX}oatpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(OATPP_INCLUDE_DIR "${OATPP_PREFIX}/include/oatpp-${OATPP_VERSION}/oatpp")
+    set(OATPP_DIR_SRC "${OATPP_PREFIX}/src")
+    set(OATPP_DIR_LIB "${OATPP_PREFIX}/lib")
+
+    set(OATPP_CMAKE_ARGS
+            "-DCMAKE_INSTALL_PREFIX=${OATPP_PREFIX}"
+            -DCMAKE_INSTALL_LIBDIR=lib
+            -DBUILD_SHARED_LIBS=OFF
+            -DOATPP_BUILD_TESTS=OFF
+            )
+
+
+    externalproject_add(oatpp_ep
+            URL
+            ${OATPP_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${OATPP_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            BUILD_BYPRODUCTS
+            ${OATPP_STATIC_LIB}
+            )
+
+    file(MAKE_DIRECTORY "${OATPP_INCLUDE_DIR}")
+    add_library(oatpp STATIC IMPORTED)
+    set_target_properties(oatpp
+            PROPERTIES IMPORTED_LOCATION "${OATPP_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OATPP_INCLUDE_DIR}")
+
+    add_dependencies(oatpp oatpp_ep)
+endmacro()
+
+if (MILVUS_WITH_OATPP)
+    resolve_dependency(oatpp)
+
+    get_target_property(OATPP_INCLUDE_DIR oatpp INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${OATPP_INCLUDE_DIR})
+endif ()
 
 # ----------------------------------------------------------------------
 # aws

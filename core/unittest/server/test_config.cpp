@@ -135,6 +135,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetServerConfigPort(str_val).ok());
     ASSERT_TRUE(str_val == server_port);
 
+    std::string web_port = "19999";
+    ASSERT_TRUE(config.SetServerConfigWebPort(web_port).ok());
+    ASSERT_TRUE(config.GetServerConfigWebPort(str_val).ok());
+    ASSERT_TRUE(str_val == web_port);
+
     std::string server_mode = "cluster_readonly";
     ASSERT_TRUE(config.SetServerConfigDeployMode(server_mode).ok());
     ASSERT_TRUE(config.GetServerConfigDeployMode(str_val).ok());
@@ -478,6 +483,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetServerConfigPort("a").ok());
     ASSERT_FALSE(config.SetServerConfigPort("99999").ok());
+
+    ASSERT_FALSE(config.SetServerConfigWebPort("a").ok());
+    ASSERT_FALSE(config.SetServerConfigWebPort("99999").ok());
+    ASSERT_FALSE(config.SetServerConfigWebPort("-1").ok());
 
     ASSERT_FALSE(config.SetServerConfigDeployMode("cluster").ok());
 
