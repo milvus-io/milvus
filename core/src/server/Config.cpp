@@ -1235,6 +1235,23 @@ Config::GetWalConfigRecordSize(uint32_t& record_size) {
     return Status::OK();
 }
 
+Status
+Config::GetWalConfigBufferSize(uint32_t &buffer_size) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
+    Status s = CheckWalConfigBufferSize(str);
+    if (!s.ok()) {
+        return s;
+    }
+    buffer_size = (uint32_t)std::stoul(str);
+    return Status::OK();
+}
+
+Status
+Config::GetWalConfigWalPath(std::string &wal_path) {
+    wal_path = GetConfigStr(CONFIG_WAL, CONFIG_WAL_WAL_PATH, "");
+    return Status::OK();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 /* server config */
 Status
