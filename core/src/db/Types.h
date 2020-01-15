@@ -18,8 +18,8 @@
 #pragma once
 
 #include <faiss/Index.h>
-#include <stdint.h>
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -32,7 +32,6 @@
 namespace milvus {
 namespace engine {
 
-// TODO
 typedef segment::doc_id_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;

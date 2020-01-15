@@ -244,7 +244,11 @@ XSearchTask::Execute() {
             } else if (!vectors.binary_data_.empty()) {
                 s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
                                           output_ids.data(), hybrid);
+            } else if (!vectors.id_array_.empty()) {
+                s = index_engine_->Search(nq, vectors.id_array_, topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
             }
+
             if (!s.ok()) {
                 search_job->GetStatus() = s;
                 search_job->SearchDone(index_id_);

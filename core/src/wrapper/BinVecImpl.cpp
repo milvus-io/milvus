@@ -16,8 +16,9 @@
 // under the License.
 
 #include "wrapper/BinVecImpl.h"
-#include "index/knowhere/knowhere/index/vector_index/IndexBinaryIVF.h"
+
 #include "WrapperException.h"
+#include "index/knowhere/knowhere/index/vector_index/IndexBinaryIVF.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
@@ -143,8 +144,7 @@ BinVecImpl::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
 }
 
 Status
-BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, faiss::ConcurrentBitsetPtr bitset, float* dist,
-                       int64_t* ids, const Config& cfg) {
+BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg) {
     if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIVF>(index_)) {
     } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {
     } else {
