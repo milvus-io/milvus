@@ -49,7 +49,7 @@ void Index::add_with_ids(
 }
 
 void Index::searchById (idx_t n, const idx_t *xid, idx_t k,
-                         float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const{
+                        float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const{
     FAISS_THROW_MSG ("searchById not implemented for this type of index");
 }
 

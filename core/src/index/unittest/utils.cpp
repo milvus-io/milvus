@@ -55,6 +55,7 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
+    id_dataset = generate_id_dataset(nb, ids.data());
 }
 
 void
@@ -194,6 +195,14 @@ generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
     ret_ds->Set(knowhere::meta::ROWS, nb);
     ret_ds->Set(knowhere::meta::DIM, dim);
     ret_ds->Set(knowhere::meta::TENSOR, xb);
+    return ret_ds;
+}
+
+knowhere::DatasetPtr
+generate_id_dataset(int64_t nb, const int64_t* ids){
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
     return ret_ds;
 }
 
