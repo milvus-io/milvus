@@ -77,6 +77,19 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_impl_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
 set(server_delivery_files
@@ -149,7 +162,6 @@ set(unittest_libs
         gtest_main
         gmock_main
         pthread
-        metrics
         gfortran
         opentracing
         opentracing_mocktracer
@@ -160,10 +172,14 @@ set(unittest_libs
         crypto
         )
 if (MILVUS_WITH_PROMETHEUS)
-    set(unittest_libs ${unittest_libs}
+    set(prometheus_lib
             prometheus-cpp-push
             prometheus-cpp-pull
             prometheus-cpp-core
+            curl
+            )
+    set(unittest_libs ${unittest_libs}
+            ${prometheus_lib}
             )
 endif ()
 set(unittest_libs ${unittest_libs}

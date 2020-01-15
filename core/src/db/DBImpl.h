@@ -119,6 +119,11 @@ class DBImpl : public DB {
     Status
     DropIndex(const std::string& table_id) override;
 
+    //    Status
+    //    QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+    //               const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const IDNumbers&
+    //               vector_ids, ResultIds& result_ids, ResultDistances& result_distances) override;
+
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
           const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
@@ -207,12 +212,10 @@ class DBImpl : public DB {
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
     Status
-    ExecWalRecord(const wal::MXLogRecord &record);
+    ExecWalRecord(const wal::MXLogRecord& record);
 
     void
     BackgroundWalTask();
-
-
 
  private:
     const DBOptions options_;
@@ -234,16 +237,18 @@ class DBImpl : public DB {
         std::mutex mutex_;
         std::condition_variable cv_;
 
-        void Wait() {
-            std::unique_lock<std::mutex> lck (mutex_);
+        void
+        Wait() {
+            std::unique_lock<std::mutex> lck(mutex_);
             if (!notified_) {
-               cv_.wait(lck);
+                cv_.wait(lck);
             }
             notified_ = false;
         }
 
-        void Notify() {
-            std::unique_lock<std::mutex> lck (mutex_);
+        void
+        Notify() {
+            std::unique_lock<std::mutex> lck(mutex_);
             notified_ = true;
             lck.unlock();
             cv_.notify_one();

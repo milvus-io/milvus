@@ -76,6 +76,7 @@ MemTableFile::Add(const VectorSourcePtr& source) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
+
         auto status = source->Add(/*execution_engine_,*/ segment_writer_ptr_, table_file_schema_, num_vectors_to_add,
                                   num_vectors_added);
         if (status.ok()) {
@@ -114,6 +115,23 @@ MemTableFile::Delete(segment::doc_id_t doc_id) {
     if (found != uids.end()) {
         auto offset = std::distance(uids.begin(), found);
         segment_ptr->vectors_ptr_->Erase(offset);
+    }
+
+    return Status::OK();
+}
+
+Status
+MemTableFile::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    for (auto& doc_id : doc_ids) {
+        auto found = std::find(uids.begin(), uids.end(), doc_id);
+        if (found != uids.end()) {
+            auto offset = std::distance(uids.begin(), found);
+            segment_ptr->vectors_ptr_->Erase(offset);
+        }
     }
 
     return Status::OK();

@@ -75,7 +75,6 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
     }
 
     // Clear vector data
-
     if (status.ok()) {
         current_num_vectors_added += num_vectors_added;
         // TODO(zhiru): remove

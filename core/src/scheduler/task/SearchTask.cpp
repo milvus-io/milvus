@@ -17,8 +17,8 @@
 
 #include "scheduler/task/SearchTask.h"
 
-#include <src/scheduler/SchedInst.h>
-#include <src/utils/ValidationUtil.h>
+#include <scheduler/SchedInst.h>
+#include <utils/ValidationUtil.h>
 
 #include <algorithm>
 #include <memory>

@@ -34,6 +34,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/ValidationUtil.h"
+
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
@@ -481,6 +482,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
                         concurrent_bitset_ptr->set(offset);
                     }
                 }
+
+                index_->SetBlacklist(concurrent_bitset_ptr);
 
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;
