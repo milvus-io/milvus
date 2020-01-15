@@ -187,6 +187,42 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
+    // get wal configurations
+    s = config.GetWalConfigEnable(opt.wal_enable_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get wal_enable configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    s = config.GetWalConfigRecoveryErrorIgnore(opt.recovery_error_ignore_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get recovery_error_ignore configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    s = config.GetWalConfigBufferSize(opt.buffer_size_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get buffer_size configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    s = config.GetWalConfigRecordSize(opt.record_size_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get record_size configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    s = config.GetWalConfigWalPath(opt.mxlog_path_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get mxlog_path configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
     return Status::OK();
 }
 
