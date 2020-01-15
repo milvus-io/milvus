@@ -23,9 +23,12 @@ namespace engine {
 namespace wal {
 
 MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
-    wal_meta_fp_ = fopen(internal_meta_file_path.c_str(), "r+");
+
+    std::string file_full_path = internal_meta_file_path + WAL_META_FILE_NAME;
+
+    wal_meta_fp_ = fopen(file_full_path.c_str(), "r+");
     if (wal_meta_fp_ == nullptr) {
-        wal_meta_fp_ = fopen(internal_meta_file_path.c_str(), "w");
+        wal_meta_fp_ = fopen(file_full_path.c_str(), "w");
     }
 
     if (wal_meta_fp_ == nullptr) {

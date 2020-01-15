@@ -24,13 +24,11 @@ namespace engine {
 namespace wal {
 
 WalManager::WalManager() {
+    // Todo: from param
+    mxlog_config_.recovery_error_ignore = true;
     mxlog_config_.buffer_size = 64*1024*1024;
     mxlog_config_.record_size = 2*1024*1024;
-    mxlog_config_.mxlog_path = "/tmp/milvus/wal/";
-//    server::Config& config = server::Config::GetInstance();
-//    config.GetWalConfigBufferSize(mxlog_config_.buffer_size);
-//    config.GetWalConfigRecordSize(mxlog_config_.record_size);
-//    config.GetWalConfigWalPath(mxlog_config_.mxlog_path);
+    mxlog_config_.mxlog_path = "/tmp/milvus/wal/"; //check mxlog_path end with '/'
 }
 
 WalManager::~WalManager() {
@@ -38,7 +36,7 @@ WalManager::~WalManager() {
 }
 
 ErrorCode
-WalManager::Init(const meta::MetaPtr& meta, bool ignore_error) {
+WalManager::Init(const meta::MetaPtr& meta) {
     uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     if (p_meta_handler_ != nullptr) {
@@ -68,31 +66,37 @@ WalManager::Init(const meta::MetaPtr& meta, bool ignore_error) {
         mxlog_config_.mxlog_path,
         mxlog_config_.buffer_size);
 
-    bool rst = p_buffer_->Init(recovery_start, applied_lsn);
-    if (!rst) {
-        if (!ignore_error) {
-            return WAL_FILE_ERROR;
-        }
+    ErrorCode error_code;
+    if (p_buffer_->Init(recovery_start, applied_lsn)) {
+        error_code = WAL_SUCCESS;
+    } else if (mxlog_config_.recovery_error_ignore) {
         p_buffer_->Reset(applied_lsn);
+        error_code = WAL_SUCCESS;
+    } else {
+        error_code = WAL_FILE_ERROR;
     }
 
     return WAL_SUCCESS;
 }
 
-void
-WalManager::GetNextRecovery(WALRecord &record) {
-    record.type = MXLogType::None;
+ErrorCode
+WalManager::GetNextRecovery(MXLogRecord &record) {
+    ErrorCode error_code = WAL_ERROR;
 
     if (p_buffer_ != nullptr) {
         do {
-            record.lsn = p_buffer_->Next(last_applied_lsn_,
-                                         record.table_id,
-                                         record.type,
-                                         record.length,
-                                         record.ids,
-                                         record.dim,
-                                         record.data);
-            if (record.lsn == 0) {
+            error_code = p_buffer_->Next(last_applied_lsn_, record);
+            if (error_code != WAL_SUCCESS) {
+                if (mxlog_config_.recovery_error_ignore) {
+                    // reset and break recovery
+                    p_buffer_->Reset(last_applied_lsn_);
+
+                    record.type = MXLogType::None;
+                    error_code = WAL_SUCCESS;
+                }
+                break;
+            }
+            if (record.type == MXLogType::None) {
                 break;
             }
 
@@ -105,36 +109,34 @@ WalManager::GetNextRecovery(WALRecord &record) {
                 }
             }
 
-        } while (1);
+        } while (true);
     }
+
+    return error_code;
 }
 
-void
-WalManager::GetNextRecord(WALRecord &record) {
-    record.type = MXLogType::None;
-    record.lsn = p_buffer_->GetReadLsn();
-
-    std::unique_lock<std::mutex> lck (mutex_);
-    if (flush_info_.second != 0) {
-        if (record.lsn >= flush_info_.second) {
-            record.lsn = flush_info_.second;
-            record.type = MXLogType::Flush;
-            record.table_id = flush_info_.first;
-            return;
-        }
-    }
-    lck.unlock();
+ErrorCode
+WalManager::GetNextRecord(MXLogRecord &record) {
+    ErrorCode error_code = WAL_ERROR;
 
     if (p_buffer_ != nullptr) {
+        std::unique_lock<std::mutex> lck (mutex_);
+        if (flush_info_.second != 0) {
+            if (p_buffer_->GetReadLsn() >= flush_info_.second) {
+                // can exec flush requirement
+                record.type = MXLogType::Flush;
+                record.lsn = flush_info_.second;
+                record.table_id = flush_info_.first;
+                // clear flush_info_
+                flush_info_.second = 0;
+                return WAL_SUCCESS;
+            }
+        }
+        lck.unlock();
+
         do {
-            record.lsn = p_buffer_->Next(last_applied_lsn_,
-                                         record.table_id,
-                                         record.type,
-                                         record.length,
-                                         record.ids,
-                                         record.dim,
-                                         record.data);
-            if (record.lsn == 0) {
+            error_code = p_buffer_->Next(last_applied_lsn_, record);
+            if (error_code != WAL_SUCCESS || record.type == MXLogType::None) {
                 break;
             }
 
@@ -145,8 +147,10 @@ WalManager::GetNextRecord(WALRecord &record) {
             }
             lck.unlock();
 
-        } while (1);
+        } while (true);
     }
+
+    return error_code;
 }
 
 uint64_t
@@ -175,6 +179,7 @@ WalManager::TableFlushed(const std::string &table_id, uint64_t lsn) {
 template <typename T>
 bool
 WalManager::Insert(const std::string &table_id,
+                   const std::string &partition_tag,
                    const IDNumbers &vector_ids,
                    const std::vector<T> &vectors)
 {
@@ -187,27 +192,32 @@ WalManager::Insert(const std::string &table_id,
         return false;
     }
 
-    uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
+    uint32_t max_record_data_size = mxlog_config_.record_size - SizeOfMXLogRecordHeader;
 
     size_t vector_num = vector_ids.size();
     uint16_t dim = vectors.size() / vector_num;
     //split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
+    size_t vectors_per_record = (max_record_data_size - table_id.size() - partition_tag.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
+
+    MXLogRecord record;
+    record.type = log_type;
+    record.table_id = table_id;
+    record.partition_tag = partition_tag;
 
     uint64_t new_lsn = 0;
     for (size_t i = 0; i < vector_num; i += vectors_per_record) {
-        size_t insert_len = std::min(vector_num - i, vectors_per_record);
-        new_lsn = p_buffer_->Append(table_id,
-                                    log_type,
-                                    insert_len,
-                                    vector_ids.data() + i,
-                                    dim,
-                                    vectors.data() + i * dim);
-        if(new_lsn == 0) {
+        record.length = std::min(vector_num - i, vectors_per_record);
+        record.ids = vector_ids.data() + i;
+        record.data_size = record.length * dim * sizeof(T);
+        record.data = vectors.data() + i * dim;
+
+        auto error_code = p_buffer_->Append(record);
+        if(error_code != WAL_SUCCESS) {
             p_buffer_->SetWriteLsn(last_applied_lsn_);
             return false;
         }
+        new_lsn = record.lsn;
     }
 
     std::unique_lock<std::mutex> lck (mutex_);
@@ -224,7 +234,7 @@ WalManager::Insert(const std::string &table_id,
 
 bool
 WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids) {
-    uint32_t max_record_data_size = mxlog_config_.record_size - (uint32_t)SizeOfMXLogRecordHeader;
+    uint32_t max_record_data_size = mxlog_config_.record_size - SizeOfMXLogRecordHeader;
 
     size_t vector_num = vector_ids.size();
 
@@ -232,18 +242,24 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
     size_t vectors_per_record = (max_record_data_size - table_id.size()) / (sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
+    MXLogRecord record;
+    record.type = MXLogType::Delete;
+    record.table_id = table_id;
+    record.partition_tag = "";
+
     uint64_t new_lsn = 0;
     for (size_t i = 0; i < vector_num; i += vectors_per_record) {
-        size_t delete_len = std::min(vector_num - i, vectors_per_record);
-        new_lsn = p_buffer_->Append(table_id,
-                                    MXLogType::Delete,
-                                    delete_len,
-                                    vector_ids.data() + i,
-                                    0,
-                                    nullptr);
-        if(new_lsn == 0) {
+        record.length = std::min(vector_num - i, vectors_per_record);
+        record.ids = vector_ids.data() + i;
+        record.data_size = 0;
+        record.data = nullptr;
+
+        auto error_code = p_buffer_->Append(record);
+        if(error_code != WAL_SUCCESS) {
+            p_buffer_->SetWriteLsn(last_applied_lsn_);
             return false;
         }
+        new_lsn = record.lsn;
     }
 
     std::unique_lock<std::mutex> lck (mutex_);
@@ -261,6 +277,10 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 uint64_t
 WalManager::Flush(const std::string table_id) {
     std::unique_lock<std::mutex> lck (mutex_, std::defer_lock);
+    // At most one flush requirement is waiting at any time.
+    // Otherwise, flush_info_ should be modified to a list.
+    __glibcxx_assert(flush_info_.second == 0);
+
     uint64_t lsn = 0;
     if (table_id.empty()) {
         lck.lock();
@@ -293,14 +313,17 @@ WalManager::Flush(const std::string table_id) {
 template bool
 WalManager::Insert<float>(
         const std::string &table_id,
+        const std::string& partition_tag,
         const IDNumbers &vector_ids,
         const std::vector<float> &vectors);
 
 template bool
 WalManager::Insert<uint8_t>(
         const std::string &table_id,
+        const std::string& partition_tag,
         const IDNumbers &vector_ids,
         const std::vector<uint8_t> &vectors);
+
 
 } // wal
 } // engine

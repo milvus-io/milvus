@@ -86,13 +86,14 @@ MXLogFileHandler::ReBorn(const std::string& file_name) {
 
 bool
 MXLogFileHandler::CloseFile() {
+    bool rst = true;
     if (p_file_ != nullptr) {
-        int ret = fclose(p_file_);
-        p_file_ = nullptr;
-        return ret == 0;
-    } else {
-        return true;
+        rst = (fclose(p_file_) == 0);
+        if (rst) {
+            p_file_ = nullptr;
+        }
     }
+    return rst;
 }
 
 
@@ -150,9 +151,6 @@ MXLogFileHandler::SetFileName(const std::string& file_name) {
 void
 MXLogFileHandler::SetFilePath(const std::string& file_path) {
     file_path_ = file_path;
-    if (!file_path_.empty() && file_path_.back() != '/') {
-        file_path_ += '/';
-    }
 }
 
 } // wal

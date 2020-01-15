@@ -37,24 +37,26 @@ class WalManager {
     /*
      * init
      * @param meta
-     * @param ignore_error: whether to ignore recovery error
+     * @retval error_code
      */
     ErrorCode
-    Init(const meta::MetaPtr& meta, bool ignore_error);
+    Init(const meta::MetaPtr& meta);
 
     /*
      * Get next recovery
      * @param record[out]: record
+     * @retval error_code
      */
-    void
-    GetNextRecovery(WALRecord &record);
+    ErrorCode
+    GetNextRecovery(MXLogRecord &record);
 
     /*
      * Get next record
      * @param record[out]: record
+     * @retval error_code
      */
-    void
-    GetNextRecord(WALRecord &record);
+    ErrorCode
+    GetNextRecord(MXLogRecord &record);
 
     /*
      * Create table
@@ -83,12 +85,14 @@ class WalManager {
     /*
      * Insert
      * @param table_id: table id
+     * @param table_id: partition tag
      * @param vector_ids: vector ids
      * @param vectors: vectors
      */
     template <typename T>
     bool
     Insert(const std::string &table_id,
+           const std::string& partition_tag,
            const IDNumbers &vector_ids,
            const std::vector<T> &vectors);
 
@@ -133,15 +137,17 @@ class WalManager {
 
 extern template bool
 WalManager::Insert<float>(
-       const std::string &table_id,
-       const IDNumbers &vector_ids,
-       const std::vector<float> &vectors);
+        const std::string &table_id,
+        const std::string& partition_tag,
+        const IDNumbers &vector_ids,
+        const std::vector<float> &vectors);
 
 extern template bool
 WalManager::Insert<uint8_t>(
-    const std::string &table_id,
-    const IDNumbers &vector_ids,
-    const std::vector<uint8_t> &vectors);
+        const std::string &table_id,
+        const std::string& partition_tag,
+        const IDNumbers &vector_ids,
+        const std::vector<uint8_t> &vectors);
 
 } // wal
 } // engine
