@@ -50,6 +50,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./ci/scripts/output_new.info
           name: ubuntu-${{ matrix.ubuntu }}-unittests
+          flags: cpu_version_ubuntu_18_04_unittest
           yml: ./codecov.yaml
 
   centos:
@@ -91,4 +92,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./ci/scripts/output_new.info
           name: centos-${{ matrix.centos }}-unittests
+          flags: cpu_version_centos7_unittest
           yml: ./codecov.yaml
