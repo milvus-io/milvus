@@ -447,7 +447,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
-                ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
+                ec = std::static_pointer_cast<BinBFIndex>(index_)->Build(conf);
                 if (ec != KNOWHERE_SUCCESS) {
                     return status;
                 }
