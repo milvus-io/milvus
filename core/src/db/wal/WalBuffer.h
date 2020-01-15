@@ -24,7 +24,7 @@
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
-
+#include "utils/Error.h"
 
 namespace milvus {
 namespace engine {
@@ -35,13 +35,14 @@ namespace wal {
 
 struct MXLogRecordHeader{
     uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
-    uint32_t vector_num;
-    uint16_t table_id_size;//
-    uint16_t dim;//one record contains the same dimension vectors
     uint8_t mxl_type;//record type, insert/delete/update/flush...
+    uint16_t table_id_size;//
+    uint16_t partition_tag_size;//
+    uint32_t vector_num;
+    uint32_t data_size;
 };
 
-#define SizeOfMXLogRecordHeader (sizeof(MXLogRecordHeader))
+const uint32_t SizeOfMXLogRecordHeader = sizeof(MXLogRecordHeader);
 
 #pragma pack(pop)
 
@@ -66,22 +67,11 @@ class MXLogBuffer {
     // ignore all old wal file
     void Reset(uint64_t lsn);
 
-    // if failed, return 0, else return lsn
-    uint64_t Append(const std::string &table_id,
-                    const MXLogType record_type,
-                    const size_t n,
-                    const IDNumber* vector_ids,
-                    const size_t dim,
-                    const void *vectors);
+    // Note: record.lsn will be set inner
+    ErrorCode Append(MXLogRecord &record);
 
-    // if failed, return 0, else return lsn
-    uint64_t Next(const uint64_t last_applied_lsn,
-                  std::string &table_id,
-                  MXLogType &record_type,
-                  size_t& n,
-                  const IDNumber* &vector_ids,
-                  size_t &dim,
-                  const void* &vectors);
+    ErrorCode Next(const uint64_t last_applied_lsn,
+                   MXLogRecord &record);
 
     uint64_t GetReadLsn();
 
@@ -89,9 +79,7 @@ class MXLogBuffer {
 
  private:
     uint32_t SurplusSpace();
-    uint32_t RecordSize(const size_t n,
-                        const size_t no_type_dim,
-                        const size_t table_id_size);
+    uint32_t RecordSize(const MXLogRecord &record);
 
  private:
     uint32_t mxlog_buffer_size_; //from config
