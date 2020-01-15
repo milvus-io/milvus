@@ -284,15 +284,15 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
     std::string reply;
     std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
 
-    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY)
-        + " " + std::to_string(advanced_config->cpu_cache_capacity->getValue());
+    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY) + " " +
+                                   std::to_string(advanced_config->cpu_cache_capacity->getValue());
     auto status = CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA)
-        + " " + std::to_string(advanced_config->cache_insert_data->getValue());
+    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA) + " " +
+                       std::to_string(advanced_config->cache_insert_data->getValue());
     status = CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
@@ -300,16 +300,16 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 
     auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
 
-    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD)
-        + " " + std::to_string(advanced_config->use_blas_threshold->getValue());
+    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD) + " " +
+                             std::to_string(advanced_config->use_blas_threshold->getValue());
     status = CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
 #ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD)
-                             + " " + std::to_string(advanced_config->gpu_search_threshold->getValue());
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) + " " +
+                        std::to_string(advanced_config->gpu_search_threshold->getValue());
     CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
@@ -401,8 +401,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     // Step 2: Set config
     std::string reply;
     std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE)
-                                  + " " + std::to_string(gpu_config_dto->enable->getValue());
+    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE) + " " +
+                                  std::to_string(gpu_config_dto->enable->getValue());
     auto status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -412,8 +412,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
     }
 
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY)
-                      + " " + std::to_string(gpu_config_dto->cache_capacity->getValue());
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY) + " " +
+                      std::to_string(gpu_config_dto->cache_capacity->getValue());
     status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -421,9 +421,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) {
-            search_resources.emplace_back(res->toLowerCase()->std_str());
-        });
+        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string search_resources_value;
     for (auto& res : search_resources) {
@@ -434,8 +432,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         search_resources_value.erase(len - 1);
     }
 
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES)
-                      + " " + search_resources_value;
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) + " " + search_resources_value;
     status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -443,9 +440,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) {
-            build_resources.emplace_back(res->toLowerCase()->std_str());
-        });
+        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string build_resources_value;
     for (auto& res : build_resources) {
@@ -456,8 +451,8 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         build_resources_value.erase(len - 1);
     }
 
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES)
-                      + " " + build_resources_value;
+    gpu_cmd_request =
+        gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) + " " + build_resources_value;
     status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
@@ -554,8 +549,8 @@ WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
 
     response_dto->count = tables.size();
 
-    int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
-                                                                                : page_size->getValue();
+    int64_t size =
+        (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset : page_size->getValue();
     for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
         std::map<std::string, std::string> table_info;
 
@@ -723,16 +718,13 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     std::vector<std::string> tag_list;
     if (nullptr != search_request->tags.get()) {
-        search_request->tags->forEach([&tag_list](const OString& tag) {
-            tag_list.emplace_back(tag->std_str());
-        });
+        search_request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
     }
 
     std::vector<std::string> file_id_list;
     if (nullptr != search_request->file_ids.get()) {
-        search_request->file_ids->forEach([&file_id_list](const OString& id) {
-                file_id_list.emplace_back(id->std_str());
-            });
+        search_request->file_ids->forEach(
+            [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
     }
 
     if (nullptr == search_request->records.get()) {
@@ -778,8 +770,14 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
 StatusDto::ObjectWrapper
 WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
+    std::string info = cmd->std_str();
+
+    if ("info" == info) {
+        info = "get_system_info";
+    }
+
     std::string reply_str;
-    auto status = CommandLine(cmd->std_str(), reply_str);
+    auto status = CommandLine(info, reply_str);
 
     if (status.ok()) {
         cmd_dto->reply = reply_str.c_str();
