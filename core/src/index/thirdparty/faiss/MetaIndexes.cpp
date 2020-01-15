@@ -83,9 +83,9 @@ void IndexIDMapTemplate<IndexT>::add_with_ids
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::search
     (idx_t n, const typename IndexT::component_t *x, idx_t k,
-     typename IndexT::distance_t *distances, typename IndexT::idx_t *labels) const
+     typename IndexT::distance_t *distances, typename IndexT::idx_t *labels, ConcurrentBitsetPtr bitset) const
 {
-    index->search (n, x, k, distances, labels);
+    index->search(n, x, k, distances, labels, bitset);
     idx_t *li = labels;
 #pragma omp parallel for
     for (idx_t i = 0; i < n * k; i++) {
@@ -93,27 +93,9 @@ void IndexIDMapTemplate<IndexT>::search
     }
 }
 
-
-template <typename IndexT>
-void IndexIDMapTemplate<IndexT>::search
-    (idx_t n, const typename IndexT::component_t *x, idx_t k,
-     typename IndexT::distance_t *distances, typename IndexT::idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const
-{
-    if(bitset == nullptr){
-        search(n, x, k, distances, labels);
-    } else{
-        index->search(n, x, k, distances, labels, bitset);
-        idx_t *li = labels;
-#pragma omp parallel for
-        for (idx_t i = 0; i < n * k; i++) {
-            li[i] = li[i] < 0 ? li[i] : id_map[li[i]];
-        }
-    }
-}
-
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::searchById (idx_t n, const idx_t *xid, idx_t k,
-                                             typename IndexT::distance_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const
+                                             typename IndexT::distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
 {
     auto x = new typename IndexT::component_t[n * IndexT::d];
     for (idx_t i = 0; i < n; i++) {
@@ -285,7 +267,8 @@ void IndexSplitVectors::add(idx_t /*n*/, const float* /*x*/) {
 
 void IndexSplitVectors::search (
            idx_t n, const float *x, idx_t k,
-           float *distances, idx_t *labels) const
+           float *distances, idx_t *labels,
+           ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (k == 1,
                       "search implemented only for k=1");

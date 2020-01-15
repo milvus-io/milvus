@@ -150,7 +150,7 @@ BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset)
+    GETBINARYTENSOR(dataset)
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {

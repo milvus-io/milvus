@@ -75,7 +75,7 @@ struct IndexShardsTemplate : public ThreadedIndex<IndexT> {
   void add_with_ids(idx_t n, const component_t* x, const idx_t* xids) override;
 
   void search(idx_t n, const component_t* x, idx_t k,
-              distance_t* distances, idx_t* labels) const override;
+              distance_t* distances, idx_t* labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
   void train(idx_t n, const component_t* x) override;
 

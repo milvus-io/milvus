@@ -64,6 +64,7 @@ inline auto
 StoragePrototype(const std::string& path) {
     return make_storage(
         path,
+        make_table(META_ENVIRONMENT, make_column("global_lsn", &EnvironmentSchema::global_lsn_, default_value(0))),
         make_table(META_TABLES, make_column("id", &TableSchema::id_, primary_key()),
                    make_column("table_id", &TableSchema::table_id_, unique()),
                    make_column("state", &TableSchema::state_), make_column("dimension", &TableSchema::dimension_),
@@ -512,6 +513,29 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_
 }
 
 Status
+SqliteMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) {
+    try {
+        server::MetricCollector metric;
+
+        auto selected = ConnectorPtr->select(
+            columns(&TableSchema::flush_lsn_),
+            where(c(&TableSchema::table_id_) == table_id));
+
+        if (selected.size() > 0) {
+            flush_lsn = std::get<0>(selected[0]);
+        } else {
+            return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
+        }
+
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when getting table files by flush_lsn", e.what());
+    }
+
+    return Status::OK();
+}
+
+
+Status
 SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) {
     table_files.clear();
 
@@ -774,8 +798,8 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
 }
 
 Status
-SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name,
-                                const std::string& tag, uint64_t lsn) {
+SqliteMetaImpl::CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag,
+                                uint64_t lsn) {
     server::MetricCollector metric;
 
     TableSchema table_schema;
@@ -1376,8 +1400,10 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                     // delete file from disk storage
                     utils::DeleteSegment(options_, table_file);
 
-                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_
-                                     << " location:" << table_file.location_;
+                    std::string segment_dir;
+                    utils::GetParentPath(table_file.location_, segment_dir);
+                    ENGINE_LOG_DEBUG << "Remove segment:" << table_file.segment_id_ << " directory:" << segment_dir;
+
                     table_ids.insert(table_file.table_id_);
 
                     ++clean_files;
@@ -1548,6 +1574,49 @@ SqliteMetaImpl::DiscardFiles(int64_t to_discard_size) {
     }
 
     return DiscardFiles(to_discard_size);
+}
+
+Status
+SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
+    try {
+        server::MetricCollector metric;
+
+        EnvironmentSchema env;
+        auto selected = ConnectorPtr->select(columns(&EnvironmentSchema::global_lsn_));
+        if (selected.size() == 0) {
+            env.global_lsn_ = lsn;
+            ConnectorPtr->insert(env);
+        } else {
+            env.global_lsn_ = lsn;
+            ConnectorPtr->update(env);
+        }
+
+        ENGINE_LOG_DEBUG << "Update global lsn = " << lsn;
+    } catch (std::exception& e) {
+        std::string msg =
+            "Exception update global lsn = " + lsn;
+        return HandleException(msg, e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+SqliteMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
+    try {
+        server::MetricCollector metric;
+
+        auto selected = ConnectorPtr->select(columns(&EnvironmentSchema::global_lsn_));
+        if (selected.size() == 0) {
+            lsn = 0;
+        } else {
+            lsn = std::get<0>(selected[0]);
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when delete table folder", e.what());
+    }
+
+    return Status::OK();
 }
 
 }  // namespace meta
