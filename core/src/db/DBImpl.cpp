@@ -75,7 +75,7 @@ DBImpl::DBImpl(const DBOptions& options)
     : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
-    
+
     wal_enable_ = false;  // todo: read config
     if (wal_enable_) {
         wal_mgr_ = std::make_shared<wal::WalManager>();
@@ -267,7 +267,16 @@ DBImpl::PreloadTable(const std::string& table_id) {
                      << " files need to be pre-loaded";
     TimeRecorderAuto rc("Pre-load table:" + table_id);
     for (auto& file : files_array) {
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+        EngineType engine_type;
+        if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
+            file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                        : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file.engine_type_;
+        }
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
                                                          (MetricType)file.metric_type_, file.nlist_);
         if (engine == nullptr) {
             ENGINE_LOG_ERROR << "Invalid engine type";
@@ -1452,7 +1461,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 }
 
 Status
-DBImpl::ExecWalRecord(const wal::MXLogRecord &record) {
+DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     Status status;
 
     switch (record.type) {
@@ -1464,8 +1473,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord &record) {
             }
 
             std::set<std::string> flushed_tables;
-            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids, (record.data_size / sizeof(uint8_t)),
-                                             (const u_int8_t*)record.data, record.lsn, flushed_tables);
+            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
+                                             (record.data_size / sizeof(uint8_t)), (const u_int8_t*)record.data,
+                                             record.lsn, flushed_tables);
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
                 Merge(flushed_tables);
@@ -1481,8 +1491,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord &record) {
             }
 
             std::set<std::string> flushed_tables;
-            status = mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, (record.data_size / sizeof(float)),
-                                             (const float*)record.data, record.lsn, flushed_tables);
+            status =
+                mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, (record.data_size / sizeof(float)),
+                                        (const float*)record.data, record.lsn, flushed_tables);
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
                 Merge(flushed_tables);
@@ -1539,9 +1550,7 @@ DBImpl::BackgroundWalTask() {
             wal_task_swn_.Wait();
         }
     }
->>>>>>> upstream/crud
 }
-
 
 }  // namespace engine
 }  // namespace milvus
