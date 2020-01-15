@@ -378,3 +378,12 @@ TEST_F(MetaTest, INDEX_TEST) {
     status = impl_->UpdateTableFilesToIndex(table_id);
     ASSERT_TRUE(status.ok());
 }
+
+TEST_F(MetaTest, LSN_TEST) {
+    uint64_t lsn = 42949672960;
+    auto status = impl_->SetGlobalLastLsn(lsn);
+    ASSERT_TRUE(status.ok());
+    uint64_t temp_lsb = 0;
+    status = impl_->GetGlobalLastLsn(temp_lsb);
+    ASSERT_EQ(temp_lsb, lsn);
+}

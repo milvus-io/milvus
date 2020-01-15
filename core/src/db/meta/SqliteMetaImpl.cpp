@@ -64,6 +64,7 @@ inline auto
 StoragePrototype(const std::string& path) {
     return make_storage(
         path,
+        make_table(META_ENVIRONMENT, make_column("global_lsn", &EnvironmentSchema::global_lsn_, default_value(0))),
         make_table(META_TABLES, make_column("id", &TableSchema::id_, primary_key()),
                    make_column("table_id", &TableSchema::table_id_, unique()),
                    make_column("state", &TableSchema::state_), make_column("dimension", &TableSchema::dimension_),
@@ -1548,6 +1549,49 @@ SqliteMetaImpl::DiscardFiles(int64_t to_discard_size) {
     }
 
     return DiscardFiles(to_discard_size);
+}
+
+Status
+SqliteMetaImpl::SetGlobalLastLsn(uint64_t lsn) {
+    try {
+        server::MetricCollector metric;
+
+        EnvironmentSchema env;
+        auto selected = ConnectorPtr->select(columns(&EnvironmentSchema::global_lsn_));
+        if (selected.size() == 0) {
+            env.global_lsn_ = lsn;
+            ConnectorPtr->insert(env);
+        } else {
+            env.global_lsn_ = lsn;
+            ConnectorPtr->update(env);
+        }
+
+        ENGINE_LOG_DEBUG << "Update global lsn = " << lsn;
+    } catch (std::exception& e) {
+        std::string msg =
+            "Exception update global lsn = " + lsn;
+        return HandleException(msg, e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+SqliteMetaImpl::GetGlobalLastLsn(uint64_t& lsn) {
+    try {
+        server::MetricCollector metric;
+
+        auto selected = ConnectorPtr->select(columns(&EnvironmentSchema::global_lsn_));
+        if (selected.size() == 0) {
+            lsn = 0;
+        } else {
+            lsn = std::get<0>(selected[0]);
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when delete table folder", e.what());
+    }
+
+    return Status::OK();
 }
 
 }  // namespace meta

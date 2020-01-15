@@ -2218,6 +2218,16 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
     }
 }
 
+Status
+MySQLMetaImpl::SetGlobalLastLsn(uint64_t lsn) {
+    return Status::OK();
+}
+
+Status
+MySQLMetaImpl::GetGlobalLastLsn(uint64_t& lsn) {
+    return Status::OK();
+}
+
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus

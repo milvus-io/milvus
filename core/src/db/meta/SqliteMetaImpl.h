@@ -134,6 +134,12 @@ class SqliteMetaImpl : public Meta {
     Status
     Count(const std::string& table_id, uint64_t& result) override;
 
+    Status
+    SetGlobalLastLsn(uint64_t lsn) override;
+
+    Status
+    GetGlobalLastLsn(uint64_t& lsn) override;
+
  private:
     Status
     NextFileId(std::string& file_id);
