@@ -56,7 +56,7 @@ Checks whether the web server is running.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 
@@ -89,7 +89,7 @@ Gets CPU/GPU information from the host.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -124,7 +124,7 @@ Gets the values of parameters in `cache_config` and `engine_config` of the Milvu
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -178,7 +178,7 @@ Updates the values of parameters in `cache_config` and `engine_config` of the Mi
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -237,7 +237,7 @@ Gets the parameter values in `gpu_resource_threshold` of the Milvus configuratio
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -292,7 +292,7 @@ Updates the parameter values in `gpu_resource_config` of the Milvus configuratio
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -360,7 +360,7 @@ Gets information about all tables.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -413,7 +413,7 @@ Creates a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 201     | Created |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -478,7 +478,7 @@ Gets all information about a table by name.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -519,7 +519,7 @@ Drops a table by name.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -585,7 +585,7 @@ Gets the index type and nlist of a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -641,7 +641,7 @@ Updates the index type and nlist of a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 201     | Created |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -649,7 +649,7 @@ Updates the index type and nlist of a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 201     | Created |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -690,7 +690,7 @@ Drops an index for a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 204     | Deleted |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -758,7 +758,7 @@ Gets all partitions in a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -793,7 +793,7 @@ Creates a partition in a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 201     | Created |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -863,7 +863,7 @@ Deletes a partition by tag.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 204     | Deleted |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -951,7 +951,7 @@ Searches vectors in a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -1007,7 +1007,7 @@ Inserts vectors to a table.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 201     | Created |
 | 400     | The request is incorrect. Refer to the error message for details. |
@@ -1070,7 +1070,7 @@ Gets information about the Milvus server.
 
 #### Response
 
-| Status code    | Type  |
+| Status code    | Description |
 |-----------------|---|
 | 200     | The request is successful.|
 | 400     | The request is incorrect. Refer to the error message for details. |
