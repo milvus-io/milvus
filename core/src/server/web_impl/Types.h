@@ -93,11 +93,17 @@ static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = 
 static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::L2, NAME_METRIC_TYPE_L2},
     {engine::MetricType::IP, NAME_METRIC_TYPE_IP},
+    {engine::MetricType::HAMMING, NAME_METRIC_TYPE_HAMMING},
+    {engine::MetricType::JACCARD, NAME_METRIC_TYPE_JACCARD},
+    {engine::MetricType::TANIMOTO, NAME_METRIC_TYPE_TANIMOTO},
 };
 
 static const std::unordered_map<std::string, engine::MetricType> MetricNameMap = {
     {NAME_METRIC_TYPE_L2, engine::MetricType::L2},
     {NAME_METRIC_TYPE_IP, engine::MetricType::IP},
+    {NAME_METRIC_TYPE_HAMMING, engine::MetricType::HAMMING},
+    {NAME_METRIC_TYPE_JACCARD, engine::MetricType::JACCARD},
+    {NAME_METRIC_TYPE_TANIMOTO, engine::MetricType::TANIMOTO},
 };
 
 }  // namespace web

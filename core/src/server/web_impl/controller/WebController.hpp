@@ -518,6 +518,12 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
+    ADD_CORS(VectorsOptions)
+
+    ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
+        return createResponse(Status::CODE_204, "No Content");
+    }
+
     ENDPOINT_INFO(Insert) {
         info->summary = "Insert vectors";
 
@@ -530,15 +536,40 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(VectorsOptions)
-
-    ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
-        return createResponse(Status::CODE_204, "No Content");
-    }
-
     ADD_CORS(Insert)
 
     ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
+             PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
+        auto ids_dto = VectorIdsDto::createShared();
+        WebRequestHandler handler = WebRequestHandler();
+        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+        auto status_dto = handler.Insert(table_name, body, ids_dto);
+
+        int64_t code = status_dto->code->getValue();
+        if (0 == code) {
+            return createDtoResponse(Status::CODE_201, ids_dto);
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
+        } else {
+            return createDtoResponse(Status::CODE_400, status_dto);
+        }
+    }
+
+    ENDPOINT_INFO(InsertBin) {
+        info->summary = "Insert vectors";
+
+        info->pathParams.add<String>("table_name");
+
+        info->addConsumes<InsertRequestDto::ObjectWrapper>("application/json");
+
+        info->addResponse<VectorIdsDto::ObjectWrapper>(Status::CODE_201, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
+    }
+
+    ADD_CORS(InsertBin)
+
+    ENDPOINT("POST", "/tables/{table_name}/vectors/bin", InsertBin,
              PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
         auto ids_dto = VectorIdsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
@@ -570,6 +601,36 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(Search)
 
     ENDPOINT("PUT", "/tables/{table_name}/vectors", Search,
+             PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
+        auto results_dto = TopkResultsDto::createShared();
+        WebRequestHandler handler = WebRequestHandler();
+        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+        auto status_dto = handler.Search(table_name, body, results_dto);
+        int64_t code = status_dto->code->getValue();
+        if (0 == code) {
+            return createDtoResponse(Status::CODE_200, results_dto);
+        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
+            return createDtoResponse(Status::CODE_404, status_dto);
+        } else {
+            return createDtoResponse(Status::CODE_400, status_dto);
+        }
+    }
+
+    ENDPOINT_INFO(SearchBin) {
+        info->summary = "Search for binary vectors";
+
+        info->pathParams.add<String>("table_name");
+
+        info->addConsumes<SearchBinRequestDto::ObjectWrapper>("application/json");
+
+        info->addResponse<TopkResultsDto::ObjectWrapper>(Status::CODE_200, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
+    }
+
+    ADD_CORS(SearchBin)
+
+    ENDPOINT("PUT", "/tables/{table_name}/vectors/bin", SearchBin,
              PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
         auto results_dto = TopkResultsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();

@@ -22,14 +22,13 @@
 #include <vector>
 
 #include "metrics/SystemInfo.h"
-#include "utils/Log.h"
-#include "utils/StringHelpFunctions.h"
-
 #include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
+#include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus {
 namespace server {
@@ -704,6 +703,12 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
 }
 
 StatusDto::ObjectWrapper
+WebRequestHandler::InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
+                             VectorIdsDto::ObjectWrapper& ids_dto) {
+    ASSIGN_RETURN_STATUS_DTO(Status::OK())
+}
+
+StatusDto::ObjectWrapper
 WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
                           TopkResultsDto::ObjectWrapper& results_dto) {
     if (nullptr == search_request->topk.get()) {
@@ -766,6 +771,12 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
+                             TopkResultsDto::ObjectWrapper& results_dto) {
+    ASSIGN_RETURN_STATUS_DTO(Status::OK())
 }
 
 StatusDto::ObjectWrapper

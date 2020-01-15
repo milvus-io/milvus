@@ -48,12 +48,29 @@ class SearchRequestDto : public OObject {
     DTO_FIELD(List<List<Float32>::ObjectWrapper>::ObjectWrapper, records);
 };
 
+class SearchBinRequestDto : public OObject {
+    DTO_INIT(SearchBinRequestDto, Object)
+
+    DTO_FIELD(Int64, topk);
+    DTO_FIELD(Int64, nprobe);
+    DTO_FIELD(List<String>::ObjectWrapper, tags);
+    DTO_FIELD(List<String>::ObjectWrapper, file_ids);
+    DTO_FIELD(List<String>::ObjectWrapper, records);
+};
 
 class InsertRequestDto : public oatpp::data::mapping::type::Object {
     DTO_INIT(InsertRequestDto, Object)
 
     DTO_FIELD(String, tag) = VALUE_PARTITION_TAG_DEFAULT;
     DTO_FIELD(List<List<Float32>::ObjectWrapper>::ObjectWrapper, records);
+    DTO_FIELD(List<Int64>::ObjectWrapper, ids);
+};
+
+class InsertBinRequestDto : public OObject {
+    DTO_INIT(InsertBinRequestDto, Object)
+
+    DTO_FIELD(String, tag) = VALUE_PARTITION_TAG_DEFAULT;
+    DTO_FIELD(List<String>::ObjectWrapper, records);
     DTO_FIELD(List<Int64>::ObjectWrapper, ids);
 };
 
