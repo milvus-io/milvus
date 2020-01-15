@@ -51,6 +51,23 @@ if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
 fi
 
 PACKAGE_FILE="ccache-${OS_NAME}-${BUILD_ENV_DOCKER_IMAGE_ID}.tar.gz"
+
+function check_ccache() {
+    BRANCH=$1
+    echo "fetching ${BRANCH}/${PACKAGE_FILE}"
+    wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
+    return $?
+}
+
+
+if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]]; then
+    REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
+    check_ccache ${CHANGE_TARGET}
+    if [[ $? == 0 ]];then
+        echo "Skip Update ccache package ..." && exit 0
+    fi
+fi
+
 REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
 
 ccache --show-stats
