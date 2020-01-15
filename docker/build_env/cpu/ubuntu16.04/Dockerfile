@@ -2,6 +2,8 @@ FROM ubuntu:16.04
 
 ENV DEBIAN_FRONTEND noninteractive
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates gnupg2 apt-transport-https && \
     wget -P /tmp https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
     apt-key add /tmp/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
