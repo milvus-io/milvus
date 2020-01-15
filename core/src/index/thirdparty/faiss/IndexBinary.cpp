@@ -36,7 +36,7 @@ void IndexBinary::add_with_ids(idx_t, const uint8_t *, const idx_t *) {
 }
 
 void IndexBinary::searchById (idx_t n, const idx_t *xid, idx_t k,
-                 int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const{
+                 int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset){
     FAISS_THROW_MSG("searchById not implemented for this type of index");
 }
 

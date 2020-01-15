@@ -120,6 +120,10 @@ TEST_P(IVFTest, ivf_basic) {
         auto re_re_result = index_->Search(query_dataset, conf);
         AssertAneq(re_re_result, nq, k);
         // PrintResult(result, nq, k);
+
+        auto re_re_re_result = index_->SearchById(id_dataset, conf);
+        AssertAneq(re_re_re_result, nq, k);
+        // PrintResult(result, nq, k);
     }
 }
 
