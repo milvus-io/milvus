@@ -103,7 +103,7 @@ class SchedulerTest : public testing::Test {
     SetUp() override {
         res_mgr_ = std::make_shared<ResourceMgr>();
         ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, false);
-        ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, false);
+        ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true);
         disk_resource_ = res_mgr_->Add(std::move(disk));
         cpu_resource_ = res_mgr_->Add(std::move(cpu));
 
