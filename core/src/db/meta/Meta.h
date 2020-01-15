@@ -65,6 +65,9 @@ class Meta {
     UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) = 0;
 
     virtual Status
+    GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) = 0;
+
+    virtual Status
     GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) = 0;
 
     virtual Status
@@ -144,10 +147,10 @@ class Meta {
     Count(const std::string& table_id, uint64_t& result) = 0;
 
     virtual Status
-    SetGlobalLastLsn(uint64_t lsn) = 0;
+    SetGlobalLastLSN(uint64_t lsn) = 0;
 
     virtual Status
-    GetGlobalLastLsn(uint64_t& lsn) = 0;
+    GetGlobalLastLSN(uint64_t& lsn) = 0;
 };  // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;

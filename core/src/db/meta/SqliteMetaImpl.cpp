@@ -513,6 +513,29 @@ SqliteMetaImpl::UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_
 }
 
 Status
+SqliteMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) {
+    try {
+        server::MetricCollector metric;
+
+        auto selected = ConnectorPtr->select(
+            columns(&TableSchema::flush_lsn_),
+            where(c(&TableSchema::table_id_) == table_id));
+
+        if (selected.size() > 0) {
+            flush_lsn = std::get<0>(selected[0]);
+        } else {
+            return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
+        }
+
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when getting table files by flush_lsn", e.what());
+    }
+
+    return Status::OK();
+}
+
+
+Status
 SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) {
     table_files.clear();
 
@@ -1552,7 +1575,7 @@ SqliteMetaImpl::DiscardFiles(int64_t to_discard_size) {
 }
 
 Status
-SqliteMetaImpl::SetGlobalLastLsn(uint64_t lsn) {
+SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
     try {
         server::MetricCollector metric;
 
@@ -1577,7 +1600,7 @@ SqliteMetaImpl::SetGlobalLastLsn(uint64_t lsn) {
 }
 
 Status
-SqliteMetaImpl::GetGlobalLastLsn(uint64_t& lsn) {
+SqliteMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
     try {
         server::MetricCollector metric;
 
