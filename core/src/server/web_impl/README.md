@@ -521,7 +521,7 @@ Drops a table by name.
 
 | Status code    | Description |
 |-----------------|---|
-| 200     | The request is successful.|
+| 204     | Deleted|
 | 400     | The request is incorrect. Refer to the error message for details. |
 | 404     | The required resource does not exist. |
 
