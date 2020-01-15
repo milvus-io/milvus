@@ -89,7 +89,8 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                             std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
 #endif
-                            std::make_tuple("IVF", ParameterType::ivf), std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("IVF", ParameterType::ivf),
+                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
                             std::make_tuple("IVFSQ", ParameterType::ivfsq)));
 
 TEST_P(IVFTest, ivf_basic) {
@@ -108,15 +109,18 @@ TEST_P(IVFTest, ivf_basic) {
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
-    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-            std::make_shared<faiss::ConcurrentBitset>(nb);
-    for (int64_t i = 0; i < nq; ++i) {
-        concurrent_bitset_ptr->clear(i);
-    }
-    index_->SetBlacklist(concurrent_bitset_ptr);
+    if(index_type.find("GPU") == std::string::npos && index_type.find("Hybrid") == std::string::npos && index_type.find("PQ") == std::string::npos){
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                std::make_shared<faiss::ConcurrentBitset>(nb);
+        for (int64_t i = 0; i < nq; ++i) {
+            concurrent_bitset_ptr->set(i);
+        }
+        index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto re_re_result = index_->Search(query_dataset, conf);
-    AssertAneq(re_re_result, nq, k);
+        auto re_re_result = index_->Search(query_dataset, conf);
+        AssertAneq(re_re_result, nq, k);
+        // PrintResult(result, nq, k);
+    }
 }
 
 TEST_P(IVFTest, ivf_serialize) {

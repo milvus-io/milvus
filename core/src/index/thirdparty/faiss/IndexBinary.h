@@ -93,15 +93,13 @@ struct IndexBinary {
    * @param x           input vectors to search, size n * d / 8
    * @param labels      output labels of the NNs, size n*k
    * @param distances   output pairwise distances, size n*k
+   * @param bitset      flags to check the validity of vectors
    */
-  virtual void search(idx_t n, const uint8_t *x, idx_t k,
-                      int32_t *distances, idx_t *labels) const = 0;
-
   virtual void search (idx_t n, const uint8_t *x, idx_t k,
-      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const;
+      int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const = 0;
 
   virtual void searchById (idx_t n, const idx_t *xid, idx_t k,
-      int32_t *distances, idx_t *labels, faiss::ConcurrentBitsetPtr bitset) const;
+      int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const;
 
 
     /** Query n vectors of dimension d to the index.
