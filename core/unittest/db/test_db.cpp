@@ -27,6 +27,7 @@
 #include "db/DBFactory.h"
 #include "db/DBImpl.h"
 #include "db/meta/MetaConsts.h"
+#include "db/IDGenerator.h"
 #include "db/utils.h"
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
@@ -50,7 +51,7 @@ BuildTableSchema() {
 }
 
 void
-BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
+BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vectors) {
     vectors.vector_count_ = n;
     vectors.float_data_.clear();
     vectors.float_data_.resize(n * TABLE_DIM);
@@ -58,7 +59,12 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
     for (uint64_t i = 0; i < n; i++) {
         for (int64_t j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
         data[TABLE_DIM * i] += i / 2000.;
+
+        vectors.id_array_.push_back(n*batch_index + i);
     }
+
+//    milvus::engine::SimpleIDGenerator id_gen;
+//    id_gen.GetNextIDNumbers(n, vectors.id_array_);
 }
 
 std::string
@@ -162,13 +168,9 @@ TEST_F(DBTest, DB_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    uint64_t nb = 50;
-    milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
-
     uint64_t qb = 5;
     milvus::engine::VectorsData qxb;
-    BuildVectors(qb, qxb);
+    BuildVectors(qb, 0, qxb);
 
     std::thread search([&]() {
         milvus::engine::ResultIds result_ids;
@@ -194,6 +196,7 @@ TEST_F(DBTest, DB_TEST) {
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
+            ASSERT_EQ(result_ids.size(), qb*k);
             for (auto i = 0; i < qb; ++i) {
                 ss.str("");
                 ss << "Result [" << i << "]:";
@@ -211,14 +214,20 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
-            qxb.id_array_.clear();
             db_->InsertVectors(TABLE_NAME, "", qxb);
             ASSERT_EQ(qxb.id_array_.size(), qb);
         } else {
-            xb.id_array_.clear();
+            uint64_t nb = 50;
+            milvus::engine::VectorsData xb;
+            BuildVectors(nb, i, xb);
+
             db_->InsertVectors(TABLE_NAME, "", xb);
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
+
+        stat = db_->Flush();
+        ASSERT_TRUE(stat.ok());
+
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
@@ -398,13 +407,11 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    uint64_t nb = VECTOR_COUNT;
-    milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
-
     int loop = 5;
     for (auto i = 0; i < loop; ++i) {
-        xb.id_array_.clear();
+        uint64_t nb = VECTOR_COUNT;
+        milvus::engine::VectorsData xb;
+        BuildVectors(nb, i, xb);
         db_->InsertVectors(TABLE_NAME, "", xb);
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
@@ -474,7 +481,7 @@ TEST_F(DBTest, INDEX_TEST) {
 
     uint64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
+    BuildVectors(nb, 0, xb);
 
     db_->InsertVectors(TABLE_NAME, "", xb);
     ASSERT_EQ(xb.id_array_.size(), nb);
@@ -532,7 +539,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
 
         milvus::engine::VectorsData xb;
-        BuildVectors(INSERT_BATCH, xb);
+        BuildVectors(INSERT_BATCH, i, xb);
 
         milvus::engine::IDNumbers vector_ids;
         vector_ids.resize(INSERT_BATCH);
@@ -574,7 +581,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         const int64_t topk = 10;
         const int64_t nprobe = 10;
         milvus::engine::VectorsData xq;
-        BuildVectors(nq, xq);
+        BuildVectors(nq, 0, xq);
 
         // specify partition tags
         std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
@@ -640,13 +647,12 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     uint64_t size;
     db_->Size(size);
 
-    uint64_t nb = 10;
-    milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
-
     int loop = INSERT_LOOP;
     for (auto i = 0; i < loop; ++i) {
-        milvus::engine::IDNumbers vector_ids;
+        uint64_t nb = 10;
+        milvus::engine::VectorsData xb;
+        BuildVectors(nb, i, xb);
+
         db_->InsertVectors(TABLE_NAME, "", xb);
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -676,7 +682,7 @@ TEST_F(DBTest2, DELETE_TEST) {
 
     uint64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
+    BuildVectors(nb, 0, xb);
 
     milvus::engine::IDNumbers vector_ids;
     stat = db_->InsertVectors(TABLE_NAME, "", xb);
@@ -711,7 +717,7 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
 
     uint64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
+    BuildVectors(nb, 0, xb);
 
     milvus::engine::IDNumbers vector_ids;
     stat = db_->InsertVectors(TABLE_NAME, "", xb);

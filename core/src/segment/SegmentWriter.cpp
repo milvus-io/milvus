@@ -163,17 +163,19 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     }
     SegmentPtr segment_to_merge;
     segment_reader_to_merge.GetSegment(segment_to_merge);
-    segment_ptr_->vectors_ptr_->Clear();
-    auto offsets_to_delete = segment_ptr_->deleted_docs_ptr_->GetDeletedDocs();
-    IdBloomFilterPtr id_bloom_filter_ptr;
-
     auto& uids = segment_to_merge->vectors_ptr_->GetUids();
-    for (size_t i = 0; i < uids.size(); ++i) {
-        auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
-        if (found != offsets_to_delete.end()) {
-            segment_to_merge->vectors_ptr_->Erase(i);
+
+    if (segment_ptr_->deleted_docs_ptr_ != nullptr) {
+        auto offsets_to_delete = segment_ptr_->deleted_docs_ptr_->GetDeletedDocs();
+
+        for (size_t i = 0; i < uids.size(); ++i) {
+            auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
+            if (found != offsets_to_delete.end()) {
+                segment_to_merge->vectors_ptr_->Erase(i);
+            }
         }
     }
+
     AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), uids);
 
     return Status::OK();
@@ -181,7 +183,11 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
 
 size_t
 SegmentWriter::Size() {
-    return segment_ptr_->vectors_ptr_->Size() + segment_ptr_->id_bloom_filter_ptr_->Size();
+    size_t ret = segment_ptr_->vectors_ptr_->Size();
+    if (segment_ptr_->id_bloom_filter_ptr_) {
+        ret += segment_ptr_->id_bloom_filter_ptr_->Size();
+    }
+    return ret;
 }
 
 size_t

@@ -29,9 +29,6 @@ namespace wal {
 
 using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
-extern std::condition_variable reader_cv;
-extern std::mutex reader_mutex;
-extern bool reader_is_waiting;
 
 #define WAL_BUFFER_MAX_SIZE ((uint32_t)2 * 1024 * 1024 * 1024)
 #define WAL_BUFFER_MIN_SIZE ((uint32_t)64 * 1024 * 1024)
@@ -51,17 +48,19 @@ enum class MXLogType {
     None,
 };
 
-struct WALRecord {
+struct MXLogRecord {
     uint64_t lsn;
     MXLogType type;
     std::string table_id;
-    size_t length;
+    std::string partition_tag;
+    uint32_t length;
     const IDNumber* ids;
-    size_t dim;
+    uint32_t data_size;
     const void* data;
 };
 
 struct MXLogConfiguration {
+    bool recovery_error_ignore;
     uint32_t record_size;
     uint32_t buffer_size;
     std::string mxlog_path;
