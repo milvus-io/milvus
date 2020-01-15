@@ -925,6 +925,11 @@ MySQLMetaImpl::UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_l
 }
 
 Status
+MySQLMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) {
+    return Status::OK();
+}
+
+Status
 MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) {
     table_files.clear();
 
@@ -2221,12 +2226,12 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
 }
 
 Status
-MySQLMetaImpl::SetGlobalLastLsn(uint64_t lsn) {
+MySQLMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
     return Status::OK();
 }
 
 Status
-MySQLMetaImpl::GetGlobalLastLsn(uint64_t& lsn) {
+MySQLMetaImpl::GetGlobalLastLSN(uint64_t& lsn) {
     return Status::OK();
 }
 
