@@ -49,7 +49,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./ci/scripts/output_new.info
-          name: ${{ matrix.ubuntu }}-unittests
+          name: ubuntu-${{ matrix.ubuntu }}-unittests
           yml: ./codecov.yaml
 
   centos:
@@ -90,5 +90,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./ci/scripts/output_new.info
-          name: ${{ matrix.centos }}-unittests
+          name: centos-${{ matrix.centos }}-unittests
           yml: ./codecov.yaml
