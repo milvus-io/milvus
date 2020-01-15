@@ -43,6 +43,10 @@ using DateT = int;
 const DateT EmptyDate = -1;
 using DatesT = std::vector<DateT>;
 
+struct EnvironmentSchema {
+    uint64_t global_lsn_ = 0;
+};  // EnvironmentSchema
+
 struct TableSchema {
     typedef enum {
         NORMAL,

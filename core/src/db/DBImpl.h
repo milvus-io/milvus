@@ -184,6 +184,10 @@ class DBImpl : public DB {
                      meta::TableFilesSchema& files);
 
     Status
+    GetPartitionByTag(const std::string& table_id, const std::string& partition_tags,
+                      std::string& partition_name_array);
+
+    Status
     GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,
                         std::set<std::string>& partition_name_array);
 
@@ -203,10 +207,12 @@ class DBImpl : public DB {
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
     Status
-    ExecWalRecord(const wal::WALRecord &record);
+    ExecWalRecord(const wal::MXLogRecord &record);
 
     void
     BackgroundWalTask();
+
+
 
  private:
     const DBOptions options_;
@@ -222,6 +228,30 @@ class DBImpl : public DB {
     bool wal_enable_;
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
+
+    struct SimpleWaitNotify {
+        bool notified_ = false;
+        std::mutex mutex_;
+        std::condition_variable cv_;
+
+        void Wait() {
+            std::unique_lock<std::mutex> lck (mutex_);
+            if (!notified_) {
+               cv_.wait(lck);
+            }
+            notified_ = false;
+        }
+
+        void Notify() {
+            std::unique_lock<std::mutex> lck (mutex_);
+            notified_ = true;
+            lck.unlock();
+            cv_.notify_one();
+        }
+    };
+
+    SimpleWaitNotify wal_task_swn_;
+    SimpleWaitNotify flush_task_swn_;
 
     ThreadPool compact_thread_pool_;
     std::mutex compact_result_mutex_;

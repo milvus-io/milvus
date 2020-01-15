@@ -196,34 +196,17 @@ uint32_t MXLogBuffer::SurplusSpace() {
     return mxlog_buffer_size_ - mxlog_buffer_writer_.buf_offset;
 }
 
-uint32_t MXLogBuffer::RecordSize(const size_t n,
-                                 const size_t no_type_dim,
-                                 const size_t table_id_size) {
-    auto data_size = uint32_t(table_id_size + n * (sizeof(IDNumber) + no_type_dim));
-    return data_size + (uint32_t)SizeOfMXLogRecordHeader;
+uint32_t MXLogBuffer::RecordSize(const MXLogRecord &record) {
+    return SizeOfMXLogRecordHeader +
+           (uint32_t)record.table_id.size() +
+           (uint32_t)record.partition_tag.size() + 
+           record.length * (uint32_t)sizeof(IDNumber) +
+           record.data_size;
 }
 
-uint64_t MXLogBuffer::Append(const std::string &table_id,
-                             const MXLogType record_type,
-                             const size_t n,
-                             const IDNumber* vector_ids,
-                             const size_t dim,
-                             const void *vectors) {
+ErrorCode MXLogBuffer::Append(MXLogRecord &record) {
 
-    size_t no_type_dim;
-    switch (record_type) {
-        case MXLogType::InsertVector:
-            no_type_dim = dim * sizeof(float);
-            break;
-        case MXLogType::InsertBinary:
-            no_type_dim = dim * sizeof(uint8_t);
-            break;
-        default:
-            no_type_dim = 0;
-            break;
-    }
-
-    uint32_t record_size = RecordSize(n, no_type_dim, table_id.size());
+    uint32_t record_size = RecordSize(record);
     if (SurplusSpace() < record_size) {
         //writer buffer has no space, switch wal file and write to a new buffer
         std::unique_lock<std::mutex> lck (mutex_);
@@ -239,7 +222,7 @@ uint64_t MXLogBuffer::Append(const std::string &table_id,
         // Reborn means close old wal file and open new wal file
         if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no))) {
             WAL_LOG_ERROR << "ReBorn wal file error " << mxlog_buffer_writer_.file_no;
-            return 0;
+            return WAL_FILE_ERROR;
         }
     }
 
@@ -251,48 +234,57 @@ uint64_t MXLogBuffer::Append(const std::string &table_id,
     BuildLsn(mxlog_buffer_writer_.file_no,
              mxlog_buffer_writer_.buf_offset + (uint32_t)record_size,
              head.mxl_lsn);
-    head.vector_num = (uint32_t)n;
-    head.table_id_size = (uint16_t)table_id.size();
-    head.dim = (uint16_t)dim;
-    head.mxl_type = (uint8_t)record_type;
+    head.mxl_type = (uint8_t)record.type;
+    head.table_id_size = (uint16_t)record.table_id.size();
+    head.partition_tag_size = (uint16_t)record.partition_tag.size();
+    head.vector_num = record.length;
+    head.data_size = record.data_size;
+
     memcpy(current_write_buf + current_write_offset, &head, SizeOfMXLogRecordHeader);
     current_write_offset += SizeOfMXLogRecordHeader;
 
-    memcpy(current_write_buf + current_write_offset, table_id.data(), table_id.size());
-    current_write_offset += table_id.size();
+    if (!record.table_id.empty()) {
+        memcpy(current_write_buf + current_write_offset, record.table_id.data(), record.table_id.size());
+        current_write_offset += record.table_id.size();
+    }
 
-    memcpy(current_write_buf + current_write_offset, vector_ids, n * sizeof(IDNumber));
-    current_write_offset += n * sizeof(IDNumber);
+    if (!record.partition_tag.empty()) {
+        memcpy(current_write_buf + current_write_offset, record.partition_tag.data(), record.partition_tag.size());
+        current_write_offset += record.partition_tag.size();
+    }
+    if (record.ids != nullptr && record.length > 0) {
+        memcpy(current_write_buf + current_write_offset, record.ids, record.length * sizeof(IDNumber));
+        current_write_offset += record.length * sizeof(IDNumber);
+    }
 
-    if (vectors != nullptr) {
-        memcpy(current_write_buf + current_write_offset, vectors, n * no_type_dim);
-        current_write_offset += n * no_type_dim;
+    if (record.data != nullptr && record.data_size > 0) {
+        memcpy(current_write_buf + current_write_offset, record.data, record.data_size);
+        current_write_offset += record.data_size;
     }
 
     bool write_rst = mxlog_writer_.Write(current_write_buf + mxlog_buffer_writer_.buf_offset,
                                          record_size);
     if (!write_rst) {
         WAL_LOG_ERROR << "write wal file error";
-        return 0;
+        return WAL_FILE_ERROR;
     }
 
     mxlog_buffer_writer_.buf_offset = current_write_offset;
-    return head.mxl_lsn;
+
+    record.lsn = head.mxl_lsn;
+    return WAL_SUCCESS;
 }
 
-uint64_t MXLogBuffer::Next(const uint64_t last_applied_lsn,
-                           std::string &table_id,
-                           MXLogType &record_type,
-                           size_t& n,
-                           const IDNumber* &vector_ids,
-                           size_t &dim,
-                           const void* &vectors) {
+ErrorCode MXLogBuffer::Next(const uint64_t last_applied_lsn,
+                           MXLogRecord &record) {
+    // init output
+    record.type = MXLogType::None;
 
     //reader catch up to writer, no next record, read fail
     uint64_t read_lsn;
     BuildLsn(mxlog_buffer_reader_.file_no, mxlog_buffer_reader_.buf_offset, read_lsn);
     if (read_lsn >= last_applied_lsn) {
-        return 0;
+        return WAL_SUCCESS;
     }
 
     //otherwise, it means there must exists next record, in buffer or wal log
@@ -317,13 +309,13 @@ uint64_t MXLogBuffer::Next(const uint64_t last_applied_lsn,
         mxlog_reader.SetFileOpenMode("r");
         if (!mxlog_reader.OpenFile()) {
             WAL_LOG_ERROR << "read wal file error " << mxlog_buffer_reader_.file_no;
-            return 0;
+            return WAL_FILE_ERROR;
         }
         if (!mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(),
                                0,
                                mxlog_reader.GetFileSize())) {
             WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.file_no;
-            return 0;
+            return WAL_FILE_ERROR;
         }
         mxlog_buffer_reader_.max_offset = (uint32_t)mxlog_reader.GetFileSize();
     }
@@ -333,25 +325,42 @@ uint64_t MXLogBuffer::Next(const uint64_t last_applied_lsn,
     uint64_t current_read_offset = mxlog_buffer_reader_.buf_offset;
 
     MXLogRecordHeader *head = (MXLogRecordHeader*)(current_read_buf + current_read_offset);
-    record_type = (MXLogType)head->mxl_type;
-    n = head->vector_num;
-    dim = head->dim;
+    record.type = (MXLogType)head->mxl_type;
+    record.lsn = head->mxl_lsn;
+    record.length = head->vector_num;
+    record.data_size = head->data_size;
+
     current_read_offset += SizeOfMXLogRecordHeader;
 
-    table_id.assign(current_read_buf + current_read_offset, head->table_id_size);
-    current_read_offset += head->table_id_size;
-
-    vector_ids = (IDNumber*)(current_read_buf + current_read_offset);
-
-    if (dim != 0) {
-        current_read_offset += n * sizeof(IDNumber);
-        vectors = current_read_buf + current_read_offset;
+    if (head->table_id_size != 0) {
+        record.table_id.assign(current_read_buf + current_read_offset, head->table_id_size);
+        current_read_offset += head->table_id_size;
     } else {
-        vectors = nullptr;
+        record.table_id = "";
+    }
+
+    if (head->partition_tag_size != 0) {
+        record.partition_tag.assign(current_read_buf + current_read_offset, head->partition_tag_size);
+        current_read_offset += head->partition_tag_size;
+    } else {
+        record.partition_tag = "";
+    }
+
+    if (head->vector_num != 0) {
+        record.ids = (IDNumber*)(current_read_buf + current_read_offset);
+        current_read_offset += head->vector_num * sizeof(IDNumber);
+    } else {
+        record.ids = nullptr;
+    }
+
+    if (record.data_size != 0) {
+        record.data = current_read_buf + current_read_offset;
+    } else {
+        record.data = nullptr;
     }
 
     mxlog_buffer_reader_.buf_offset = uint32_t (head->mxl_lsn & LSN_OFFSET_MASK);
-    return head->mxl_lsn;
+    return WAL_SUCCESS;
 }
 
 uint64_t MXLogBuffer::GetReadLsn() {
@@ -375,7 +384,6 @@ bool MXLogBuffer::SetWriteLsn(uint64_t lsn) {
     lck.unlock();
 
     if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no))) {
-
         WAL_LOG_ERROR << "reborn file error " << mxlog_buffer_writer_.file_no;
         return false;
     }
