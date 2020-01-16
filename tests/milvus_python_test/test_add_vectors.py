@@ -579,7 +579,7 @@ class TestAddBase:
     # TODO: enable
     # @pytest.mark.repeat(10)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_with_multiprocessing(self, args):
+    def _test_add_vector_with_multiprocessing(self, args):
         '''
         target: test add vectors, with multi processes
         method: 10 processed add vectors concurrently
