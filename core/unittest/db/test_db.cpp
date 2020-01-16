@@ -26,8 +26,8 @@
 #include "db/DB.h"
 #include "db/DBFactory.h"
 #include "db/DBImpl.h"
-#include "db/meta/MetaConsts.h"
 #include "db/IDGenerator.h"
+#include "db/meta/MetaConsts.h"
 #include "db/utils.h"
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
@@ -40,7 +40,6 @@ static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
 static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
-
 
 milvus::engine::meta::TableSchema
 BuildTableSchema() {
@@ -60,11 +59,11 @@ BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vect
         for (int64_t j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
         data[TABLE_DIM * i] += i / 2000.;
 
-        vectors.id_array_.push_back(n*batch_index + i);
+        vectors.id_array_.push_back(n * batch_index + i);
     }
 
-//    milvus::engine::SimpleIDGenerator id_gen;
-//    id_gen.GetNextIDNumbers(n, vectors.id_array_);
+    //    milvus::engine::SimpleIDGenerator id_gen;
+    //    id_gen.GetNextIDNumbers(n, vectors.id_array_);
 }
 
 std::string
@@ -196,7 +195,7 @@ TEST_F(DBTest, DB_TEST) {
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
-            ASSERT_EQ(result_ids.size(), qb*k);
+            ASSERT_EQ(result_ids.size(), qb * k);
             for (auto i = 0; i < qb; ++i) {
                 ss.str("");
                 ss << "Result [" << i << "]:";
@@ -347,8 +346,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids,
-                                  result_distances);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -389,8 +387,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         result_ids.clear();
         result_dists.clear();
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids,
-                                  result_dists);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -464,8 +461,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     milvus::engine::meta::DatesT dates;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat =
-        db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, xb, dates, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, xb, dates, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
     stat = db_->QueryByFileID(dummy_context_, table_info.table_id_, file_ids, 1, 1, xb, dates, result_ids,

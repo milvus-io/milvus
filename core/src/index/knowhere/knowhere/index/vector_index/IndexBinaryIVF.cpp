@@ -175,7 +175,6 @@ BinaryIVF::SearchById(const DatasetPtr& dataset, const Config& config) {
     //    }
 
     //    GETBINARYTENSOR(dataset)
-    auto dim = dataset->Get<int64_t>(meta::DIM);
     auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 

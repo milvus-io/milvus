@@ -71,6 +71,7 @@ class BinaryDataGen {
     std::vector<int64_t> ids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
+    knowhere::DatasetPtr id_dataset = nullptr;
 };
 
 extern void

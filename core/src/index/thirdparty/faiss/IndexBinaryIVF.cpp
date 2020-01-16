@@ -163,6 +163,21 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
   indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
+void IndexBinaryIVF::searchById (idx_t n, const idx_t *xid, idx_t k,
+                                 int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset){
+    if(!maintain_direct_map){
+        make_direct_map(true);
+    }
+
+    auto x = new unsigned char[n * d];
+    for (idx_t i = 0; i < n; ++i) {
+        reconstruct(xid[i], x + i * d);
+    }
+
+    search(n, x, k, distances, labels, bitset);
+    delete []x;
+}
+
 void IndexBinaryIVF::reconstruct(idx_t key, uint8_t *recons) const {
   FAISS_THROW_IF_NOT_MSG(direct_map.size() == ntotal,
                          "direct map is not initialized");
