@@ -7,8 +7,11 @@ import logging
 import time, datetime
 import copy
 import numpy as np
-from utils import *
 from milvus import Milvus, IndexType, MetricType
+
+
+def get_milvus():
+    return Milvus()
 
 
 def gen_inaccuracy(num):
