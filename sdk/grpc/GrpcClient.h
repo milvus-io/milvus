@@ -60,6 +60,9 @@ class GrpcClient {
     Search(::milvus::grpc::TopKQueryResult& topk_query_result, const grpc::SearchParam& search_param);
 
     Status
+    SearchByID(::milvus::grpc::TopKQueryResult& topk_query_result, const grpc::SearchByIDParam& search_param);
+
+    Status
     DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
 
     int64_t
@@ -72,7 +75,7 @@ class GrpcClient {
     Cmd(std::string& result, const std::string& cmd);
 
     Status
-    DeleteByDate(grpc::DeleteByDateParam& delete_by_range_param);
+    DeleteByID(grpc::DeleteByIDParam& delete_by_id_param);
 
     Status
     PreloadTable(grpc::TableName& table_name);
@@ -91,6 +94,9 @@ class GrpcClient {
 
     Status
     DropPartition(const ::milvus::grpc::PartitionParam& partition_param);
+
+    Status
+    Flush(const std::string& table_name);
 
     Status
     Disconnect();

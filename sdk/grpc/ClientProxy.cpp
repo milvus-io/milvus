@@ -56,7 +56,7 @@ ClientProxy::Connect(const ConnectParam& param) {
         return Status::OK();
     }
 
-    std::string reason = "connect failed!";
+    std::string reason = "connect Failed!";
     connected_ = false;
     return Status(StatusCode::NotConnected, reason);
 }
@@ -93,7 +93,7 @@ ClientProxy::Disconnect() {
         channel_.reset();
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to disconnect: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to disconnect: " + std::string(ex.what()));
     }
 }
 
@@ -113,7 +113,7 @@ ClientProxy::CreateTable(const TableSchema& param) {
 
         return client_ptr_->CreateTable(schema);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to create table: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to create table: " + std::string(ex.what()));
     }
 }
 
@@ -133,7 +133,7 @@ ClientProxy::DropTable(const std::string& table_name) {
         grpc_table_name.set_table_name(table_name);
         return client_ptr_->DropTable(grpc_table_name);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to drop table: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to drop table: " + std::string(ex.what()));
     }
 }
 
@@ -146,7 +146,7 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
         grpc_index_param.mutable_index()->set_nlist(index_param.nlist);
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to build index: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));
     }
 }
 
@@ -220,7 +220,7 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
         }
 #endif
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to add vector: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to add vector: " + std::string(ex.what()));
     }
 
     return status;
@@ -273,7 +273,50 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
 
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to search vectors: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to search vectors: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
+                        const std::vector<int64_t>& query_id_array, int64_t topk,
+                        int64_t nprobe, TopKQueryResult& topk_query_result) {
+    try {
+        // step 1: convert vector id array
+        ::milvus::grpc::SearchByIDParam search_param;
+        search_param.set_table_name(table_name);
+        search_param.set_topk(topk);
+        search_param.set_nprobe(nprobe);
+        for (auto& tag : partition_tags) {
+            search_param.add_partition_tag_array(tag);
+        }
+        for (auto& id : query_id_array) {
+            search_param.add_id_array(id);
+        }
+
+        // step 2: search vectors
+        ::milvus::grpc::TopKQueryResult result;
+        Status status = client_ptr_->SearchByID(result, search_param);
+        if (result.row_num() == 0) {
+            return status;
+        }
+
+        // step 4: convert result array
+        topk_query_result.reserve(result.row_num());
+        int64_t nq = result.row_num();
+        int64_t topk = result.ids().size() / nq;
+        for (int64_t i = 0; i < result.row_num(); i++) {
+            milvus::QueryResult one_result;
+            one_result.ids.resize(topk);
+            one_result.distances.resize(topk);
+            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
+            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
+            topk_query_result.emplace_back(one_result);
+        }
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to search vectors: " + std::string(ex.what()));
     }
 }
 
@@ -291,7 +334,7 @@ ClientProxy::DescribeTable(const std::string& table_name, TableSchema& table_sch
 
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to describe table: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to describe table: " + std::string(ex.what()));
     }
 }
 
@@ -302,7 +345,7 @@ ClientProxy::CountTable(const std::string& table_name, int64_t& row_count) {
         row_count = client_ptr_->CountTable(table_name, status);
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to show tables: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to show tables: " + std::string(ex.what()));
     }
 }
 
@@ -319,7 +362,7 @@ ClientProxy::ShowTables(std::vector<std::string>& table_array) {
         }
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to show tables: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to show tables: " + std::string(ex.what()));
     }
 }
 
@@ -366,15 +409,18 @@ ClientProxy::DumpTaskTables() const {
 }
 
 Status
-ClientProxy::DeleteByDate(const std::string& table_name, const milvus::Range& range) {
+ClientProxy::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) {
     try {
-        ::milvus::grpc::DeleteByDateParam delete_by_range_param;
-        delete_by_range_param.set_table_name(table_name);
-        delete_by_range_param.mutable_range()->set_start_value(range.start_value);
-        delete_by_range_param.mutable_range()->set_end_value(range.end_value);
-        return client_ptr_->DeleteByDate(delete_by_range_param);
+        ::milvus::grpc::DeleteByIDParam delete_by_id_param;
+        delete_by_id_param.set_table_name(table_name);
+
+        for (auto id : id_array) {
+            delete_by_id_param.add_id_array(id);
+        }
+
+        return client_ptr_->DeleteByID(delete_by_id_param);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to delete by range: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to delete by range: " + std::string(ex.what()));
     }
 }
 
@@ -386,7 +432,7 @@ ClientProxy::PreloadTable(const std::string& table_name) const {
         Status status = client_ptr_->PreloadTable(grpc_table_name);
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to preload tables: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to preload tables: " + std::string(ex.what()));
     }
 }
 
@@ -402,7 +448,7 @@ ClientProxy::DescribeIndex(const std::string& table_name, IndexParam& index_para
 
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to describe index: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to describe index: " + std::string(ex.what()));
     }
 }
 
@@ -414,7 +460,7 @@ ClientProxy::DropIndex(const std::string& table_name) const {
         Status status = client_ptr_->DropIndex(grpc_table_name);
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to drop index: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to drop index: " + std::string(ex.what()));
     }
 }
 
@@ -428,7 +474,7 @@ ClientProxy::CreatePartition(const PartitionParam& partition_param) {
         Status status = client_ptr_->CreatePartition(grpc_partition_param);
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to create partition: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to create partition: " + std::string(ex.what()));
     }
 }
 
@@ -447,7 +493,7 @@ ClientProxy::ShowPartitions(const std::string& table_name, PartitionList& partit
         }
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to show partitions: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to show partitions: " + std::string(ex.what()));
     }
 }
 
@@ -461,7 +507,7 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
         Status status = client_ptr_->DropPartition(grpc_partition_param);
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "fail to drop partition: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to drop partition: " + std::string(ex.what()));
     }
 }
 
@@ -470,7 +516,7 @@ ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
     try {
         return client_ptr_->Cmd(value, "get_config " + node_name);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Fail to get config: " + node_name);
+        return Status(StatusCode::UnknownError, "Failed to get config: " + node_name);
     }
 }
 
@@ -480,9 +526,28 @@ ClientProxy::SetConfig(const std::string& node_name, const std::string& value) c
         std::string dummy;
         return client_ptr_->Cmd(dummy, "set_config " + node_name + " " + value);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Fail to set config: " + node_name);
+        return Status(StatusCode::UnknownError, "Failed to set config: " + node_name);
     }
 }
 
+Status
+ClientProxy::FlushTable(const std::string& table_name) {
+    try {
+        std::string dummy;
+        return client_ptr_->Flush(table_name);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to flush");
+    }
+}
+
+Status
+ClientProxy::Flush() {
+    try {
+        std::string dummy;
+        return client_ptr_->Flush("");
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to flush");
+    }
+}
 
 }  // namespace milvus
