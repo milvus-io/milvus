@@ -874,26 +874,31 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         HybridLoad();
     }
 
-    // Load bloom filter
     std::string segment_dir;
     utils::GetParentPath(location_, segment_dir);
     segment::SegmentReader segment_reader(segment_dir);
-    segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+//    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+//    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
 
     // Check if the id is present. If so, find its offset
     std::vector<int64_t> offsets;
     std::vector<segment::doc_id_t> uids;
+    segment_reader.LoadUids(uids);
     for (auto& id : ids) {
-        if (id_bloom_filter_ptr->Check(id)) {
-            if (uids.empty()) {
-                segment_reader.LoadUids(uids);
-            }
-            auto found = std::find(uids.begin(), uids.end(), id);
-            if (found != uids.end()) {
-                auto offset = std::distance(uids.begin(), found);
-                offsets.emplace_back(offset);
-            }
+//        if (id_bloom_filter_ptr->Check(id)) {
+//            if (uids.empty()) {
+//                segment_reader.LoadUids(uids);
+//            }
+//            auto found = std::find(uids.begin(), uids.end(), id);
+//            if (found != uids.end()) {
+//                auto offset = std::distance(uids.begin(), found);
+//                offsets.emplace_back(offset);
+//            }
+//        }
+        auto found = std::find(uids.begin(), uids.end(), id);
+        if (found != uids.end()) {
+            auto offset = std::distance(uids.begin(), found);
+            offsets.emplace_back(offset);
         }
     }
 
