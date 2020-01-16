@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "segment/Vectors.h"
 #include "store/Directory.h"

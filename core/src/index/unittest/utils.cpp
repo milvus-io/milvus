@@ -200,7 +200,7 @@ generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
 }
 
 knowhere::DatasetPtr
-generate_id_dataset(int64_t nb, const int64_t* ids){
+generate_id_dataset(int64_t nb, const int64_t* ids) {
     auto ret_ds = std::make_shared<knowhere::Dataset>();
     ret_ds->Set(knowhere::meta::ROWS, nb);
     ret_ds->Set(knowhere::meta::IDS, ids);

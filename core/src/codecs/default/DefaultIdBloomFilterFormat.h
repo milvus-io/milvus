@@ -21,6 +21,8 @@
 #include "segment/IdBloomFilter.h"
 #include "store/Directory.h"
 
+#include <string>
+
 namespace milvus {
 namespace codec {
 

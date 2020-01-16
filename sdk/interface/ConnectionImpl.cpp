@@ -134,7 +134,7 @@ ConnectionImpl::DumpTaskTables() const {
 }
 
 Status
-ConnectionImpl::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array){
+ConnectionImpl::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) {
     return client_proxy_->DeleteByID(table_name, id_array);
 }
 

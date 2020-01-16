@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "ExecutionEngine.h"
 #include "wrapper/VecIndex.h"

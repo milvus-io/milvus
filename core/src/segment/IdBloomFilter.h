@@ -29,7 +29,7 @@ using doc_id_t = int64_t;
 
 class IdBloomFilter {
  public:
-    IdBloomFilter(scaling_bloom_t* bloom_filter);
+    explicit IdBloomFilter(scaling_bloom_t* bloom_filter);
 
     ~IdBloomFilter();
 

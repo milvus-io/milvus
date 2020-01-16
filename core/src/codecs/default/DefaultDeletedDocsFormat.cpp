@@ -17,11 +17,14 @@
 
 #include "codecs/default/DefaultDeletedDocsFormat.h"
 
-#include <boost/filesystem.hpp>
-
 #include "segment/Types.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
+#include <boost/filesystem.hpp>
+#include <vector>
+#include <memory>
+#include <string>
 
 namespace milvus {
 namespace codec {
