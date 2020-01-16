@@ -95,30 +95,28 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
         vectors.vector_count_ = param->records->count();
 
         size_t tal_size = 0;
-        param->records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& row_item) {
-            tal_size += row_item->count();
-        });
+        param->records->forEach(
+            [&tal_size](const OList<OFloat32>::ObjectWrapper& row_item) { tal_size += row_item->count(); });
 
         std::vector<float>& datas = vectors.float_data_;
         datas.resize(tal_size);
         size_t index_offset = 0;
         param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
-            row_item->forEach([&datas, &index_offset](const OFloat32& item) {
-                datas[index_offset++] = item->getValue();
-            });
+            row_item->forEach(
+                [&datas, &index_offset](const OFloat32& item) { datas[index_offset++] = item->getValue(); });
         });
     } else {
         if (nullptr == param->records_bin.get()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "Table in only supported with binary vectors, Field \'records_bin\' is required and not allowed to be empty");
+                          "Table in only supported with binary vectors, Field \'records_bin\' is required "
+                          "and not allowed to be empty");
         }
 
         vectors.vector_count_ = param->records_bin->count();
 
         size_t tal_size = 0;
-        param->records_bin->forEach([&tal_size](const OList<OInt64>::ObjectWrapper& item) {
-            tal_size += item->count();
-        });
+        param->records_bin->forEach(
+            [&tal_size](const OList<OInt64>::ObjectWrapper& item) { tal_size += item->count(); });
 
         std::vector<uint8_t>& datas = vectors.binary_data_;
         datas.resize(tal_size);
@@ -126,7 +124,8 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
         bool oor = false;
         param->records_bin->forEach([&datas, &index_offset, &oor](const OList<OInt64>::ObjectWrapper& row_item) {
             row_item->forEach([&datas, &index_offset, &oor](const OInt64& item) {
-                if (oor) return;
+                if (oor)
+                    return;
 
                 int64_t value = item->getValue();
                 if (0 > value || value > 255) {
@@ -135,7 +134,6 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
                 }
 
                 datas[index_offset++] = static_cast<uint8_t>(value);
-
             });
         });
 
@@ -150,9 +148,7 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
         id_array.resize(param->ids->count());
 
         size_t i = 0;
-        param->ids->forEach([&id_array, &i](const OInt64& item) {
-            id_array[i++] = item->getValue();
-        });
+        param->ids->forEach([&id_array, &i](const OInt64& item) { id_array[i++] = item->getValue(); });
     }
 
     return Status::OK();
@@ -164,40 +160,34 @@ CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData
     vectors.binary_data_.clear();
     vectors.id_array_.clear();
 
-    const static char* record_msg = "Field \'records\' is required to fill vectors";
-
     // step 1: copy vector data
     if (!bin) {
         if (nullptr == param->records.get()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Field \'records\' is required to fill vectors");
         }
 
         vectors.vector_count_ = param->records->count();
 
         size_t tal_size = 0;
-        param->records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& item) {
-            tal_size += item->count();
-        });
+        param->records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& item) { tal_size += item->count(); });
 
         std::vector<float>& datas = vectors.float_data_;
         datas.resize(tal_size);
         size_t index_offset = 0;
         param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
-            row_item->forEach([&datas, &index_offset](const OFloat32& item) {
-                datas[index_offset++] = item->getValue();
-            });
+            row_item->forEach(
+                [&datas, &index_offset](const OFloat32& item) { datas[index_offset++] = item->getValue(); });
         });
     } else {
         if (nullptr == param->records_bin.get()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, record_msg);
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Field \'records_bin\' is required to fill vectors");
         }
 
         vectors.vector_count_ = param->records_bin->count();
 
         size_t tal_size = 0;
-        param->records_bin->forEach([&tal_size](const OList<OInt64>::ObjectWrapper& item) {
-            tal_size += item->count();
-        });
+        param->records_bin->forEach(
+            [&tal_size](const OList<OInt64>::ObjectWrapper& item) { tal_size += item->count(); });
 
         std::vector<uint8_t>& datas = vectors.binary_data_;
         datas.resize(tal_size);
@@ -205,7 +195,8 @@ CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData
         bool oor = false;
         param->records_bin->forEach([&datas, &index_offset, &oor](const OList<OInt64>::ObjectWrapper& row_item) {
             row_item->forEach([&datas, &index_offset, &oor](const OInt64& item) {
-                if (oor) return;
+                if (oor)
+                    return;
 
                 int64_t value = item->getValue();
                 if (0 > value || value > 255) {
@@ -218,7 +209,7 @@ CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData
         });
 
         if (oor) {
-            return Status(SERVER_INVALID_ROWRECORD, record_msg);
+            return Status(SERVER_INVALID_ROWRECORD, "Records value should be in range of 0 and 255");
         }
     }
 
@@ -228,7 +219,6 @@ CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData
 }  // namespace
 
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
-
 Status
 WebRequestHandler::GetTaleInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields) {
     TableSchema schema;
@@ -303,6 +293,7 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
     std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
     auto status = CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
     }
     advanced_config->cpu_cache_capacity = std::stol(reply);
 
@@ -495,9 +486,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) {
-            search_resources.emplace_back(res->toLowerCase()->std_str());
-        });
+        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string search_resources_value;
     for (auto& res : search_resources) {
@@ -516,9 +505,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) {
-            build_resources.emplace_back(res->toLowerCase()->std_str());
-        });
+        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string build_resources_value;
     for (auto& res : build_resources) {
@@ -591,7 +578,6 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
 
     if (nullptr != offset.get()) {
         try {
-            std::string offset_str = offset->std_str();
             offset_value = std::stol(offset->std_str());
         } catch (const std::exception& e) {
             std::string msg = "Query param \'offset\' is illegal. Reason: " + std::string(e.what());
@@ -626,8 +612,7 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
 
     response_dto->count = tables.size();
 
-    int64_t size =
-        page_size_value + offset_value > tables.size() ? tables.size() - offset_value : page_size_value;
+    int64_t size = page_size_value + offset_value > tables.size() ? tables.size() - offset_value : page_size_value;
     for (int64_t i = offset_value; i < size + offset_value; i++) {
         std::map<std::string, std::string> table_info;
 
@@ -707,20 +692,27 @@ WebRequestHandler::CreatePartition(const OString& table_name, const PartitionReq
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
-
     int64_t offset_value = 0;
     int64_t page_size_value = 10;
 
     if (nullptr != offset.get()) {
-        offset_value = offset->getValue();
-//        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'offset\' is required!");
+        try {
+            offset_value = std::stol(offset->std_str());
+        } catch (const std::exception& e) {
+            std::string msg = "Query param \'offset\' is illegal. Reason: " + std::string(e.what());
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        }
     }
 
     if (nullptr != page_size.get()) {
-        page_size_value = page_size->getValue();
-//        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required!");
+        try {
+            page_size_value = std::stol(page_size->std_str());
+        } catch (const std::exception& e) {
+            std::string msg = "Query param \'page_size\' is illegal. Reason: " + std::string(e.what());
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        }
     }
 
     if (offset_value < 0 || page_size_value < 0) {
@@ -737,8 +729,8 @@ WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size,
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
     if (offset_value < partitions.size()) {
-        int64_t size = offset_value + page_size_value > partitions.size() ? partitions.size() - offset_value
-                                                                          : page_size_value;
+        int64_t size =
+            offset_value + page_size_value > partitions.size() ? partitions.size() - offset_value : page_size_value;
         for (int64_t i = offset_value; i < size + offset_value; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
             partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
@@ -768,8 +760,8 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
 
     auto metric = engine::MetricType(schema.metric_type_);
     engine::VectorsData vectors;
-    if (engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric
-        || engine::MetricType::TANIMOTO == metric) {
+    if (engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
+        engine::MetricType::TANIMOTO == metric) {
         status = CopyRowRecords(request, vectors, true);
     } else {
         status = CopyRowRecords(request, vectors);
@@ -791,8 +783,8 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-//StatusDto::ObjectWrapper
-//WebRequestHandler::InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
+// StatusDto::ObjectWrapper
+// WebRequestHandler::InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
 //                             VectorIdsDto::ObjectWrapper& ids_dto) {
 //    engine::VectorsData vectors;
 //    auto status = CopyRowRecords(param, vectors);
@@ -827,17 +819,12 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     std::vector<std::string> tag_list;
     if (nullptr != request->tags.get()) {
-        request->tags->forEach([&tag_list](const OString& tag) {
-            tag_list.emplace_back(tag->std_str());
-        });
+        request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
     }
 
     std::vector<std::string> file_id_list;
     if (nullptr != request->file_ids.get()) {
-        request->file_ids->forEach(
-            [&file_id_list](const OString& id) {
-                file_id_list.emplace_back(id->std_str());
-            });
+        request->file_ids->forEach([&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
     }
 
     TableSchema schema;
@@ -848,8 +835,8 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     auto metric = engine::MetricType(schema.metric_type_);
     engine::VectorsData vectors;
-    if (engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric
-        || engine::MetricType::TANIMOTO == metric) {
+    if (engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
+        engine::MetricType::TANIMOTO == metric) {
         status = CopyRowRecords(request, vectors, true);
     } else {
         status = CopyRowRecords(request, vectors);
@@ -889,8 +876,8 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-//StatusDto::ObjectWrapper
-//WebRequestHandler::SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
+// StatusDto::ObjectWrapper
+// WebRequestHandler::SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
 //                             TopkResultsDto::ObjectWrapper& results_dto) {
 //    if (nullptr == search_request->topk.get()) {
 //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'topk\' is required in request body")

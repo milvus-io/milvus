@@ -22,10 +22,10 @@
 #include <string>
 #include <utility>
 
+#include <opentracing/mocktracer/tracer.h>
 #include <oatpp/core/data/mapping/type/Object.hpp>
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
-#include <opentracing/mocktracer/tracer.h>
 
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/CmdDto.hpp"
@@ -136,7 +136,7 @@ class WebRequestHandler {
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+    ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper
@@ -146,17 +146,17 @@ class WebRequestHandler {
     Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
            VectorIdsDto::ObjectWrapper& ids_dto);
 
-//    StatusDto::ObjectWrapper
-//    InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
-//              VectorIdsDto::ObjectWrapper& ids_dto);
+    //    StatusDto::ObjectWrapper
+    //    InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
+    //              VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
     Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
            TopkResultsDto::ObjectWrapper& results_dto);
 
-//    StatusDto::ObjectWrapper
-//    SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
-//              TopkResultsDto::ObjectWrapper& results_dto);
+    //    StatusDto::ObjectWrapper
+    //    SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
+    //              TopkResultsDto::ObjectWrapper& results_dto);
 
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);

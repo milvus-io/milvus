@@ -50,7 +50,6 @@ static const char* NAME_METRIC_TYPE_HAMMING = "HAMMING";
 static const char* NAME_METRIC_TYPE_JACCARD = "JACCARD";
 static const char* NAME_METRIC_TYPE_TANIMOTO = "TANIMOTO";
 
-
 ////////////////////////////////////////////////////
 
 static const char* KEY_TABLE_TABLE_NAME = "table_name";

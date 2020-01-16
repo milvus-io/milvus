@@ -257,9 +257,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(ShowTables)
 
-//    ENDPOINT("GET", "/tables", ShowTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
-    ENDPOINT("GET", "/tables", ShowTables, REQUEST(
-        const std::shared_ptr<IncomingRequest>&, request)) {
+    ENDPOINT("GET", "/tables", ShowTables, REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto response_dto = TableListFieldsDto::createShared();
@@ -477,13 +475,15 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(ShowPartitions)
 
     ENDPOINT("GET", "/tables/{table_name}/partitions", ShowPartitions,
-             PATH(String, table_name), QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
-        auto status_dto = StatusDto::createShared();
+             PATH(String, table_name), REQUEST(const std::shared_ptr<IncomingRequest>&, request)) {
+        auto offset = request->getQueryParameter("offset", "0");
+        auto page_size = request->getQueryParameter("page_size", "10");
+
         auto partition_list_dto = PartitionListDto::createShared();
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
-        status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
+        auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
         int64_t code = status_dto->code->getValue();
         if (0 == code) {
             return createDtoResponse(Status::CODE_200, partition_list_dto);
