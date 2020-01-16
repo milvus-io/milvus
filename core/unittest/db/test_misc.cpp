@@ -15,6 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <gtest/gtest.h>
+
+#include <boost/filesystem.hpp>
+#include <thread>
+#include <vector>
+
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Options.h"
@@ -23,11 +29,6 @@
 #include "db/meta/SqliteMetaImpl.h"
 #include "utils/Exception.h"
 #include "utils/Status.h"
-
-#include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
-#include <thread>
-#include <vector>
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
     milvus::Exception ex1(100, "error");
@@ -112,13 +113,16 @@ TEST(DBMiscTest, UTILS_TEST) {
     file.file_type_ = 3;
     file.date_ = 155000;
     status = milvus::engine::utils::GetTableFilePath(options, file);
-    ASSERT_FALSE(status.ok());
-    ASSERT_TRUE(file.location_.empty());
+    ASSERT_TRUE(status.ok());
+    ASSERT_FALSE(file.location_.empty());
 
     status = milvus::engine::utils::DeleteTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
 
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
+    ASSERT_TRUE(status.ok());
+
+    status = milvus::engine::utils::DeleteSegment(options, file);
     ASSERT_TRUE(status.ok());
 }
 
