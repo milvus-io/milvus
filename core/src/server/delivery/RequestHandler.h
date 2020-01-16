@@ -60,6 +60,15 @@ class RequestHandler {
            TopKQueryResult& result);
 
     Status
+    SearchByID(const std::shared_ptr<Context>& context,
+               const std::string& table_name,
+               const std::vector<int64_t>& vector_ids,
+               int64_t topk,
+               int64_t nprobe,
+               const std::vector<std::string>& partition_list,
+               TopKQueryResult& result);
+
+    Status
     DescribeTable(const std::shared_ptr<Context>& context, const std::string& table_name, TableSchema& table_schema);
 
     Status
@@ -67,6 +76,11 @@ class RequestHandler {
 
     Status
     Cmd(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& reply);
+
+    Status
+    DeleteByID(const std::shared_ptr<Context>& context,
+               const std::string& table_name,
+               const std::vector<int64_t>& vector_ids);
 
     Status
     DeleteByRange(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
@@ -91,6 +105,9 @@ class RequestHandler {
     Status
     DropPartition(const std::shared_ptr<Context>& context, const std::string& table_name,
                   const std::string& partition_name, const std::string& tag);
+
+    Status
+    Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names);
 };
 
 }  // namespace server
