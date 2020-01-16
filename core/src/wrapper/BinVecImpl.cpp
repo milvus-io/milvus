@@ -121,16 +121,16 @@ BinVecImpl::Add(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const 
 
 VecIndexPtr
 BinVecImpl::CopyToGpu(const int64_t& device_id, const Config& cfg) {
-    char* errmsg = "Binary Index not support CopyToGpu";
+    const char* errmsg = "Binary Index not support CopyToGpu";
     WRAPPER_LOG_ERROR << errmsg;
-    throw WrapperException("errmsg");
+    throw WrapperException(errmsg);
 }
 
 VecIndexPtr
 BinVecImpl::CopyToCpu(const Config& cfg) {
-    char* errmsg = "Binary Index not support CopyToCpu";
+    const char* errmsg = "Binary Index not support CopyToCpu";
     WRAPPER_LOG_ERROR << errmsg;
-    throw WrapperException("errmsg");
+    throw WrapperException(errmsg);
 }
 
 Status
