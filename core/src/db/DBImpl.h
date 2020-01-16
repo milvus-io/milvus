@@ -225,6 +225,8 @@ class DBImpl : public DB {
 
     std::atomic<bool> initialized_;
 
+    int32_t auto_flush_interval_;
+
     std::thread bg_timer_thread_;
 
     meta::MetaPtr meta_ptr_;
@@ -245,6 +247,15 @@ class DBImpl : public DB {
             std::unique_lock<std::mutex> lck(mutex_);
             if (!notified_) {
                 cv_.wait(lck);
+            }
+            notified_ = false;
+        }
+
+        void
+        Wait_Until(const std::chrono::system_clock::time_point &tm_pint) {
+            std::unique_lock<std::mutex> lck(mutex_);
+            if (!notified_) {
+                cv_.wait_until(lck, tm_pint);
             }
             notified_ = false;
         }
