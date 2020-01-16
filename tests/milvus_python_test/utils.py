@@ -10,8 +10,10 @@ import numpy as np
 from milvus import Milvus, IndexType, MetricType
 
 
-def get_milvus():
-    return Milvus()
+def get_milvus(handler=None):
+    if handler is None:
+        handler = "GRPC"
+    return Milvus(handler=handler)
 
 
 def gen_inaccuracy(num):

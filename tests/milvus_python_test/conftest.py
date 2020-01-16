@@ -5,6 +5,7 @@ import logging
 import pytest
 from utils import gen_unique_str
 from milvus import Milvus, IndexType, MetricType
+from utils import *
 
 index_file_size = 10
 
@@ -12,11 +13,13 @@ index_file_size = 10
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
     parser.addoption("--port", action="store", default=19530)
+    parser.addoption("--handler", action="store", default="GRPC")
 
 
 def check_server_connection(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
+
     connected = True
     if ip and (ip not in ['localhost', '127.0.0.1']):
         try:
@@ -27,19 +30,12 @@ def check_server_connection(request):
     return connected
 
 
-def get_args(request):
-    args = {
-        "ip": request.config.getoption("--ip"),
-        "port": request.config.getoption("--port")
-    }
-    return args
-
-
 @pytest.fixture(scope="module")
 def connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
-    milvus = Milvus()
+    handler = request.config.getoption("--handler")
+    milvus = get_milvus(handler=handler)
     try:
         status = milvus.connect(host=ip, port=port)
         logging.getLogger().info(status)
@@ -65,7 +61,8 @@ def connect(request):
 def dis_connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
-    milvus = Milvus()
+    handler = request.config.getoption("--handler")
+    milvus = get_milvus(handler=handler)
     return milvus
 
 
@@ -73,13 +70,15 @@ def dis_connect(request):
 def args(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
-    args = {"ip": ip, "port": port}
+    handler = request.config.getoption("--handler")
+    args = {"ip": ip, "port": port, "handler": handler}
     return args
 
 
 @pytest.fixture(scope="module")
 def milvus(request):
-    return Milvus()
+    handler = request.config.getoption("--handler")
+    return get_milvus(handler=handler)
 
 
 @pytest.fixture(scope="function")
