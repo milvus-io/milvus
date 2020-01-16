@@ -67,15 +67,6 @@ def dis_connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
     milvus = Milvus()
-    milvus.connect(host=ip, port=port)
-    milvus.disconnect()
-    def fin():
-        try:
-            milvus.disconnect()
-        except:
-            pass
-
-    request.addfinalizer(fin)
     return milvus
 
 
