@@ -19,6 +19,8 @@
 
 #include "codecs/DeletedDocsFormat.h"
 
+#include <string>
+
 namespace milvus {
 namespace codec {
 

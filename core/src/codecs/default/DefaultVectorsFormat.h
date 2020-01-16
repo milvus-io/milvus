@@ -20,6 +20,9 @@
 #include "codecs/VectorsFormat.h"
 #include "segment/Vectors.h"
 
+#include <vector>
+#include <string>
+
 namespace milvus {
 namespace codec {
 

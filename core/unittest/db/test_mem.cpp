@@ -283,6 +283,7 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 }
+/*
 
 TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
@@ -332,7 +333,9 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
                 for (auto t = 0; t < k; t++) {
                     ss << result_ids[i * k + t] << " ";
                 }
-                /* LOG(DEBUG) << ss.str(); */
+                */
+/* LOG(DEBUG) << ss.str(); *//*
+
             }
             ASSERT_TRUE(count >= prev_count);
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -356,6 +359,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
 
     search.join();
 }
+*/
 
 TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();

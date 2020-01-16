@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Vectors.h"
+#include "segment/Vectors.h"
 
 #include <iostream>
 #include <utility>

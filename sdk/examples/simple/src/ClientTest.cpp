@@ -138,7 +138,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
     }
 
-    milvus_sdk::Utils::Sleep(3);
+    {  // flush buffer
+        stat = conn->FlushTable(TABLE_NAME);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    }
+
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
@@ -179,15 +183,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-    }
-
-    {  // delete by range
-        milvus::Range rg;
-        rg.start_value = milvus_sdk::Utils::CurrentTmDate(-3);
-        rg.end_value = milvus_sdk::Utils::CurrentTmDate(-2);
-
-        stat = conn->DeleteByDate(TABLE_NAME, rg);
-        std::cout << "DeleteByDate function call status: " << stat.message() << std::endl;
     }
 
     {  // drop table

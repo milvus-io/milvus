@@ -109,6 +109,17 @@ message SearchInFilesParam {
 }
 
 /**
+ * @brief Params for searching vector by ID
+ */
+message SearchByIDParam {
+    string table_name = 1;
+    repeated int64 id_array = 2;
+    int64 topk = 3;
+    int64 nprobe = 4;
+    repeated string partition_tag_array = 5;
+}
+
+/**
  * @brief Query result params
  */
 message TopKQueryResult {
@@ -166,6 +177,21 @@ message IndexParam {
     Status status = 1;
     string table_name = 2;
     Index index = 3;
+}
+
+/**
+ * @brief Flush params
+ */
+message FlushParam {
+    repeated string table_name_array = 1;
+}
+
+/**
+ * @brief Flush params
+ */
+message DeleteByIDParam {
+    string table_name = 1;
+    repeated int64 id_array = 2;
 }
 
 /**
@@ -304,6 +330,15 @@ service MilvusService {
     rpc Search(SearchParam) returns (TopKQueryResult) {}
 
     /**
+     * @brief This method is used to query vector by id.
+     *
+     * @param SearchByIDParam, search parameters.
+     *
+     * @return TopKQueryResult
+     */
+    rpc SearchByID(SearchByIDParam) returns (TopKQueryResult) {}
+
+    /**
      * @brief This method is used to query vector in specified files.
      *
      * @param SearchInFilesParam, search in files paremeters.
@@ -321,21 +356,39 @@ service MilvusService {
      */
     rpc Cmd(Command) returns (StringReply) {}
 
-     /**
+    /**
+     * @brief This method is used to delete vector by id
+     *
+     * @param DeleteByIDParam, delete parameters.
+     *
+     * @return status
+     */
+    rpc DeleteByID(DeleteByIDParam) returns (Status) {}
+
+    /**
      * @brief This method is used to delete vector by date range
      *
      * @param DeleteByDateParam, delete parameters.
      *
      * @return status
      */
-     rpc DeleteByDate(DeleteByDateParam) returns (Status) {}
+    rpc DeleteByDate(DeleteByDateParam) returns (Status) {}
 
-     /**
-      * @brief This method is used to preload table
-      *
-      * @param TableName, target table name.
-      *
-      * @return Status
-      */
-     rpc PreloadTable(TableName) returns (Status) {}
+    /**
+     * @brief This method is used to preload table
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc PreloadTable(TableName) returns (Status) {}
+
+    /**
+     * @brief This method is used to flush buffer into storage.
+     *
+     * @param FlushParam, flush parameters
+     *
+     * @return Status
+     */
+    rpc Flush(FlushParam) returns (Status) {}
 }

@@ -82,7 +82,6 @@ class BinBFIndex : public BinVecImpl {
 
     Status
     AddWithoutIds(const int64_t& nb, const uint8_t* xb, const Config& cfg);
-
 };
 
 }  // namespace engine

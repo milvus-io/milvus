@@ -309,6 +309,15 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
+GrpcRequestHandler::SearchByID(::grpc::ServerContext* context,
+                               const ::milvus::grpc::SearchByIDParam* request,
+                               ::milvus::grpc::TopKQueryResult* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
                                   ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -415,6 +424,16 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 }
 
 ::grpc::Status
+GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context,
+           const ::milvus::grpc::DeleteByIDParam* request,
+           ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
                                  ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -502,6 +521,17 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
     Status status = request_handler_.DropPartition(context_map_[context], request->table_name(),
                                                    request->partition_name(), request->tag());
     SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::Flush(::grpc::ServerContext* context,
+                          const ::milvus::grpc::FlushParam* request,
+                          ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+
 
     return ::grpc::Status::OK;
 }

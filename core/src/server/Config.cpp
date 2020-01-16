@@ -1244,8 +1244,9 @@ Config::GetWalConfigEnable(bool &wal_enable) {
 }
 
 Status
-Config::GetWalConfigRecoveryErrorIgnore(bool &recovery_error_ignore) {
-    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
+Config::GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore) {
+    std::string
+        str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
     Status s = CheckWalConfigRecoveryErrorIgnore(str);
     if (!s.ok()) {
         return s;

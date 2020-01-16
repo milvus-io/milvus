@@ -26,7 +26,7 @@ namespace segment {
 
 class VectorIndex {
  public:
-    VectorIndex(knowhere::IndexPtr index_ptr);
+    explicit VectorIndex(knowhere::IndexPtr index_ptr);
 
     void
     Get(knowhere::IndexPtr& index_ptr);

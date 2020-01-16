@@ -17,17 +17,34 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
-#include "Attr.h"
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
-namespace segment {
+namespace server {
 
-struct Attrs {
-    std::unordered_map<std::string, AttrPtr> attrs;
+class DeleteByIDRequest : public BaseRequest {
+ public:
+    static BaseRequestPtr
+    Create(const std::shared_ptr<Context>& context,
+           const std::string& table_name,
+           const std::vector<int64_t>& vector_ids);
+
+ protected:
+    DeleteByIDRequest(const std::shared_ptr<Context>& context,
+                      const std::string& table_name,
+                      const std::vector<int64_t>& vector_ids);
+
+    Status
+    OnExecute() override;
+
+ private:
+    const std::string table_name_;
+    const std::vector<int64_t>& vector_ids_;
 };
 
-}  // namespace segment
+}  // namespace server
 }  // namespace milvus

@@ -597,9 +597,9 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-                   const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
+                  const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1587,7 +1587,7 @@ DBImpl::BackgroundWalTask() {
                 // user req flush
                 flush_task_swn_.Notify();
 
-                // if user flush all manually, update auto flush also 
+                // if user flush all manually, update auto flush also
                 if (record.table_id.empty()) {
                     next_auto_flush_time = get_next_auto_flush_time();
                 }

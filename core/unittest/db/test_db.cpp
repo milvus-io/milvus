@@ -209,7 +209,7 @@ TEST_F(DBTest, DB_TEST) {
         }
     });
 
-    int loop = INSERT_LOOP;
+    int loop = 100;
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
@@ -323,6 +323,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     }
 
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
@@ -333,6 +334,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
+#endif
 #endif
 
     {  // search by specify index file
@@ -350,18 +352,21 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
-    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+    // TODO(zhiru): PQ build takes forever
 
-    {
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-    }
+    //    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+    //    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+    //
+    //    {
+    //        std::vector<std::string> tags;
+    //        milvus::engine::ResultIds result_ids;
+    //        milvus::engine::ResultDistances result_distances;
+    //        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+    //        ASSERT_TRUE(stat.ok());
+    //    }
 
 #ifdef CUSTOMIZATION
+#ifdef MILVUS_GPU_VERSION
     // test FAISS_IVFSQ8H optimizer
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
@@ -390,7 +395,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
-
+#endif
 #endif
 }
 
@@ -441,6 +446,12 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
 
     milvus::engine::VectorsData xb;
     stat = db_->InsertVectors(table_info.table_id_, "", xb);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->Flush();
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DeleteVector(table_info.table_id_, 0);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->PreloadTable(table_info.table_id_);

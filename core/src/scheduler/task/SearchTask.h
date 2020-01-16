@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <vector>
+#include <string>
 
 #include "Task.h"
 #include "scheduler/Definition.h"

@@ -211,6 +211,17 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
            ::milvus::grpc::TopKQueryResult* response) override;
 
     // *
+    // @brief This method is used to query vector by id.
+    //
+    // @param SearchByIDParam, search parameters.
+    //
+    // @return TopKQueryResult
+    ::grpc::Status
+    SearchByID(::grpc::ServerContext* context,
+               const ::milvus::grpc::SearchByIDParam* request,
+               ::milvus::grpc::TopKQueryResult* response);
+
+    // *
     // @brief This method is used to query vector in specified files.
     //
     // @param SearchInFilesParam, search in files paremeters.
@@ -229,6 +240,18 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
         ::milvus::grpc::StringReply* response) override;
+
+    // *
+    // @brief This method is used to delete vector by id
+    //
+    // @param DeleteByIDParam, delete parameters.
+    //
+    // @return status
+    ::grpc::Status
+    DeleteByID(::grpc::ServerContext* context,
+               const ::milvus::grpc::DeleteByIDParam* request,
+               ::milvus::grpc::Status* response);
+
     // *
     // @brief This method is used to delete vector by date range
     //
@@ -247,6 +270,15 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                  ::milvus::grpc::Status* response) override;
+
+    // *
+    // @brief This method is used to flush buffer into storage.
+    //
+    // @param FlushParam, flush parameters
+    //
+    // @return Status
+    ::grpc::Status
+    Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request, ::milvus::grpc::Status* response);
 
     GrpcRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {
