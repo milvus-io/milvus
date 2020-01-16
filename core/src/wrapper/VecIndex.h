@@ -155,8 +155,7 @@ class VecIndex : public cache::DataObj {
     ////////////////
 
     virtual Status
-    SearchById(const int64_t& nq, const int64_t* xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t* ids,
-               const Config& cfg = Config()) {
+    SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg = Config()) {
         ENGINE_LOG_ERROR << "SearchById not support";
         return Status::OK();
     }

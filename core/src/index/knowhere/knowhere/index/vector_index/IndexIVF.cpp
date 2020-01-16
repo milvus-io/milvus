@@ -287,7 +287,6 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("not support this kind of config");
     }
 
-    auto dim = dataset->Get<int64_t>(meta::DIM);
     auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
@@ -301,7 +300,8 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
 
         // todo: enable search by id (zhiru)
         //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-        index_->searchById(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
+        auto index_ivf  = std::static_pointer_cast<faiss::IndexIVF>(index_);
+        index_ivf->searchById(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {

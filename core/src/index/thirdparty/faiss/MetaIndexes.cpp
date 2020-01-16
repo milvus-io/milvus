@@ -95,7 +95,7 @@ void IndexIDMapTemplate<IndexT>::search
 
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::searchById (idx_t n, const idx_t *xid, idx_t k,
-                                             typename IndexT::distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
+                                             typename IndexT::distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset)
 {
     auto x = new typename IndexT::component_t[n * IndexT::d];
     for (idx_t i = 0; i < n; i++) {

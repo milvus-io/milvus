@@ -107,8 +107,8 @@ class DBImpl : public DB {
     Status
     Flush() override;
 
-    Status
-    Merge(const std::set<std::string>& table_ids) override;
+    //    Status
+    //    Merge(const std::set<std::string>& table_ids) override;
 
     Status
     CreateIndex(const std::string& table_id, const TableIndex& index) override;
@@ -119,10 +119,10 @@ class DBImpl : public DB {
     Status
     DropIndex(const std::string& table_id) override;
 
-    //    Status
-    //    QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-    //               const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const IDNumbers&
-    //               vector_ids, ResultIds& result_ids, ResultDistances& result_distances) override;
+    Status
+    QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+               const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const IDNumbers& vector_ids,
+               ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
@@ -158,10 +158,8 @@ class DBImpl : public DB {
     void
     StartMetricTask();
 
-    /*
     void
     StartCompactionTask();
-    */
 
     Status
     MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files);
@@ -276,6 +274,7 @@ class DBImpl : public DB {
     std::mutex compact_result_mutex_;
     std::list<std::future<void>> compact_thread_results_;
     std::set<std::string> compact_table_ids_;
+//    std::mutex compact_table_ids_mutex_;
 
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;

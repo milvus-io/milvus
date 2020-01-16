@@ -34,7 +34,6 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/ValidationUtil.h"
-
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
@@ -842,6 +841,66 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
     }
 
     auto status = index_->Search(n, data, distances, labels, conf);
+
+    if (hybrid) {
+        HybridUnset();
+    }
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
+    }
+    return status;
+}
+
+Status
+ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances,
+                            int64_t* labels, bool hybrid) {
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+    }
+
+    ENGINE_LOG_DEBUG << "Search by ids Params: [k]  " << k << " [nprobe] " << nprobe;
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+    temp_conf.k = k;
+    temp_conf.nprobe = nprobe;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    if (hybrid) {
+        HybridLoad();
+    }
+
+    // Load bloom filter
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    segment::SegmentReader segment_reader(segment_dir);
+    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+    // Check if the id is present. If so, find its offset
+    std::vector<int64_t> offsets;
+    std::vector<segment::doc_id_t> uids;
+    for (auto& id : ids) {
+        if (id_bloom_filter_ptr->Check(id)) {
+            if (uids.empty()) {
+                segment_reader.LoadUids(uids);
+            }
+            auto found = std::find(uids.begin(), uids.end(), id);
+            if (found != uids.end()) {
+                auto offset = std::distance(uids.begin(), found);
+                offsets.emplace_back(offset);
+            }
+        }
+    }
+
+    Status status = Status::OK();
+    if (!offsets.empty()) {
+        status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
+    }
 
     if (hybrid) {
         HybridUnset();

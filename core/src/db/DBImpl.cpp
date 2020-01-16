@@ -427,7 +427,11 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
                                              vectors.binary_data_.data(), lsn, flushed_tables);
         }
         if (!flushed_tables.empty()) {
-            Merge(flushed_tables);
+            std::lock_guard<std::mutex> lck(compact_result_mutex_);
+            for (auto& table : flushed_tables) {
+                compact_table_ids_.insert(table);
+            }
+            //            Merge(flushed_tables);
         }
     }
 
@@ -490,8 +494,11 @@ DBImpl::Flush(const std::string& table_id) {
 
     } else {
         status = mem_mgr_->Flush(table_id);
-        std::set<std::string> table_ids{table_id};
-        Merge(table_ids);
+        {
+            std::lock_guard<std::mutex> lck(compact_result_mutex_);
+            compact_table_ids_.insert(table_id);
+        }
+        //        Merge(table_ids);
     }
 
     return status;
@@ -513,48 +520,16 @@ DBImpl::Flush() {
     } else {
         std::set<std::string> table_ids;
         status = mem_mgr_->Flush(table_ids);
-        Merge(table_ids);
+        {
+            std::lock_guard<std::mutex> lck(compact_result_mutex_);
+            for (auto& table_id : table_ids) {
+                compact_table_ids_.insert(table_id);
+            }
+        }
+        //        Merge(table_ids);
     }
 
     return status;
-}
-
-Status
-DBImpl::Merge(const std::set<std::string>& table_ids) {
-    // compaction finished?
-    {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (!compact_thread_results_.empty()) {
-            std::chrono::milliseconds span(10);
-            if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
-                compact_thread_results_.pop_back();
-            }
-        }
-    }
-
-    // add new compaction task
-    {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (compact_thread_results_.empty()) {
-            // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
-            // 1. other tables may still has un-merged files
-            // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
-            if (compact_table_ids_.empty()) {
-                std::vector<meta::TableSchema> table_schema_array;
-                meta_ptr_->AllTables(table_schema_array);
-                for (auto& schema : table_schema_array) {
-                    compact_table_ids_.insert(schema.table_id_);
-                }
-            }
-
-            // start merge file thread
-            compact_thread_results_.push_back(
-                compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
-            compact_table_ids_.clear();
-        }
-    }
-
-    return Status::OK();
 }
 
 Status
@@ -619,6 +594,23 @@ DBImpl::DropIndex(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Drop index for table: " << table_id;
     return DropTableIndexRecursively(table_id);
+}
+
+Status
+DBImpl::QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                   const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
+                   const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    meta::DatesT dates = {utils::GetDate()};
+    VectorsData vectors_data;
+    vectors_data.id_array_ = vector_ids;
+    vectors_data.vector_count_ = vector_ids.size();
+    Status result =
+        Query(context, table_id, partition_tags, k, nprobe, vectors_data, dates, result_ids, result_distances);
+    return result;
 }
 
 Status
@@ -789,7 +781,7 @@ DBImpl::BackgroundTimerTask() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
         StartMetricTask();
-        //        StartCompactionTask();
+        StartCompactionTask();
         StartBuildIndexTask();
     }
 }
@@ -866,6 +858,8 @@ DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
     return Status::OK();
 }
 
+ */
+
 void
 DBImpl::StartCompactionTask() {
     static uint64_t compact_clock_tick = 0;
@@ -875,7 +869,7 @@ DBImpl::StartCompactionTask() {
     }
 
     // serialize memory data
-    SyncMemData(compact_table_ids_);
+    //    SyncMemData(compact_table_ids_);
 
     // compactiong has been finished?
     {
@@ -910,6 +904,8 @@ DBImpl::StartCompactionTask() {
         }
     }
 }
+
+/*
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
@@ -1469,7 +1465,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 
 Status
 DBImpl::UpdateWALTableFlushed(const std::set<std::string>& table_id) {
-    for (auto &it : table_id) {
+    for (auto& it : table_id) {
         uint64_t lsn = 0;
         auto status = meta_ptr_->GetTableFlushLSN(it, lsn);
         if (status.ok()) {
@@ -1498,7 +1494,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
                 UpdateWALTableFlushed(flushed_tables);
-                Merge(flushed_tables);
+                std::lock_guard<std::mutex> lck(compact_result_mutex_);
+                for (auto& table : flushed_tables) {
+                    compact_table_ids_.insert(table);
+                }
+                //                Merge(flushed_tables);
             }
             break;
         }
@@ -1517,7 +1517,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             // even though !status.ok, run Merge
             if (!flushed_tables.empty()) {
                 UpdateWALTableFlushed(flushed_tables);
-                Merge(flushed_tables);
+                std::lock_guard<std::mutex> lck(compact_result_mutex_);
+                for (auto& table : flushed_tables) {
+                    compact_table_ids_.insert(table);
+                }
+                //                Merge(flushed_tables);
             }
             break;
         }
@@ -1538,7 +1542,13 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             }
             status = mem_mgr_->Flush(table_ids);
             UpdateWALTableFlushed(table_ids);
-            Merge(table_ids);
+            {
+                std::lock_guard<std::mutex> lck(compact_result_mutex_);
+                for (auto& table_id : table_ids) {
+                    compact_table_ids_.insert(table_id);
+                }
+            }
+            //        Merge(table_ids);
             break;
         }
     }
