@@ -393,12 +393,13 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
             std::string& owner_table = table_schema.owner_table_;
             std::string& partition_tag = table_schema.partition_tag_;
             std::string& version = table_schema.version_;
+            std::string flush_lsn = std::to_string(table_schema.flush_lsn_);
 
             createTableQuery << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote << table_id
                              << ", " << state << ", " << dimension << ", " << created_on << ", " << flag << ", "
                              << index_file_size << ", " << engine_type << ", " << nlist << ", " << metric_type << ", "
                              << mysqlpp::quote << owner_table << ", " << mysqlpp::quote << partition_tag << ", "
-                             << mysqlpp::quote << version << ");";
+                             << mysqlpp::quote << version << ", " << flush_lsn << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
@@ -647,6 +648,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
 
         std::string id = "NULL";  // auto-increment
         std::string table_id = file_schema.table_id_;
+        std::string segment_id = file_schema.segment_id_;
         std::string engine_type = std::to_string(file_schema.engine_type_);
         std::string file_id = file_schema.file_id_;
         std::string file_type = std::to_string(file_schema.file_type_);
@@ -655,6 +657,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         std::string updated_time = std::to_string(file_schema.updated_time_);
         std::string created_on = std::to_string(file_schema.created_on_);
         std::string date = std::to_string(file_schema.date_);
+        std::string flush_lsn = std::to_string(file_schema.flush_lsn_);
 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
@@ -666,9 +669,10 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
             mysqlpp::Query createTableFileQuery = connectionPtr->query();
 
             createTableFileQuery << "INSERT INTO " << META_TABLEFILES << " VALUES(" << id << ", " << mysqlpp::quote
-                                 << table_id << ", " << engine_type << ", " << mysqlpp::quote << file_id << ", "
-                                 << file_type << ", " << file_size << ", " << row_count << ", " << updated_time << ", "
-                                 << created_on << ", " << date << ");";
+                                 << table_id << ", " << mysqlpp::quote << segment_id << ", " << engine_type << ", "
+                                 << mysqlpp::quote << file_id << ", " << file_type << ", " << file_size << ", "
+                                 << row_count << ", " << updated_time << ", " << created_on << ", " << date << ", "
+                                 << flush_lsn << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTableFile: " << createTableFileQuery.str();
 
