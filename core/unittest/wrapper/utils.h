@@ -82,6 +82,38 @@ class DataGenBase {
     std::vector<float> gt_dis;
 };
 
+class BinDataGen {
+ public:
+    virtual void GenData(const int& dim, const int& nb, const int& nq, uint8_t* xb, uint8_t* xq, int64_t* ids,
+                         const int& k, int64_t* gt_ids, float* gt_dis);
+
+    virtual void GenData(const int& dim,
+                         const int& nb,
+                         const int& nq,
+                         std::vector<uint8_t>& xb,
+                         std::vector<uint8_t>& xq,
+                         std::vector<int64_t>& ids,
+                         const int& k,
+                         std::vector<int64_t>& gt_ids,
+                         std::vector<float>& gt_dis);
+
+    void AssertResult(const std::vector<int64_t>& ids, const std::vector<float>& dis);
+
+    void Generate(const int& dim, const int& nb, const int& nq, const int& k);
+
+    int dim = DIM;
+    int nb = NB;
+    int nq = NQ;
+    int k = 10;
+    std::vector<uint8_t> xb;
+    std::vector<uint8_t> xq;
+    std::vector<int64_t> ids;
+
+    // Ground Truth
+    std::vector<int64_t> gt_ids;
+    std::vector<float> gt_dis;
+};
+
 class ParamGenerator {
  public:
     static ParamGenerator& GetInstance() {
