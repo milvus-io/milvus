@@ -783,27 +783,6 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-// StatusDto::ObjectWrapper
-// WebRequestHandler::InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
-//                             VectorIdsDto::ObjectWrapper& ids_dto) {
-//    engine::VectorsData vectors;
-//    auto status = CopyRowRecords(param, vectors);
-//    if (status.code() == SERVER_INVALID_ROWRECORD_ARRAY) {
-//        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
-//    }
-//
-//    status = request_handler_.Insert(context_ptr_, table_name->std_str(), vectors, param->tag->std_str());
-//
-//    if (status.ok()) {
-//        ids_dto->ids = ids_dto->ids->createShared();
-//        for (auto& id : vectors.id_array_) {
-//            ids_dto->ids->pushBack(std::to_string(id).c_str());
-//        }
-//    }
-//
-//    ASSIGN_RETURN_STATUS_DTO(status)
-//}
-
 StatusDto::ObjectWrapper
 WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& request,
                           TopkResultsDto::ObjectWrapper& results_dto) {
@@ -875,71 +854,6 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
-
-// StatusDto::ObjectWrapper
-// WebRequestHandler::SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
-//                             TopkResultsDto::ObjectWrapper& results_dto) {
-//    if (nullptr == search_request->topk.get()) {
-//        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'topk\' is required in request body")
-//    }
-//    int64_t topk_t = search_request->topk->getValue();
-//
-//    if (nullptr == search_request->nprobe.get()) {
-//        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'nprobe\' is required in request body")
-//    }
-//    int64_t nprobe_t = search_request->nprobe->getValue();
-//
-//    std::vector<std::string> tag_list;
-//    if (nullptr != search_request->tags.get()) {
-//        search_request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
-//    }
-//
-//    std::vector<std::string> file_id_list;
-//    if (nullptr != search_request->file_ids.get()) {
-//        search_request->file_ids->forEach(
-//            [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
-//    }
-//
-//    if (nullptr == search_request->records.get()) {
-//        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill query vectors")
-//    }
-//
-//    engine::VectorsData vectors;
-//    auto status = CopyRowRecords(search_request, vectors);
-//    if (status.code() == SERVER_INVALID_ROWRECORD_ARRAY) {
-//        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
-//    }
-//
-//    std::vector<Range> range_list;
-//
-//    TopKQueryResult result;
-//    auto context_ptr = GenContextPtr("Web Handler");
-//    status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, range_list, topk_t, nprobe_t,
-//                                     tag_list, file_id_list, result);
-//    if (!status.ok()) {
-//        ASSIGN_RETURN_STATUS_DTO(status)
-//    }
-//
-//    results_dto->num = result.row_num_;
-//    results_dto->results = results_dto->results->createShared();
-//    if (0 == result.row_num_) {
-//        ASSIGN_RETURN_STATUS_DTO(status)
-//    }
-//
-//    auto step = result.id_list_.size() / result.row_num_;
-//    for (size_t i = 0; i < result.row_num_; i++) {
-//        auto row_result_dto = OList<ResultDto::ObjectWrapper>::createShared();
-//        for (size_t j = 0; j < step; j++) {
-//            auto result_dto = ResultDto::createShared();
-//            result_dto->id = std::to_string(result.id_list_.at(i * step + j)).c_str();
-//            result_dto->dit = std::to_string(result.distance_list_.at(i * step + j)).c_str();
-//            row_result_dto->pushBack(result_dto);
-//        }
-//        results_dto->results->pushBack(row_result_dto);
-//    }
-//
-//    ASSIGN_RETURN_STATUS_DTO(status)
-//}
 
 StatusDto::ObjectWrapper
 WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {

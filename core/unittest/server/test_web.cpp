@@ -518,11 +518,8 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/tables/{table_name}/indexes", optionsIndexes, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST",
-             "/tables/{table_name}/indexes",
-             createIndex,
-             PATH(String, table_name, "table_name"),
-             BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/indexes",createIndex,
+             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
 

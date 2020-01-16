@@ -146,17 +146,9 @@ class WebRequestHandler {
     Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
            VectorIdsDto::ObjectWrapper& ids_dto);
 
-    //    StatusDto::ObjectWrapper
-    //    InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
-    //              VectorIdsDto::ObjectWrapper& ids_dto);
-
     StatusDto::ObjectWrapper
     Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
            TopkResultsDto::ObjectWrapper& results_dto);
-
-    //    StatusDto::ObjectWrapper
-    //    SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
-    //              TopkResultsDto::ObjectWrapper& results_dto);
 
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);
