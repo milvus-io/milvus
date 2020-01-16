@@ -177,7 +177,10 @@ pipeline {
                                     failure {
                                         container('milvus-test-env') {
                                             script {
-                                                sh "python ${env.WORKSPACE}/ci/jenkins/scripts/mail.py"
+                                                String subject = "Daily test failed"
+                                                String content = "${env.BUILD_URL}"
+                                                String token = "qhaccrPdNPj3pCJF"
+                                                sh "python ${env.WORKSPACE}/ci/jenkins/scripts/mail.py '${subject}' '${content}' '${token}'"
                                             }
                                         }
                                     }
