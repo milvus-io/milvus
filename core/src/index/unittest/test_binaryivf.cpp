@@ -93,6 +93,9 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
 
     auto re_re_result = index_->Search(query_dataset, conf);
     AssertAneq(re_re_result, nq, k);
+
+    auto re_re_re_result = index_->SearchById(id_dataset, conf);
+    AssertAneq(re_re_re_result, nq, k);
 }
 
 TEST_P(BinaryIVFTest, binaryivf_serialize) {
