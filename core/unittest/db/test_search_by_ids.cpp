@@ -111,6 +111,7 @@ TEST_F(SearchByIdsTest, basic) {
     stat = db_->QueryByIds(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_search, result_ids,
                            result_distances);
     for (int i = 0; i < ids_to_search.size(); ++i) {
+//        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
         ASSERT_EQ(result_ids[i * topk], ids_to_search[i]);
         ASSERT_LT(result_distances[i * topk], 1e-4);
     }
@@ -168,5 +169,6 @@ TEST_F(SearchByIdsTest, with_delete) {
     stat = db_->QueryByIds(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_search, result_ids,
                            result_distances);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(result_ids[0], 0);
+    ASSERT_EQ(result_ids[0], -1);
+    ASSERT_EQ(result_distances[0], 0.0);
 }
