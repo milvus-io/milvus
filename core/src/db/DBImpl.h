@@ -120,9 +120,9 @@ class DBImpl : public DB {
     DropIndex(const std::string& table_id) override;
 
     Status
-    QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-               const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const IDNumbers& vector_ids,
-               ResultIds& result_ids, ResultDistances& result_distances) override;
+    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const IDNumbers& vector_ids,
+              ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
