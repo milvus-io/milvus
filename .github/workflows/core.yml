@@ -65,6 +65,11 @@ jobs:
     steps:
       - name: Checkout Milvus
         uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review # Default is github-pr-check
       - name: Docker Pull
         shell: bash
         run: |
