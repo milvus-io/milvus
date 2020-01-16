@@ -80,4 +80,4 @@ fi
 
 make -j 4 || exit 1
 
-# # make install || exit 1
+make install || exit 1
