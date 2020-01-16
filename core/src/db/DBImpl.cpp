@@ -597,9 +597,9 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-                   const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
+                  const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }

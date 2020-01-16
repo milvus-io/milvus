@@ -108,7 +108,7 @@ TEST_F(SearchByIdsTest, basic) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->QueryByIds(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_search, result_ids,
+    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_search, result_ids,
                            result_distances);
     for (int i = 0; i < ids_to_search.size(); ++i) {
 //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
@@ -166,7 +166,7 @@ TEST_F(SearchByIdsTest, with_delete) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->QueryByIds(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_search, result_ids,
+    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_search, result_ids,
                            result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids[0], -1);
