@@ -13,6 +13,7 @@ index_file_size = 10
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
     parser.addoption("--port", action="store", default=19530)
+    parser.addoption("--http-port", action="store", default=19121)
     parser.addoption("--handler", action="store", default="GRPC")
 
 
@@ -34,9 +35,12 @@ def check_server_connection(request):
 def connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
+    http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
     milvus = get_milvus(handler=handler)
     try:
+        if handler == "HTTP":
+            port = http_port
         status = milvus.connect(host=ip, port=port)
         logging.getLogger().info(status)
         if not status.OK():
@@ -61,6 +65,7 @@ def connect(request):
 def dis_connect(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
+    http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
     milvus = get_milvus(handler=handler)
     return milvus
@@ -70,7 +75,10 @@ def dis_connect(request):
 def args(request):
     ip = request.config.getoption("--ip")
     port = request.config.getoption("--port")
+    http_port = request.config.getoption("--http-port")
     handler = request.config.getoption("--handler")
+    if handler == "HTTP":
+        port = http_port
     args = {"ip": ip, "port": port, "handler": handler}
     return args
 
