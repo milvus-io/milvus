@@ -85,7 +85,6 @@ MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSou
     mem->SetLSN(lsn);
 
     auto status = mem->Add(source);
-
     return status;
 }
 

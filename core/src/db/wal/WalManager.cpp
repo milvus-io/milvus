@@ -23,12 +23,14 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-WalManager::WalManager() {
+WalManager::WalManager(const MXLogConfiguration& config) {
     // Todo: from param
-    mxlog_config_.recovery_error_ignore = true;
-    mxlog_config_.buffer_size = 64*1024*1024;
-    mxlog_config_.record_size = 2*1024*1024;
-    mxlog_config_.mxlog_path = "/tmp/milvus/wal/"; //check mxlog_path end with '/'
+    mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
+    mxlog_config_.buffer_size = config.buffer_size;
+    mxlog_config_.record_size = config.record_size;
+    mxlog_config_.mxlog_path = config.mxlog_path; //check mxlog_path end with '/'
+    if (mxlog_config_.mxlog_path[mxlog_config_.mxlog_path.size() - 1] != '/')
+        mxlog_config_.mxlog_path += '/';
 }
 
 WalManager::~WalManager() {

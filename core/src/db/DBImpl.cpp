@@ -48,6 +48,7 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
+#include "wal/WalDefinations.h"
 
 namespace milvus {
 namespace engine {
@@ -76,9 +77,13 @@ DBImpl::DBImpl(const DBOptions& options)
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
-    wal_enable_ = false;  // todo: read config
-    if (wal_enable_) {
-        wal_mgr_ = std::make_shared<wal::WalManager>();
+    if (options_.wal_enable_) {
+        wal::MXLogConfiguration mxlog_config;
+        mxlog_config.record_size = options_.record_size_;
+        mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
+        mxlog_config.buffer_size = options_.buffer_size_;
+        mxlog_config.mxlog_path = options_.mxlog_path_;
+        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
 
     Start();
@@ -612,6 +617,23 @@ DBImpl::DropIndex(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Drop index for table: " << table_id;
     return DropTableIndexRecursively(table_id);
+}
+
+Status
+DBImpl::QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                   const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
+                   const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    meta::DatesT dates = {utils::GetDate()};
+    VectorsData vectors_data;
+    vectors_data.id_array_ = vector_ids;
+    vectors_data.vector_count_ = vector_ids.size();
+    Status result =
+        Query(context, table_id, partition_tags, k, nprobe, vectors_data, dates, result_ids, result_distances);
+    return result;
 }
 
 Status

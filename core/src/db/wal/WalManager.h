@@ -31,7 +31,7 @@ namespace wal {
 
 class WalManager {
  public:
-    WalManager();
+    WalManager(const MXLogConfiguration& config);
     ~WalManager();
 
     /*

@@ -27,6 +27,7 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_misc.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_search.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_delete.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_search_by_ids.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
 
 add_executable(test_db
@@ -36,6 +37,7 @@ add_executable(test_db
 
 target_link_libraries(test_db
         knowhere
+        metrics
         ${unittest_libs})
 
 install(TARGETS test_db DESTINATION unittest)

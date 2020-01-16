@@ -49,6 +49,8 @@ static const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+static const char* CONFIG_SERVER_WEB_PORT = "web_port";
+static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
@@ -134,6 +136,10 @@ static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 /* wal config */
 static const char* CONFIG_WAL = "wal_config";
+static const char* CONFIG_WAL_ENABLE = "enable";
+static const char* CONFIG_WAL_ENABLE_DEFAULT = "false";
+static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
+static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "128";
 static const char* CONFIG_WAL_RECORD_SIZE = "record_size";
@@ -184,6 +190,8 @@ class Config {
     CheckServerConfigDeployMode(const std::string& value);
     Status
     CheckServerConfigTimeZone(const std::string& value);
+    Status
+    CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
     Status
@@ -237,6 +245,10 @@ class Config {
 
     /* wal config */
     Status
+    CheckWalConfigEnable(const std::string& value);
+    Status
+    CheckWalConfigRecoveryErrorIgnore(const std::string& value);
+    Status
     CheckWalConfigBufferSize(const std::string& value);
     Status
     CheckWalConfigRecordSize(const std::string& value);
@@ -276,6 +288,8 @@ class Config {
     GetServerConfigDeployMode(std::string& value);
     Status
     GetServerConfigTimeZone(std::string& value);
+    Status
+    GetServerConfigWebPort(std::string& value);
 
     /* db config */
     Status
@@ -352,6 +366,12 @@ class Config {
 
     /* wal config */
     Status
+    GetWalConfigEnable(bool& wal_enable);
+
+    Status
+    GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore);
+
+    Status
     GetWalConfigBufferSize(uint32_t& buffer_size);
 
     Status
@@ -370,6 +390,8 @@ class Config {
     SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
+    Status
+    SetServerConfigWebPort(const std::string& value);
 
     /* db config */
     Status
