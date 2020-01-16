@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "SegmentWriter.h"
+#include "segment/SegmentWriter.h"
 
 #include <memory>
 

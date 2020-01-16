@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "DefaultVectorsFormat.h"
+#include "codecs/default/DefaultVectorsFormat.h"
 
 #include <fcntl.h>
 #include <unistd.h>

@@ -1587,7 +1587,7 @@ DBImpl::BackgroundWalTask() {
                 // user req flush
                 flush_task_swn_.Notify();
 
-                // if user flush all manually, update auto flush also 
+                // if user flush all manually, update auto flush also
                 if (record.table_id.empty()) {
                     next_auto_flush_time = get_next_auto_flush_time();
                 }

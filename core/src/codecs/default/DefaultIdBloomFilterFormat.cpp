@@ -15,10 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "DefaultIdBloomFilterFormat.h"
+#include "codecs/default/DefaultIdBloomFilterFormat.h"
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
+#include <string>
+#include <memory>
 
 namespace milvus {
 namespace codec {
@@ -73,3 +76,4 @@ DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
 
 }  // namespace codec
 }  // namespace milvus
+

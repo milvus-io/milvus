@@ -31,7 +31,7 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
-static const char* META_ENVIRONMENT= "Environment";
+static const char* META_ENVIRONMENT = "Environment";
 static const char* META_TABLES = "Tables";
 static const char* META_TABLEFILES = "TableFiles";
 
@@ -104,7 +104,10 @@ class Meta {
     DropTableIndex(const std::string& table_id) = 0;
 
     virtual Status
-    CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag, uint64_t lsn) = 0;
+    CreatePartition(const std::string& table_name,
+                    const std::string& partition_name,
+                    const std::string& tag,
+                    uint64_t lsn) = 0;
 
     virtual Status
     DropPartition(const std::string& partition_name) = 0;

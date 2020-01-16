@@ -15,7 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "IdBloomFilter.h"
+#include "segment/IdBloomFilter.h"
+
+#include <string>
 
 namespace milvus {
 namespace segment {
