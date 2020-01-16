@@ -901,7 +901,7 @@ TEST_F(WebControllerTest, SEARCH) {
     search_request_dto->topk = 1;
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_ROWRECORD, result_dto->code);
 
     search_request_dto->records = RandomRecordsDto(64, 10);
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);

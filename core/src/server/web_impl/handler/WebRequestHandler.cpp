@@ -86,12 +86,10 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
     vectors.binary_data_.clear();
     vectors.id_array_.clear();
 
-    const static char* record_msg = "Field \'records\' is required to fill vectors";
-
     // step 1: copy vector data
     if (!bin) {
         if (nullptr == param->records.get()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, record_msg);
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Field \'records\' is required to fill vectors");
         }
 
         vectors.vector_count_ = param->records->count();
@@ -111,7 +109,8 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
         });
     } else {
         if (nullptr == param->records_bin.get()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, record_msg);
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "Table in only supported with binary vectors, Field \'records_bin\' is required and not allowed to be empty");
         }
 
         vectors.vector_count_ = param->records_bin->count();
@@ -147,11 +146,12 @@ CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData
 
     // step 2: copy id array
     if (nullptr != param->ids.get()) {
-//        return Status(SERVER_ILLEGAL_VECTOR_ID, "");
-        vectors.id_array_.resize(param->ids->count());
         auto& id_array = vectors.id_array_;
-        param->ids->forEach([&id_array](const OInt64& item) {
-            id_array.emplace_back(item->getValue());
+        id_array.resize(param->ids->count());
+
+        size_t i = 0;
+        param->ids->forEach([&id_array, &i](const OInt64& item) {
+            id_array[i++] = item->getValue();
         });
     }
 
@@ -205,7 +205,7 @@ CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData
         bool oor = false;
         param->records_bin->forEach([&datas, &index_offset, &oor](const OList<OInt64>::ObjectWrapper& row_item) {
             row_item->forEach([&datas, &index_offset, &oor](const OInt64& item) {
-                if (oor) return ;
+                if (oor) return;
 
                 int64_t value = item->getValue();
                 if (0 > value || value > 255) {
