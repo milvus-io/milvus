@@ -975,6 +975,8 @@ $ curl -X PUT "http://192.168.1.65:19122/tables/test_table/vectors" -H "accept: 
 
 Inserts vectors to a table.
 
+> Note: It is recommended that you do not insert more than 1 million vectors per request.
+
 #### Request
 
 <table>
