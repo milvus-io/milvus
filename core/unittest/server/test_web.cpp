@@ -53,6 +53,8 @@
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 
+#include "unittest/server/utils.h"
+
 static const char* TABLE_NAME = "test_web";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t INDEX_FILE_SIZE = 1024;
@@ -66,6 +68,7 @@ using OQueryParams = milvus::server::web::OQueryParams;
 using OChunkedBuffer = oatpp::data::stream::ChunkedBuffer;
 using OOutputStream = oatpp::data::stream::BufferOutputStream;
 using OFloat32 = milvus::server::web::OFloat32;
+using OInt64 = milvus::server::web::OInt64;
 template<class T>
 using OList = milvus::server::web::OList<T>;
 
@@ -86,11 +89,34 @@ RandomRowRecordDto(int64_t dim) {
     return row_record_dto;
 }
 
+OList<OInt64>::ObjectWrapper
+RandomBinRowRecordDto(int64_t dim) {
+    auto row_record_dto = OList<OInt64>::createShared();
+
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 255);
+    for (size_t i = 0; i < dim / 8; i++) {
+        row_record_dto->pushBack(static_cast<int64_t>(u(e)));
+    }
+
+    return row_record_dto;
+}
+
 OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper
 RandomRecordsDto(int64_t dim, int64_t num) {
     auto records_dto = OList<OList<OFloat32>::ObjectWrapper>::createShared();
     for (size_t i = 0; i < num; i++) {
         records_dto->pushBack(RandomRowRecordDto(dim));
+    }
+
+    return records_dto;
+}
+
+OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper
+RandomBinRecordsDto(int64_t dim, int64_t num) {
+    auto records_dto = OList<OList<OInt64>::ObjectWrapper>::createShared();
+    for (size_t i = 0; i < num; i++) {
+        records_dto->pushBack(RandomBinRowRecordDto(dim));
     }
 
     return records_dto;
@@ -400,7 +426,54 @@ TEST_F(WebHandlerTest, CMD) {
 ///////////////////////////////////////////////////////////////////////////////////////
 
 namespace {
+static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
+    "# Default values are used when you make no changes to the following parameters.\n"
+    "\n"
+    "version: 0.1"
+    "\n"
+    "server_config:\n"
+    "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
+    "  port: 19530                       # port range: 1025 ~ 65534\n"
+    "  deploy_mode: single               \n"
+    "  time_zone: UTC+8\n"
+    "\n"
+    "db_config:\n"
+    "  backend_url: sqlite://:@:/        \n"
+    "\n"
+    "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
+    "  preload_table:                    \n"
+    "\n"
+    "storage_config:\n"
+    "  primary_path: /tmp/milvus_web_controller_test        # path used to store data and meta\n"
+    "  secondary_path:                   # path used to store data only, split by semicolon\n"
+    "\n"
+    "metric_config:\n"
+    "  enable_monitor: false             # enable monitoring or not\n"
+    "  address: 127.0.0.1\n"
+    "  port: 8080                        # port prometheus uses to fetch metrics\n"
+    "\n"
+    "cache_config:\n"
+    "  cpu_cache_capacity: 4             # GB, CPU memory used for cache\n"
+    "  cpu_cache_threshold: 0.85         \n"
+    "  cache_insert_data: false          # whether to load inserted data into cache\n"
+    "\n"
+    "engine_config:\n"
+    "  use_blas_threshold: 20            \n"
+    "\n"
+    #ifdef MILVUS_GPU_VERSION
+    "gpu_resource_config:\n"
+    "  enable: true                      # whether to enable GPU resources\n"
+    "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
+    "  search_resources:                 # define the GPU devices used for search computation, must be in format gpux\n"
+    "    - gpu0\n"
+    "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
+    "    - gpu0\n"
+    #endif
+    "\n";
+
 static const char* CONTROLLER_TEST_TABLE_NAME = "controller_unit_test";
+static const char* CONTROLLER_TEST_CONFIG_DIR = "/tmp/milvus_web_controller_test/";
+static const char* CONTROLLER_TEST_CONFIG_FILE = "config.yaml";
 
 class TestClient : public oatpp::web::client::ApiClient {
  public:
@@ -505,6 +578,15 @@ class WebControllerTest : public testing::Test {
  protected:
     static void
     SetUpTestCase() {
+        // Basic config
+        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+        std::fstream fs(config_path.c_str(), std::ios_base::out);
+        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+        fs.close();
+
+        milvus::server::Config& config = milvus::server::Config::GetInstance();
+        config.LoadConfigFile(config_path);
+
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
         res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
@@ -522,13 +604,8 @@ class WebControllerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        boost::filesystem::remove_all("/tmp/milvus_web_controller_test");
-        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_web_controller_test");
-        milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
-        milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
-        milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
-        milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
-        milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
+        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
+        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath(CONTROLLER_TEST_CONFIG_DIR);
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
@@ -547,7 +624,7 @@ class WebControllerTest : public testing::Test {
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
-        boost::filesystem::remove_all("/tmp/milvus_web_controller_test");
+        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
     }
 
     void
@@ -734,6 +811,24 @@ TEST_F(WebControllerTest, INSERT) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
+TEST_F(WebControllerTest, INSERT_BIN) {
+    auto table_name = "test_insert_bin_table_test" + OString(RandomName().c_str());
+    const int64_t dim = 64;
+    GenTable(table_name, dim, 100, "HAMMING");
+
+    auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->ids = insert_dto->ids->createShared();
+    insert_dto->records_bin = RandomBinRecordsDto(dim, 20);
+
+    auto response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
+    ASSERT_EQ(20, result_dto->ids->count());
+
+    response = client_ptr->dropTable(table_name, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+}
+
 TEST_F(WebControllerTest, INSERT_IDS) {
     auto table_name = "test_insert_table_test" + OString(RandomName().c_str());
     const int64_t dim = 64;
@@ -860,7 +955,7 @@ TEST_F(WebControllerTest, PARTITION) {
 }
 
 TEST_F(WebControllerTest, SEARCH) {
-    const OString table_name = "test_partition_table_test" + OString(RandomName().c_str());
+    const OString table_name = "test_search_table_test" + OString(RandomName().c_str());
     GenTable(table_name, 64, 100, "L2");
 
     // Insert 200 vectors into table
@@ -904,6 +999,61 @@ TEST_F(WebControllerTest, SEARCH) {
     ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_ROWRECORD, result_dto->code);
 
     search_request_dto->records = RandomRecordsDto(64, 10);
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // Test search with tags
+    search_request_dto->tags = search_request_dto->tags->createShared();
+    search_request_dto->tags->pushBack(par_param->partition_tag);
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, SEARCH_BIN) {
+    const OString table_name = "test_search_bin_table_test" + OString(RandomName().c_str());
+    GenTable(table_name, 64, 100, "HAMMING");
+
+    // Insert 200 vectors into table
+    OQueryParams query_params;
+    auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
+    insert_dto->ids = insert_dto->ids->createShared();
+    insert_dto->records_bin = RandomBinRecordsDto(64, 200);
+
+    auto response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+
+    sleep(4);
+
+    //Create partition and insert 200 vectors into it
+    auto par_param = milvus::server::web::PartitionRequestDto::createShared();
+    par_param->partition_name = "partition" + OString(RandomName().c_str());
+    par_param->partition_tag = "tag" + OString(RandomName().c_str());
+    response = client_ptr->createPartition(table_name, par_param);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
+                        << "Error: " << response->getStatusDescription()->std_str();
+
+    insert_dto->tag = par_param->partition_tag;
+    response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    sleep(5);
+
+    // Test search
+    auto search_request_dto = milvus::server::web::SearchRequestDto::createShared();
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
+    search_request_dto->nprobe = 1;
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+
+    search_request_dto->topk = 1;
+    response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_ROWRECORD, result_dto->code);
+
+    search_request_dto->records_bin = RandomBinRecordsDto(64, 10);
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 

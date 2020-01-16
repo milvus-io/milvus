@@ -16,7 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1022 - check if partition name is legal
 - \#1028 - check if table exists when show partitions
 - \#1029 - check if table exists when try to delete partition
-- \#1066 - optimize http insert and search time
+- \#1066 - optimize http insert and search speed
 - \#1067 - Add binary vectors support in http server
 
 ## Feature
