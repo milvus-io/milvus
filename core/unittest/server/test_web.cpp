@@ -370,7 +370,7 @@ TEST_F(WebHandlerTest, PARTITION) {
     ASSERT_EQ(StatusCode::ILLEGAL_TABLE_NAME, status_dto->code->getValue());
 
     auto partitions_dto = milvus::server::web::PartitionListDto::createShared();
-    status_dto = handler->ShowPartitions(0, 10, table_name, partitions_dto);
+    status_dto = handler->ShowPartitions("0", "10", table_name, partitions_dto);
     ASSERT_EQ(1, partitions_dto->partitions->count());
 
     status_dto = handler->DropPartition(table_name, "test");
@@ -378,7 +378,7 @@ TEST_F(WebHandlerTest, PARTITION) {
 
     // Show all partitions
     partitions_dto = milvus::server::web::PartitionListDto::createShared();
-    status_dto = handler->ShowPartitions(0, 10, table_name, partitions_dto);
+    status_dto = handler->ShowPartitions("0", "10", table_name, partitions_dto);
 }
 
 TEST_F(WebHandlerTest, SEARCH) {
