@@ -98,8 +98,8 @@ class DB {
     virtual Status
     Flush() = 0;
 
-    virtual Status
-    Merge(const std::set<std::string>& table_ids) = 0;
+    //    virtual Status
+    //    Merge(const std::set<std::string>& table_ids) = 0;
 
     virtual Status
     QueryByIds(const std::shared_ptr<server::Context>& context, const std::string& table_id,
