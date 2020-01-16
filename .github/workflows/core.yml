@@ -5,10 +5,12 @@ on:
     paths:
       - 'ci/**'
       - 'core/**'
+      - 'docker/**'
   pull_request:
     paths:
       - 'ci/**'
       - 'core/**'
+      - 'docker/**'
 
 jobs:
   ubuntu:
