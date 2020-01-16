@@ -84,7 +84,7 @@ class WebRequestHandler {
 
  protected:
     Status
-    GetTaleInfo(const std::string& table_name, std::map<std::string, std::string>& table_info);
+    GetTaleInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
@@ -118,7 +118,7 @@ class WebRequestHandler {
     GetTable(const OString& table_name, const OQueryParams& query_params, TableFieldsDto::ObjectWrapper& schema_dto);
 
     StatusDto::ObjectWrapper
-    ShowTables(const OInt64& offset, const OInt64& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
+    ShowTables(const OString& offset, const OString& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
 
     StatusDto::ObjectWrapper
     DropTable(const OString& table_name);
@@ -146,17 +146,17 @@ class WebRequestHandler {
     Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
            VectorIdsDto::ObjectWrapper& ids_dto);
 
-    StatusDto::ObjectWrapper
-    InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
-              VectorIdsDto::ObjectWrapper& ids_dto);
+//    StatusDto::ObjectWrapper
+//    InsertBin(const OString& table_name, const InsertBinRequestDto::ObjectWrapper& param,
+//              VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
     Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
            TopkResultsDto::ObjectWrapper& results_dto);
 
-    StatusDto::ObjectWrapper
-    SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
-              TopkResultsDto::ObjectWrapper& results_dto);
+//    StatusDto::ObjectWrapper
+//    SearchBin(const OString& table_name, const SearchBinRequestDto::ObjectWrapper& search_request,
+//              TopkResultsDto::ObjectWrapper& results_dto);
 
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);

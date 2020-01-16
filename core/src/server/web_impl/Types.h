@@ -31,6 +31,8 @@ namespace server {
 namespace web {
 
 using OString = oatpp::data::mapping::type::String;
+using OInt8 = oatpp::data::mapping::type::Int8;
+using OInt16 = oatpp::data::mapping::type::Int16;
 using OInt64 = oatpp::data::mapping::type::Int64;
 using OFloat32 = oatpp::data::mapping::type::Float32;
 template <class T>

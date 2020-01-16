@@ -22,8 +22,6 @@
 #include <string>
 #include <thread>
 
-#include <oatpp/network/server/Server.hpp>
-
 #include "server/web_impl/component/AppComponent.hpp"
 
 #include "utils/Status.h"
