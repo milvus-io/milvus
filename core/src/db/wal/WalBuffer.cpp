@@ -281,9 +281,7 @@ ErrorCode MXLogBuffer::Next(const uint64_t last_applied_lsn,
     record.type = MXLogType::None;
 
     //reader catch up to writer, no next record, read fail
-    uint64_t read_lsn;
-    BuildLsn(mxlog_buffer_reader_.file_no, mxlog_buffer_reader_.buf_offset, read_lsn);
-    if (read_lsn >= last_applied_lsn) {
+    if (GetReadLsn() >= last_applied_lsn) {
         return WAL_SUCCESS;
     }
 

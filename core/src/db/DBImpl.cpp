@@ -77,6 +77,8 @@ DBImpl::DBImpl(const DBOptions& options)
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
+    auto_flush_interval_ = 1000;
+
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.record_size = options_.record_size_;
@@ -1563,19 +1565,39 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
 void
 DBImpl::BackgroundWalTask() {
+    auto get_next_auto_flush_time =  [&]() {
+        return std::chrono::system_clock::now() +
+               std::chrono::milliseconds(auto_flush_interval_);
+    };
+    auto next_auto_flush_time = get_next_auto_flush_time();
+
     wal::MXLogRecord record;
     while (true) {
+        if (std::chrono::system_clock::now() >= next_auto_flush_time) {
+            // auto flush
+            record.type = wal::MXLogType::Flush;
+            record.table_id.clear();
+            ExecWalRecord(record);
+
+            next_auto_flush_time = get_next_auto_flush_time();
+        }
+
         auto error_code = wal_mgr_->GetNextRecord(record);
         if (error_code != WAL_SUCCESS) {
             ENGINE_LOG_ERROR << "WAL background GetNextRecord error";
-            // TODO: ???
             break;
         }
 
         if (record.type != wal::MXLogType::None) {
             ExecWalRecord(record);
             if (record.type == wal::MXLogType::Flush) {
+                // user req flush
                 flush_task_swn_.Notify();
+
+                // if user flush all manually, update auto flush also 
+                if (record.table_id.empty()) {
+                    next_auto_flush_time = get_next_auto_flush_time();
+                }
             }
 
         } else {
@@ -1584,7 +1606,7 @@ DBImpl::BackgroundWalTask() {
                 break;
             }
 
-            wal_task_swn_.Wait();
+            wal_task_swn_.Wait_Until(next_auto_flush_time);
         }
     }
 }
