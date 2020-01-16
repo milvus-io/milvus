@@ -328,7 +328,8 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
             tar_idx = tar_k_multi_i + tar_k_j;
             buf_idx = buf_k_multi_i + buf_k_j;
 
-            if ((ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
+            if ((tar_ids[tar_idx] == -1) ||  // initialized value
+                (ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
                 (!ascending && src_distances[src_idx] > tar_distances[tar_idx])) {
                 buf_ids[buf_idx] = src_ids[src_idx];
                 buf_distances[buf_idx] = src_distances[src_idx];
@@ -365,6 +366,16 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
     }
     tar_ids.swap(buf_ids);
     tar_distances.swap(buf_distances);
+}
+
+const std::string&
+XSearchTask::GetLocation() const {
+    return file_->location_;
+}
+
+size_t
+XSearchTask::GetIndexId() const {
+    return file_->id_;
 }
 
 // void
