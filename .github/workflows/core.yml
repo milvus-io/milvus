@@ -29,7 +29,7 @@ jobs:
         uses: mgrachev/action-hadolint@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review # Default is github-pr-check
+          reporter: github-pr-check # Default is github-pr-check
       - name: Docker Pull
         shell: bash
         run: |
@@ -76,7 +76,7 @@ jobs:
         uses: mgrachev/action-hadolint@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review # Default is github-pr-check
+          reporter: github-pr-check # Default is github-pr-check
       - name: Docker Pull
         shell: bash
         run: |
