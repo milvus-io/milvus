@@ -128,6 +128,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
+    std::vector<int64_t> search_id_array;
     {  // build search vectors
         for (int64_t i = 0; i < NQ; i++) {
             std::vector<milvus::RowRecord> record_array;
@@ -135,6 +136,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             int64_t index = i * BATCH_ROW_COUNT + SEARCH_TARGET;
             milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, TABLE_DIMENSION);
             search_record_array.push_back(std::make_pair(record_ids[0], record_array[0]));
+            search_id_array.push_back(record_ids[0]);
         }
     }
 
@@ -147,6 +149,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+                                    topk_query_result);
+    }
+
+    {  // search vectors by id
+        std::vector<std::string> partition_tags;
+        milvus::TopKQueryResult topk_query_result;
+        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_id_array,
                                     topk_query_result);
     }
 

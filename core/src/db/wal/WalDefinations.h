@@ -16,12 +16,12 @@
 // under the License.
 
 #pragma once
-#include <stdint-gcc.h>
-#include <src/db/Types.h>
-#include <condition_variable>
-#include <unordered_map>
-#include <src/db/meta/MetaTypes.h>
 
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include "db/Types.h"
+#include "db/meta/MetaTypes.h"
 
 namespace milvus {
 namespace engine {
@@ -33,11 +33,6 @@ using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchema
 #define WAL_BUFFER_MAX_SIZE ((uint32_t)2 * 1024 * 1024 * 1024)
 #define WAL_BUFFER_MIN_SIZE ((uint32_t)64 * 1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
-#define WAL_META_AMOUNT 2
-#ifdef offsetof
-#undef offsetof
-#endif
-#define offsetof(type, field) ((long) &((type *)0)->field)
 
 enum class MXLogType {
     InsertBinary,
@@ -66,8 +61,6 @@ struct MXLogConfiguration {
     std::string mxlog_path;
 };
 
-
-
-} //wal
-} //engine
-} //milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

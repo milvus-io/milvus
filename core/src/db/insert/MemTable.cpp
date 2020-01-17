@@ -23,6 +23,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "db/Utils.h"
 #include "utils/Log.h"

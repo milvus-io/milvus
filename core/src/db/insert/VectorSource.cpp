@@ -18,6 +18,7 @@
 #include "db/insert/VectorSource.h"
 
 #include <utility>
+#include <vector>
 
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"

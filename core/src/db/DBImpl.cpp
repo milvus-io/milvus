@@ -77,9 +77,10 @@ DBImpl::DBImpl(const DBOptions& options)
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
+    wal_enable_ = options_.wal_enable_;
     auto_flush_interval_ = 1000;
 
-    if (options_.wal_enable_) {
+    if (wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.record_size = options_.record_size_;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
@@ -868,10 +869,9 @@ DBImpl::StartCompactionTask() {
         return;
     }
 
-    // serialize memory data
-    //    SyncMemData(compact_table_ids_);
+    Flush();
 
-    // compactiong has been finished?
+    // compaction has been finished?
     {
         std::lock_guard<std::mutex> lck(compact_result_mutex_);
         if (!compact_thread_results_.empty()) {
@@ -1558,9 +1558,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
 void
 DBImpl::BackgroundWalTask() {
-    auto get_next_auto_flush_time =  [&]() {
-        return std::chrono::system_clock::now() +
-               std::chrono::milliseconds(auto_flush_interval_);
+    auto get_next_auto_flush_time = [&]() {
+        return std::chrono::system_clock::now() + std::chrono::milliseconds(auto_flush_interval_);
     };
     auto next_auto_flush_time = get_next_auto_flush_time();
 

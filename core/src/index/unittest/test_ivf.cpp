@@ -86,16 +86,15 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
 INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                         Values(
 #ifdef MILVUS_GPU_VERSION
-    std::make_tuple("GPUIVF", ParameterType::ivf),
-    std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
-    std::make_tuple("GPUIVFSQ", ParameterType::ivfsq),
+                            std::make_tuple("GPUIVF", ParameterType::ivf),
+                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("GPUIVFSQ", ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
-    std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
+                            std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
 #endif
-    std::make_tuple("IVF", ParameterType::ivf),
-    std::make_tuple("IVFPQ", ParameterType::ivfpq),
-    std::make_tuple("IVFSQ", ParameterType::ivfsq)));
+                            std::make_tuple("IVF", ParameterType::ivf), std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("IVFSQ", ParameterType::ivfsq)));
 
 TEST_P(IVFTest, ivf_basic) {
     assert(!xb.empty());
@@ -113,10 +112,9 @@ TEST_P(IVFTest, ivf_basic) {
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
-    if (index_type.find("GPU") == std::string::npos && index_type.find("Hybrid") == std::string::npos
-        && index_type.find("PQ") == std::string::npos) {
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-            std::make_shared<faiss::ConcurrentBitset>(nb);
+    if (index_type.find("GPU") == std::string::npos && index_type.find("Hybrid") == std::string::npos &&
+        index_type.find("PQ") == std::string::npos) {
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
         for (int64_t i = 0; i < nq; ++i) {
             concurrent_bitset_ptr->set(i);
         }
@@ -243,11 +241,11 @@ TEST_P(IVFTest, clone_test) {
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
-                                auto clone_index = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
-                                auto clone_result = clone_index->Search(query_dataset, conf);
-                                AssertEqual(result, clone_result);
-                                std::cout << "clone G <=> C [" << index_type << "] success" << std::endl;
-                            });
+                auto clone_index = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
+                auto clone_result = clone_index->Search(query_dataset, conf);
+                AssertEqual(result, clone_result);
+                std::cout << "clone G <=> C [" << index_type << "] success" << std::endl;
+            });
         } else {
             EXPECT_THROW(
                 {
@@ -268,11 +266,11 @@ TEST_P(IVFTest, clone_test) {
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
-                                auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, knowhere::Config());
-                                auto clone_result = clone_index->Search(query_dataset, conf);
-                                AssertEqual(result, clone_result);
-                                std::cout << "clone C <=> G [" << index_type << "] success" << std::endl;
-                            });
+                auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, knowhere::Config());
+                auto clone_result = clone_index->Search(query_dataset, conf);
+                AssertEqual(result, clone_result);
+                std::cout << "clone C <=> G [" << index_type << "] success" << std::endl;
+            });
         } else {
             EXPECT_THROW(
                 {

@@ -15,26 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/wal/WalManager.h"
 #include <unistd.h>
-#include "WalManager.h"
-#include "stdio.h"
+#include <algorithm>
+#include <memory>
+#include "utils/CommonUtil.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
 WalManager::WalManager(const MXLogConfiguration& config) {
-    // Todo: from param
     mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
     mxlog_config_.buffer_size = config.buffer_size;
     mxlog_config_.record_size = config.record_size;
-    mxlog_config_.mxlog_path = config.mxlog_path; //check mxlog_path end with '/'
-    if (mxlog_config_.mxlog_path[mxlog_config_.mxlog_path.size() - 1] != '/')
+    mxlog_config_.mxlog_path = config.mxlog_path;
+
+    // check the path end with '/'
+    if (mxlog_config_.mxlog_path.back() != '/') {
         mxlog_config_.mxlog_path += '/';
+    }
+    // check path exist
+    auto status = server::CommonUtil::CreateDirectory(mxlog_config_.mxlog_path);
+    if (!status.ok()) {
+        std::string msg = "failed to create wal directory " + mxlog_config_.mxlog_path;
+        ENGINE_LOG_ERROR << msg;
+        throw Exception(WAL_PATH_ERROR, msg);
+    }
 }
 
 WalManager::~WalManager() {
-
 }
 
 ErrorCode
@@ -57,7 +69,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
 
         uint64_t max_flused_lsn = 0;
-        for (auto schema: table_schema_array) {
+        for (auto schema : table_schema_array) {
             TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
             tables_[schema.table_id_] = tb_lsn;
 
@@ -72,9 +84,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
     }
 
-    p_buffer_ = std::make_shared<MXLogBuffer>(
-        mxlog_config_.mxlog_path,
-        mxlog_config_.buffer_size);
+    p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
 
     ErrorCode error_code;
     if (p_buffer_->Init(recovery_start, applied_lsn)) {
@@ -90,7 +100,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
 }
 
 ErrorCode
-WalManager::GetNextRecovery(MXLogRecord &record) {
+WalManager::GetNextRecovery(MXLogRecord& record) {
     ErrorCode error_code = WAL_ERROR;
 
     if (p_buffer_ != nullptr) {
@@ -118,19 +128,21 @@ WalManager::GetNextRecovery(MXLogRecord &record) {
                     break;
                 }
             }
-
         } while (true);
     }
+
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
+                 << error_code;
 
     return error_code;
 }
 
 ErrorCode
-WalManager::GetNextRecord(MXLogRecord &record) {
+WalManager::GetNextRecord(MXLogRecord& record) {
     ErrorCode error_code = WAL_ERROR;
 
     if (p_buffer_ != nullptr) {
-        std::unique_lock<std::mutex> lck (mutex_);
+        std::unique_lock<std::mutex> lck(mutex_);
         if (flush_info_.second != 0) {
             if (p_buffer_->GetReadLsn() >= flush_info_.second) {
                 // can exec flush requirement
@@ -139,6 +151,8 @@ WalManager::GetNextRecord(MXLogRecord &record) {
                 record.table_id = flush_info_.first;
                 // clear flush_info_
                 flush_info_.second = 0;
+
+                WAL_LOG_INFO << "flush lsn " << record.lsn << " flush table " << record.table_id;
                 return WAL_SUCCESS;
             }
         }
@@ -156,43 +170,47 @@ WalManager::GetNextRecord(MXLogRecord &record) {
                 break;
             }
             lck.unlock();
-
         } while (true);
     }
+
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
+                 << error_code;
 
     return error_code;
 }
 
 uint64_t
-WalManager::CreateTable(const std::string &table_id) {
-    std::unique_lock<std::mutex> lck (mutex_);
+WalManager::CreateTable(const std::string& table_id) {
+    WAL_LOG_INFO << "create table " << table_id;
+    std::unique_lock<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
     tables_[table_id] = {applied_lsn, applied_lsn};
     return applied_lsn;
 }
 
 void
-WalManager::DropTable(const std::string &table_id) {
-    std::unique_lock<std::mutex> lck (mutex_);
+WalManager::DropTable(const std::string& table_id) {
+    WAL_LOG_INFO << "drop table " << table_id;
+    std::unique_lock<std::mutex> lck(mutex_);
     tables_.erase(table_id);
 }
 
 void
-WalManager::TableFlushed(const std::string &table_id, uint64_t lsn) {
-    std::unique_lock<std::mutex> lck (mutex_);
+WalManager::TableFlushed(const std::string& table_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
     auto it = tables_.find(table_id);
     if (it != tables_.end()) {
         it->second.flush_lsn = lsn;
     }
+    lck.unlock();
+
+    WAL_LOG_INFO << table_id << " is flushed by lsn " << lsn;
 }
 
 template <typename T>
 bool
-WalManager::Insert(const std::string &table_id,
-                   const std::string &partition_tag,
-                   const IDNumbers &vector_ids,
-                   const std::vector<T> &vectors)
-{
+WalManager::Insert(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                   const std::vector<T>& vectors) {
     MXLogType log_type;
     if (std::is_same<T, float>::value) {
         log_type = MXLogType::InsertVector;
@@ -206,8 +224,9 @@ WalManager::Insert(const std::string &table_id,
 
     size_t vector_num = vector_ids.size();
     uint16_t dim = vectors.size() / vector_num;
-    //split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size() - partition_tag.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
+    // split and insert into wal
+    size_t vectors_per_record =
+        (max_record_data_size - table_id.size() - partition_tag.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
     MXLogRecord record;
@@ -223,20 +242,22 @@ WalManager::Insert(const std::string &table_id,
         record.data = vectors.data() + i * dim;
 
         auto error_code = p_buffer_->Append(record);
-        if(error_code != WAL_SUCCESS) {
+        if (error_code != WAL_SUCCESS) {
             p_buffer_->SetWriteLsn(last_applied_lsn_);
             return false;
         }
         new_lsn = record.lsn;
     }
 
-    std::unique_lock<std::mutex> lck (mutex_);
+    std::unique_lock<std::mutex> lck(mutex_);
     last_applied_lsn_ = new_lsn;
     auto it = tables_.find(table_id);
     if (it != tables_.end()) {
         it->second.wal_lsn = new_lsn;
     }
     lck.unlock();
+
+    WAL_LOG_INFO << table_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
@@ -247,7 +268,7 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 
     size_t vector_num = vector_ids.size();
 
-    //split and insert into wal
+    // split and insert into wal
     size_t vectors_per_record = (max_record_data_size - table_id.size()) / (sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
@@ -264,14 +285,14 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
         record.data = nullptr;
 
         auto error_code = p_buffer_->Append(record);
-        if(error_code != WAL_SUCCESS) {
+        if (error_code != WAL_SUCCESS) {
             p_buffer_->SetWriteLsn(last_applied_lsn_);
             return false;
         }
         new_lsn = record.lsn;
     }
 
-    std::unique_lock<std::mutex> lck (mutex_);
+    std::unique_lock<std::mutex> lck(mutex_);
     last_applied_lsn_ = new_lsn;
     auto it = tables_.find(table_id);
     if (it != tables_.end()) {
@@ -279,12 +300,14 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
     }
     lck.unlock();
 
+    WAL_LOG_INFO << table_id << " delete rows by id, lsn " << new_lsn;
+
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
 
 uint64_t
 WalManager::Flush(const std::string table_id) {
-    std::unique_lock<std::mutex> lck (mutex_, std::defer_lock);
+    std::unique_lock<std::mutex> lck(mutex_, std::defer_lock);
     // At most one flush requirement is waiting at any time.
     // Otherwise, flush_info_ should be modified to a list.
     __glibcxx_assert(flush_info_.second == 0);
@@ -292,7 +315,7 @@ WalManager::Flush(const std::string table_id) {
     uint64_t lsn = 0;
     if (table_id.empty()) {
         lck.lock();
-        for (auto &it : tables_) {
+        for (auto& it : tables_) {
             if (it.second.wal_lsn > it.second.flush_lsn) {
                 lsn = last_applied_lsn_;
                 break;
@@ -315,24 +338,19 @@ WalManager::Flush(const std::string table_id) {
     }
     lck.unlock();
 
+    WAL_LOG_INFO << table_id << " want to be flush, lsn " << lsn;
+
     return lsn;
 }
 
 template bool
-WalManager::Insert<float>(
-        const std::string &table_id,
-        const std::string& partition_tag,
-        const IDNumbers &vector_ids,
-        const std::vector<float> &vectors);
+WalManager::Insert<float>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                          const std::vector<float>& vectors);
 
 template bool
-WalManager::Insert<uint8_t>(
-        const std::string &table_id,
-        const std::string& partition_tag,
-        const IDNumbers &vector_ids,
-        const std::vector<uint8_t> &vectors);
+WalManager::Insert<uint8_t>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                            const std::vector<uint8_t>& vectors);
 
-
-} // wal
-} // engine
-} // milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

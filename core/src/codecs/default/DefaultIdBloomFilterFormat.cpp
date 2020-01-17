@@ -20,8 +20,8 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
-#include <string>
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace codec {
@@ -76,4 +76,3 @@ DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
 
 }  // namespace codec
 }  // namespace milvus
-

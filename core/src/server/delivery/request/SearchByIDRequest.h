@@ -29,19 +29,14 @@ namespace server {
 class SearchByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context,
-           const std::string& table_name,
-           const std::vector<int64_t>& vector_ids,
-           int64_t topk,
-           int64_t nprobe,
-           const std::vector<std::string>& partition_list,
-           TopKQueryResult& result);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+           const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
+           const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
  protected:
     SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const std::vector<int64_t>& vector_ids, int64_t topk,
-                      int64_t nprobe, const std::vector<std::string>& partition_list,
-                      TopKQueryResult& result);
+                      const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
+                      const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
     Status
     OnExecute() override;

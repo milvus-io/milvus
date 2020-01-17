@@ -18,9 +18,9 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include <memory>
-#include <bits/shared_ptr.h>
+#include <mutex>
+#include <string>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
@@ -33,11 +33,11 @@ namespace wal {
 #pragma pack(push)
 #pragma pack(1)
 
-struct MXLogRecordHeader{
-    uint64_t mxl_lsn;//log sequence number, high 32 bits means file number which increasing by 1, low 32 bits means offset in a wal file, max 4GB
-    uint8_t mxl_type;//record type, insert/delete/update/flush...
-    uint16_t table_id_size;//
-    uint16_t partition_tag_size;//
+struct MXLogRecordHeader {
+    uint64_t mxl_lsn;  // log sequence number (high 32 bits: file No. inc by 1, low 32 bits: offset in file, max 4GB)
+    uint8_t mxl_type;  // record type, insert/delete/update/flush...
+    uint16_t table_id_size;
+    uint16_t partition_tag_size;
     uint32_t vector_num;
     uint32_t data_size;
 };
@@ -57,32 +57,37 @@ using BufferPtr = std::shared_ptr<char>;
 
 class MXLogBuffer {
  public:
-    MXLogBuffer(const std::string& mxlog_path,
-                const uint32_t buffer_size);
+    MXLogBuffer(const std::string& mxlog_path, const uint32_t buffer_size);
     ~MXLogBuffer();
 
-    bool Init(uint64_t read_lsn,
-              uint64_t write_lsn);
+    bool
+    Init(uint64_t read_lsn, uint64_t write_lsn);
 
     // ignore all old wal file
-    void Reset(uint64_t lsn);
+    void
+    Reset(uint64_t lsn);
 
     // Note: record.lsn will be set inner
-    ErrorCode Append(MXLogRecord &record);
+    ErrorCode
+    Append(MXLogRecord& record);
 
-    ErrorCode Next(const uint64_t last_applied_lsn,
-                   MXLogRecord &record);
+    ErrorCode
+    Next(const uint64_t last_applied_lsn, MXLogRecord& record);
 
-    uint64_t GetReadLsn();
+    uint64_t
+    GetReadLsn();
 
-    bool SetWriteLsn(uint64_t lsn);
+    bool
+    SetWriteLsn(uint64_t lsn);
 
  private:
-    uint32_t SurplusSpace();
-    uint32_t RecordSize(const MXLogRecord &record);
+    uint32_t
+    SurplusSpace();
+    uint32_t
+    RecordSize(const MXLogRecord& record);
 
  private:
-    uint32_t mxlog_buffer_size_; //from config
+    uint32_t mxlog_buffer_size_;  // from config
     BufferPtr buf_[2];
     std::mutex mutex_;
     MXLogBufferHandler mxlog_buffer_reader_;
@@ -92,6 +97,6 @@ class MXLogBuffer {
 
 using MXLogBufferPtr = std::shared_ptr<MXLogBuffer>;
 
-} // wal
-} // engine
-} // milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus
