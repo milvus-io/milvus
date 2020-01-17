@@ -283,83 +283,81 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 }
-/*
 
-TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
+//TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
+//    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+//    auto stat = db_->CreateTable(table_info);
+//
+//    milvus::engine::meta::TableSchema table_info_get;
+//    table_info_get.table_id_ = GetTableName();
+//    stat = db_->DescribeTable(table_info_get);
+//    ASSERT_TRUE(stat.ok());
+//    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+//
+//    int64_t nb = 40960;
+//    milvus::engine::VectorsData xb;
+//    BuildVectors(nb, xb);
+//
+//    int64_t qb = 5;
+//    milvus::engine::VectorsData qxb;
+//    BuildVectors(qb, qxb);
+//
+//    std::thread search([&]() {
+//        milvus::engine::ResultIds result_ids;
+//        milvus::engine::ResultDistances result_distances;
+//        int k = 10;
+//        std::this_thread::sleep_for(std::chrono::seconds(2));
+//
+//        INIT_TIMER;
+//        std::stringstream ss;
+//        uint64_t count = 0;
+//        uint64_t prev_count = 0;
+//
+//        for (auto j = 0; j < 10; ++j) {
+//            ss.str("");
+//            db_->Size(count);
+//            prev_count = count;
+//
+//            START_TIMER;
+//
+//            std::vector<std::string> tags;
+//            stat = db_->Query(dummy_context_, GetTableName(), tags, k, 10, qxb, result_ids, result_distances);
+//            ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
+//            STOP_TIMER(ss.str());
+//
+//            ASSERT_TRUE(stat.ok());
+//            for (auto i = 0; i < qb; ++i) {
+//                ss.str("");
+//                ss << "Result [" << i << "]:";
+//                for (auto t = 0; t < k; t++) {
+//                    ss << result_ids[i * k + t] << " ";
+//                }
+//
+//                LOG(DEBUG) << ss.str();
+//            }
+//            ASSERT_TRUE(count >= prev_count);
+//            std::this_thread::sleep_for(std::chrono::seconds(1));
+//        }
+//    });
+//
+//    int loop = 20;
+//
+//    for (auto i = 0; i < loop; ++i) {
+//        if (i == 0) {
+//            qxb.id_array_.clear();
+//            db_->InsertVectors(GetTableName(), "", qxb);
+//            ASSERT_EQ(qxb.id_array_.size(), qb);
+//        } else {
+//            xb.id_array_.clear();
+//            db_->InsertVectors(GetTableName(), "", xb);
+//            ASSERT_EQ(xb.id_array_.size(), nb);
+//        }
+//        std::this_thread::sleep_for(std::chrono::microseconds(1));
+//    }
+//
+//    search.join();
+//}
 
-    milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
-    stat = db_->DescribeTable(table_info_get);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
-
-    int64_t nb = 40960;
-    milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
-
-    int64_t qb = 5;
-    milvus::engine::VectorsData qxb;
-    BuildVectors(qb, qxb);
-
-    std::thread search([&]() {
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        int k = 10;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-
-        INIT_TIMER;
-        std::stringstream ss;
-        uint64_t count = 0;
-        uint64_t prev_count = 0;
-
-        for (auto j = 0; j < 10; ++j) {
-            ss.str("");
-            db_->Size(count);
-            prev_count = count;
-
-            START_TIMER;
-
-            std::vector<std::string> tags;
-            stat = db_->Query(dummy_context_, GetTableName(), tags, k, 10, qxb, result_ids, result_distances);
-            ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
-            STOP_TIMER(ss.str());
-
-            ASSERT_TRUE(stat.ok());
-            for (auto i = 0; i < qb; ++i) {
-                ss.str("");
-                ss << "Result [" << i << "]:";
-                for (auto t = 0; t < k; t++) {
-                    ss << result_ids[i * k + t] << " ";
-                }
-                */
-/* LOG(DEBUG) << ss.str(); *//*
-
-            }
-            ASSERT_TRUE(count >= prev_count);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-    });
-
-    int loop = 20;
-
-    for (auto i = 0; i < loop; ++i) {
-        if (i == 0) {
-            qxb.id_array_.clear();
-            db_->InsertVectors(GetTableName(), "", qxb);
-            ASSERT_EQ(qxb.id_array_.size(), qb);
-        } else {
-            xb.id_array_.clear();
-            db_->InsertVectors(GetTableName(), "", xb);
-            ASSERT_EQ(xb.id_array_.size(), nb);
-        }
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
-
-    search.join();
-}
-*/
 
 TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
