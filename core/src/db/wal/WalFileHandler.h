@@ -62,7 +62,6 @@ class MXLogFileHandler {
     std::string file_path_;
     std::string file_name_;
     std::string file_mode_;
-    uint32_t file_size_;
     FILE* p_file_;
 };
 

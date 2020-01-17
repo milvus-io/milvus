@@ -295,11 +295,12 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
             WAL_LOG_ERROR << "read wal file error " << mxlog_buffer_reader_.file_no;
             return WAL_FILE_ERROR;
         }
-        if (!mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0, mxlog_reader.GetFileSize())) {
+        auto file_size = (uint32_t)mxlog_reader.GetFileSize();
+        if (!mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0, file_size)) {
             WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.file_no;
             return WAL_FILE_ERROR;
         }
-        mxlog_buffer_reader_.max_offset = (uint32_t)mxlog_reader.GetFileSize();
+        mxlog_buffer_reader_.max_offset = file_size;
     }
 
     char* current_read_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
