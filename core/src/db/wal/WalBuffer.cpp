@@ -16,8 +16,8 @@
 // under the License.
 
 #include <cstring>
-#include "WalBuffer.h"
-#include "WalDefinations.h"
+#include "db/wal/WalBuffer.h"
+#include "db/wal/WalDefinations.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -30,34 +30,29 @@ ToFileName(int32_t file_no) {
 }
 
 inline void
-BuildLsn(uint32_t file_no, uint32_t offset, uint64_t &lsn) {
+BuildLsn(uint32_t file_no, uint32_t offset, uint64_t& lsn) {
     lsn = (uint64_t)file_no << 32 | offset;
 }
 
 inline void
-ParserLsn(uint64_t lsn, uint32_t &file_no, uint32_t &offset) {
-    file_no = uint32_t (lsn >> 32);
-    offset = uint32_t (lsn & LSN_OFFSET_MASK);
+ParserLsn(uint64_t lsn, uint32_t& file_no, uint32_t& offset) {
+    file_no = uint32_t(lsn >> 32);
+    offset = uint32_t(lsn & LSN_OFFSET_MASK);
 }
 
-
-MXLogBuffer::MXLogBuffer(const std::string &mxlog_path,
+MXLogBuffer::MXLogBuffer(const std::string& mxlog_path,
                          const uint32_t buffer_size)
-: mxlog_buffer_size_(buffer_size)
-, mxlog_writer_(mxlog_path)
-{
+    : mxlog_buffer_size_(buffer_size), mxlog_writer_(mxlog_path) {
     if (mxlog_buffer_size_ < (uint32_t)WAL_BUFFER_MIN_SIZE) {
         WAL_LOG_INFO << "config wal buffer size is too small " << mxlog_buffer_size_;
         mxlog_buffer_size_ = (uint32_t)WAL_BUFFER_MIN_SIZE;
-    }
-    else if (mxlog_buffer_size_ > (uint32_t)WAL_BUFFER_MAX_SIZE) {
+    } else if (mxlog_buffer_size_ > (uint32_t)WAL_BUFFER_MAX_SIZE) {
         WAL_LOG_INFO << "config wal buffer size is too larger " << mxlog_buffer_size_;
         mxlog_buffer_size_ = (uint32_t)WAL_BUFFER_MAX_SIZE;
     }
 }
 
 MXLogBuffer::~MXLogBuffer() {
-
 }
 
 /**
@@ -65,8 +60,12 @@ MXLogBuffer::~MXLogBuffer() {
  * @param buffer_size
  * @return
  */
-bool MXLogBuffer::Init(uint64_t start_lsn,
-                       uint64_t end_lsn) {
+bool
+MXLogBuffer::Init(uint64_t start_lsn,
+                  uint64_t end_lsn) {
+    WAL_LOG_DEBUG << std::hex << "start_lsn " << start_lsn
+                  << " end_lsn " << end_lsn << std::dec;
+
     ParserLsn(start_lsn,
               mxlog_buffer_reader_.file_no,
               mxlog_buffer_reader_.buf_offset);
@@ -144,8 +143,8 @@ bool MXLogBuffer::Init(uint64_t start_lsn,
         file_handler.SetFileName(ToFileName(mxlog_buffer_reader_.file_no));
         file_handler.SetFileOpenMode("r");
         if (!file_handler.FileExists()) {
+            WAL_LOG_ERROR << "wal file not exist " << mxlog_buffer_reader_.file_no;
             return false;
-
         }
         mxlog_buffer_reader_.max_offset = file_handler.GetFileSize();
         file_handler.Load(buf_[0].get() + mxlog_buffer_reader_.buf_offset,
@@ -171,7 +170,10 @@ bool MXLogBuffer::Init(uint64_t start_lsn,
     return true;
 }
 
-void MXLogBuffer::Reset(uint64_t lsn) {
+void
+MXLogBuffer::Reset(uint64_t lsn) {
+    WAL_LOG_DEBUG << std::hex << "reset lsn " << lsn << std::dec;
+
     buf_[0] = BufferPtr(new char[mxlog_buffer_size_]);
     buf_[1] = BufferPtr(new char[mxlog_buffer_size_]);
 
@@ -192,30 +194,32 @@ void MXLogBuffer::Reset(uint64_t lsn) {
 }
 
 //buffer writer cares about surplus space of buffer
-uint32_t MXLogBuffer::SurplusSpace() {
+uint32_t
+MXLogBuffer::SurplusSpace() {
     return mxlog_buffer_size_ - mxlog_buffer_writer_.buf_offset;
 }
 
-uint32_t MXLogBuffer::RecordSize(const MXLogRecord &record) {
+uint32_t
+MXLogBuffer::RecordSize(const MXLogRecord& record) {
     return SizeOfMXLogRecordHeader +
            (uint32_t)record.table_id.size() +
-           (uint32_t)record.partition_tag.size() + 
+           (uint32_t)record.partition_tag.size() +
            record.length * (uint32_t)sizeof(IDNumber) +
            record.data_size;
 }
 
-ErrorCode MXLogBuffer::Append(MXLogRecord &record) {
-
+ErrorCode
+MXLogBuffer::Append(MXLogRecord& record) {
     uint32_t record_size = RecordSize(record);
     if (SurplusSpace() < record_size) {
         //writer buffer has no space, switch wal file and write to a new buffer
-        std::unique_lock<std::mutex> lck (mutex_);
+        std::unique_lock<std::mutex> lck(mutex_);
         if (mxlog_buffer_writer_.buf_idx == mxlog_buffer_reader_.buf_idx) {
             // swith writer buffer
             mxlog_buffer_reader_.max_offset = mxlog_buffer_writer_.buf_offset;
             mxlog_buffer_writer_.buf_idx ^= 1;
         }
-        mxlog_buffer_writer_.file_no ++;
+        mxlog_buffer_writer_.file_no++;
         mxlog_buffer_writer_.buf_offset = 0;
         lck.unlock();
 
@@ -275,8 +279,9 @@ ErrorCode MXLogBuffer::Append(MXLogRecord &record) {
     return WAL_SUCCESS;
 }
 
-ErrorCode MXLogBuffer::Next(const uint64_t last_applied_lsn,
-                           MXLogRecord &record) {
+ErrorCode
+MXLogBuffer::Next(const uint64_t last_applied_lsn,
+                  MXLogRecord& record) {
     // init output
     record.type = MXLogType::None;
 
@@ -287,7 +292,7 @@ ErrorCode MXLogBuffer::Next(const uint64_t last_applied_lsn,
 
     //otherwise, it means there must exists next record, in buffer or wal log
     bool need_load_new = false;
-    std::unique_lock<std::mutex> lck (mutex_);
+    std::unique_lock<std::mutex> lck(mutex_);
     if (mxlog_buffer_reader_.file_no != mxlog_buffer_writer_.file_no) {
         if (mxlog_buffer_reader_.buf_offset == mxlog_buffer_reader_.max_offset) { // last record
             mxlog_buffer_reader_.file_no++;
@@ -318,11 +323,10 @@ ErrorCode MXLogBuffer::Next(const uint64_t last_applied_lsn,
         mxlog_buffer_reader_.max_offset = (uint32_t)mxlog_reader.GetFileSize();
     }
 
-
     char* current_read_buf = buf_[mxlog_buffer_reader_.buf_idx].get();
     uint64_t current_read_offset = mxlog_buffer_reader_.buf_offset;
 
-    MXLogRecordHeader *head = (MXLogRecordHeader*)(current_read_buf + current_read_offset);
+    MXLogRecordHeader* head = (MXLogRecordHeader*)(current_read_buf + current_read_offset);
     record.type = (MXLogType)head->mxl_type;
     record.lsn = head->mxl_lsn;
     record.length = head->vector_num;
@@ -357,17 +361,19 @@ ErrorCode MXLogBuffer::Next(const uint64_t last_applied_lsn,
         record.data = nullptr;
     }
 
-    mxlog_buffer_reader_.buf_offset = uint32_t (head->mxl_lsn & LSN_OFFSET_MASK);
+    mxlog_buffer_reader_.buf_offset = uint32_t(head->mxl_lsn & LSN_OFFSET_MASK);
     return WAL_SUCCESS;
 }
 
-uint64_t MXLogBuffer::GetReadLsn() {
+uint64_t
+MXLogBuffer::GetReadLsn() {
     uint64_t read_lsn;
     BuildLsn(mxlog_buffer_reader_.file_no, mxlog_buffer_reader_.buf_offset, read_lsn);
     return read_lsn;
 }
 
-bool MXLogBuffer::SetWriteLsn(uint64_t lsn) {
+bool
+MXLogBuffer::SetWriteLsn(uint64_t lsn) {
     int32_t old_file_no = mxlog_buffer_writer_.file_no;
     ParserLsn(lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
     if (old_file_no == mxlog_buffer_writer_.file_no) {
@@ -395,6 +401,6 @@ bool MXLogBuffer::SetWriteLsn(uint64_t lsn) {
     return true;
 }
 
-} // wal
-} // engine
-} // milvus
+} // namespace wal
+} // namespace engine
+} // namespace milvus

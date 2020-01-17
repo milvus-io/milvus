@@ -26,8 +26,7 @@ namespace wal {
 
 class MXLogFileHandler {
  public:
-    MXLogFileHandler();
-    MXLogFileHandler(const std::string& mxlog_path);
+    explicit MXLogFileHandler(const std::string& mxlog_path);
     ~MXLogFileHandler();
 
     bool IsOpen();
@@ -35,8 +34,8 @@ class MXLogFileHandler {
     std::string GetFileName();
     bool OpenFile();
     bool CloseFile();
-    bool Load(char *buf, uint32_t data_offset, uint32_t data_size);
-    bool Write(char *buf, uint32_t data_size, bool is_sync = false);
+    bool Load(char* buf, uint32_t data_offset, uint32_t data_size);
+    bool Write(char* buf, uint32_t data_size, bool is_sync = false);
     bool ReBorn(const std::string& file_name);
     uint32_t GetFileSize();
     void SetFileOpenMode(const std::string& open_mode);
@@ -53,7 +52,7 @@ class MXLogFileHandler {
     FILE* p_file_;
 };
 
-} // wal
-} // engine
-} // milvus
+} // namespace wal
+} // namespace engine
+} // namespace milvus
 
