@@ -230,4 +230,36 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
     CheckSearchResult(search_record_array, topk_query_result);
 }
 
+void
+Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
+                const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
+                const std::vector<int64_t>& search_id_array,
+                milvus::TopKQueryResult& topk_query_result) {
+    topk_query_result.clear();
+
+    {
+        BLOCK_SPLITER
+        milvus_sdk::TimeRecorder rc("search by id");
+        milvus::Status stat =
+            conn->SearchByID(table_name, partition_tags, search_id_array, top_k, nprobe, topk_query_result);
+        std::cout << "SearchVector function call status: " << stat.message() << std::endl;
+        BLOCK_SPLITER
+    }
+
+    if (topk_query_result.size() != search_id_array.size()) {
+        std::cout << "ERROR: Returned result count dones equal nq" << std::endl;
+        return;
+    }
+
+    for (size_t i = 0; i < topk_query_result.size(); i++) {
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        size_t topk = one_result.ids.size();
+        auto search_id = search_id_array[i];
+        std::cout << "No." << i << " vector " << search_id << " top " << topk << " search result:" << std::endl;
+        for (size_t j = 0; j < topk; j++) {
+            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
+        }
+    }
+}
+
 }  // namespace milvus_sdk

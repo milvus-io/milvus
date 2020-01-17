@@ -128,6 +128,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
+    std::vector<int64_t> search_id_array;
     {  // build search vectors
         for (int64_t i = 0; i < NQ; i++) {
             std::vector<milvus::RowRecord> record_array;
@@ -135,6 +136,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             int64_t index = i * BATCH_ROW_COUNT + SEARCH_TARGET;
             milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, TABLE_DIMENSION);
             search_record_array.push_back(std::make_pair(record_ids[0], record_array[0]));
+            search_id_array.push_back(record_ids[0]);
         }
     }
 
@@ -150,45 +152,52 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                                     topk_query_result);
     }
 
-    {  // wait unit build index finish
-        milvus_sdk::TimeRecorder rc("Create index");
-        std::cout << "Wait until create all index done" << std::endl;
-        milvus::IndexParam index1 = BuildIndexParam();
-        milvus_sdk::Utils::PrintIndexParam(index1);
-        stat = conn->CreateIndex(index1);
-        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-        milvus::IndexParam index2;
-        stat = conn->DescribeIndex(TABLE_NAME, index2);
-        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintIndexParam(index2);
-    }
-
-    {  // preload table
-        stat = conn->PreloadTable(TABLE_NAME);
-        std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
-    }
-
-    {  // search vectors
+    {  // search vectors by id
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_id_array,
                                     topk_query_result);
     }
+//
+//    {  // wait unit build index finish
+//        milvus_sdk::TimeRecorder rc("Create index");
+//        std::cout << "Wait until create all index done" << std::endl;
+//        milvus::IndexParam index1 = BuildIndexParam();
+//        milvus_sdk::Utils::PrintIndexParam(index1);
+//        stat = conn->CreateIndex(index1);
+//        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+//
+//        milvus::IndexParam index2;
+//        stat = conn->DescribeIndex(TABLE_NAME, index2);
+//        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
+//        milvus_sdk::Utils::PrintIndexParam(index2);
+//    }
+//
+//    {  // preload table
+//        stat = conn->PreloadTable(TABLE_NAME);
+//        std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
+//    }
 
-    {  // drop index
-        stat = conn->DropIndex(TABLE_NAME);
-        std::cout << "DropIndex function call status: " << stat.message() << std::endl;
+//    {  // search vectors
+//        std::vector<std::string> partition_tags;
+//        milvus::TopKQueryResult topk_query_result;
+//        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+//                                    topk_query_result);
+//    }
 
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-    }
-
-    {  // drop table
-        stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DropTable function call status: " << stat.message() << std::endl;
-    }
+//    {  // drop index
+//        stat = conn->DropIndex(TABLE_NAME);
+//        std::cout << "DropIndex function call status: " << stat.message() << std::endl;
+//
+//        int64_t row_count = 0;
+//        stat = conn->CountTable(TABLE_NAME, row_count);
+//        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+//    }
+//
+//    {  // drop table
+//        stat = conn->DropTable(TABLE_NAME);
+//        std::cout << "DropTable function call status: " << stat.message() << std::endl;
+//    }
 
     {  // server status
         std::string status = conn->ServerStatus();

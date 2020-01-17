@@ -16,14 +16,15 @@
 // under the License.
 
 #include "server/delivery/request/DeleteByIDRequest.h"
-#include "server/DBWrapper.h"
-#include "utils/Log.h"
-#include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "server/DBWrapper.h"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -60,6 +61,18 @@ DeleteByIDRequest::OnExecute() {
             } else {
                 return status;
             }
+        }
+
+        // Check table's index type supports delete
+        if (table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+            std::string err_msg =
+                "Index type " + std::to_string(table_info.engine_type_) + " does not support delete operation";
+            SERVER_LOG_ERROR << err_msg;
+            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
 
         rc.RecordSection("check validation");
