@@ -531,7 +531,12 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context,
                           ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-
+    std::vector<std::string> table_names;
+    for (int32_t i = 0; i < request->table_name_array().size(); i++) {
+        table_names.push_back(request->table_name_array(i));
+    }
+    Status status = request_handler_.Flush(context_map_[context], table_names);
+    SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
 }
