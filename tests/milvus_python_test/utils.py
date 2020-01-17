@@ -7,8 +7,15 @@ import logging
 import time, datetime
 import copy
 import numpy as np
-from utils import *
 from milvus import Milvus, IndexType, MetricType
+
+port = 19530
+
+
+def get_milvus(handler=None):
+    if handler is None:
+        handler = "GRPC"
+    return Milvus(handler=handler)
 
 
 def gen_inaccuracy(num):
@@ -125,12 +132,9 @@ def gen_invalid_ports():
 
 def gen_invalid_uris():
     ip = None
-    port = 19530
-
     uris = [
             " ",
             "中文",
-
             # invalid protocol
             # "tc://%s:%s" % (ip, port),
             # "tcp%s:%s" % (ip, port),
@@ -143,15 +147,14 @@ def gen_invalid_uris():
             # "tcp://%s:string" % ip,
 
             # invalid ip
-            "tcp:// :%s" % port,
+            "tcp:// :19530",
             # "tcp://123.0.0.1:%s" % port,
-            "tcp://127.0.0:%s" % port,
+            "tcp://127.0.0:19530",
             # "tcp://255.0.0.0:%s" % port,
             # "tcp://255.255.0.0:%s" % port,
             # "tcp://255.255.255.0:%s" % port,
             # "tcp://255.255.255.255:%s" % port,
-            "tcp://\n:%s" % port,
-
+            "tcp://\n:19530",
     ]
     return uris
 
