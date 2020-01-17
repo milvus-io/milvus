@@ -155,7 +155,7 @@ VecIndexImpl::Count() {
 }
 
 IndexType
-VecIndexImpl::GetType() {
+VecIndexImpl::GetType() const {
     return type;
 }
 

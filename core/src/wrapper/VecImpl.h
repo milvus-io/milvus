@@ -43,7 +43,7 @@ class VecIndexImpl : public VecIndex {
     CopyToCpu(const Config& cfg) override;
 
     IndexType
-    GetType() override;
+    GetType() const override;
 
     int64_t
     Dimension() override;

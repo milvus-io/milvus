@@ -112,7 +112,7 @@ class ConnectionImpl : public Connection {
     Status
     SetConfig(const std::string& node_name, const std::string& value) const override;
 
-private:
+ private:
     std::shared_ptr<ClientProxy> client_proxy_;
 };
 

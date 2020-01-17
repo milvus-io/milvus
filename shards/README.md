@@ -26,7 +26,7 @@ Below graph is a demonstration of the process:
 
 Below examples codes demonstrate how to build from source code a Milvus server with Mishards on a standalone machine, as well as how to use Kubernetes to establish Milvus cluster with Mishards. 
 
-Before executing these examples, make sure you meet the prerequisites of [Milvus installation](https://www.milvus.io/docs/en/userguide/install_milvus/). 
+Before executing these examples, make sure you meet the prerequisites of [Milvus installation](https://milvus.io/docs/guides/get_started/install_milvus/install_milvus.md). 
 
 ### Build from source code
 

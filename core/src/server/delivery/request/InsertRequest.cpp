@@ -30,26 +30,23 @@ namespace milvus {
 namespace server {
 
 InsertRequest::InsertRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             int64_t record_size, std::vector<float>& data_list, const std::string& partition_tag,
-                             std::vector<int64_t>& id_array)
+                             engine::VectorsData& vectors, const std::string& partition_tag)
     : BaseRequest(context, DDL_DML_REQUEST_GROUP),
       table_name_(table_name),
-      record_size_(record_size),
-      data_list_(data_list),
-      partition_tag_(partition_tag),
-      id_array_(id_array) {
+      vectors_data_(vectors),
+      partition_tag_(partition_tag) {
 }
 
 BaseRequestPtr
-InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
-                      std::vector<float>& data_list, const std::string& partition_tag, std::vector<int64_t>& id_array) {
-    return std::shared_ptr<BaseRequest>(
-        new InsertRequest(context, table_name, record_size, data_list, partition_tag, id_array));
+InsertRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                      engine::VectorsData& vectors, const std::string& partition_tag) {
+    return std::shared_ptr<BaseRequest>(new InsertRequest(context, table_name, vectors, partition_tag));
 }
 
 Status
 InsertRequest::OnExecute() {
     try {
+        int64_t vector_count = vectors_data_.vector_count_;
         fiu_do_on("InsertRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(record_size_) +
                           ", partition_tag=" + partition_tag_ + ")";
@@ -60,14 +57,14 @@ InsertRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        if (data_list_.empty()) {
+        if (vectors_data_.float_data_.empty() && vectors_data_.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
         fiu_do_on("InsertRequest.OnExecute.id_array_error", id_array_.resize(record_size_ + 1));
-        if (!id_array_.empty()) {
-            if (id_array_.size() != record_size_) {
+        if (!vectors_data_.id_array_.empty()) {
+            if (vectors_data_.id_array_.size() != vector_count) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID,
                               "The size of vector ID array must be equal to the size of the vector.");
             }
@@ -89,7 +86,7 @@ InsertRequest::OnExecute() {
 
         // step 3: check table flag
         // all user provide id, or all internal id
-        bool user_provide_ids = !id_array_.empty();
+        bool user_provide_ids = !vectors_data_.id_array_.empty();
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id",
             user_provide_ids = false; table_info.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
@@ -114,29 +111,51 @@ InsertRequest::OnExecute() {
             "/tmp/insert_" + std::to_string(this->insert_param_->row_record_array_size()) + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
+        // step 4: some metric type doesn't support float vectors
+        if (!vectors_data_.float_data_.empty()) {  // insert float vectors
+            if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float vectors.");
+            }
 
-        // step 4: check prepared float data
-        if (data_list_.size() % record_size_ != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
-        }
+            // check prepared float data
+            if (vectors_data_.float_data_.size() % vector_count != 0) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
+            }
 
         fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
-        if (data_list_.size() / record_size_ != table_info.dimension_) {
-            return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the table dimension.");
+            if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
+                return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                              "The vector dimension must be equal to the table dimension.");
+            }
+        } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
+            if (!ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary vectors.");
+            }
+
+            // check prepared binary data
+            if (vectors_data_.binary_data_.size() % vector_count != 0) {
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
+            }
+
+            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_info.dimension_) {
+                return Status(SERVER_INVALID_VECTOR_DIMENSION,
+                              "The vector dimension must be equal to the table dimension.");
+            }
         }
 
         // step 5: insert vectors
-        auto vec_count = static_cast<uint64_t>(record_size_);
+        auto vec_count = static_cast<uint64_t>(vector_count);
 
         rc.RecordSection("prepare vectors data");
-        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vec_count, data_list_.data(), id_array_);
+        status = DBWrapper::DB()->InsertVectors(table_name_, partition_tag_, vectors_data_);
         fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
-        auto ids_size = id_array_.size();
+        auto ids_size = vectors_data_.id_array_.size();
         fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);
         if (ids_size != vec_count) {
             std::string msg =

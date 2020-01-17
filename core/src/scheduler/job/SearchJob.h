@@ -46,8 +46,8 @@ using ResultDistances = engine::ResultDistances;
 
 class SearchJob : public Job {
  public:
-    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe,
-              const float* vectors);
+    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nprobe,
+              const engine::VectorsData& vectors);
 
  public:
     bool
@@ -82,7 +82,7 @@ class SearchJob : public Job {
 
     uint64_t
     nq() const {
-        return nq_;
+        return vectors_.vector_count_;
     }
 
     uint64_t
@@ -90,7 +90,7 @@ class SearchJob : public Job {
         return nprobe_;
     }
 
-    const float*
+    const engine::VectorsData&
     vectors() const {
         return vectors_;
     }
@@ -109,10 +109,9 @@ class SearchJob : public Job {
     const std::shared_ptr<server::Context> context_;
 
     uint64_t topk_ = 0;
-    uint64_t nq_ = 0;
     uint64_t nprobe_ = 0;
     // TODO: smart pointer
-    const float* vectors_ = nullptr;
+    const engine::VectorsData& vectors_;
 
     Id2IndexMap index_files_;
     // TODO: column-base better ?

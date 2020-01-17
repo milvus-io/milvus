@@ -5,10 +5,12 @@ on:
     paths:
       - 'ci/**'
       - 'core/**'
+      - 'docker/**'
   pull_request:
     paths:
       - 'ci/**'
       - 'core/**'
+      - 'docker/**'
 
 jobs:
   ubuntu:
@@ -23,6 +25,11 @@ jobs:
     steps:
       - name: Checkout Milvus
         uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
       - name: Docker Pull
         shell: bash
         run: |
@@ -49,7 +56,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./ci/scripts/output_new.info
-          name: ${{ matrix.ubuntu }}-unittests
+          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          flags: cpu_version_ubuntu_18_04_unittest
           yml: ./codecov.yaml
 
   centos:
@@ -64,6 +72,11 @@ jobs:
     steps:
       - name: Checkout Milvus
         uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
       - name: Docker Pull
         shell: bash
         run: |
@@ -90,5 +103,6 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./ci/scripts/output_new.info
-          name: ${{ matrix.centos }}-unittests
+          name: centos-${{ matrix.centos }}-unittests
+          flags: cpu_version_centos7_unittest
           yml: ./codecov.yaml

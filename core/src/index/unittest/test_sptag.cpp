@@ -42,11 +42,13 @@ class SPTAGTest : public DataGen, public TestWithParam<std::string> {
             auto tempconf = std::make_shared<knowhere::KDTCfg>();
             tempconf->tptnumber = 1;
             tempconf->k = 10;
+            tempconf->metric_type = knowhere::METRICTYPE::L2;
             conf = tempconf;
         } else {
             auto tempconf = std::make_shared<knowhere::BKTCfg>();
             tempconf->tptnumber = 1;
             tempconf->k = 10;
+            tempconf->metric_type = knowhere::METRICTYPE::L2;
             conf = tempconf;
         }
 

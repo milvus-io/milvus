@@ -50,6 +50,8 @@ enum class IndexType {
     NSG_MIX,
     FAISS_IVFPQ_MIX,
     SPTAG_BKT_RNT_CPU,
+    FAISS_BIN_IDMAP = 100,
+    FAISS_BIN_IVFLAT_CPU = 101,
 };
 
 class VecIndex;
@@ -63,10 +65,29 @@ class VecIndex : public cache::DataObj {
              const float* xt = nullptr) = 0;
 
     virtual Status
+    BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg, const int64_t& nt = 0,
+             const uint8_t* xt = nullptr) {
+        ENGINE_LOG_ERROR << "BuildAll with uint8_t not support";
+        return Status::OK();
+    }
+
+    virtual Status
     Add(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg = Config()) = 0;
 
     virtual Status
+    Add(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "Add with uint8_t not support";
+        return Status::OK();
+    }
+
+    virtual Status
     Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg = Config()) = 0;
+
+    virtual Status
+    Search(const int64_t& nq, const uint8_t* xq, float* dist, int64_t* ids, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "Search with uint8_t not support";
+        return Status::OK();
+    }
 
     virtual VecIndexPtr
     CopyToGpu(const int64_t& device_id, const Config& cfg = Config()) = 0;
@@ -82,7 +103,7 @@ class VecIndex : public cache::DataObj {
     GetDeviceId() = 0;
 
     virtual IndexType
-    GetType() = 0;
+    GetType() const = 0;
 
     virtual int64_t
     Dimension() = 0;

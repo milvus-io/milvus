@@ -74,6 +74,22 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
+        // step 2: binary and float vector support different index/metric type, need to adapt here
+        engine::meta::TableSchema table_info;
+        table_info.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_info);
+
+        int32_t adapter_index_type = index_type_;
+        if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {  // binary vector not allow
+            if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
+                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
+            } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
+                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            } else {
+                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for table metric type");
+            }
+        }
+
 #ifdef MILVUS_GPU_VERSION
         Status s;
         bool enable_gpu = false;
@@ -85,14 +101,15 @@ CreateIndexRequest::OnExecute() {
         fiu_do_on("CreateIndexRequest.OnExecute.ip_meteric",
                   table_info.metric_type_ = static_cast<int>(engine::MetricType::IP));
         if (s.ok() && index_type_ == (int)engine::EngineType::FAISS_PQ &&
+        if (s.ok() && adapter_index_type == (int)engine::EngineType::FAISS_PQ &&
             table_info.metric_type_ == (int)engine::MetricType::IP) {
             return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
         }
 #endif
 
-        // step 2: check table existence
+        // step 3: create index
         engine::TableIndex index;
-        index.engine_type_ = index_type_;
+        index.engine_type_ = adapter_index_type;
         index.nlist_ = nlist_;
         status = DBWrapper::DB()->CreateIndex(table_name_, index);
         fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",

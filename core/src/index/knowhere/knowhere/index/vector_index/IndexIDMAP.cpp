@@ -66,7 +66,6 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    config->CheckValid();
     GETTENSOR(dataset)
 
     auto elems = rows * config->k;
@@ -149,12 +148,11 @@ IDMAP::GetRawIds() {
     }
 }
 
-const char* type = "IDMap,Flat";
-
 void
 IDMAP::Train(const Config& config) {
     config->CheckValid();
 
+    const char* type = "IDMap,Flat";
     auto index = faiss::index_factory(config->d, type, GetMetricType(config->metric_type));
     index_.reset(index);
 }

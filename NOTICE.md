@@ -23,4 +23,7 @@
 | grpc          | [Apache 2.0](https://github.com/grpc/grpc/blob/master/LICENSE)                                                   |
 | EASYLOGGINGPP | [MIT](https://github.com/zuhd-org/easyloggingpp/blob/master/LICENSE)                                                          |
 | Json          | [MIT](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT)                                                          |
+| opentracing-cpp | [Apache License 2.0](https://github.com/opentracing/opentracing-cpp/blob/master/LICENSE)                                     |
+| libfiu        | [BOLA](https://github.com/albertito/libfiu/blob/master/LICENSE)                                                          |
+| aws-sdk-cpp   | [Apache License 2.0](https://github.com/aws/aws-sdk-cpp/blob/master/LICENSE)                                             |
 

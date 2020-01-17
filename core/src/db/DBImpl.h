@@ -92,8 +92,7 @@ class DBImpl : public DB {
     ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) override;
 
     Status
-    InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,
-                  IDNumbers& vector_ids) override;
+    InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status
     CreateIndex(const std::string& table_id, const TableIndex& index) override;
@@ -106,20 +105,18 @@ class DBImpl : public DB {
 
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-          const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+          ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-          const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-          ResultDistances& result_distances) override;
+          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
-                  const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-                  ResultDistances& result_distances) override;
+                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+                  const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
@@ -127,7 +124,7 @@ class DBImpl : public DB {
  private:
     Status
     QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-               const meta::TableFilesSchema& files, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+               const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
                ResultIds& result_ids, ResultDistances& result_distances);
 
     void
@@ -187,7 +184,7 @@ class DBImpl : public DB {
  private:
     const DBOptions options_;
 
-    std::atomic<bool> shutting_down_;
+    std::atomic<bool> initialized_;
 
     std::thread bg_timer_thread_;
 
