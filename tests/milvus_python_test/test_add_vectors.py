@@ -5,7 +5,7 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import Milvus, IndexType, MetricType
+from milvus import IndexType, MetricType
 from utils import *
 
 
@@ -576,38 +576,8 @@ class TestAddBase:
         assert status.OK()
         assert len(result) == 1
 
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_multi_threading(self, connect, table):
-        '''
-        target: test add vectors, with multi threading
-        method: 10 thread add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        thread_num = 4
-        loops = 100
-        threads = []
-        total_ids = []
-        vector = gen_single_vector(dim)
-        def add():
-            i = 0
-            while i < loops:
-                status, ids = connect.add_vectors(table, vector)
-                total_ids.append(ids[0])
-                i = i + 1
-        for i in range(thread_num):
-            x = threading.Thread(target=add, args=())
-            threads.append(x)
-            x.start()
-            time.sleep(0.2)
-        for th in threads:
-            th.join()
-        assert len(total_ids) == thread_num * loops
-        # make sure ids not the same
-        assert len(set(total_ids)) == thread_num * loops
-
     # TODO: enable
-    # @pytest.mark.repeat(5)
+    # @pytest.mark.repeat(10)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def _test_add_vector_with_multiprocessing(self, args):
         '''
@@ -615,36 +585,35 @@ class TestAddBase:
         method: 10 processed add vectors concurrently
         expected: status ok and result length is equal to the length off added vectors
         '''
-        table = gen_unique_str("test_add_vector_with_multiprocessing")
+        table = gen_unique_str()
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'table_name': table,
                  'dimension': dim,
-                 'index_file_size': index_file_size}
-        # create table
-        milvus = Milvus()
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.L2}
+        milvus = get_milvus()
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vector = gen_single_vector(dim)
-
         process_num = 4
-        loop_num = 10
+        loop_num = 5
         processes = []
-        # with dependent connection
-        def add(milvus):
+        def add():
+            milvus = get_milvus()
+            milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
                 status, ids = milvus.add_vectors(table, vector)
                 i = i + 1
+            milvus.disconnect()
         for i in range(process_num):
-            milvus = Milvus()
-            milvus.connect(uri=uri)
-            p = Process(target=add, args=(milvus,))
+            p = Process(target=add, args=())
             processes.append(p)
             p.start()
             time.sleep(0.2)
         for p in processes:
             p.join()
-        time.sleep(3)
+        time.sleep(2)
         status, count = milvus.get_table_row_count(table)
         assert count == process_num * loop_num
 
@@ -1148,78 +1117,6 @@ class TestAddIP:
         status, result = connect.search_vectors(ip_table, 1, nprobe, [vectors[0]])
         assert status.OK()
         assert len(result) == 1
-
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_multi_threading(self, connect, ip_table):
-        '''
-        target: test add vectors, with multi threading
-        method: 10 thread add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        thread_num = 4
-        loops = 100
-        threads = []
-        total_ids = []
-        vector = gen_single_vector(dim)
-        def add():
-            i = 0
-            while i < loops:
-                status, ids = connect.add_vectors(ip_table, vector)
-                total_ids.append(ids[0])
-                i = i + 1
-        for i in range(thread_num):
-            x = threading.Thread(target=add, args=())
-            threads.append(x)
-            x.start()
-            time.sleep(0.2)
-        for th in threads:
-            th.join()
-        assert len(total_ids) == thread_num * loops
-        # make sure ids not the same
-        assert len(set(total_ids)) == thread_num * loops
-
-    # TODO: enable
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_with_multiprocessing(self, args):
-        '''
-        target: test add vectors, with multi processes
-        method: 10 processed add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        table = gen_unique_str("test_add_vector_with_multiprocessing")
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-        param = {'table_name': table,
-                 'dimension': dim,
-                 'index_file_size': index_file_size}
-        # create table
-        milvus = Milvus()
-        milvus.connect(uri=uri)
-        milvus.create_table(param)
-        vector = gen_single_vector(dim)
-
-        process_num = 4
-        loop_num = 10
-        processes = []
-        # with dependent connection
-        def add(milvus):
-            i = 0
-            while i < loop_num:
-                status, ids = milvus.add_vectors(table, vector)
-                i = i + 1
-        for i in range(process_num):
-            milvus = Milvus()
-            milvus.connect(uri=uri)
-            p = Process(target=add, args=(milvus,))
-            processes.append(p)
-            p.start()
-            time.sleep(0.2)
-        for p in processes:
-            p.join()
-        time.sleep(3)
-        status, count = milvus.get_table_row_count(table)
-        assert count == process_num * loop_num
 
     def test_add_vector_multi_tables(self, connect):
         '''
