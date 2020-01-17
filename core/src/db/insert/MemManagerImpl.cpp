@@ -122,27 +122,43 @@ MemManagerImpl::Flush(const std::string& table_id) {
     if (!status.ok()) {
         return Status(DB_ERROR, status.message());
     }
+
+    MemList temp_immutable_list;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        immu_mem_list_.swap(temp_immutable_list);
+    }
+
     std::unique_lock<std::mutex> lock(serialization_mtx_);
-    for (auto& mem : immu_mem_list_) {
+    for (auto& mem : temp_immutable_list) {
         auto max_lsn = GetMaxLSN();
         mem->Serialize(max_lsn);
     }
-    immu_mem_list_.clear();
 
     return Status::OK();
 }
 
 Status
 MemManagerImpl::Flush(std::set<std::string>& table_ids) {
-    ToImmutable();
+    auto status = ToImmutable();
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
+
+    MemList temp_immutable_list;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        immu_mem_list_.swap(temp_immutable_list);
+    }
+
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     table_ids.clear();
-    for (auto& mem : immu_mem_list_) {
+    for (auto& mem : temp_immutable_list) {
         auto max_lsn = GetMaxLSN();
         mem->Serialize(max_lsn);
         table_ids.insert(mem->GetTableId());
     }
-    immu_mem_list_.clear();
+
     return Status::OK();
 }
 

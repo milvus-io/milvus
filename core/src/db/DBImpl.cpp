@@ -869,10 +869,9 @@ DBImpl::StartCompactionTask() {
         return;
     }
 
-    // serialize memory data
-    //    SyncMemData(compact_table_ids_);
+    Flush();
 
-    // compactiong has been finished?
+    // compaction has been finished?
     {
         std::lock_guard<std::mutex> lck(compact_result_mutex_);
         if (!compact_thread_results_.empty()) {

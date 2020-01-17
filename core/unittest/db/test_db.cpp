@@ -209,7 +209,7 @@ TEST_F(DBTest, DB_TEST) {
         }
     });
 
-    int loop = 100;
+    int loop = INSERT_LOOP;
 
     for (auto i = 0; i < loop; ++i) {
         if (i == 40) {
