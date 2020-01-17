@@ -1022,19 +1022,11 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
     utils::GetParentPath(table_file.location_, new_segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
 
-    // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
-    //    int vector_type_size;
-    //    if (server::ValidationUtil::IsBinaryMetricType(table_file.metric_type_)) {
-    //        vector_type_size = sizeof(uint8_t);
-    //    } else {
-    //        vector_type_size = sizeof(float);
-    //    }
-
     for (auto& file : files) {
         server::CollectMergeFilesMetrics metrics;
         std::string segment_dir_to_merge;
         utils::GetParentPath(file.location_, segment_dir_to_merge);
-        segment_writer_ptr->Merge(segment_dir_to_merge, file.file_id_);
+        segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
         auto file_schema = file;
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
