@@ -509,8 +509,7 @@ Config::CheckStorageConfigS3Enable(const std::string& value) {
 Status
 Config::CheckStorageConfigS3Address(const std::string& value) {
     if (!ValidationUtil::ValidateIpAddress(value).ok()) {
-        std::string msg =
-            "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
+        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -525,7 +524,7 @@ Config::CheckStorageConfigS3Port(const std::string& value) {
         int32_t port = std::stoi(value);
         if (!(port > 1024 && port < 65535)) {
             std::string msg = "Invalid s3 port: " + value +
-                              ". Possible reason: storage_config.port is not in range (1024, 65535).";
+                              ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
