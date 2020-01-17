@@ -21,6 +21,7 @@
 #include <cmath>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include "db/Constants.h"
 #include "db/Utils.h"

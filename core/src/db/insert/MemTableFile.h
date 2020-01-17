@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "VectorSource.h"
 #include "db/engine/ExecutionEngine.h"
@@ -68,7 +69,6 @@ class MemTableFile {
 
     //    ExecutionEnginePtr execution_engine_;
     segment::SegmentWriterPtr segment_writer_ptr_;
-
 };  // MemTableFile
 
 using MemTableFilePtr = std::shared_ptr<MemTableFile>;
