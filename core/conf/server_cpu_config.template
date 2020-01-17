@@ -48,17 +48,12 @@ server_config:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# insert_buffer_size   | Buffer size used for data insertion.                       | Integer    | 1 (GB)          |
-#                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
-#                      | must be less than system memory size.                      |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
 #                      | loaded when Milvus server starts up.                       |            |                 |
 #                      | '*' means preload all existing tables.                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: sqlite://:@:/
-  insert_buffer_size: 1
   preload_table:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -113,12 +108,17 @@ metric_config:
 #                      | query. The sum of 'cpu_cache_capacity' and                 |            |                 |
 #                      | 'insert_buffer_size' must be less than system memory size. |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# insert_buffer_size   | Buffer size used for data insertion.                       | Integer    | 1 (GB)          |
+#                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
+#                      | must be less than system memory size.                      |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # cache_insert_data    | Whether to load inserted data into cache immediately for   | Boolean    | false           |
 #                      | hot query. If want to simultaneously insert and query      |            |                 |
 #                      | vectors, it's recommended to enable this config.           |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 cache_config:
   cpu_cache_capacity: 4
+  insert_buffer_size: 1
   cache_insert_data: false
 
 #----------------------+------------------------------------------------------------+------------+-----------------+

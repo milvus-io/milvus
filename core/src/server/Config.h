@@ -60,8 +60,6 @@ static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
 
@@ -90,6 +88,8 @@ static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
+static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 
@@ -188,8 +188,6 @@ class Config {
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    CheckDBConfigInsertBufferSize(const std::string& value);
 
     /* storage config */
     Status
@@ -222,6 +220,8 @@ class Config {
     CheckCacheConfigCpuCacheCapacity(const std::string& value);
     Status
     CheckCacheConfigCpuCacheThreshold(const std::string& value);
+    Status
+    CheckCacheConfigInsertBufferSize(const std::string& value);
     Status
     CheckCacheConfigCacheInsertData(const std::string& value);
 
@@ -277,8 +277,6 @@ class Config {
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigInsertBufferSize(int64_t& value);
-    Status
     GetDBConfigPreloadTable(std::string& value);
 
     /* storage config */
@@ -312,6 +310,8 @@ class Config {
     GetCacheConfigCpuCacheCapacity(int64_t& value);
     Status
     GetCacheConfigCpuCacheThreshold(float& value);
+    Status
+    GetCacheConfigInsertBufferSize(int64_t& value);
     Status
     GetCacheConfigCacheInsertData(bool& value);
 
@@ -362,8 +362,6 @@ class Config {
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    SetDBConfigInsertBufferSize(const std::string& value);
 
     /* storage config */
     Status
@@ -396,6 +394,8 @@ class Config {
     SetCacheConfigCpuCacheCapacity(const std::string& value);
     Status
     SetCacheConfigCpuCacheThreshold(const std::string& value);
+    Status
+    SetCacheConfigInsertBufferSize(const std::string& value);
     Status
     SetCacheConfigCacheInsertData(const std::string& value);
 

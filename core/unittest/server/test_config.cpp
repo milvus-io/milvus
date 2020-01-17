@@ -166,11 +166,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetDBConfigArchiveDaysThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == db_archive_days_threshold);
 
-    int64_t db_insert_buffer_size = 2;
-    ASSERT_TRUE(config.SetDBConfigInsertBufferSize(std::to_string(db_insert_buffer_size)).ok());
-    ASSERT_TRUE(config.GetDBConfigInsertBufferSize(int64_val).ok());
-    ASSERT_TRUE(int64_val == db_insert_buffer_size);
-
     /* storage config */
     std::string storage_primary_path = "/home/zilliz";
     ASSERT_TRUE(config.SetStorageConfigPrimaryPath(storage_primary_path).ok());
@@ -238,6 +233,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.SetCacheConfigCpuCacheThreshold(std::to_string(cache_cpu_cache_threshold)).ok());
     ASSERT_TRUE(config.GetCacheConfigCpuCacheThreshold(float_val).ok());
     ASSERT_TRUE(float_val == cache_cpu_cache_threshold);
+
+    int64_t cache_insert_buffer_size = 2;
+    ASSERT_TRUE(config.SetCacheConfigInsertBufferSize(std::to_string(cache_insert_buffer_size)).ok());
+    ASSERT_TRUE(config.GetCacheConfigInsertBufferSize(int64_val).ok());
+    ASSERT_TRUE(int64_val == cache_insert_buffer_size);
 
     bool cache_insert_data = true;
     ASSERT_TRUE(config.SetCacheConfigCacheInsertData(std::to_string(cache_insert_data)).ok());
@@ -336,9 +336,9 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
 
     /* db config */
-    std::string db_insert_buffer_size = "4";
-    get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_INSERT_BUFFER_SIZE);
-    set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_INSERT_BUFFER_SIZE, db_insert_buffer_size);
+    std::string db_backend_url = "bad_url";
+    get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_BACKEND_URL);
+    set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_BACKEND_URL, db_backend_url);
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_FALSE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
@@ -378,7 +378,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == cache_cpu_cache_threshold);
+
+    std::string cache_insert_buffer_size = "1";
+    get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE);
+    set_cmd = gen_set_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE, cache_insert_buffer_size);
+    s = config.ProcessConfigCli(dummy, set_cmd);
+    ASSERT_TRUE(s.ok());
+    s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
 
     std::string cache_insert_data = "true";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CACHE_INSERT_DATA);
@@ -503,10 +512,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetDBConfigArchiveDaysThreshold("0x10").ok());
 
-    ASSERT_FALSE(config.SetDBConfigInsertBufferSize("a").ok());
-    ASSERT_FALSE(config.SetDBConfigInsertBufferSize("0").ok());
-    ASSERT_FALSE(config.SetDBConfigInsertBufferSize("2048").ok());
-
     /* storage config */
     ASSERT_FALSE(config.SetStorageConfigPrimaryPath("").ok());
 
@@ -536,9 +541,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("a").ok());
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("0").ok());
     ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("2048").ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheCapacity("-1").ok());
 
     ASSERT_FALSE(config.SetCacheConfigCpuCacheThreshold("a").ok());
     ASSERT_FALSE(config.SetCacheConfigCpuCacheThreshold("1.0").ok());
+    ASSERT_FALSE(config.SetCacheConfigCpuCacheThreshold("-0.1").ok());
+
+    ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("a").ok());
+    ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("0").ok());
+    ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("2048").ok());
+    ASSERT_FALSE(config.SetCacheConfigInsertBufferSize("-1").ok());
 
     ASSERT_FALSE(config.SetCacheConfigCacheInsertData("N").ok());
 
@@ -547,6 +559,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("a").ok());
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("10000").ok());
+    ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("-10").ok());
 
 #ifdef MILVUS_GPU_VERSION
     ASSERT_FALSE(config.SetEngineConfigGpuSearchThreshold("-1").ok());
@@ -558,9 +571,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("a").ok());
     ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("128").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheCapacity("-1").ok());
 
     ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("a").ok());
     ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("1.0").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("-0.1").ok());
 
     ASSERT_FALSE(config.SetGpuResourceConfigSearchResources("gpu10").ok());
 
