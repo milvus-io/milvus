@@ -144,9 +144,9 @@ TEST_F(StorageTest, S3_FAIL_TEST) {
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
 
-    fiu_enable("S3ClientWrapper.StartService.minio_disable", 1, NULL, 0);
+    fiu_enable("S3ClientWrapper.StartService.s3_disable", 1, NULL, 0);
     ASSERT_TRUE(storage_inst.StartService().ok());
-    fiu_disable("S3ClientWrapper.StartService.minio_disable");
+    fiu_disable("S3ClientWrapper.StartService.s3_disable");
 
     fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
     ASSERT_TRUE(storage_inst.StartService().ok());
