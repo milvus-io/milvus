@@ -300,6 +300,7 @@ IVFSQHybrid::SerializeImpl() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
+    fiu_do_on("IVFSQHybrid.SerializeImpl.zero_gpu_mode",gpu_mode = 0);
     if (gpu_mode == 0) {
         MemoryIOWriter writer;
         faiss::write_index(index_.get(), &writer);

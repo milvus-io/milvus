@@ -139,7 +139,10 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
 
     auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+#ifndef MILVUS_GPU_VERSION
+    //PQ don't support IP In gpu version
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
+#endif
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
     engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
     engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);

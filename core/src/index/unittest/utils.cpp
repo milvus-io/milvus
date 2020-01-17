@@ -52,6 +52,8 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     query_dataset = generate_query_dataset(nq, dim, xq.data());
 }
 
+//not used
+#if 0
 knowhere::DatasetPtr
 DataGen::GenQuery(const int& nq) {
     xq.resize(nq * dim);
@@ -60,6 +62,7 @@ DataGen::GenQuery(const int& nq) {
     }
     return generate_query_dataset(nq, dim, xq.data());
 }
+#endif
 
 void
 GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
@@ -169,6 +172,8 @@ PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
+//not used
+#if 0
 void
 Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph, const char* filename) {
     std::vector<std::vector<unsigned>> knng;
@@ -237,3 +242,4 @@ int*  // not very clean, but works as long as sizeof(int) == sizeof(float)
 ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
     return (int*)fvecs_read(fname, d_out, n_out);
 }
+#endif
