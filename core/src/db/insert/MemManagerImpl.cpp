@@ -155,8 +155,8 @@ MemManagerImpl::ToImmutable(const std::string& table_id) {
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_NOT_FOUND, err_msg);
     }
-    mem_id_map_.erase(memIt);
     immu_mem_list_.push_back(memIt->second);
+    mem_id_map_.erase(memIt);
 
     return Status::OK();
 }
