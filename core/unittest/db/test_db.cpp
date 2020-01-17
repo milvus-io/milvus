@@ -128,15 +128,15 @@ TEST_F(DBTest, CONFIG_TEST) {
     }
     {
         fiu_init(0);
-        fiu_enable("OptionsParseCritiriasOutOfRange", 1, NULL, 0);
+        fiu_enable("ArchiveConf.ParseCritirias.OptionsParseCritiriasOutOfRange", 1, NULL, 0);
         ASSERT_ANY_THROW(milvus::engine::ArchiveConf conf("swap", "disk:"));
-        fiu_disable("OptionsParseCritiriasOutOfRange");
+        fiu_disable("ArchiveConf.ParseCritirias.OptionsParseCritiriasOutOfRange");
     }
     {
-        fiu_enable("ArchiveConfParseCritiriasEmptyTokens", 1, NULL, 0);
+        fiu_enable("ArchiveConf.ParseCritirias.empty_tokens", 1, NULL, 0);
         milvus::engine::ArchiveConf conf("swap", "");
         ASSERT_TRUE(conf.GetCriterias().empty());
-        fiu_disable("ArchiveConfParseCritiriasEmptyTokens");
+        fiu_disable("ArchiveConf.ParseCritirias.empty_tokens");
     }
     {
         ASSERT_ANY_THROW(milvus::engine::ArchiveConf conf1("swap", "disk:"));
@@ -380,17 +380,17 @@ TEST_F(DBTest, SEARCH_TEST) {
                                   result_distances);
         ASSERT_TRUE(stat.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
         stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
                                   result_distances);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
+        fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
-        FIU_ENABLE_FIU("DBImpl_QueryByFileID_EmptyFilesArray");
+        FIU_ENABLE_FIU("DBImpl.QueryByFileID.empty_files_array");
         stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, result_ids,
                                   result_distances);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl_QueryByFileID_EmptyFilesArray");
+        fiu_disable("DBImpl.QueryByFileID.empty_files_array");
     }
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
@@ -405,10 +405,10 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
         stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 1100, 10, xq.data(), result_ids, result_distances);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
+        fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
     }
 
 #ifdef CUSTOMIZATION
@@ -485,10 +485,10 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
     ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
 
-    FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+    FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
     stat = db_->PreloadTable(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
+    fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
     //create a partition
     stat = db_->CreatePartition(TABLE_NAME, "part0", "0");
@@ -496,20 +496,20 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     stat = db_->PreloadTable(TABLE_NAME);
     ASSERT_TRUE(stat.ok());
 
-    FIU_ENABLE_FIU("DBImpl_PreloadTable_NullEngine");
+    FIU_ENABLE_FIU("DBImpl.PreloadTable.null_engine");
     stat = db_->PreloadTable(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_PreloadTable_NullEngine");
+    fiu_disable("DBImpl.PreloadTable.null_engine");
 
-    FIU_ENABLE_FIU("DBImpl_PreloadTable_ExceedCache");
+    FIU_ENABLE_FIU("DBImpl.PreloadTable.exceed_cache");
     stat = db_->PreloadTable(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_PreloadTable_ExceedCache");
+    fiu_disable("DBImpl.PreloadTable.exceed_cache");
 
-    FIU_ENABLE_FIU("DBImpl_PreloadTable_EngineThrowException");
+    FIU_ENABLE_FIU("DBImpl.PreloadTable.engine_throw_exception");
     stat = db_->PreloadTable(TABLE_NAME);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_PreloadTable_EngineThrowException");
+    fiu_disable("DBImpl.PreloadTable.engine_throw_exception");
 }
 
 TEST_F(DBTest, SHUTDOWN_TEST) {
@@ -593,8 +593,8 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
     milvus::Status stat;
     //test background timer thread
     {
-        FIU_ENABLE_FIU("DBImpl_StartMetricTask_InvalidTotalCache");
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToMerge_ThrowException");
+        FIU_ENABLE_FIU("DBImpl.StartMetricTask.InvalidTotalCache");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToMerge.throw_exception");
         stat = db_->CreateTable(table_info);
         ASSERT_TRUE(stat.ok());
 
@@ -612,15 +612,15 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
 
         std::this_thread::sleep_for(std::chrono::seconds(2));
         db_->Stop();
-        fiu_disable("DBImpl_StartMetricTask_InvalidTotalCache");
-        fiu_disable("SqliteMetaImpl_FilesToMerge_ThrowException");
+        fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
+        fiu_disable("SqliteMetaImpl.FilesToMerge.throw_exception");
     }
 
-    FIU_ENABLE_FIU("DBImpl_StartMetricTask_InvalidTotalCache");
+    FIU_ENABLE_FIU("DBImpl.StartMetricTask.InvalidTotalCache");
     db_->Start();
     std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
-    fiu_disable("DBImpl_StartMetricTask_InvalidTotalCache");
+    fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
 }
 
 TEST_F(DBTest, BACK_TIMER_THREAD_2) {
@@ -643,10 +643,10 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
         ASSERT_EQ(vector_ids.size(), nb);
     }
 
-    FIU_ENABLE_FIU("SqliteMetaImpl_CreateTableFile_ThrowException");
+    FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
     std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
-    fiu_disable("SqliteMetaImpl_CreateTableFile_ThrowException");
+    fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");
 }
 
 TEST_F(DBTest, BACK_TIMER_THREAD_3) {
@@ -669,11 +669,11 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
         ASSERT_EQ(vector_ids.size(), nb);
     }
 
-    FIU_ENABLE_FIU("DBImpl_MergeFiles_SerializeThrowException");
+    FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ThrowException");
     db_->Start();
     std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
-    fiu_disable("DBImpl_MergeFiles_SerializeThrowException");
+    fiu_disable("DBImpl.MergeFiles.Serialize_ThrowException");
 }
 
 TEST_F(DBTest, BACK_TIMER_THREAD_4) {
@@ -696,11 +696,11 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
         ASSERT_EQ(vector_ids.size(), nb);
     }
 
-    FIU_ENABLE_FIU("DBImpl_MergeFiles_SerializeErrorStatus");
+    FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ErrorStatus");
     db_->Start();
     std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();
-    fiu_disable("DBImpl_MergeFiles_SerializeErrorStatus");
+    fiu_disable("DBImpl.MergeFiles.Serialize_ErrorStatus");
 }
 
 TEST_F(DBTest, INDEX_TEST) {
@@ -726,16 +726,16 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
 
     fiu_init(0);
-    FIU_ENABLE_FIU("SqliteMetaImpl_DescribeTableIndex_ThrowException");
+    FIU_ENABLE_FIU("SqliteMetaImpl.DescribeTableIndex.throw_exception");
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("SqliteMetaImpl_DescribeTableIndex_ThrowException");
+    fiu_disable("SqliteMetaImpl.DescribeTableIndex.throw_exception");
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
-    FIU_ENABLE_FIU("DBImpl_UpdateTableIndexRecursively_FailUpdateTableIndex");
+    FIU_ENABLE_FIU("DBImpl.UpdateTableIndexRecursively.fail_update_table_index");
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_UpdateTableIndexRecursively_FailUpdateTableIndex");
+    fiu_disable("DBImpl.UpdateTableIndexRecursively.fail_update_table_index");
 
 #ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
@@ -816,30 +816,30 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
 
         fiu_init(0);
-        FIU_ENABLE_FIU("DBImpl_BuildTableIndexRecursively_FailBuildTableIndexForPartition");
+        FIU_ENABLE_FIU("DBImpl.BuildTableIndexRecursively.fail_build_table_Index_for_partition");
         stat = db_->CreateIndex(table_info.table_id_, index);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl_BuildTableIndexRecursively_FailBuildTableIndexForPartition");
+        fiu_disable("DBImpl.BuildTableIndexRecursively.fail_build_table_Index_for_partition");
 
-        FIU_ENABLE_FIU("DBImpl_BuildTableIndexRecursively_NotEmptyFailedFiles");
+        FIU_ENABLE_FIU("DBImpl.BuildTableIndexRecursively.not_empty_failed_files");
         stat = db_->CreateIndex(table_info.table_id_, index);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl_BuildTableIndexRecursively_NotEmptyFailedFiles");
+        fiu_disable("DBImpl.BuildTableIndexRecursively.not_empty_failed_files");
 
         uint64_t row_count = 0;
         stat = db_->GetTableRowCount(TABLE_NAME, row_count);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(row_count, INSERT_BATCH * PARTITION_COUNT);
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_Count_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.Count.throw_exception");
         stat = db_->GetTableRowCount(TABLE_NAME, row_count);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("SqliteMetaImpl_Count_ThrowException");
+        fiu_disable("SqliteMetaImpl.Count.throw_exception");
 
-        FIU_ENABLE_FIU("DBImpl_GetTableRowCountRecursively_FailGetTableRowCountForPartition");
+        FIU_ENABLE_FIU("DBImpl.GetTableRowCountRecursively.fail_get_table_rowcount_for_partition");
         stat = db_->GetTableRowCount(TABLE_NAME, row_count);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl_GetTableRowCountRecursively_FailGetTableRowCountForPartition");
+        fiu_disable("DBImpl.GetTableRowCountRecursively.fail_get_table_rowcount_for_partition");
     }
 
     {  // search
@@ -883,15 +883,15 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->DropPartitionByTag(table_name, "1");
     ASSERT_TRUE(stat.ok());
 
-    FIU_ENABLE_FIU("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+    FIU_ENABLE_FIU("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
     stat = db_->DropIndex(table_info.table_id_);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+    fiu_disable("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
 
-    FIU_ENABLE_FIU("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+    FIU_ENABLE_FIU("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
     stat = db_->DropIndex(table_info.table_id_);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_DropTableIndexRecursively_FailDropTableIndexForPartition");
+    fiu_disable("DBImpl.DropTableIndexRecursively.fail_drop_table_Index_for_partition");
 
     stat = db_->DropIndex(table_name);
     ASSERT_TRUE(stat.ok());
@@ -977,10 +977,10 @@ TEST_F(DBTest2, DELETE_TEST) {
 
     //fail drop table
     fiu_init(0);
-    FIU_ENABLE_FIU("DBImpl_DropTableRecursively_failed");
+    FIU_ENABLE_FIU("DBImpl.DropTableRecursively.failed");
     stat = db_->DropTable(TABLE_NAME, dates);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("DBImpl_DropTableRecursively_failed");
+    fiu_disable("DBImpl.DropTableRecursively.failed");
 
     stat = db_->DropTable(TABLE_NAME, dates);
     std::this_thread::sleep_for(std::chrono::seconds(2));

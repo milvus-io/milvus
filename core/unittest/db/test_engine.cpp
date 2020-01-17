@@ -88,11 +88,11 @@ TEST_F(EngineTest, FACTORY_TEST) {
     {
         fiu_init(0);
         // test ExecutionEngineImpl constructor when create vecindex failed
-        FIU_ENABLE_FIU("ExecutionEngineImpl_CreatetVecIndex_InvalidType");
+        FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.invalid_type");
         ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
             milvus::engine::MetricType::L2, 1024));
-        fiu_disable("ExecutionEngineImpl_CreatetVecIndex_InvalidType");
+        fiu_disable("ExecutionEngineImpl.CreatetVecIndex.invalid_type");
     }
 
     {
@@ -148,13 +148,13 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);
 
 #ifdef MILVUS_GPU_VERSION
-    FIU_ENABLE_FIU("ExecutionEngineImpl_CreatetVecIndex_GpuResDisabled");
+    FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
     engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
     engine_ptr->BuildIndex("/tmp/milvus_index_6", milvus::engine::EngineType::FAISS_IVFFLAT);
     engine_ptr->BuildIndex("/tmp/milvus_index_7",milvus::engine::EngineType::FAISS_IVFSQ8);
     ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_8",milvus::engine::EngineType::FAISS_IVFSQ8H));
     ASSERT_ANY_THROW(engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_9", milvus::engine::EngineType::FAISS_PQ));
-    fiu_disable("ExecutionEngineImpl_CreatetVecIndex_GpuResDisabled");
+    fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
 #endif
 
     //merge self

@@ -66,7 +66,7 @@ MySQLConnectionPool::getDB() {
 mysqlpp::Connection*
 MySQLConnectionPool::create() {
     try {
-        fiu_do_on("MySQLConnectionPool_create_ThrowException", throw mysqlpp::ConnectionFailed());
+        fiu_do_on("MySQLConnectionPool.create.throw_exception", throw mysqlpp::ConnectionFailed());
 
         // Create connection using the parameters we were passed upon
         // creation.

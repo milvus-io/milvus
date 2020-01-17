@@ -73,9 +73,9 @@ TEST_F(MetaTest, FALID_TEST) {
     milvus::Status status;
 
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_ValidateMetaSchema_NullConnection");
+        FIU_ENABLE_FIU("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
         milvus::engine::meta::SqliteMetaImpl impl(options.meta_);
-        fiu_disable("SqliteMetaImpl_ValidateMetaSchema_NullConnection");
+        fiu_disable("SqliteMetaImpl.ValidateMetaSchema.NullConnection");
     }
     {
         //failed initialize
@@ -85,24 +85,24 @@ TEST_F(MetaTest, FALID_TEST) {
             boost::filesystem::remove_all(options_1.meta_.path_);
         }
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_Initialize_FailCreateDirectory");
+        FIU_ENABLE_FIU("SqliteMetaImpl.Initialize.fail_create_directory");
         ASSERT_ANY_THROW(milvus::engine::meta::SqliteMetaImpl impl(options_1.meta_));
-        fiu_disable("SqliteMetaImpl_Initialize_FailCreateDirectory");
+        fiu_disable("SqliteMetaImpl.Initialize.fail_create_directory");
 
         boost::filesystem::remove_all(options_1.meta_.path_);
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_CreateTable_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CreateTable.throw_exception");
         status = impl_->CreateTable(table);
         ASSERT_FALSE(status.ok());
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CreateTable_ThrowException");
+        fiu_disable("SqliteMetaImpl.CreateTable.throw_exception");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CreateTable_InsertThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CreateTable.insert_throw_exception");
         table.table_id_ = "";
         status = impl_->CreateTable(table);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_CreateTable_InsertThrowException");
+        fiu_disable("SqliteMetaImpl.CreateTable.insert_throw_exception");
 
         //success create table
         table.table_id_ = table_id;
@@ -110,31 +110,31 @@ TEST_F(MetaTest, FALID_TEST) {
         ASSERT_TRUE(status.ok());
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_DescribeTable_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DescribeTable.throw_exception");
         status = impl_->DescribeTable(table);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_DescribeTable_ThrowException");
+        fiu_disable("SqliteMetaImpl.DescribeTable.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_HasTable_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.HasTable.throw_exception");
         bool has = false;
         status = impl_->HasTable(table.table_id_, has);
         ASSERT_FALSE(status.ok());
         ASSERT_FALSE(has);
-        fiu_disable("SqliteMetaImpl_HasTable_ThrowException");
+        fiu_disable("SqliteMetaImpl.HasTable.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_AllTables_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.AllTables.throw_exception");
         std::vector<milvus::engine::meta::TableSchema> table_schema_array;
         status = impl_->AllTables(table_schema_array);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_AllTables_ThrowException");
+        fiu_disable("SqliteMetaImpl.AllTables.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_DropTable_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DropTable.throw_exception");
         status = impl_->DropTable(table.table_id_);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_DropTable_ThrowException");
+        fiu_disable("SqliteMetaImpl.DropTable.throw_exception");
     }
     {
         milvus::engine::meta::TableFileSchema schema;
@@ -142,17 +142,17 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->CreateTableFile(schema);
         ASSERT_FALSE(status.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CreateTableFile_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
         schema.table_id_ = table_id;
         status = impl_->CreateTableFile(schema);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_CreateTableFile_ThrowException");
+        fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_DeleteTableFiles_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DeleteTableFiles.throw_exception");
         status = impl_->DeleteTableFiles(table.table_id_);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_DeleteTableFiles_ThrowException");
+        fiu_disable("SqliteMetaImpl.DeleteTableFiles.throw_exception");
     }
     {
         milvus::engine::meta::DatesT dates;
@@ -163,10 +163,10 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->DropDataByDate("notexist", dates);
         ASSERT_FALSE(status.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_DropDataByDate_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DropDataByDate.throw_exception");
         status = impl_->DropDataByDate(table.table_id_, dates);
         ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl_DropDataByDate_ThrowException");
+        fiu_disable("SqliteMetaImpl.DropDataByDate.throw_exception");
     }
     {
         milvus::engine::meta::TableFilesSchema schemas;
@@ -174,25 +174,25 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->GetTableFiles("notexist", ids, schemas);
         ASSERT_FALSE(status.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_GetTableFiles_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.GetTableFiles.throw_exception");
         status = impl_->GetTableFiles(table_id, ids, schemas);
         ASSERT_FALSE(status.ok());
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_GetTableFiles_ThrowException");
+        fiu_disable("SqliteMetaImpl.GetTableFiles.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableFlag_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFlag.throw_exception");
         status = impl_->UpdateTableFlag(table_id, 0);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_UpdateTableFlag_ThrowException");
+        fiu_disable("SqliteMetaImpl.UpdateTableFlag.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableFile_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFile.throw_exception");
         milvus::engine::meta::TableFileSchema schema;
         schema.table_id_ = table_id;
         status = impl_->UpdateTableFile(schema);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_UpdateTableFile_ThrowException");
+        fiu_disable("SqliteMetaImpl.UpdateTableFile.throw_exception");
 
         schema = {};
         schema.table_id_ = "notexist";
@@ -207,42 +207,42 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->UpdateTableFiles(schemas);
         ASSERT_TRUE(status.ok());
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableFiles_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFiles.throw_exception");
         status = impl_->UpdateTableFiles(schemas);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_UpdateTableFiles_ThrowException");
+        fiu_disable("SqliteMetaImpl.UpdateTableFiles.throw_exception");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableFiles_FailCommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFiles.fail_commited");
         status = impl_->UpdateTableFiles(schemas);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_UpdateTableFiles_FailCommited");
+        fiu_disable("SqliteMetaImpl.UpdateTableFiles.fail_commited");
     }
     {
         milvus::engine::TableIndex index;
         status = impl_->UpdateTableIndex("notexist", index);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableIndex_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableIndex.throw_exception");
         status = impl_->UpdateTableIndex("notexist", index);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_UpdateTableIndex_ThrowException");
+        fiu_disable("SqliteMetaImpl.UpdateTableIndex.throw_exception");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_DescribeTableIndex_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DescribeTableIndex.throw_exception");
         status = impl_->DescribeTableIndex(table_id, index);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_DescribeTableIndex_ThrowException");
+        fiu_disable("SqliteMetaImpl.DescribeTableIndex.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableFilesToIndex_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFilesToIndex.throw_exception");
         status = impl_->UpdateTableFilesToIndex(table_id);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_UpdateTableFilesToIndex_ThrowException");
+        fiu_disable("SqliteMetaImpl.UpdateTableFilesToIndex.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_DropTableIndex_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DropTableIndex.throw_exception");
         status = impl_->DropTableIndex(table_id);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_DropTableIndex_ThrowException");
+        fiu_disable("SqliteMetaImpl.DropTableIndex.throw_exception");
     }
     {
         std::string partition = "part0";
@@ -268,16 +268,16 @@ TEST_F(MetaTest, FALID_TEST) {
         ASSERT_EQ(partions_schema.size(), 2);
 
         partions_schema.clear();
-        FIU_ENABLE_FIU("SqliteMetaImpl_ShowPartitions_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.ShowPartitions.throw_exception");
         status = impl_->ShowPartitions(table_id, partions_schema);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_ShowPartitions_ThrowException");
+        fiu_disable("SqliteMetaImpl.ShowPartitions.throw_exception");
 
         std::string partion;
-        FIU_ENABLE_FIU("SqliteMetaImpl_GetPartitionName_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.GetPartitionName.throw_exception");
         status = impl_->GetPartitionName(table_id, "tag0", partion);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_GetPartitionName_ThrowException");
+        fiu_disable("SqliteMetaImpl.GetPartitionName.throw_exception");
     }
     {
         std::vector<size_t> ids;
@@ -286,10 +286,10 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->FilesToSearch("notexist", ids, dates, schema);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToSearch_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
         status = impl_->FilesToSearch(table_id, ids, dates, schema);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_FilesToSearch_ThrowException");
+        fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
     }
     {
         milvus::engine::meta::TableFileSchema file;
@@ -305,10 +305,10 @@ TEST_F(MetaTest, FALID_TEST) {
         status = impl_->FilesToMerge("notexist", schema);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToMerge_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToMerge.throw_exception");
         status = impl_->FilesToMerge(table_id, schema);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_FilesToMerge_ThrowException");
+        fiu_disable("SqliteMetaImpl.FilesToMerge.throw_exception");
 
         //skip large files
         milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
@@ -329,73 +329,73 @@ TEST_F(MetaTest, FALID_TEST) {
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
         fiu_disable("SqliteMetaImpl_FilesToIndex_TableNotFound");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesToIndex_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToIndex.throw_exception");
         status = impl_->FilesToIndex(files);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_FilesToIndex_ThrowException");
+        fiu_disable("SqliteMetaImpl.FilesToIndex.throw_exception");
     }
     {
         milvus::engine::meta::TableFilesSchema files;
         std::vector<int> file_types;
         file_types.push_back(milvus::engine::meta::TableFileSchema::INDEX);
-        FIU_ENABLE_FIU("SqliteMetaImpl_FilesByType_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.FilesByType.throw_exception");
         status = impl_->FilesByType(table_id, file_types, files);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_FilesByType_ThrowException");
+        fiu_disable("SqliteMetaImpl.FilesByType.throw_exception");
     }
     {
         uint64_t size = 0;
-        FIU_ENABLE_FIU("SqliteMetaImpl_Size_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.Size.throw_exception");
         status = impl_->Size(size);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_Size_ThrowException");
+        fiu_disable("SqliteMetaImpl.Size.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpShadowFiles_FailCommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpShadowFiles.fail_commited");
         status = impl_->CleanUpShadowFiles();
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpShadowFiles_FailCommited");
+        fiu_disable("SqliteMetaImpl.CleanUpShadowFiles.fail_commited");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpShadowFiles_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpShadowFiles.throw_exception");
         status = impl_->CleanUpShadowFiles();
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpShadowFiles_ThrowException");
+        fiu_disable("SqliteMetaImpl.CleanUpShadowFiles.throw_exception");
     }
     {
         uint64_t count;
         status = impl_->Count("notexist", count);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_Count_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.Count.throw_exception");
         status = impl_->Count("notexist", count);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_Count_ThrowException");
+        fiu_disable("SqliteMetaImpl.Count.throw_exception");
     }
     {
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_ThrowException");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_ThrowException");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_FailCommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_FailCommited");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveFile_FailCommited");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_FailCommited");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_Failcommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_Failcommited");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_Failcommited");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_Failcommited");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTable_ThrowException");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTable_ThrowException");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTableFolder_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTableFolder_ThrowException");
         status = impl_->CleanUpFilesWithTTL(1);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_CleanUpFilesWithTTL_RemoveTableFolder_ThrowException");
+        fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveTableFolder_ThrowException");
     }
 }
 
@@ -495,10 +495,10 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 
     {
         fiu_init(0);
-        FIU_ENABLE_FIU("SqliteMetaImpl_Archive_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.Archive.throw_exception");
         status = impl.Archive();
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl_Archive_ThrowException");
+        fiu_disable("SqliteMetaImpl.Archive.throw_exception");
     }
 
     impl.Archive();
@@ -548,13 +548,13 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 
     {
         fiu_init(0);
-        FIU_ENABLE_FIU("SqliteMetaImpl_DiscardFiles_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DiscardFiles.throw_exception");
         status = impl.Archive();
-        fiu_disable("SqliteMetaImpl_DiscardFiles_ThrowException");
+        fiu_disable("SqliteMetaImpl.DiscardFiles.throw_exception");
 
-        FIU_ENABLE_FIU("SqliteMetaImpl_DiscardFiles_FailCommited");
+        FIU_ENABLE_FIU("SqliteMetaImpl.DiscardFiles.fail_commited");
         status = impl.Archive();
-        fiu_disable("SqliteMetaImpl_DiscardFiles_FailCommited");
+        fiu_disable("SqliteMetaImpl.DiscardFiles.fail_commited");
     }
 
     impl.Archive();

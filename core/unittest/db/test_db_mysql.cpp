@@ -217,15 +217,15 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_TRUE(bfound);
 
     fiu_init(0);
-    FIU_ENABLE_FIU("MySQLMetaImpl_AllTable_NUllConnection");
+    FIU_ENABLE_FIU("MySQLMetaImpl.AllTable.null_connection");
     stat = db_->AllTables(table_schema_array);
     ASSERT_FALSE(stat.ok());
 
-    FIU_ENABLE_FIU("MySQLMetaImpl_AllTable_ThrowException");
+    FIU_ENABLE_FIU("MySQLMetaImpl.AllTable.throw_exception");
     stat = db_->AllTables(table_schema_array);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl_AllTable_NUllConnection");
-    fiu_disable("MySQLMetaImpl_AllTable_ThrowException");
+    fiu_disable("MySQLMetaImpl.AllTable.null_connection");
+    fiu_disable("MySQLMetaImpl.AllTable.throw_exception");
 
     milvus::engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -255,14 +255,14 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * milvus::engine::G);
 
-    FIU_ENABLE_FIU("MySQLMetaImpl_Size_NUllConnection");
+    FIU_ENABLE_FIU("MySQLMetaImpl.Size.null_connection");
     stat = db_->Size(size);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl_Size_NUllConnection");
-    FIU_ENABLE_FIU("MySQLMetaImpl_Size_ThrowException");
+    fiu_disable("MySQLMetaImpl.Size.null_connection");
+    FIU_ENABLE_FIU("MySQLMetaImpl.Size.throw_exception");
     stat = db_->Size(size);
     ASSERT_FALSE(stat.ok());
-    fiu_disable("MySQLMetaImpl_Size_ThrowException");
+    fiu_disable("MySQLMetaImpl.Size.throw_exception");
 }
 
 TEST_F(MySqlDBTest, DELETE_TEST) {
@@ -411,73 +411,73 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
 
         // ensure DescribeTable failed
-        FIU_ENABLE_FIU("MySQLMetaImpl_DescribeTable_ThrowException");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTable.throw_exception");
         stat = db_->CreatePartition(table_name, "", "7");
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl_DescribeTable_ThrowException");
+        fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
 
         //Drop partition will failed,since it firstly drop partition meta table.
-        FIU_ENABLE_FIU("MySQLMetaImpl_DropTable_NUllConnection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.null_connection");
         stat = db_->DropPartition(table_name + "_5");
         //TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.
         //ASSERT_TRUE(stat.ok());
-        fiu_disable("MySQLMetaImpl_DropTable_NUllConnection");
+        fiu_disable("MySQLMetaImpl.DropTable.null_connection");
 
         std::vector<milvus::engine::meta::TableSchema> partition_schema_array;
         stat = db_->ShowPartitions(table_name, partition_schema_array);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(partition_schema_array.size(), PARTITION_COUNT + 1);
 
-        FIU_ENABLE_FIU("MySQLMetaImpl_ShowPartitions_NUllConnection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.ShowPartitions.null_connection");
         stat = db_->ShowPartitions(table_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
-        FIU_ENABLE_FIU("MySQLMetaImpl_ShowPartitions_ThrowException");
+        FIU_ENABLE_FIU("MySQLMetaImpl.ShowPartitions.throw_exception");
         stat = db_->ShowPartitions(table_name, partition_schema_array);
         ASSERT_FALSE(stat.ok());
 
-        FIU_ENABLE_FIU("MySQLMetaImpl_DropTable_ThrowException");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropTable.throw_exception");
         stat = db_->DropPartition(table_name + "_4");
-        fiu_disable("MySQLMetaImpl_DropTable_ThrowException");
+        fiu_disable("MySQLMetaImpl.DropTable.throw_exception");
 
         stat = db_->DropPartition(table_name + "_0");
         ASSERT_TRUE(stat.ok());
     }
 
     {
-        FIU_ENABLE_FIU("MySQLMetaImpl_GetPartitionName_NUllConnection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.GetPartitionName.null_connection");
         stat = db_->DropPartitionByTag(table_name, "1");
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl_GetPartitionName_NUllConnection");
+        fiu_disable("MySQLMetaImpl.GetPartitionName.null_connection");
 
-        FIU_ENABLE_FIU("MySQLMetaImpl_GetPartitionName_ThrowException");
+        FIU_ENABLE_FIU("MySQLMetaImpl.GetPartitionName.throw_exception");
         stat = db_->DropPartitionByTag(table_name, "1");
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl_GetPartitionName_ThrowException");
+        fiu_disable("MySQLMetaImpl.GetPartitionName.throw_exception");
 
         stat = db_->DropPartitionByTag(table_name, "1");
         ASSERT_TRUE(stat.ok());
 
         stat = db_->CreatePartition(table_name, table_name + "_1", "1");
-        FIU_ENABLE_FIU("MySQLMetaImpl_DeleteTableFiles_NUllConnection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.null_connection");
         stat = db_->DropPartition(table_name + "_1");
-        fiu_disable("MySQLMetaImpl_DeleteTableFiles_NUllConnection");
+        fiu_disable("MySQLMetaImpl.DeleteTableFiles.null_connection");
 
-        FIU_ENABLE_FIU("MySQLMetaImpl_DeleteTableFiles_ThrowException");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DeleteTableFiles.throw_exception");
         stat = db_->DropPartition(table_name + "_1");
-        fiu_disable("MySQLMetaImpl_DeleteTableFiles_ThrowException");
+        fiu_disable("MySQLMetaImpl.DeleteTableFiles.throw_exception");
     }
 
     {
-        FIU_ENABLE_FIU("MySQLMetaImpl_DropTableIndex_NUllConnection");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropTableIndex.null_connection");
         stat = db_->DropIndex(table_name);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl_DropTableIndex_NUllConnection");
+        fiu_disable("MySQLMetaImpl.DropTableIndex.null_connection");
 
-        FIU_ENABLE_FIU("MySQLMetaImpl_DropTableIndex_ThrowException");
+        FIU_ENABLE_FIU("MySQLMetaImpl.DropTableIndex.throw_exception");
         stat = db_->DropIndex(table_name);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("MySQLMetaImpl_DropTableIndex_ThrowException");
+        fiu_disable("MySQLMetaImpl.DropTableIndex.throw_exception");
 
         stat = db_->DropIndex(table_name);
         ASSERT_TRUE(stat.ok());

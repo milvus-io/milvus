@@ -164,9 +164,9 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     {
         //test fail create table file
-        FIU_ENABLE_FIU("SqliteMetaImpl_CreateTableFile_ThrowException");
+        FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
         milvus::engine::MemTableFile mem_table_file_1(GetTableName(), impl_, options);
-        fiu_disable("SqliteMetaImpl_CreateTableFile_ThrowException");
+        fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");
 
         status = mem_table_file_1.Add(source, vector_ids);
         ASSERT_FALSE(status.ok());
@@ -264,10 +264,10 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     status = mem_table.Add(source_10, vector_ids);
     ASSERT_TRUE(status.ok());
 
-    FIU_ENABLE_FIU("SqliteMetaImpl_UpdateTableFile_ThrowException");
+    FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFile.throw_exception");
     status = mem_table.Serialize();
     ASSERT_FALSE(status.ok());
-    fiu_disable("SqliteMetaImpl_UpdateTableFile_ThrowException");
+    fiu_disable("SqliteMetaImpl.UpdateTableFile.throw_exception");
 }
 
 TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
