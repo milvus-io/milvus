@@ -9,7 +9,7 @@ import threading
 from multiprocessing import Pool, Process
 import numpy
 import sklearn.preprocessing
-from milvus import Milvus, IndexType, MetricType
+from milvus import IndexType, MetricType
 from utils import *
 
 nb = 6000
@@ -146,7 +146,7 @@ class TestIndexBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
 
         for i in range(process_num):
-            m = Milvus()
+            m = get_milvus()
             m.connect(uri=uri)
             p = Process(target=build, args=(m,))
             processes.append(p)
@@ -205,7 +205,7 @@ class TestIndexBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
 
         for i in range(process_num):
-            m = Milvus()
+            m = get_milvus()
             m.connect(uri=uri)
             ids = i
             p = Process(target=create_index, args=(m,ids))
@@ -669,7 +669,7 @@ class TestIndexIP:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
 
         for i in range(process_num):
-            m = Milvus()
+            m = get_milvus()
             m.connect(uri=uri)
             p = Process(target=build, args=(m,))
             processes.append(p)
@@ -726,7 +726,7 @@ class TestIndexIP:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
 
         for i in range(process_num):
-            m = Milvus()
+            m = get_milvus()
             m.connect(uri=uri)
             ids = i
             p = Process(target=create_index, args=(m,ids))
