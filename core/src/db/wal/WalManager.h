@@ -19,6 +19,9 @@
 
 #include <atomic>
 #include <map>
+#include <string>
+#include <utility>
+#include <vector>
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
@@ -31,7 +34,7 @@ namespace wal {
 
 class WalManager {
  public:
-    WalManager(const MXLogConfiguration& config);
+    explicit WalManager(const MXLogConfiguration& config);
     ~WalManager();
 
     /*
@@ -48,7 +51,7 @@ class WalManager {
      * @retval error_code
      */
     ErrorCode
-    GetNextRecovery(MXLogRecord &record);
+    GetNextRecovery(MXLogRecord& record);
 
     /*
      * Get next record
@@ -56,7 +59,7 @@ class WalManager {
      * @retval error_code
      */
     ErrorCode
-    GetNextRecord(MXLogRecord &record);
+    GetNextRecord(MXLogRecord& record);
 
     /*
      * Create table
@@ -64,7 +67,7 @@ class WalManager {
      * @retval lsn
      */
     uint64_t
-    CreateTable(const std::string &table_id);
+    CreateTable(const std::string& table_id);
 
     /*
      * Drop table
@@ -72,7 +75,7 @@ class WalManager {
      * @retval none
      */
     void
-    DropTable(const std::string &table_id);
+    DropTable(const std::string& table_id);
 
     /*
      * Table is flushed
@@ -80,7 +83,7 @@ class WalManager {
      * @param lsn: flushed lsn
      */
     void
-    TableFlushed(const std::string &table_id, uint64_t lsn);
+    TableFlushed(const std::string& table_id, uint64_t lsn);
 
     /*
      * Insert
@@ -89,12 +92,12 @@ class WalManager {
      * @param vector_ids: vector ids
      * @param vectors: vectors
      */
-    template <typename T>
+    template<typename T>
     bool
-    Insert(const std::string &table_id,
+    Insert(const std::string& table_id,
            const std::string& partition_tag,
-           const IDNumbers &vector_ids,
-           const std::vector<T> &vectors);
+           const IDNumbers& vector_ids,
+           const std::vector<T>& vectors);
 
     /*
      * Insert
@@ -103,7 +106,7 @@ class WalManager {
      */
     bool
     DeleteById(const std::string& table_id,
-               const IDNumbers &vector_ids);
+               const IDNumbers& vector_ids);
 
     /*
      * Get flush lsn
@@ -114,9 +117,8 @@ class WalManager {
     uint64_t
     Flush(const std::string table_id = "");
 
-
  private:
-    WalManager operator = (WalManager&);
+    WalManager operator=(WalManager&);
 
     MXLogConfiguration mxlog_config_;
 
@@ -137,19 +139,18 @@ class WalManager {
 
 extern template bool
 WalManager::Insert<float>(
-        const std::string &table_id,
-        const std::string& partition_tag,
-        const IDNumbers &vector_ids,
-        const std::vector<float> &vectors);
+    const std::string& table_id,
+    const std::string& partition_tag,
+    const IDNumbers& vector_ids,
+    const std::vector<float>& vectors);
 
 extern template bool
 WalManager::Insert<uint8_t>(
-        const std::string &table_id,
-        const std::string& partition_tag,
-        const IDNumbers &vector_ids,
-        const std::vector<uint8_t> &vectors);
+    const std::string& table_id,
+    const std::string& partition_tag,
+    const IDNumbers& vector_ids,
+    const std::vector<uint8_t>& vectors);
 
-} // wal
-} // engine
-} // milvus
-
+} // namespace wal
+} // namespace engine
+} // namespace milvus

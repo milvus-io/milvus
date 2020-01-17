@@ -250,7 +250,7 @@ class DBImpl : public DB {
         }
 
         void
-        Wait_Until(const std::chrono::system_clock::time_point &tm_pint) {
+        Wait_Until(const std::chrono::system_clock::time_point& tm_pint) {
             std::unique_lock<std::mutex> lck(mutex_);
             if (!notified_) {
                 cv_.wait_until(lck, tm_pint);
