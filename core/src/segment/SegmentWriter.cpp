@@ -150,6 +150,10 @@ SegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
 
 Status
 SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
+    if (dir_to_merge == directory_ptr_->GetDirPath()) {
+        return Status(DB_ERROR, "Cannot Merge Self");
+    }
+
     SegmentReader segment_reader_to_merge(dir_to_merge);
     bool in_cache;
     auto status = segment_reader_to_merge.LoadCache(in_cache);
