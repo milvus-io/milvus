@@ -18,8 +18,8 @@
 #pragma once
 
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "Task.h"
 #include "scheduler/Definition.h"

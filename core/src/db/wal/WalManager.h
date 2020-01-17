@@ -22,10 +22,10 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "WalBuffer.h"
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"
-#include "WalBuffer.h"
 #include "utils/Error.h"
 
 namespace milvus {
@@ -92,11 +92,9 @@ class WalManager {
      * @param vector_ids: vector ids
      * @param vectors: vectors
      */
-    template<typename T>
+    template <typename T>
     bool
-    Insert(const std::string& table_id,
-           const std::string& partition_tag,
-           const IDNumbers& vector_ids,
+    Insert(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
            const std::vector<T>& vectors);
 
     /*
@@ -105,8 +103,7 @@ class WalManager {
      * @param vector_ids: vector ids
      */
     bool
-    DeleteById(const std::string& table_id,
-               const IDNumbers& vector_ids);
+    DeleteById(const std::string& table_id, const IDNumbers& vector_ids);
 
     /*
      * Get flush lsn
@@ -118,7 +115,8 @@ class WalManager {
     Flush(const std::string table_id = "");
 
  private:
-    WalManager operator=(WalManager&);
+    WalManager
+    operator=(WalManager&);
 
     MXLogConfiguration mxlog_config_;
 
@@ -138,19 +136,13 @@ class WalManager {
 };
 
 extern template bool
-WalManager::Insert<float>(
-    const std::string& table_id,
-    const std::string& partition_tag,
-    const IDNumbers& vector_ids,
-    const std::vector<float>& vectors);
+WalManager::Insert<float>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                          const std::vector<float>& vectors);
 
 extern template bool
-WalManager::Insert<uint8_t>(
-    const std::string& table_id,
-    const std::string& partition_tag,
-    const IDNumbers& vector_ids,
-    const std::vector<uint8_t>& vectors);
+WalManager::Insert<uint8_t>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                            const std::vector<uint8_t>& vectors);
 
-} // namespace wal
-} // namespace engine
-} // namespace milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

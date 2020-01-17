@@ -19,9 +19,9 @@
 
 #include "IndexIVF.h"
 
+#include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <utility>
-#include <faiss/utils/ConcurrentBitset.h>
 
 namespace knowhere {
 

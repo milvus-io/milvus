@@ -116,7 +116,7 @@ JobMgr::worker_function() {
                     }
 
                     if (pass) {
-//                        std::cout << search_task->GetIndexId() << std::endl;
+                        //                        std::cout << search_task->GetIndexId() << std::endl;
                         search_job->SearchDone(search_task->GetIndexId());
                         task = tasks.erase(task);
                     } else {

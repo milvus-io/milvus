@@ -300,7 +300,7 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
 
         // todo: enable search by id (zhiru)
         //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-        auto index_ivf  = std::static_pointer_cast<faiss::IndexIVF>(index_);
+        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
         index_ivf->searchById(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
 
         //    std::stringstream ss_res_id, ss_res_dist;

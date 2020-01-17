@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/wal/WalManager.h"
+#include <unistd.h>
 #include <algorithm>
 #include <memory>
-#include <unistd.h>
-#include "db/wal/WalManager.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -84,9 +84,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
     }
 
-    p_buffer_ = std::make_shared<MXLogBuffer>(
-        mxlog_config_.mxlog_path,
-        mxlog_config_.buffer_size);
+    p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
 
     ErrorCode error_code;
     if (p_buffer_->Init(recovery_start, applied_lsn)) {
@@ -102,7 +100,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
 }
 
 ErrorCode
-WalManager::GetNextRecovery(MXLogRecord &record) {
+WalManager::GetNextRecovery(MXLogRecord& record) {
     ErrorCode error_code = WAL_ERROR;
 
     if (p_buffer_ != nullptr) {
@@ -133,15 +131,14 @@ WalManager::GetNextRecovery(MXLogRecord &record) {
         } while (true);
     }
 
-    WAL_LOG_INFO << "record type " << (int32_t)record.type
-                 << " record lsn " << record.lsn
-                 << " error code  " << error_code;
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
+                 << error_code;
 
     return error_code;
 }
 
 ErrorCode
-WalManager::GetNextRecord(MXLogRecord &record) {
+WalManager::GetNextRecord(MXLogRecord& record) {
     ErrorCode error_code = WAL_ERROR;
 
     if (p_buffer_ != nullptr) {
@@ -155,8 +152,7 @@ WalManager::GetNextRecord(MXLogRecord &record) {
                 // clear flush_info_
                 flush_info_.second = 0;
 
-                WAL_LOG_INFO << "flush lsn " << record.lsn
-                             << " flush table " << record.table_id;
+                WAL_LOG_INFO << "flush lsn " << record.lsn << " flush table " << record.table_id;
                 return WAL_SUCCESS;
             }
         }
@@ -177,15 +173,14 @@ WalManager::GetNextRecord(MXLogRecord &record) {
         } while (true);
     }
 
-    WAL_LOG_INFO << "record type " << (int32_t)record.type
-                 << " record lsn " << record.lsn
-                 << " error code  " << error_code;
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
+                 << error_code;
 
     return error_code;
 }
 
 uint64_t
-WalManager::CreateTable(const std::string &table_id) {
+WalManager::CreateTable(const std::string& table_id) {
     WAL_LOG_INFO << "create table " << table_id;
     std::unique_lock<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
@@ -194,14 +189,14 @@ WalManager::CreateTable(const std::string &table_id) {
 }
 
 void
-WalManager::DropTable(const std::string &table_id) {
+WalManager::DropTable(const std::string& table_id) {
     WAL_LOG_INFO << "drop table " << table_id;
     std::unique_lock<std::mutex> lck(mutex_);
     tables_.erase(table_id);
 }
 
 void
-WalManager::TableFlushed(const std::string &table_id, uint64_t lsn) {
+WalManager::TableFlushed(const std::string& table_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lck(mutex_);
     auto it = tables_.find(table_id);
     if (it != tables_.end()) {
@@ -214,10 +209,8 @@ WalManager::TableFlushed(const std::string &table_id, uint64_t lsn) {
 
 template <typename T>
 bool
-WalManager::Insert(const std::string &table_id,
-                   const std::string &partition_tag,
-                   const IDNumbers &vector_ids,
-                   const std::vector<T> &vectors) {
+WalManager::Insert(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                   const std::vector<T>& vectors) {
     MXLogType log_type;
     if (std::is_same<T, float>::value) {
         log_type = MXLogType::InsertVector;
@@ -231,9 +224,9 @@ WalManager::Insert(const std::string &table_id,
 
     size_t vector_num = vector_ids.size();
     uint16_t dim = vectors.size() / vector_num;
-    //split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size() - partition_tag.size()) /
-                                ((dim * sizeof(T)) + sizeof(IDNumber));
+    // split and insert into wal
+    size_t vectors_per_record =
+        (max_record_data_size - table_id.size() - partition_tag.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
     MXLogRecord record;
@@ -264,8 +257,7 @@ WalManager::Insert(const std::string &table_id,
     }
     lck.unlock();
 
-    WAL_LOG_INFO << table_id << " insert in part "
-                 << partition_tag << " with lsn " << new_lsn;
+    WAL_LOG_INFO << table_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
@@ -276,7 +268,7 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 
     size_t vector_num = vector_ids.size();
 
-    //split and insert into wal
+    // split and insert into wal
     size_t vectors_per_record = (max_record_data_size - table_id.size()) / (sizeof(IDNumber));
     __glibcxx_assert(vectors_per_record > 0);
 
@@ -323,7 +315,7 @@ WalManager::Flush(const std::string table_id) {
     uint64_t lsn = 0;
     if (table_id.empty()) {
         lck.lock();
-        for (auto &it : tables_) {
+        for (auto& it : tables_) {
             if (it.second.wal_lsn > it.second.flush_lsn) {
                 lsn = last_applied_lsn_;
                 break;
@@ -352,20 +344,13 @@ WalManager::Flush(const std::string table_id) {
 }
 
 template bool
-WalManager::Insert<float>(
-        const std::string &table_id,
-        const std::string& partition_tag,
-        const IDNumbers &vector_ids,
-        const std::vector<float> &vectors);
+WalManager::Insert<float>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                          const std::vector<float>& vectors);
 
 template bool
-WalManager::Insert<uint8_t>(
-        const std::string &table_id,
-        const std::string& partition_tag,
-        const IDNumbers &vector_ids,
-        const std::vector<uint8_t> &vectors);
+WalManager::Insert<uint8_t>(const std::string& table_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                            const std::vector<uint8_t>& vectors);
 
-
-} // namespace wal
-} // namespace engine
-} // namespace milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

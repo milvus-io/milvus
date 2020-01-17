@@ -217,8 +217,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return TopKQueryResult
     ::grpc::Status
-    SearchByID(::grpc::ServerContext* context,
-               const ::milvus::grpc::SearchByIDParam* request,
+    SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
                ::milvus::grpc::TopKQueryResult* response);
 
     // *
@@ -248,8 +247,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return status
     ::grpc::Status
-    DeleteByID(::grpc::ServerContext* context,
-               const ::milvus::grpc::DeleteByIDParam* request,
+    DeleteByID(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByIDParam* request,
                ::milvus::grpc::Status* response);
 
     // *

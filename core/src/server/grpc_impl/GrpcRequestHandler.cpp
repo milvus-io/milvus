@@ -318,8 +318,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
-GrpcRequestHandler::SearchByID(::grpc::ServerContext* context,
-                               const ::milvus::grpc::SearchByIDParam* request,
+GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
                                ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
     // step 1: prepare id array
@@ -448,9 +447,8 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 }
 
 ::grpc::Status
-GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context,
-           const ::milvus::grpc::DeleteByIDParam* request,
-           ::milvus::grpc::Status* response) {
+GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByIDParam* request,
+                               ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
     // step 1: prepare id array
@@ -559,8 +557,7 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
 }
 
 ::grpc::Status
-GrpcRequestHandler::Flush(::grpc::ServerContext* context,
-                          const ::milvus::grpc::FlushParam* request,
+GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request,
                           ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 

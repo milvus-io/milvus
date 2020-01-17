@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <cstring>
 #include "db/wal/WalMetaHandler.h"
+#include <cstring>
 
 namespace milvus {
 namespace engine {
@@ -61,6 +61,6 @@ MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t& wal_lsn) {
     return (sizeof(wal_lsn) == fwrite(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_));
 }
 
-} // namespace wal
-} // namespace engine
-} // namespace milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus
