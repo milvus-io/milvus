@@ -118,10 +118,7 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
 
 Status
 MemManagerImpl::Flush(const std::string& table_id) {
-    auto status = ToImmutable(table_id);
-    if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
-    }
+    ToImmutable(table_id);
 
     MemList temp_immutable_list;
     {
@@ -140,10 +137,7 @@ MemManagerImpl::Flush(const std::string& table_id) {
 
 Status
 MemManagerImpl::Flush(std::set<std::string>& table_ids) {
-    auto status = ToImmutable();
-    if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
-    }
+    ToImmutable();
 
     MemList temp_immutable_list;
     {
@@ -166,13 +160,15 @@ Status
 MemManagerImpl::ToImmutable(const std::string& table_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     auto memIt = mem_id_map_.find(table_id);
-    if (memIt == mem_id_map_.end()) {
-        std::string err_msg = "Could not find table = " + table_id + " to flush";
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(DB_NOT_FOUND, err_msg);
+    if (memIt != mem_id_map_.end()) {
+        if (!memIt->second->Empty()) {
+            immu_mem_list_.push_back(memIt->second);
+            mem_id_map_.erase(memIt);
+        }
+        //        std::string err_msg = "Could not find table = " + table_id + " to flush";
+        //        ENGINE_LOG_ERROR << err_msg;
+        //        return Status(DB_NOT_FOUND, err_msg);
     }
-    immu_mem_list_.push_back(memIt->second);
-    mem_id_map_.erase(memIt);
 
     return Status::OK();
 }
