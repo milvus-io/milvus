@@ -108,6 +108,7 @@ constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
 constexpr ErrorCode WAL_ERROR = ToWalErrorCode(1);
 constexpr ErrorCode WAL_META_ERROR = ToWalErrorCode(2);
 constexpr ErrorCode WAL_FILE_ERROR = ToWalErrorCode(3);
+constexpr ErrorCode WAL_PATH_ERROR = ToWalErrorCode(4);
 
 namespace server {
 class ServerException : public std::exception {

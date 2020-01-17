@@ -84,8 +84,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
-    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-            std::make_shared<faiss::ConcurrentBitset>(nb);
+    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }

@@ -15,15 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/wal/WalMetaHandler.h"
 #include <cstring>
-#include "WalMetaHandler.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
 MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
-
     std::string file_full_path = internal_meta_file_path + WAL_META_FILE_NAME;
 
     wal_meta_fp_ = fopen(file_full_path.c_str(), "r+");
@@ -40,7 +39,7 @@ MXLogMetaHandler::~MXLogMetaHandler() {
 }
 
 bool
-MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn) {
+MXLogMetaHandler::GetMXLogInternalMeta(uint64_t& wal_lsn) {
     if (wal_meta_fp_ == nullptr) {
         return false;
     }
@@ -55,14 +54,13 @@ MXLogMetaHandler::GetMXLogInternalMeta(uint64_t &wal_lsn) {
 }
 
 bool
-MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t &wal_lsn) {
+MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t& wal_lsn) {
     // todo: add crc
 
     fseek(wal_meta_fp_, 0, SEEK_SET);
     return (sizeof(wal_lsn) == fwrite(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_));
 }
 
-
-} // wal
-} // engine
-} // milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

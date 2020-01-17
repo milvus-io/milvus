@@ -104,9 +104,7 @@ class Meta {
     DropTableIndex(const std::string& table_id) = 0;
 
     virtual Status
-    CreatePartition(const std::string& table_name,
-                    const std::string& partition_name,
-                    const std::string& tag,
+    CreatePartition(const std::string& table_name, const std::string& partition_name, const std::string& tag,
                     uint64_t lsn) = 0;
 
     virtual Status

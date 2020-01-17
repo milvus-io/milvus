@@ -17,13 +17,14 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include "db/meta/Meta.h"
-#include "db/meta/MetaTypes.h"
 #include "db/meta/MetaFactory.h"
+#include "db/meta/MetaTypes.h"
 #include "db/wal/WalDefinations.h"
 #include "db/wal/WalFileHandler.h"
-
 
 namespace milvus {
 namespace engine {
@@ -33,20 +34,20 @@ static const char* WAL_META_FILE_NAME = "mxlog.meta";
 
 class MXLogMetaHandler {
  public:
-    MXLogMetaHandler(const std::string& internal_meta_file_path);
+    explicit MXLogMetaHandler(const std::string& internal_meta_file_path);
     ~MXLogMetaHandler();
 
-    bool GetMXLogInternalMeta(uint64_t& wal_lsn);
-    bool SetMXLogInternalMeta(const uint64_t& wal_lsn);
+    bool
+    GetMXLogInternalMeta(uint64_t& wal_lsn);
+    bool
+    SetMXLogInternalMeta(const uint64_t& wal_lsn);
 
  private:
-    FILE *wal_meta_fp_;
-
+    FILE* wal_meta_fp_;
 };
 
 using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;
 
-
-} // wal
-} // engine
-} // milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus
