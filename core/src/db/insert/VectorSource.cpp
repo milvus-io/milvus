@@ -60,9 +60,10 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
             vector_ids_to_add.data());
         */
         std::vector<uint8_t> vectors;
-        auto size = vectors_.float_data_.size() * sizeof(float);
+        auto size = num_vectors_added * table_file_schema.dimension_ * sizeof(float);
         vectors.resize(size);
-        memcpy(vectors.data(), vectors_.float_data_.data(), size);
+        memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
+               size);
         status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
 
     } else if (!vectors_.binary_data_.empty()) {
@@ -72,6 +73,11 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
             vectors_.binary_data_.data() + current_num_vectors_added * SingleVectorSize(table_file_schema.dimension_),
             vector_ids_to_add.data());
         */
+        std::vector<uint8_t> vectors;
+        auto size = num_vectors_added * table_file_schema.dimension_ * sizeof(uint8_t);
+        vectors.resize(size);
+        memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
+               size);
         status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors_.binary_data_, vector_ids_to_add);
     }
 
