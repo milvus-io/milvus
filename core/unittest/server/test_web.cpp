@@ -307,7 +307,7 @@ TEST_F(WebHandlerTest, INSERT_COUNT) {
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ(1000, ids_dto->ids->count());
 
-    sleep(8);
+    sleep(2);
 
     milvus::server::web::OQueryParams query_params;
     query_params.put("fields", "num");
@@ -712,16 +712,16 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
     auto table_dto = milvus::server::web::TableRequestDto::createShared();
     auto response = client_ptr->createTable(table_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code) << result_dto->message->std_str();
+    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code) << error_dto->message->std_str();
 
     OString table_name = "web_test_create_table" + OString(RandomName().c_str());
 
     table_dto->table_name = table_name;
     response = client_ptr->createTable(table_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code) << result_dto->message->std_str();
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code) << error_dto->message->std_str();
 
     table_dto->dimension = 128;
     table_dto->index_file_size = 10;
@@ -729,6 +729,8 @@ TEST_F(WebControllerTest, CREATE_TABLE) {
 
     response = client_ptr->createTable(table_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, result_dto->code->getValue()) << result_dto->message->std_str();
 
     // invalid table name
     table_dto->table_name = "9090&*&()";
@@ -745,29 +747,32 @@ TEST_F(WebControllerTest, GET_TABLE) {
     // fields value is 'num', test count table
     params.put("fields", "num");
     auto response = client_ptr->getTable(table_name, conncetion_ptr);
-
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::TableFieldsDto>(object_mapper.get());
-
-    response = client_ptr->getTable(table_name, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(table_name->std_str(), result_dto->table_name->std_str());
+    ASSERT_EQ(10, result_dto->dimension);
+    ASSERT_EQ("L2", result_dto->metric_type->std_str());
+    ASSERT_EQ(10, result_dto->index_file_size->getValue());
+    ASSERT_EQ("FLAT", result_dto->index->std_str());
 
     // invalid table name
     table_name = "57474dgdfhdfhdh  dgd";
     response = client_ptr->getTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
     auto status_sto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_TABLE_NAME, status_sto->code->getValue());
 
-    table_name = "test_table_not_found_0000000001110101010020202030203030435";
+    table_name = "test_table_not_found_000000000111010101002020203020aaaaa3030435";
     response = client_ptr->getTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
-    status_sto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
 }
 
 TEST_F(WebControllerTest, SHOW_TABLES) {
     // test query table limit 1
     auto response = client_ptr->showTables(1, 1, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::TableListFieldsDto>(object_mapper.get());
+    ASSERT_TRUE(result_dto->count->getValue() > 0);
 
     // test query table empty
     response = client_ptr->showTables(0, 0, conncetion_ptr);
@@ -856,6 +861,9 @@ TEST_F(WebControllerTest, INDEX) {
     auto index_dto = milvus::server::web::IndexRequestDto::createShared();
     auto response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto create_index_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, create_index_dto->code);
+
     // drop index
     response = client_ptr->dropIndex(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
@@ -887,7 +895,6 @@ TEST_F(WebControllerTest, INDEX) {
     // invalid index type
     index_dto->index_type = 100;
     response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
-    ASSERT_NE(OStatus::CODE_201.code, response->getStatusCode());
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 
     // insert data and create index
@@ -908,6 +915,9 @@ TEST_F(WebControllerTest, INDEX) {
     // get index
     response = client_ptr->getIndex(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    auto result_index_dto = response->readBodyToDto<milvus::server::web::IndexDto>(object_mapper.get());
+    ASSERT_EQ("FLAT", result_index_dto->index_type->std_str());
+    ASSERT_EQ(10, result_index_dto->nlist->getValue());
 }
 
 TEST_F(WebControllerTest, PARTITION) {
@@ -917,23 +927,25 @@ TEST_F(WebControllerTest, PARTITION) {
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     auto response = client_ptr->createPartition(table_name, par_param);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code);
 
     par_param->partition_name = "partition01" + OString(RandomName().c_str());
     response = client_ptr->createPartition(table_name, par_param);
-    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code);
 
     par_param->partition_tag = "tag01";
     response = client_ptr->createPartition(table_name, par_param);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto create_result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, create_result_dto->code);
 
     // insert 200 vectors into table with tag = 'tag01'
     OQueryParams query_params;
     // add partition tag
     auto insert_dto = milvus::server::web::InsertRequestDto::createShared();
-    // add partition tag
     insert_dto->tag = OString("tag01");
     insert_dto->ids = insert_dto->ids->createShared();
     insert_dto->records = insert_dto->records->createShared();
@@ -946,6 +958,10 @@ TEST_F(WebControllerTest, PARTITION) {
     // Show all partitins
     response = client_ptr->showPartitions(table_name, 0, 10, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
+    ASSERT_EQ(1, result_dto->partitions->count());
+    ASSERT_EQ("tag01", result_dto->partitions->get(0)->partition_tag->std_str());
+    ASSERT_EQ(par_param->partition_name->std_str(), result_dto->partitions->get(0)->partition_name->std_str());
 
     response = client_ptr->dropPartition(table_name, "tag01", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
@@ -963,6 +979,8 @@ TEST_F(WebControllerTest, SEARCH) {
 
     auto response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto insert_result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
+    ASSERT_EQ(200, insert_result_dto->ids->count());
 
     sleep(4);
 
@@ -977,27 +995,31 @@ TEST_F(WebControllerTest, SEARCH) {
     insert_dto->tag = par_param->partition_tag;
     response = client_ptr->insert(table_name, insert_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    sleep(5);
+    sleep(2);
 
     // Test search
     auto search_request_dto = milvus::server::web::SearchRequestDto::createShared();
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
-    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code);
 
     search_request_dto->nprobe = 1;
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
-    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code);
 
     search_request_dto->topk = 1;
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
-    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_ROWRECORD, result_dto->code);
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code);
 
     search_request_dto->records = RandomRecordsDto(64, 10);
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::TopkResultsDto>(object_mapper.get());
+    ASSERT_EQ(10, result_dto->num);
+    ASSERT_EQ(10, result_dto->results->count());
+    ASSERT_EQ(1, result_dto->results->get(0)->count());
 
     // Test search with tags
     search_request_dto->tags = search_request_dto->tags->createShared();
@@ -1048,7 +1070,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     search_request_dto->topk = 1;
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_ROWRECORD, result_dto->code);
+    ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, result_dto->code);
 
     search_request_dto->records_bin = RandomBinRecordsDto(64, 10);
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);

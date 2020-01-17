@@ -21,9 +21,9 @@
 #include <unordered_map>
 
 #include <oatpp/core/data/mapping/type/Object.hpp>
+#include <oatpp/web/protocol/http/Http.hpp>
 
 #include "db/engine/ExecutionEngine.h"
-
 #include "server/web_impl/Constants.h"
 
 namespace milvus {
@@ -67,7 +67,7 @@ enum StatusCode : int {
     ILLEGAL_METRIC_TYPE = 23,
     OUT_OF_MEMORY = 24,
 
-    // HTTP status code
+    // HTTP error code
     PATH_PARAM_LOSS = 31,
     QUERY_PARAM_LOSS = 32,
     BODY_FIELD_LOSS = 33,

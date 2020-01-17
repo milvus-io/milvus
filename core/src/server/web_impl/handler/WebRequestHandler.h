@@ -84,7 +84,7 @@ class WebRequestHandler {
 
  protected:
     Status
-    GetTaleInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
+    GetTableInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
