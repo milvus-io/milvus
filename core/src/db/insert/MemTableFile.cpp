@@ -89,24 +89,6 @@ MemTableFile::Add(const VectorSourcePtr& source) {
 
 Status
 MemTableFile::Delete(segment::doc_id_t doc_id) {
-    // Use bloom filter to check whether the id is present in this table file
-    //    std::string segment_dir;
-    //    utils::GetParentPath(table_file_schema_.location_, segment_dir);
-    //    segment::SegmentReader segment_reader(segment_dir);
-    //    segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    //    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
-    //    if (!id_bloom_filter_ptr->Check(doc_id)) {
-    //        return Status::OK();
-    //    }
-
-    // TODO(zhiru): need to know the type of vector we want to delete from meta (cache). Hard code for now
-    //    int vector_type_size;
-    //    if (server::ValidationUtil::IsBinaryMetricType(table_file_schema_.metric_type_)) {
-    //        vector_type_size = sizeof(uint8_t);
-    //    } else {
-    //        vector_type_size = sizeof(float);
-    //    }
-
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
