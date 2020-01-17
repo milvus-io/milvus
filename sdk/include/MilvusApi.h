@@ -268,7 +268,7 @@ class Connection {
      *
      * @param table_name, target table's name.
      * @param partition_tags, target partitions, keep empty if no partition.
-     * @param query_record_array, all vector are going to be queried.
+     * @param query_record_array, vectors to be queried.
      * @param query_range_array, [deprecated] time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
      * @param nprobe, the number of centroids choose to search.
@@ -280,6 +280,25 @@ class Connection {
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
            const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
+
+    /**
+     * @brief Search vector by ID
+     *
+     * This method is used to query vector in table.
+     *
+     * @param table_name, target table's name.
+     * @param partition_tags, target partitions, keep empty if no partition.
+     * @param query_id_array, vector ids to be queried.
+     * @param topk, how many similarity vectors will be searched.
+     * @param nprobe, the number of centroids choose to search.
+     * @param topk_query_result_array, result array.
+     *
+     * @return Indicate if query is successful.
+     */
+    virtual Status
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
+               const std::vector<int64_t>& query_id_array, int64_t topk,
+               int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show table description
@@ -361,17 +380,17 @@ class Connection {
 
     /**
      * [deprecated]
-     * @brief delete tables by date range
+     * @brief delete tables by vector id
      *
      * This method is used to delete table data by date range.
      *
      * @param table_name, target table's name.
-     * @param Range, table range to delete.
+     * @param id_array, vector ids to deleted.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteByDate(const std::string& table_name, const Range& range) = 0;
+    DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief preload table
@@ -474,6 +493,28 @@ class Connection {
      */
     virtual Status
     SetConfig(const std::string& node_name, const std::string& value) const = 0;
+
+    /**
+     * @brief flush table buffer into storage
+     *
+     * This method is used to flush table buffer into storage
+     *
+     * @param table_name, target table's name.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    FlushTable(const std::string& table_name) = 0;
+
+    /**
+     * @brief flush all buffer into storage
+     *
+     * This method is used to all table buffer into storage
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    Flush() = 0;
 };
 
 }  // namespace milvus

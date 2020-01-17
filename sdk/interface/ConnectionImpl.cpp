@@ -97,6 +97,13 @@ ConnectionImpl::Search(const std::string& table_name, const std::vector<std::str
 }
 
 Status
+ConnectionImpl::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
+                           const std::vector<int64_t>& query_id_array, int64_t topk,
+                           int64_t nprobe, TopKQueryResult& topk_query_result) {
+    return client_proxy_->SearchByID(table_name, partition_tags, query_id_array, topk, nprobe, topk_query_result);
+}
+
+Status
 ConnectionImpl::DescribeTable(const std::string& table_name, TableSchema& table_schema) {
     return client_proxy_->DescribeTable(table_name, table_schema);
 }
@@ -127,8 +134,8 @@ ConnectionImpl::DumpTaskTables() const {
 }
 
 Status
-ConnectionImpl::DeleteByDate(const std::string& table_name, const Range& range) {
-    return client_proxy_->DeleteByDate(table_name, range);
+ConnectionImpl::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) {
+    return client_proxy_->DeleteByID(table_name, id_array);
 }
 
 Status
@@ -170,4 +177,15 @@ Status
 ConnectionImpl::SetConfig(const std::string& node_name, const std::string& value) const {
     return client_proxy_->SetConfig(node_name, value);
 }
+
+Status
+ConnectionImpl::FlushTable(const std::string& Status) {
+    return client_proxy_->FlushTable(Status);
+}
+
+Status
+ConnectionImpl::Flush() {
+    return client_proxy_->Flush();
+}
+
 }  // namespace milvus

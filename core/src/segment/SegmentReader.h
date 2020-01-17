@@ -17,7 +17,9 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "segment/Types.h"
 #include "store/Directory.h"

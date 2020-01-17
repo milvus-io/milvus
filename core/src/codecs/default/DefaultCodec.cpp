@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "DefaultCodec.h"
+#include "codecs/default/DefaultCodec.h"
 
 #include <memory>
 

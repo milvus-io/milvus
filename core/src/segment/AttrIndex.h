@@ -17,12 +17,15 @@
 
 #pragma once
 
+#include <string>
+#include <memory>
+
 namespace milvus {
 namespace segment {
 
 class AttrIndex {
  public:
-    AttrIndex(AttrIndexWrapper attr_index_wrapper);
+    explicit AttrIndex(AttrIndexWrapper attr_index_wrapper);
 
     void
     Get(AttrIndexWrapper &attr_index_wrapper);

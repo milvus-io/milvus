@@ -17,17 +17,29 @@
 
 #pragma once
 
-#include <string>
-#include <unordered_map>
+#include "BaseRequest.h"
 
-#include "Attr.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
-namespace segment {
+namespace server {
 
-struct Attrs {
-    std::unordered_map<std::string, AttrPtr> attrs;
+class FlushRequest : public BaseRequest {
+ public:
+    static BaseRequestPtr
+    Create(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names);
+
+ protected:
+    FlushRequest(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names);
+
+    Status
+    OnExecute() override;
+
+ private:
+    std::vector<std::string> table_names_;
 };
 
-}  // namespace segment
+}  // namespace server
 }  // namespace milvus
