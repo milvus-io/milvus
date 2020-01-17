@@ -84,6 +84,7 @@ SearchByIDRequest::OnExecute() {
         }
 
         // Check whether GPU search resource is enabled
+#ifdef MILVUS_GPU_VERSION
         Config& config = Config::GetInstance();
         bool gpu_enable;
         config.GetGpuResourceConfigEnable(gpu_enable);
@@ -96,6 +97,7 @@ SearchByIDRequest::OnExecute() {
                 return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
             }
         }
+#endif
 
         // Check table's index type supports search by id
         if (table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
