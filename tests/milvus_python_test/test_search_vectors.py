@@ -9,7 +9,7 @@ import logging
 from time import sleep
 from multiprocessing import Process
 import numpy
-from milvus import Milvus, IndexType, MetricType
+from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
@@ -743,7 +743,7 @@ class TestSearchBase:
              'index_type': IndexType.FLAT,
              'store_raw_vector': False}
         # create table
-        milvus = Milvus()
+        milvus = get_milvus()
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vectors, ids = self.init_data(milvus, table, nb=nb)
@@ -756,7 +756,7 @@ class TestSearchBase:
                 assert result[i][0].distance == 0.0
 
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=search, args=(milvus, ))
             processes.append(p)
@@ -784,7 +784,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create table
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             milvus.create_table(param)
             status, ids = milvus.add_vectors(table, vectors)
@@ -826,7 +826,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create table
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             milvus.create_table(param)
             status, ids = milvus.add_vectors(table, vectors)
