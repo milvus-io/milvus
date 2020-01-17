@@ -20,8 +20,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include "db/meta/MetaTypes.h"
 #include "db/Types.h"
+#include "db/meta/MetaTypes.h"
 
 namespace milvus {
 namespace engine {
@@ -61,6 +61,6 @@ struct MXLogConfiguration {
     std::string mxlog_path;
 };
 
-} // namespace wal
-} // namespace engine
-} // namespace milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

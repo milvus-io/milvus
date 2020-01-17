@@ -34,8 +34,8 @@
 #include "server/delivery/request/HasTableRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadTableRequest.h"
-#include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
+#include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
 #include "server/delivery/request/ShowTablesRequest.h"
 
@@ -109,17 +109,12 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
     return request_ptr->status();
 }
 
-
 Status
-RequestHandler::SearchByID(const std::shared_ptr<Context>& context,
-                           const std::string& table_name,
-                           const std::vector<int64_t>& vector_ids,
-                           int64_t topk,
-                           int64_t nprobe,
-                           const std::vector<std::string>& partition_list,
-                           TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = SearchByIDRequest::Create(context, table_name, vector_ids, topk, nprobe,
-                                                           partition_list, result);
+RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name,
+                           const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
+                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
+    BaseRequestPtr request_ptr =
+        SearchByIDRequest::Create(context, table_name, vector_ids, topk, nprobe, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -151,9 +146,8 @@ RequestHandler::Cmd(const std::shared_ptr<Context>& context, const std::string& 
 }
 
 Status
-RequestHandler::DeleteByID(const std::shared_ptr<Context>& context,
-           const std::string& table_name,
-           const std::vector<int64_t>& vector_ids) {
+RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::string& table_name,
+                           const std::vector<int64_t>& vector_ids) {
     BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, table_name, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 

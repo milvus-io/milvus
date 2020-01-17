@@ -113,6 +113,22 @@ CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::RowRecor
     vectors.id_array_.swap(id_array);
 }
 
+void
+ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult* response) {
+    if (!response) {
+        return;
+    }
+
+    response->set_row_num(result.row_num_);
+
+    response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
+    memcpy(response->mutable_ids()->mutable_data(), result.id_list_.data(), result.id_list_.size() * sizeof(int64_t));
+
+    response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
+    memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
+           result.distance_list_.size() * sizeof(float));
+}
+
 }  // namespace
 
 GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
@@ -294,14 +310,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
                                             request->topk(), request->nprobe(), partitions, file_ids, result);
 
     // step 4: construct and return result
-    response->set_row_num(result.row_num_);
-
-    response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
-    memcpy(response->mutable_ids()->mutable_data(), result.id_list_.data(), result.id_list_.size() * sizeof(int64_t));
-
-    response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
-           result.distance_list_.size() * sizeof(float));
+    ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
 
@@ -309,10 +318,30 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
-GrpcRequestHandler::SearchByID(::grpc::ServerContext* context,
-                               const ::milvus::grpc::SearchByIDParam* request,
+GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
                                ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
+    // step 1: prepare id array
+    std::vector<int64_t> vector_ids;
+    for (int i = 0; i < request->id_array_size(); i++) {
+        vector_ids.push_back(request->id_array(i));
+    }
+
+    // step 2: partition tags
+    std::vector<std::string> partitions;
+    for (auto& partition : request->partition_tag_array()) {
+        partitions.emplace_back(partition);
+    }
+
+    // step 3: search vectors
+    TopKQueryResult result;
+    Status status = request_handler_.SearchByID(context_map_[context], request->table_name(), vector_ids,
+                                                request->topk(), request->nprobe(), partitions, result);
+
+    // step 4: construct and return result
+    ConstructResults(result, response);
+
+    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
 }
@@ -354,14 +383,8 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
                                 search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
 
     // step 5: construct and return result
-    response->set_row_num(result.row_num_);
+    ConstructResults(result, response);
 
-    response->mutable_ids()->Resize(static_cast<int>(result.id_list_.size()), 0);
-    memcpy(response->mutable_ids()->mutable_data(), result.id_list_.data(), result.id_list_.size() * sizeof(int64_t));
-
-    response->mutable_distances()->Resize(static_cast<int>(result.distance_list_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(), result.distance_list_.data(),
-           result.distance_list_.size() * sizeof(float));
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -424,11 +447,19 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 }
 
 ::grpc::Status
-GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context,
-           const ::milvus::grpc::DeleteByIDParam* request,
-           ::milvus::grpc::Status* response) {
+GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByIDParam* request,
+                               ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
+    // step 1: prepare id array
+    std::vector<int64_t> vector_ids;
+    for (int i = 0; i < request->id_array_size(); i++) {
+        vector_ids.push_back(request->id_array(i));
+    }
+
+    // step 2: delete vector
+    Status status = request_handler_.DeleteByID(context_map_[context], request->table_name(), vector_ids);
+    SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
 }
@@ -526,8 +557,7 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
 }
 
 ::grpc::Status
-GrpcRequestHandler::Flush(::grpc::ServerContext* context,
-                          const ::milvus::grpc::FlushParam* request,
+GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request,
                           ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 

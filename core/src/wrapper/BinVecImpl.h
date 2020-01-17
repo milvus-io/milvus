@@ -54,8 +54,7 @@ class BinVecImpl : public VecIndexImpl {
     //               const Config& cfg) override;
 
     Status
-    SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids,
-               const Config& cfg) override;
+    SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg) override;
 
     VecIndexPtr
     CopyToCpu(const Config& cfg) override;

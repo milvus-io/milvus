@@ -29,13 +29,11 @@ namespace server {
 class DeleteByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context,
-           const std::string& table_name,
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
            const std::vector<int64_t>& vector_ids);
 
  protected:
-    DeleteByIDRequest(const std::shared_ptr<Context>& context,
-                      const std::string& table_name,
+    DeleteByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                       const std::vector<int64_t>& vector_ids);
 
     Status

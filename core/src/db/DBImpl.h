@@ -274,7 +274,7 @@ class DBImpl : public DB {
     std::mutex compact_result_mutex_;
     std::list<std::future<void>> compact_thread_results_;
     std::set<std::string> compact_table_ids_;
-//    std::mutex compact_table_ids_mutex_;
+    //    std::mutex compact_table_ids_mutex_;
 
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;

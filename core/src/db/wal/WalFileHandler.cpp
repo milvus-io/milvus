@@ -15,16 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "db/wal/WalFileHandler.h"
 #include <sys/stat.h>
 #include <unistd.h>
-#include "db/wal/WalFileHandler.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path)
-    : file_path_(mxlog_path), file_size_(0) {
+MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path) : file_path_(mxlog_path), file_size_(0) {
 }
 
 MXLogFileHandler::~MXLogFileHandler() {
@@ -35,7 +34,7 @@ bool
 MXLogFileHandler::OpenFile() {
     p_file_ = fopen((file_path_ + file_name_).c_str(), file_mode_.c_str());
     if (!p_file_) {
-        //todo: log error
+        // todo: log error
         return false;
     }
     file_size_ = 0;
@@ -44,9 +43,7 @@ MXLogFileHandler::OpenFile() {
 }
 
 bool
-MXLogFileHandler::Load(char* buf,
-                       uint32_t data_offset,
-                       uint32_t data_size) {
+MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
     if (!IsOpen()) {
         if (!OpenFile())
             return false;
@@ -65,9 +62,7 @@ MXLogFileHandler::Load(char* buf,
 }
 
 bool
-MXLogFileHandler::Write(char* buf,
-                        uint32_t data_size,
-                        bool is_sync) {
+MXLogFileHandler::Write(char* buf, uint32_t data_size, bool is_sync) {
     if (!IsOpen()) {
         if (!OpenFile())
             return false;
@@ -151,6 +146,6 @@ MXLogFileHandler::SetFilePath(const std::string& file_path) {
     file_path_ = file_path;
 }
 
-} // namespace wal
-} // namespace engine
-} // namespace milvus
+}  // namespace wal
+}  // namespace engine
+}  // namespace milvus

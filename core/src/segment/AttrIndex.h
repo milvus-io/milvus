@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include <string>
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace segment {
@@ -28,7 +28,7 @@ class AttrIndex {
     explicit AttrIndex(AttrIndexWrapper attr_index_wrapper);
 
     void
-    Get(AttrIndexWrapper &attr_index_wrapper);
+    Get(AttrIndexWrapper& attr_index_wrapper);
 
     // No copy and move
     AttrIndex(const AttrIndex&) = delete;
