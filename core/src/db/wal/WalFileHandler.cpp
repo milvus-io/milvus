@@ -17,15 +17,14 @@
 
 #include <sys/stat.h>
 #include <unistd.h>
-#include "WalFileHandler.h"
+#include "db/wal/WalFileHandler.h"
 
 namespace milvus {
 namespace engine {
 namespace wal {
 
 MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path)
-: file_path_(mxlog_path)
-, file_size_(0) {
+    : file_path_(mxlog_path), file_size_(0) {
 }
 
 MXLogFileHandler::~MXLogFileHandler() {
@@ -45,10 +44,10 @@ MXLogFileHandler::OpenFile() {
 }
 
 bool
-MXLogFileHandler::Load(char *buf,
+MXLogFileHandler::Load(char* buf,
                        uint32_t data_offset,
                        uint32_t data_size) {
-    if(!IsOpen()) {
+    if (!IsOpen()) {
         if (!OpenFile())
             return false;
     }
@@ -66,10 +65,10 @@ MXLogFileHandler::Load(char *buf,
 }
 
 bool
-MXLogFileHandler::Write(char *buf,
+MXLogFileHandler::Write(char* buf,
                         uint32_t data_size,
                         bool is_sync) {
-    if(!IsOpen()) {
+    if (!IsOpen()) {
         if (!OpenFile())
             return false;
     }
@@ -96,7 +95,6 @@ MXLogFileHandler::CloseFile() {
     return rst;
 }
 
-
 std::string
 MXLogFileHandler::GetFilePath() {
     return file_path_;
@@ -119,7 +117,7 @@ MXLogFileHandler::GetFileSize() {
 
     struct stat statbuf;
     if (0 == stat((file_path_ + file_name_).c_str(), &statbuf)) {
-        file_size_ = (uint32_t) statbuf.st_size;
+        file_size_ = (uint32_t)statbuf.st_size;
     }
 
     return file_size_;
@@ -153,6 +151,6 @@ MXLogFileHandler::SetFilePath(const std::string& file_path) {
     file_path_ = file_path;
 }
 
-} // wal
-} // engine
-} // milvus
+} // namespace wal
+} // namespace engine
+} // namespace milvus

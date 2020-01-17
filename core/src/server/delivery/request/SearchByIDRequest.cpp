@@ -16,20 +16,21 @@
 // under the License.
 
 #include "server/delivery/request/SearchByIDRequest.h"
+
+#include <memory>
+
+#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
-#include <memory>
-
 namespace milvus {
 namespace server {
 
 SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     const std::vector<int64_t>& vector_ids, int64_t topk,
-                                     int64_t nprobe, const std::vector<std::string>& partition_list,
-                              TopKQueryResult& result)
+                                     const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
+                                     const std::vector<std::string>& partition_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
       vector_ids_(vector_ids),
@@ -41,10 +42,10 @@ SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, co
 
 BaseRequestPtr
 SearchByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                          const std::vector<int64_t>& vector_ids, int64_t topk,
-                          int64_t nprobe, const std::vector<std::string>& partition_list, TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchByIDRequest(context, table_name, vector_ids, topk, nprobe,
-                                                              partition_list, result));
+                          const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
+                          const std::vector<std::string>& partition_list, TopKQueryResult& result) {
+    return std::shared_ptr<BaseRequest>(
+        new SearchByIDRequest(context, table_name, vector_ids, topk, nprobe, partition_list, result));
 }
 
 Status
@@ -82,6 +83,32 @@ SearchByIDRequest::OnExecute() {
             }
         }
 
+        // Check whether GPU search resource is enabled
+        Config& config = Config::GetInstance();
+        bool gpu_enable;
+        config.GetGpuResourceConfigEnable(gpu_enable);
+        if (gpu_enable) {
+            std::vector<int64_t> search_resources;
+            config.GetGpuResourceConfigSearchResources(search_resources);
+            if (!search_resources.empty()) {
+                std::string err_msg = "SearchByID cannot be executed on GPU";
+                SERVER_LOG_ERROR << err_msg;
+                return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
+            }
+        }
+
+        // Check table's index type supports search by id
+        if (table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
+            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+            std::string err_msg =
+                "Index type " + std::to_string(table_info.engine_type_) + " does not support SearchByID operation";
+            SERVER_LOG_ERROR << err_msg;
+            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
+        }
+
         // step 4: check search parameter
         status = ValidationUtil::ValidateSearchTopk(topk_, table_info);
         if (!status.ok()) {
@@ -107,8 +134,8 @@ SearchByIDRequest::OnExecute() {
 
         pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, nprobe_,
-                                                vector_ids_, result_ids, result_distances);
+        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, nprobe_, vector_ids_,
+                                            result_ids, result_distances);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
