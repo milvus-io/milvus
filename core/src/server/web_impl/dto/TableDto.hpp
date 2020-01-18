@@ -59,14 +59,7 @@ class TableListFieldsDto : public OObject {
     DTO_INIT(TableListFieldsDto, Object)
 
     DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, tables);
-    DTO_FIELD(Int64, count);
-};
-
-class TablesResponseDto : public OObject {
-    DTO_INIT(TablesResponseDto, Object)
-
-    DTO_FIELD(TableListFieldsDto::ObjectWrapper, tables_fields);
-    DTO_FIELD(Int64, page_num);
+    DTO_FIELD(Int64, count) = 0;
 };
 
 #include OATPP_CODEGEN_END(DTO)

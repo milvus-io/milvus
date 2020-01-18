@@ -47,8 +47,19 @@ DropPartitionRequest::OnExecute() {
     std::string table_name = table_name_;
     std::string partition_name = partition_name_;
     std::string partition_tag = tag_;
+
+    bool exists;
+    auto status = DBWrapper::DB()->HasTable(table_name, exists);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (!exists) {
+        return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+    }
+
     if (!partition_name.empty()) {
-        auto status = ValidationUtil::ValidateTableName(partition_name);
+        status = ValidationUtil::ValidateTableName(partition_name);
         if (!status.ok()) {
             return status;
         }
@@ -68,7 +79,7 @@ DropPartitionRequest::OnExecute() {
 
         return DBWrapper::DB()->DropPartition(partition_name);
     } else {
-        auto status = ValidationUtil::ValidateTableName(table_name);
+        status = ValidationUtil::ValidateTableName(table_name);
         if (!status.ok()) {
             return status;
         }
