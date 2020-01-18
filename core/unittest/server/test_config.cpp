@@ -463,10 +463,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == search_resources);
-//    search_resources = "gpu0, gpu0";
-//    set_cmd = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, search_resources);
-//    s = config.ProcessConfigCli(dummy, set_cmd);
-//    ASSERT_FALSE(s.ok());
 
     std::string build_index_resources = "gpu0";
     get_cmd = gen_get_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
@@ -477,11 +473,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == build_index_resources);
-//    build_index_resources = "gpu0, gpu0";
-//    set_cmd =
-//        gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources);
-//    s = config.ProcessConfigCli(dummy, set_cmd);
-//    ASSERT_FALSE(s.ok());
 #endif
 }
 
