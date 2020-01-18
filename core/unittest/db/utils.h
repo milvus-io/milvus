@@ -125,4 +125,4 @@ class MemManagerTest2 : public DBTest {};
 class DeleteTest : public DBTest {};
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class SearchByIdsTest : public DBTest {};
+class SearchByIdTest : public DBTest {};
