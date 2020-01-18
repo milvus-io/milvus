@@ -309,6 +309,9 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
     }
     try {
         int32_t value = std::stoi(str);
+        if (value < 0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Negative number");
+        }
     } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
@@ -330,6 +333,9 @@ Status
 ValidationUtil::ValidateStringIsFloat(const std::string& str) {
     try {
         float val = std::stof(str);
+        if (val < 0.0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Negative float: " + str);
+        }
     } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid float: " + str);
     }
