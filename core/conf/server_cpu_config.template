@@ -48,17 +48,12 @@ server_config:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# insert_buffer_size   | Buffer size used for data insertion.                       | Integer    | 1 (GB)          |
-#                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
-#                      | must be less than system memory size.                      |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
 #                      | loaded when Milvus server starts up.                       |            |                 |
 #                      | '*' means preload all existing tables.                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: sqlite://:@:/
-  insert_buffer_size: 1
   preload_table:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -70,27 +65,27 @@ db_config:
 # secondary_path       | A semicolon-separated list of secondary directories used   | Path       |                 |
 #                      | to save vector data and index data.                        |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_enable         | Enable MinIO storage or not.                               | Boolean    | false           |
+# s3_enable            | Enable Simple Storage Service or not.                      | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_address        | MinIO storage service IP address.                          | IP         | 127.0.0.1       |
+# s3_address           | Simple Storage Service IP address.                         | IP         | 127.0.0.1       |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_port           | MinIO storage service port. Port range (1024, 65535)       | Integer    | 9000            |
+# s3_port              | Simple Storage Service port. Port range (1024, 65535)      | Integer    | 9000            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_access_key     | MinIO storage service access key.                          | String     | minioadmin      |
+# s3_access_key        | Simple Storage Service access key.                         | String     | minioadmin      |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_secret_key     | MinIO storage service secret key.                          | String     | minioadmin      |
+# s3_secret_key        | Simple Storage Service secret key.                         | String     | minioadmin      |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# minio_bucket         | MinIO storage service bucket name.                         | String     | milvus-bucket   |
+# s3_bucket            | Simple Storage Service bucket name.                        | String     | milvus-bucket   |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 storage_config:
   primary_path: @MILVUS_DB_PATH@
   secondary_path:
-  minio_enable: false
-  minio_address: 127.0.0.1
-  minio_port: 9000
-  minio_access_key: minioadmin
-  minio_secret_key: minioadmin
-  minio_bucket: milvus-bucket
+  s3_enable: false
+  s3_address: 127.0.0.1
+  s3_port: 9000
+  s3_access_key: minioadmin
+  s3_secret_key: minioadmin
+  s3_bucket: milvus-bucket
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |
@@ -113,12 +108,17 @@ metric_config:
 #                      | query. The sum of 'cpu_cache_capacity' and                 |            |                 |
 #                      | 'insert_buffer_size' must be less than system memory size. |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# insert_buffer_size   | Buffer size used for data insertion.                       | Integer    | 1 (GB)          |
+#                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
+#                      | must be less than system memory size.                      |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # cache_insert_data    | Whether to load inserted data into cache immediately for   | Boolean    | false           |
 #                      | hot query. If want to simultaneously insert and query      |            |                 |
 #                      | vectors, it's recommended to enable this config.           |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 cache_config:
   cpu_cache_capacity: 4
+  insert_buffer_size: 1
   cache_insert_data: false
 
 #----------------------+------------------------------------------------------------+------------+-----------------+

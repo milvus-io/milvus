@@ -1,15 +1,12 @@
 import random
 import pdb
-
 import pytest
 import logging
 import itertools
-
 from time import sleep
 from multiprocessing import Process
-from milvus import Milvus
-from utils import *
 from milvus import IndexType, MetricType
+from utils import *
 
 dim = 128
 index_file_size = 10
@@ -209,7 +206,7 @@ class TestTableCount:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=rows_count, args=(milvus, ))
             processes.append(p)
@@ -354,7 +351,7 @@ class TestTableCountIP:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=rows_count, args=(milvus,))
             processes.append(p)
