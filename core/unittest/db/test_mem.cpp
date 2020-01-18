@@ -105,12 +105,12 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
     auto current_num_vectors_added = source.GetNumVectorsAdded();
     ASSERT_EQ(current_num_vectors_added, 100);
 
-    vector_ids = source.GetVectorIds();
-    ASSERT_EQ(vector_ids.size(), 100);
+    vectors.id_array_ = source.GetVectorIds();
+    ASSERT_EQ(vectors.id_array_.size(), 100);
 
     fiu_init(0);
     FIU_ENABLE_FIU("VecIndexImpl.Add.throw_knowhere_exception");
-    status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added, vector_ids);
+    status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added);
     ASSERT_FALSE(status.ok());
     fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
 }
@@ -131,7 +131,6 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     milvus::engine::VectorSourcePtr source = std::make_shared<milvus::engine::VectorSource>(vectors_100);
 
-    milvus::engine::IDNumbers vector_ids;
     status = mem_table_file.Add(source);
     ASSERT_TRUE(status.ok());
 
@@ -146,7 +145,6 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     milvus::engine::VectorSourcePtr source_128M =
         std::make_shared<milvus::engine::VectorSource>(vectors_128M);
-    vector_ids.clear();
     status = mem_table_file.Add(source_128M);
 
     ASSERT_EQ(source_128M->GetVectorIds().size(), n_max - n_100);
@@ -154,8 +152,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     ASSERT_TRUE(mem_table_file.IsFull());
 
     //mem_table_file has no memory left = 0
-    vector_ids.clear();
-    status = mem_table_file.Add(source_128M, vector_ids);
+    status = mem_table_file.Add(source_128M);
     ASSERT_TRUE(status.ok());
 
     {
@@ -164,7 +161,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
         milvus::engine::MemTableFile mem_table_file_1(GetTableName(), impl_, options);
         fiu_disable("SqliteMetaImpl.CreateTableFile.throw_exception");
 
-        status = mem_table_file_1.Add(source, vector_ids);
+        status = mem_table_file_1.Add(source);
         ASSERT_FALSE(status.ok());
         ASSERT_EQ(status.code(), milvus::DB_ERROR);
     }
@@ -198,7 +195,6 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
 
     milvus::engine::MemTable mem_table(GetTableName(), impl_, options);
 
-    milvus::engine::IDNumbers vector_ids;
     status = mem_table.Add(source_100);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(source_100->GetVectorIds().size(), 100);
@@ -212,7 +208,6 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     milvus::engine::VectorsData vectors_128M;
     BuildVectors(n_max, vectors_128M);
 
-    vector_ids.clear();
     milvus::engine::VectorSourcePtr source_128M =
         std::make_shared<milvus::engine::VectorSource>(vectors_128M);
     status = mem_table.Add(source_128M);
@@ -231,7 +226,6 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
 
     milvus::engine::VectorSourcePtr source_1G = std::make_shared<milvus::engine::VectorSource>(vectors_1G);
 
-    vector_ids.clear();
     status = mem_table.Add(source_1G);
     ASSERT_TRUE(status.ok());
 
@@ -243,18 +237,17 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     status = mem_table.Serialize();
     ASSERT_TRUE(status.ok());
 
-    std::vector<float> vectors_10;
+    milvus::engine::VectorsData vectors_10;
     BuildVectors(10, vectors_10);
-    milvus::engine::VectorSourcePtr source_10 = std::make_shared<milvus::engine::VectorSource>(10, vectors_10.data());
-    vector_ids.clear();
+    milvus::engine::VectorSourcePtr source_10 = std::make_shared<milvus::engine::VectorSource>(vectors_10);
 
     fiu_init(0);
     FIU_ENABLE_FIU("VecIndexImpl.Add.throw_knowhere_exception");
-    status = mem_table.Add(source_10, vector_ids);
+    status = mem_table.Add(source_10);
     ASSERT_FALSE(status.ok());
     fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
 
-    status = mem_table.Add(source_10, vector_ids);
+    status = mem_table.Add(source_10);
     ASSERT_TRUE(status.ok());
 
     FIU_ENABLE_FIU("SqliteMetaImpl.UpdateTableFile.throw_exception");
@@ -347,11 +340,10 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
         options.insert_buffer_size_ = 1 * milvus::engine::M;
         auto db = milvus::engine::DBFactory::Build(options);
         int64_t nb = 40960;
-        milvus::engine::IDNumbers vector_ids;
-        std::vector<float> xb;
+        milvus::engine::VectorsData xb;
         for (int i = 0; i < 10; ++i) {
             BuildVectors(nb, xb);
-            stat = db->InsertVectors(GetTableName(), "", nb, xb.data(), vector_ids);
+            stat = db->InsertVectors(GetTableName(), "", xb);
             ASSERT_TRUE(stat.ok());
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
@@ -361,9 +353,8 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
         milvus::engine::meta::TableSchema table_info;
         table_info.dimension_ = 0;
         table_info.table_id_ = "zero_dim";
-        xb.clear();
-        vector_ids.clear();
-        stat = db->InsertVectors("zero_dim","",0,xb.data(),vector_ids);
+        xb.float_data_.clear();
+        stat = db->InsertVectors("zero_dim", "", xb);
     }
 }
 

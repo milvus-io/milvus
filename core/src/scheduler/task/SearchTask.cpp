@@ -233,9 +233,7 @@ XSearchTask::Execute() {
                 s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
                                           output_ids.data(), hybrid);
             }
-//            Status s =
-//                index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
-//            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
+            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
 
             if (!s.ok()) {
                 search_job->GetStatus() = s;

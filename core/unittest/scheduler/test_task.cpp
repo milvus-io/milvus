@@ -143,10 +143,10 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
 
     // search task
-    float vector;
-    auto search_job = std::make_shared<SearchJob>(dummy_context, 1, 1, 1, &vector);
+    engine::VectorsData vector;
+    auto search_job = std::make_shared<SearchJob>(dummy_context, 1, 1, vector);
     file->metric_type_ = static_cast<int>(MetricType::IP);
-    file->engine_type_= static_cast<int>(engine::EngineType::FAISS_IVFSQ8H);
+    file->engine_type_ = static_cast<int>(engine::EngineType::FAISS_IVFSQ8H);
     opentracing::mocktracer::MockTracerOptions tracer_options;
     auto mock_tracer =
         std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
@@ -154,8 +154,8 @@ TEST(TaskTest, TEST_TASK) {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context->SetTraceContext(trace_context);
     XSearchTask search_task(dummy_context, file, label);
-    search_task.job_=search_job;
-    std::string cpu_resouce_name ="cpu_name1";
+    search_task.job_ = search_job;
+    std::string cpu_resouce_name = "cpu_name1";
     std::vector<std::string> path = {cpu_resouce_name};
     search_task.task_path_ = Path(path, 0);
     ResMgrInst::GetInstance()->Add(std::make_shared<CpuResource>(cpu_resouce_name, 1, true));

@@ -1691,7 +1691,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                         ++backup_count;
                         break;
                     default:
-                        return Status(DB_ERROR, "Unknown file type.");
+                        break;
                 }
             }
 
@@ -1720,7 +1720,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
                     default:
-                        return Status(DB_ERROR, "Unknown file type!");
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;

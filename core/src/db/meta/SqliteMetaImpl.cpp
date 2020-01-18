@@ -1194,8 +1194,7 @@ SqliteMetaImpl::FilesByType(const std::string& table_id,
                     case (int)TableFileSchema::BACKUP:
                         ++backup_count;
                         break;
-                    default:
-                        return Status(DB_ERROR, "Unknown file type.");
+                    default:break;
                 }
 
                 table_files.emplace_back(file_schema);
@@ -1222,8 +1221,7 @@ SqliteMetaImpl::FilesByType(const std::string& table_id,
                         break;
                     case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:
-                        return Status(DB_ERROR, "Unknown file type!");
+                    default:break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;

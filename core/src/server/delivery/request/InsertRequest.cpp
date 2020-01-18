@@ -48,7 +48,7 @@ InsertRequest::OnExecute() {
     try {
         int64_t vector_count = vectors_data_.vector_count_;
         fiu_do_on("InsertRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(record_size_) +
+        std::string hdr = "InsertRequest(table=" + table_name_ + ", n=" + std::to_string(vector_count) +
                           ", partition_tag=" + partition_tag_ + ")";
         TimeRecorder rc(hdr);
 
@@ -62,7 +62,7 @@ InsertRequest::OnExecute() {
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
-        fiu_do_on("InsertRequest.OnExecute.id_array_error", id_array_.resize(record_size_ + 1));
+        fiu_do_on("InsertRequest.OnExecute.id_array_error", vectors_data_.id_array_.resize(vector_count + 1));
         if (!vectors_data_.id_array_.empty()) {
             if (vectors_data_.id_array_.size() != vector_count) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID,

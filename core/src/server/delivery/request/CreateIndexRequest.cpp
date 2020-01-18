@@ -95,12 +95,9 @@ CreateIndexRequest::OnExecute() {
         bool enable_gpu = false;
         server::Config& config = server::Config::GetInstance();
         s = config.GetGpuResourceConfigEnable(enable_gpu);
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
         fiu_do_on("CreateIndexRequest.OnExecute.ip_meteric",
                   table_info.metric_type_ = static_cast<int>(engine::MetricType::IP));
-        if (s.ok() && index_type_ == (int)engine::EngineType::FAISS_PQ &&
+
         if (s.ok() && adapter_index_type == (int)engine::EngineType::FAISS_PQ &&
             table_info.metric_type_ == (int)engine::MetricType::IP) {
             return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");

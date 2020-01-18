@@ -120,7 +120,8 @@ SearchRequest::OnExecute() {
             }
         } else {
             // check prepared float data
-            fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array", record_size_ = data_list_.size() + 1);
+            fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array",
+                      vector_count = vectors_data_.float_data_.size() + 1);
             if (vectors_data_.float_data_.size() % vector_count != 0) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                               "The vector dimension must be equal to the table dimension.");
@@ -148,7 +149,8 @@ SearchRequest::OnExecute() {
 
         if (file_id_list_.empty()) {
             status = ValidationUtil::ValidatePartitionTags(partition_list_);
-            fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+            fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags",
+                      status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
             if (!status.ok()) {
                 return status;
             }

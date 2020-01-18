@@ -41,8 +41,8 @@ TEST(JobTest, TestJob) {
     auto delete_ptr = std::make_shared<DeleteJob>("table_id", nullptr, 1);
     delete_ptr->Dump();
 
-    float vectors;
-    auto search_ptr = std::make_shared<SearchJob>(nullptr, 1, 1, 1, &vectors);
+    engine::VectorsData vectors;
+    auto search_ptr = std::make_shared<SearchJob>(nullptr, 1, 1, vectors);
     search_ptr->Dump();
     search_ptr->AddIndexFile(nullptr);
 }
