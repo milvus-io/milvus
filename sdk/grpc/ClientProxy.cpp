@@ -16,11 +16,12 @@
 // under the License.
 
 #include "grpc/ClientProxy.h"
-#include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
 //#define GRPC_MULTIPLE_THREAD;
 #define MILVUS_SDK_VERSION "0.6.0";
@@ -278,9 +279,8 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
 }
 
 Status
-ClientProxy::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                        const std::vector<int64_t>& query_id_array, int64_t topk,
-                        int64_t nprobe, TopKQueryResult& topk_query_result) {
+ClientProxy::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
+                        int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
     try {
         // step 1: convert vector id array
         ::milvus::grpc::SearchByIDParam search_param;
@@ -290,9 +290,7 @@ ClientProxy::SearchByID(const std::string& table_name, const std::vector<std::st
         for (auto& tag : partition_tags) {
             search_param.add_partition_tag_array(tag);
         }
-        for (auto& id : query_id_array) {
-            search_param.add_id_array(id);
-        }
+        search_param.set_id(query_id);
 
         // step 2: search vectors
         ::milvus::grpc::TopKQueryResult result;

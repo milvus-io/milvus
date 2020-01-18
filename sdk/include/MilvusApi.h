@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "Status.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "Status.h"
 
 /** \brief Milvus SDK namespace
  */
@@ -43,11 +43,11 @@ enum class IndexType {
 };
 
 enum class MetricType {
-    L2 = 1,         // Euclidean Distance
-    IP = 2,         // Cosine Similarity
-    HAMMING = 3,    // Hamming Distance
-    JACCARD = 4,    // Jaccard Distance
-    TANIMOTO = 5,   // Tanimoto Distance
+    L2 = 1,        // Euclidean Distance
+    IP = 2,        // Cosine Similarity
+    HAMMING = 3,   // Hamming Distance
+    JACCARD = 4,   // Jaccard Distance
+    TANIMOTO = 5,  // Tanimoto Distance
 };
 
 /**
@@ -81,7 +81,7 @@ struct Range {
  * @brief Record inserted
  */
 struct RowRecord {
-    std::vector<float> float_data;  ///< Vector raw float data
+    std::vector<float> float_data;     ///< Vector raw float data
     std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
@@ -296,9 +296,8 @@ class Connection {
      * @return Indicate if query is successful.
      */
     virtual Status
-    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
-               const std::vector<int64_t>& query_id_array, int64_t topk,
-               int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
+               int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show table description

@@ -90,6 +90,7 @@ MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, const VectorSou
 
 Status
 MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lock(mutex_);
     MemTablePtr mem = GetMemByTable(table_id);
     mem->SetLSN(lsn);
     auto status = mem->Delete(vector_id);
@@ -98,6 +99,7 @@ MemManagerImpl::DeleteVector(const std::string& table_id, IDNumber vector_id, ui
 
 Status
 MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
+    std::unique_lock<std::mutex> lock(mutex_);
     MemTablePtr mem = GetMemByTable(table_id);
     mem->SetLSN(lsn);
 

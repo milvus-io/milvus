@@ -29,11 +29,11 @@ namespace milvus {
 namespace server {
 
 SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
+                                     int64_t vector_id, int64_t topk, int64_t nprobe,
                                      const std::vector<std::string>& partition_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
-      vector_ids_(vector_ids),
+      vector_id_(vector_id),
       topk_(topk),
       nprobe_(nprobe),
       partition_list_(partition_list),
@@ -41,29 +41,24 @@ SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, co
 }
 
 BaseRequestPtr
-SearchByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                          const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
-                          const std::vector<std::string>& partition_list, TopKQueryResult& result) {
+SearchByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
+                          int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                          TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
-        new SearchByIDRequest(context, table_name, vector_ids, topk, nprobe, partition_list, result));
+        new SearchByIDRequest(context, table_name, vector_id, topk, nprobe, partition_list, result));
 }
 
 Status
 SearchByIDRequest::OnExecute() {
     try {
-        uint64_t vector_count = vector_ids_.size();
         auto pre_query_ctx = context_->Child("Pre query");
 
-        std::string hdr = "SearchByIDRequest(table=" + table_name_ + ", nq=" + std::to_string(vector_count) +
+        std::string hdr = "SearchByIDRequest(table=" + table_name_ + ", id=" + std::to_string(vector_id_) +
                           ", k=" + std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
 
         TimeRecorder rc(hdr);
 
         // step 1: check empty id
-        if (vector_ids_.empty()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector id array is empty. Make sure you have entered vector ids.");
-        }
 
         // step 2: check table name
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -136,7 +131,7 @@ SearchByIDRequest::OnExecute() {
 
         pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, nprobe_, vector_ids_,
+        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, nprobe_, vector_id_,
                                             result_ids, result_distances);
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -155,7 +150,7 @@ SearchByIDRequest::OnExecute() {
         auto post_query_ctx = context_->Child("Constructing result");
 
         // step 7: construct result array
-        result_.row_num_ = vector_count;
+        result_.row_num_ = 1;
         result_.distance_list_ = result_distances;
         result_.id_list_ = result_ids;
 

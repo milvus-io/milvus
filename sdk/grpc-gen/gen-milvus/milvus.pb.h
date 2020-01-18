@@ -2151,23 +2151,12 @@ class SearchByIDParam :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIdArrayFieldNumber = 2,
     kPartitionTagArrayFieldNumber = 5,
     kTableNameFieldNumber = 1,
+    kIdFieldNumber = 2,
     kTopkFieldNumber = 3,
     kNprobeFieldNumber = 4,
   };
-  // repeated int64 id_array = 2;
-  int id_array_size() const;
-  void clear_id_array();
-  ::PROTOBUF_NAMESPACE_ID::int64 id_array(int index) const;
-  void set_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
-  void add_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
-      id_array() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
-      mutable_id_array();
-
   // repeated string partition_tag_array = 5;
   int partition_tag_array_size() const;
   void clear_partition_tag_array();
@@ -2196,6 +2185,11 @@ class SearchByIDParam :
   std::string* release_table_name();
   void set_allocated_table_name(std::string* table_name);
 
+  // int64 id = 2;
+  void clear_id();
+  ::PROTOBUF_NAMESPACE_ID::int64 id() const;
+  void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // int64 topk = 3;
   void clear_topk();
   ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
@@ -2211,10 +2205,9 @@ class SearchByIDParam :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > id_array_;
-  mutable std::atomic<int> _id_array_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tag_array_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr table_name_;
+  ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::int64 topk_;
   ::PROTOBUF_NAMESPACE_ID::int64 nprobe_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -5119,34 +5112,18 @@ inline void SearchByIDParam::set_allocated_table_name(std::string* table_name) {
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.SearchByIDParam.table_name)
 }
 
-// repeated int64 id_array = 2;
-inline int SearchByIDParam::id_array_size() const {
-  return id_array_.size();
+// int64 id = 2;
+inline void SearchByIDParam::clear_id() {
+  id_ = PROTOBUF_LONGLONG(0);
 }
-inline void SearchByIDParam::clear_id_array() {
-  id_array_.Clear();
+inline ::PROTOBUF_NAMESPACE_ID::int64 SearchByIDParam::id() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.SearchByIDParam.id)
+  return id_;
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 SearchByIDParam::id_array(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.SearchByIDParam.id_array)
-  return id_array_.Get(index);
-}
-inline void SearchByIDParam::set_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
-  id_array_.Set(index, value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.SearchByIDParam.id_array)
-}
-inline void SearchByIDParam::add_id_array(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  id_array_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.SearchByIDParam.id_array)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
-SearchByIDParam::id_array() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.SearchByIDParam.id_array)
-  return id_array_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
-SearchByIDParam::mutable_id_array() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.SearchByIDParam.id_array)
-  return &id_array_;
+inline void SearchByIDParam::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  id_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.SearchByIDParam.id)
 }
 
 // int64 topk = 3;

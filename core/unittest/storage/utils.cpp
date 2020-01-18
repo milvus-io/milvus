@@ -28,12 +28,12 @@ static const char* CONFIG_STR =
     "storage_config:\n"
     "  primary_path: /tmp/milvus\n"
     "  secondary_path:\n"
-    "  minio_enable: true\n"
-    "  minio_address: 127.0.0.1\n"
-    "  minio_port: 9000\n"
-    "  minio_access_key: minioadmin\n"
-    "  minio_secret_key: minioadmin\n"
-    "  minio_bucket: milvus-bucket\n"
+    "  s3_enable: true\n"
+    "  s3_address: 127.0.0.1\n"
+    "  s3_port: 9000\n"
+    "  s3_access_key: minioadmin\n"
+    "  s3_secret_key: minioadmin\n"
+    "  s3_bucket: milvus-bucket\n"
     "\n";
 
 void
