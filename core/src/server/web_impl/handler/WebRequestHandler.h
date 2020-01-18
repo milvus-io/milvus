@@ -23,10 +23,9 @@
 #include <utility>
 
 #include <opentracing/mocktracer/tracer.h>
-#include <oatpp/web/server/api/ApiController.hpp>
-
 #include <oatpp/core/data/mapping/type/Object.hpp>
 #include <oatpp/core/macro/codegen.hpp>
+#include <oatpp/web/server/api/ApiController.hpp>
 
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/CmdDto.hpp"
@@ -37,6 +36,7 @@
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 
+#include "db/Types.h"
 #include "server/context/Context.h"
 #include "server/delivery/RequestHandler.h"
 #include "utils/Status.h"
@@ -82,14 +82,17 @@ class WebRequestHandler {
         return context_ptr;
     }
 
+ protected:
+    Status
+    GetTableInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
+
+    Status
+    CommandLine(const std::string& cmd, std::string& reply);
+
  public:
     WebRequestHandler() {
         context_ptr_ = GenContextPtr("Web Handler");
     }
-
-    Status
-    GetTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
-                std::map<std::string, std::string>& table_info);
 
     StatusDto::ObjectWrapper
     GetDevices(DevicesDto::ObjectWrapper& devices);
@@ -115,7 +118,7 @@ class WebRequestHandler {
     GetTable(const OString& table_name, const OQueryParams& query_params, TableFieldsDto::ObjectWrapper& schema_dto);
 
     StatusDto::ObjectWrapper
-    ShowTables(const OInt64& offset, const OInt64& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
+    ShowTables(const OString& offset, const OString& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
 
     StatusDto::ObjectWrapper
     DropTable(const OString& table_name);
@@ -133,7 +136,7 @@ class WebRequestHandler {
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+    ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper
@@ -150,6 +153,7 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);
 
+ public:
     WebRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;

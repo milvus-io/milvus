@@ -21,9 +21,9 @@
 #include <unordered_map>
 
 #include <oatpp/core/data/mapping/type/Object.hpp>
+#include <oatpp/web/protocol/http/Http.hpp>
 
 #include "db/engine/ExecutionEngine.h"
-
 #include "server/web_impl/Constants.h"
 
 namespace milvus {
@@ -31,6 +31,8 @@ namespace server {
 namespace web {
 
 using OString = oatpp::data::mapping::type::String;
+using OInt8 = oatpp::data::mapping::type::Int8;
+using OInt16 = oatpp::data::mapping::type::Int16;
 using OInt64 = oatpp::data::mapping::type::Int64;
 using OFloat32 = oatpp::data::mapping::type::Float32;
 template <class T>
@@ -65,10 +67,11 @@ enum StatusCode : int {
     ILLEGAL_METRIC_TYPE = 23,
     OUT_OF_MEMORY = 24,
 
-    // HTTP status code
+    // HTTP error code
     PATH_PARAM_LOSS = 31,
     QUERY_PARAM_LOSS = 32,
     BODY_FIELD_LOSS = 33,
+    ILLEGAL_QUERY_PARAM = 36,
 };
 
 static const std::unordered_map<engine::EngineType, std::string> IndexMap = {
@@ -92,11 +95,17 @@ static const std::unordered_map<std::string, engine::EngineType> IndexNameMap = 
 static const std::unordered_map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::L2, NAME_METRIC_TYPE_L2},
     {engine::MetricType::IP, NAME_METRIC_TYPE_IP},
+    {engine::MetricType::HAMMING, NAME_METRIC_TYPE_HAMMING},
+    {engine::MetricType::JACCARD, NAME_METRIC_TYPE_JACCARD},
+    {engine::MetricType::TANIMOTO, NAME_METRIC_TYPE_TANIMOTO},
 };
 
 static const std::unordered_map<std::string, engine::MetricType> MetricNameMap = {
     {NAME_METRIC_TYPE_L2, engine::MetricType::L2},
     {NAME_METRIC_TYPE_IP, engine::MetricType::IP},
+    {NAME_METRIC_TYPE_HAMMING, engine::MetricType::HAMMING},
+    {NAME_METRIC_TYPE_JACCARD, engine::MetricType::JACCARD},
+    {NAME_METRIC_TYPE_TANIMOTO, engine::MetricType::TANIMOTO},
 };
 
 }  // namespace web

@@ -258,8 +258,8 @@ class TestShowBase:
         '''
         partition_name = gen_unique_str()
         status, res = connect.show_partitions(partition_name)
-        assert status.OK()
-        assert len(res) == 0
+        assert not status.OK()
+        # assert len(res) == 0
 
     def test_show_multi_partitions(self, connect, table):
         '''
