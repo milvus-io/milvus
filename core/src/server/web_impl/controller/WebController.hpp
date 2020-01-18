@@ -27,7 +27,6 @@
 
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "server/delivery/RequestHandler.h"
 
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/dto/CmdDto.hpp"
@@ -101,7 +100,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         auto devices_dto = DevicesDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.GetDevices(devices_dto);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
@@ -135,7 +133,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("GET", "/config/advanced", GetAdvancedConfig) {
         auto config_dto = AdvancedConfigDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.GetAdvancedConfig(config_dto);
 
         std::shared_ptr<OutgoingResponse> response;
@@ -163,7 +160,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("PUT", "/config/advanced", SetAdvancedConfig, BODY_DTO(AdvancedConfigDto::ObjectWrapper, body)) {
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.SetAdvancedConfig(body);
@@ -198,7 +194,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("GET", "/config/gpu_resources", GetGPUConfig) {
         auto gpu_config_dto = GPUConfigDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.GetGpuConfig(gpu_config_dto);
@@ -225,7 +220,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("PUT", "/config/gpu_resources", SetGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, body)) {
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.SetGpuConfig(body);
 
         std::shared_ptr<OutgoingResponse> response;
@@ -261,9 +255,9 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("POST", "/tables", CreateTable, BODY_DTO(TableRequestDto::ObjectWrapper, body)) {
         TimeRecorder tr("POST \'/tables\'");
+        tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.CreateTable(body);
@@ -293,17 +287,15 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(ShowTables)
 
-    ENDPOINT("GET", "/tables", ShowTables, REQUEST(
-        const std::shared_ptr<IncomingRequest>&, request)) {
+    ENDPOINT("GET", "/tables", ShowTables, QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr("GET \'/tables\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         auto response_dto = TableListFieldsDto::createShared();
-        auto offset = request->getQueryParameter("offset", "0");
-        auto page_size = request->getQueryParameter("page_size", "10");
+        auto offset = query_params.get("offset");
+        auto page_size = query_params.get("page_size");
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.ShowTables(offset, page_size, response_dto);
@@ -342,11 +334,10 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("GET", "/tables/{table_name}", GetTable, PATH(String, table_name), QUERIES(
         const QueryParams&, query_params)) {
-        auto error_status_dto = StatusDto::createShared();
-
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+        auto error_status_dto = StatusDto::createShared();
         auto fields_dto = TableFieldsDto::createShared();
+
         auto status_dto = handler.GetTable(table_name, query_params, fields_dto);
 
         std::shared_ptr<OutgoingResponse> response;
@@ -376,7 +367,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("DELETE", "/tables/{table_name}", DropTable, PATH(String, table_name)) {
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.DropTable(table_name);
@@ -415,7 +405,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("POST", "/tables/{table_name}/indexes", CreateIndex,
              PATH(String, table_name), BODY_DTO(IndexRequestDto::ObjectWrapper, body)) {
         auto handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.CreateIndex(table_name, body);
@@ -448,7 +437,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("GET", "/tables/{table_name}/indexes", GetIndex, PATH(String, table_name)) {
         auto index_dto = IndexDto::createShared();
         auto handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.GetIndex(table_name, index_dto);
@@ -480,7 +468,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("DELETE", "/tables/{table_name}/indexes", DropIndex, PATH(String, table_name)) {
         auto handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.DropIndex(table_name);
@@ -521,7 +508,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("POST", "/tables/{table_name}/partitions",
              CreatePartition, PATH(String, table_name), BODY_DTO(PartitionRequestDto::ObjectWrapper, body)) {
         auto handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.CreatePartition(table_name, body);
@@ -558,14 +544,12 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(ShowPartitions)
 
     ENDPOINT("GET", "/tables/{table_name}/partitions", ShowPartitions,
-             PATH(String, table_name), REQUEST(
-                 const std::shared_ptr<IncomingRequest>&, request)) {
-        auto offset = request->getQueryParameter("offset", "0");
-        auto page_size = request->getQueryParameter("page_size", "10");
+             PATH(String, table_name), QUERIES(const QueryParams&, query_params)) {
+        auto offset = query_params.get("offset");
+        auto page_size = query_params.get("page_size");
 
         auto partition_list_dto = PartitionListDto::createShared();
         auto handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
@@ -604,7 +588,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition,
              PATH(String, table_name), PATH(String, partition_tag)) {
         auto handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.DropPartition(table_name, partition_tag);
@@ -646,7 +629,6 @@ class WebController : public oatpp::web::server::api::ApiController {
              PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
         auto ids_dto = VectorIdsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.Insert(table_name, body, ids_dto);
@@ -682,7 +664,6 @@ class WebController : public oatpp::web::server::api::ApiController {
              PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
         auto results_dto = TopkResultsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.Search(table_name, body, results_dto);
@@ -715,7 +696,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto cmd_dto = CommandDto::createShared();
 
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.Cmd(msg, cmd_dto);
