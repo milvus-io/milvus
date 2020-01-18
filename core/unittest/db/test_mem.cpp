@@ -350,10 +350,8 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
 
         //just for trigger creating a empty mem table
         sleep(1);
-        milvus::engine::meta::TableSchema table_info;
-        table_info.dimension_ = 0;
-        table_info.table_id_ = "zero_dim";
         xb.float_data_.clear();
+        xb.id_array_.clear();
         stat = db->InsertVectors("zero_dim", "", xb);
     }
 }
