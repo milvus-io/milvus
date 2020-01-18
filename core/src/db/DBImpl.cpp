@@ -599,16 +599,16 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe,
-                  const IDNumbers& vector_ids, ResultIds& result_ids, ResultDistances& result_distances) {
+                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, IDNumber vector_id,
+                  ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    VectorsData vectors_data;
-    vectors_data.id_array_ = vector_ids;
-    vectors_data.vector_count_ = vector_ids.size();
+    VectorsData vectors_data = VectorsData();
+    vectors_data.id_array_.emplace_back(vector_id);
+    vectors_data.vector_count_ = 1;
     Status result =
         Query(context, table_id, partition_tags, k, nprobe, vectors_data, dates, result_ids, result_distances);
     return result;
@@ -1072,11 +1072,10 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
         table_file.file_type_ = meta::TableFileSchema::RAW;
     }
     table_file.file_size_ = segment_writer_ptr->Size();
-    // TODO(zhiru): row count?
     table_file.row_count_ = segment_writer_ptr->VectorCount();
     updated.push_back(table_file);
     status = meta_ptr_->UpdateTableFiles(updated);
-    ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ << " of size " << segment_writer_ptr->Size()
+    ENGINE_LOG_DEBUG << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
                      << " bytes";
 
     if (options_.insert_cache_immediately_) {

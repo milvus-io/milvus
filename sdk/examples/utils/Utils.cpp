@@ -16,14 +16,16 @@
 // under the License.
 
 #include "examples/utils/Utils.h"
-#include "examples/utils/TimeRecorder.h"
 
 #include <time.h>
 #include <unistd.h>
+
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
+
+#include "examples/utils/TimeRecorder.h"
 
 namespace milvus_sdk {
 
@@ -76,27 +78,42 @@ Utils::GenTableName() {
 std::string
 Utils::MetricTypeName(const milvus::MetricType& metric_type) {
     switch (metric_type) {
-        case milvus::MetricType::L2:return "L2 distance";
-        case milvus::MetricType::IP:return "Inner product";
-        case milvus::MetricType::HAMMING:return "Hamming distance";
-        case milvus::MetricType::JACCARD:return "Jaccard distance";
-        case milvus::MetricType::TANIMOTO:return "Tanimoto distance";
-        default:return "Unknown metric type";
+        case milvus::MetricType::L2:
+            return "L2 distance";
+        case milvus::MetricType::IP:
+            return "Inner product";
+        case milvus::MetricType::HAMMING:
+            return "Hamming distance";
+        case milvus::MetricType::JACCARD:
+            return "Jaccard distance";
+        case milvus::MetricType::TANIMOTO:
+            return "Tanimoto distance";
+        default:
+            return "Unknown metric type";
     }
 }
 
 std::string
 Utils::IndexTypeName(const milvus::IndexType& index_type) {
     switch (index_type) {
-        case milvus::IndexType::FLAT:return "FLAT";
-        case milvus::IndexType::IVFFLAT:return "IVFFLAT";
-        case milvus::IndexType::IVFSQ8:return "IVFSQ8";
-        case milvus::IndexType::RNSG:return "NSG";
-        case milvus::IndexType::IVFSQ8H:return "IVFSQ8H";
-        case milvus::IndexType::IVFPQ:return "IVFPQ";
-        case milvus::IndexType::SPTAGKDT:return "SPTAGKDT";
-        case milvus::IndexType::SPTAGBKT:return "SPTAGBKT";
-        default:return "Unknown index type";
+        case milvus::IndexType::FLAT:
+            return "FLAT";
+        case milvus::IndexType::IVFFLAT:
+            return "IVFFLAT";
+        case milvus::IndexType::IVFSQ8:
+            return "IVFSQ8";
+        case milvus::IndexType::RNSG:
+            return "NSG";
+        case milvus::IndexType::IVFSQ8H:
+            return "IVFSQ8H";
+        case milvus::IndexType::IVFPQ:
+            return "IVFPQ";
+        case milvus::IndexType::SPTAGKDT:
+            return "SPTAGKDT";
+        case milvus::IndexType::SPTAGBKT:
+            return "SPTAGBKT";
+        default:
+            return "Unknown index type";
     }
 }
 
@@ -233,24 +250,28 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
 void
 Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-                const std::vector<int64_t>& search_id_array,
-                milvus::TopKQueryResult& topk_query_result) {
+                const std::vector<int64_t>& search_id_array, milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
 
     {
         BLOCK_SPLITER
-        milvus_sdk::TimeRecorder rc("search by id");
-        milvus::Status stat =
-            conn->SearchByID(table_name, partition_tags, search_id_array, top_k, nprobe, topk_query_result);
-        std::cout << "SearchVector function call status: " << stat.message() << std::endl;
+        for (auto& search_id : search_id_array) {
+            milvus_sdk::TimeRecorder rc("search by id " + std::to_string(search_id));
+            milvus::TopKQueryResult result;
+            milvus::Status stat = conn->SearchByID(table_name, partition_tags, search_id, top_k, nprobe, result);
+            topk_query_result.insert(topk_query_result.end(), std::make_move_iterator(result.begin()),
+                                     std::make_move_iterator(result.end()));
+            std::cout << "SearchByID function call status: " << stat.message() << std::endl;
+        }
         BLOCK_SPLITER
     }
 
     if (topk_query_result.size() != search_id_array.size()) {
-        std::cout << "ERROR: Returned result count dones equal nq" << std::endl;
+        std::cout << "ERROR: Returned result count does not equal nq" << std::endl;
         return;
     }
 
+    BLOCK_SPLITER
     for (size_t i = 0; i < topk_query_result.size(); i++) {
         const milvus::QueryResult& one_result = topk_query_result[i];
         size_t topk = one_result.ids.size();
@@ -260,6 +281,30 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
             std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
         }
     }
+    BLOCK_SPLITER
+
+    BLOCK_SPLITER
+    size_t nq = topk_query_result.size();
+    for (size_t i = 0; i < nq; i++) {
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        auto search_id = search_id_array[i];
+
+        uint64_t match_index = one_result.ids.size();
+        for (uint64_t index = 0; index < one_result.ids.size(); index++) {
+            if (search_id == one_result.ids[index]) {
+                match_index = index;
+                break;
+            }
+        }
+
+        if (match_index >= one_result.ids.size()) {
+            std::cout << "The topk result is wrong: not return search target in result set" << std::endl;
+        } else {
+            std::cout << "No." << i << " Check result successfully for target: " << search_id << " at top "
+                      << match_index << std::endl;
+        }
+    }
+    BLOCK_SPLITER
 }
 
 }  // namespace milvus_sdk

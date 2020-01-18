@@ -15,12 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "server/grpc_impl/GrpcRequestHandler.h"
+
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "server/Config.h"
-#include "server/grpc_impl/GrpcRequestHandler.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
@@ -321,24 +322,19 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
                                ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
-    // step 1: prepare id array
-    std::vector<int64_t> vector_ids;
-    for (int i = 0; i < request->id_array_size(); i++) {
-        vector_ids.push_back(request->id_array(i));
-    }
 
-    // step 2: partition tags
+    // step 1: partition tags
     std::vector<std::string> partitions;
     for (auto& partition : request->partition_tag_array()) {
         partitions.emplace_back(partition);
     }
 
-    // step 3: search vectors
+    // step 2: search vectors
     TopKQueryResult result;
-    Status status = request_handler_.SearchByID(context_map_[context], request->table_name(), vector_ids,
+    Status status = request_handler_.SearchByID(context_map_[context], request->table_name(), request->id(),
                                                 request->topk(), request->nprobe(), partitions, result);
 
-    // step 4: construct and return result
+    // step 3: construct and return result
     ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);

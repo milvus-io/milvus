@@ -113,7 +113,7 @@ message SearchInFilesParam {
  */
 message SearchByIDParam {
     string table_name = 1;
-    repeated int64 id_array = 2;
+    int64 id = 2;
     int64 topk = 3;
     int64 nprobe = 4;
     repeated string partition_tag_array = 5;

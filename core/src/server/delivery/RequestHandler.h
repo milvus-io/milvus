@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "server/delivery/request/BaseRequest.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
@@ -60,9 +60,8 @@ class RequestHandler {
            TopKQueryResult& result);
 
     Status
-    SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name,
-               const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
-               const std::vector<std::string>& partition_list, TopKQueryResult& result);
+    SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id, int64_t topk,
+               int64_t nprobe, const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
     Status
     DescribeTable(const std::shared_ptr<Context>& context, const std::string& table_name, TableSchema& table_schema);

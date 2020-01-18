@@ -16,6 +16,9 @@
 // under the License.
 
 #include "server/delivery/RequestHandler.h"
+
+#include <set>
+
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/delivery/request/CmdRequest.h"
@@ -38,8 +41,6 @@
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
 #include "server/delivery/request/ShowTablesRequest.h"
-
-#include <set>
 
 namespace milvus {
 namespace server {
@@ -110,11 +111,11 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
 }
 
 Status
-RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name,
-                           const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
-                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
+RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
+                           int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                           TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
-        SearchByIDRequest::Create(context, table_name, vector_ids, topk, nprobe, partition_list, result);
+        SearchByIDRequest::Create(context, table_name, vector_id, topk, nprobe, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

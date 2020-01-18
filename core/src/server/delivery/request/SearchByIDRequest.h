@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
 namespace server {
@@ -29,21 +29,20 @@ namespace server {
 class SearchByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-           const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
-           const std::vector<std::string>& partition_list, TopKQueryResult& result);
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id, int64_t topk,
+           int64_t nprobe, const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
  protected:
-    SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const std::vector<int64_t>& vector_ids, int64_t topk, int64_t nprobe,
-                      const std::vector<std::string>& partition_list, TopKQueryResult& result);
+    SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
+                      int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                      TopKQueryResult& result);
 
     Status
     OnExecute() override;
 
  private:
     const std::string table_name_;
-    const std::vector<int64_t>& vector_ids_;
+    const int64_t vector_id_;
     int64_t topk_;
     int64_t nprobe_;
     const std::vector<std::string> partition_list_;
