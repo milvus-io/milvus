@@ -42,6 +42,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#908 - Move "primary_path" and "secondary_path" to storage config
 - \#931 - Remove "collector" from config
 - \#966 - Update NOTICE.md
+- \#1002 - Rename minio to s3 in Storage Config section
 
 ## Task
 
