@@ -25,16 +25,17 @@
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/core/macro/component.hpp>
 
-#include "server/web_impl/dto/ConfigDto.hpp"
-#include "server/web_impl/dto/TableDto.hpp"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
+#include "server/delivery/RequestHandler.h"
+
+#include "server/web_impl/Constants.h"
 #include "server/web_impl/dto/CmdDto.hpp"
+#include "server/web_impl/dto/ConfigDto.hpp"
 #include "server/web_impl/dto/IndexDto.hpp"
 #include "server/web_impl/dto/PartitionDto.hpp"
+#include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
-#include "server/web_impl/dto/ConfigDto.hpp"
-
-#include "utils/Log.h"
-#include "server/delivery/RequestHandler.h"
 #include "server/web_impl/handler/WebRequestHandler.h"
 
 namespace milvus {
@@ -80,6 +81,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(State)
 
     ENDPOINT("GET", "/state", State) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "{GET \'/state\'}");
+        tr.ElapseFromBegin("Total cost ");
         return createDtoResponse(Status::CODE_200, StatusDto::createShared());
     }
 
@@ -93,6 +96,9 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(GetDevices)
 
     ENDPOINT("GET", "/devices", GetDevices) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/devices\' ");
+        tr.RecordSection("Receive request");
+
         auto devices_dto = DevicesDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
@@ -105,6 +111,8 @@ class WebController : public oatpp::web::server::api::ApiController {
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        tr.ElapseFromBegin("Total cost");
 
         return response;
     }
@@ -252,6 +260,8 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(CreateTable)
 
     ENDPOINT("POST", "/tables", CreateTable, BODY_DTO(TableRequestDto::ObjectWrapper, body)) {
+        TimeRecorder tr("POST \'/tables\'");
+
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
@@ -265,6 +275,9 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        tr.ElapseFromBegin(ttr);
         return response;
     }
 
@@ -282,8 +295,12 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("GET", "/tables", ShowTables, REQUEST(
         const std::shared_ptr<IncomingRequest>&, request)) {
+        TimeRecorder tr("GET \'/tables\'");
+        tr.RecordSection("Received request.");
+
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
         auto response_dto = TableListFieldsDto::createShared();
         auto offset = request->getQueryParameter("offset", "0");
         auto page_size = request->getQueryParameter("page_size", "10");
@@ -297,6 +314,10 @@ class WebController : public oatpp::web::server::api::ApiController {
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        tr.ElapseFromBegin(ttr);
 
         return response;
     }
