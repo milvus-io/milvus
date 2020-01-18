@@ -43,6 +43,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#931 - Remove "collector" from config
 - \#966 - Update NOTICE.md
 - \#1002 - Rename minio to s3 in Storage Config section
+- \#1078 - Move 'insert_buffer_size' to Cache Config section
 
 ## Task
 
