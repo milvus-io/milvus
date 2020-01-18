@@ -318,11 +318,10 @@ TEST(whatever, test_config) {
 #include "wrapper/VecImpl.h"
 
 TEST(BFIndex, test_bf_index_fail) {
-    using namespace milvus::engine;
-    auto bf_ptr = std::make_shared<BFIndex>(nullptr);
+    auto bf_ptr = std::make_shared<milvus::engine::BFIndex>(nullptr);
     auto float_vec = bf_ptr->GetRawVectors();
     ASSERT_EQ(float_vec, nullptr);
-    Config config;
+    milvus::engine::Config config;
 
     fiu_init(0);
     fiu_enable("BFIndex.Build.throw_knowhere_exception", 1, NULL, 0);

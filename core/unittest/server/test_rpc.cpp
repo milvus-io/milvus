@@ -928,7 +928,7 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
 }
 
 TEST(RpcTest, RPC_SERVER_TEST) {
-    using namespace milvus::server::grpc;
+    using GrpcServer =  milvus::server::grpc::GrpcServer;
     GrpcServer& server = GrpcServer::GetInstance();
 
     fiu_init(0);
@@ -950,8 +950,7 @@ TEST(RpcTest, RPC_SERVER_TEST) {
 }
 
 TEST(RpcTest, InterceptorHookHandlerTest) {
-    using namespace milvus::server::grpc;
-    auto handler = std::make_shared<GrpcInterceptorHookHandler>();
+    auto handler = std::make_shared<milvus::server::grpc::GrpcInterceptorHookHandler>();
     handler->OnPostRecvInitialMetaData(nullptr, nullptr);
     handler->OnPreSendMessage(nullptr, nullptr);
 }

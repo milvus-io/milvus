@@ -234,7 +234,7 @@ TEST(SchedulerTestResource, SPECIFIED_RESOURCE_TEST) {
     ASSERT_EQ(res.first, nullptr);
     ASSERT_EQ(res.second, nullptr);
 
-    using namespace milvus::engine;
+    using IndexType = milvus::engine::IndexType;
     auto index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU, config);
     ASSERT_EQ(index->GetType(), IndexType::SPTAG_KDT_RNT_CPU);
 

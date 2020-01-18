@@ -32,7 +32,6 @@ namespace scheduler {
 
 #ifdef MILVUS_GPU_VERSION
 TEST(Action_Test, TESTACTION) {
-
 }
 
 #endif
