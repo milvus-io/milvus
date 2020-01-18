@@ -17,50 +17,21 @@
 
 #pragma once
 
-#include <atomic>
-#include <memory>
-#include <string>
-#include <thread>
+#include <vector>
 
-#include "server/web_impl/component/AppComponent.hpp"
-
+#include "db/Types.h"
+#include "server/web_impl/Types.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace server {
 namespace web {
 
-class WebServer {
- public:
-    static WebServer&
-    GetInstance() {
-        static WebServer web_server;
-        return web_server;
-    }
+Status
+CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& records, std::vector<float>& vectors);
 
-    void
-    Start();
-
-    void
-    Stop();
-
- private:
-    WebServer() {
-        try_stop_.store(false);
-    }
-
-    ~WebServer() = default;
-
-    Status
-    StartService();
-    Status
-    StopService();
-
- private:
-    std::atomic_bool try_stop_;
-
-    std::shared_ptr<std::thread> thread_ptr_;
-};
+Status
+CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors);
 
 }  // namespace web
 }  // namespace server
