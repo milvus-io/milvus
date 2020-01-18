@@ -28,11 +28,11 @@
 
 #endif
 
+#include <fiu-local.h>
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
-#include<fiu-local.h>
 
 namespace knowhere {
 

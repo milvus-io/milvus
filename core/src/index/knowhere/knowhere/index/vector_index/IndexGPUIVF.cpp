@@ -131,7 +131,7 @@ GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, i
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
-    fiu_do_on("GPUIVF.search_impl.invald_index",device_index = nullptr);
+    fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
         auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(cfg);
         device_index->nprobe = search_cfg->nprobe;

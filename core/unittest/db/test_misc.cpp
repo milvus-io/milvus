@@ -30,7 +30,7 @@
 #include <vector>
 #include <fiu-local.h>
 #include <fiu-control.h>
-#include "utils.h"
+#include "db/utils.h"
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
     milvus::Exception ex1(100, "error");
@@ -137,11 +137,11 @@ TEST(DBMiscTest, UTILS_TEST) {
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());
 
-    status = milvus::engine::utils::CreateTableFilePath(options,file);
+    status = milvus::engine::utils::CreateTableFilePath(options, file);
     ASSERT_TRUE(status.ok());
 
     FIU_ENABLE_FIU("CreateTableFilePath.fail_create");
-    status = milvus::engine::utils::CreateTableFilePath(options,file);
+    status = milvus::engine::utils::CreateTableFilePath(options, file);
     ASSERT_FALSE(status.ok());
     fiu_disable("CreateTableFilePath.fail_create");
 
@@ -153,10 +153,10 @@ TEST(DBMiscTest, UTILS_TEST) {
     ASSERT_FALSE(file.location_.empty());
     fiu_disable("CommonUtil.CreateDirectory.create_parent_fail");
 
-    FIU_ENABLE_FIU("GetTableFilePath.enable_minio");
+    FIU_ENABLE_FIU("GetTableFilePath.enable_s3");
     status = milvus::engine::utils::GetTableFilePath(options, file);
     ASSERT_FALSE(file.location_.empty());
-    fiu_disable("GetTableFilePath.enable_minio");
+    fiu_disable("GetTableFilePath.enable_s3");
 
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());

@@ -560,8 +560,8 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
                               result_distances);
     ASSERT_FALSE(stat.ok());
 
-    stat =
-        db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1,milvus::engine::VectorsData(), result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1,
+                      milvus::engine::VectorsData(), result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->DropTable(table_info.table_id_, dates);

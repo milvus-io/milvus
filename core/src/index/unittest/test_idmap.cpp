@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <fiu-local.h>
-#include <fiu-control.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
@@ -60,8 +60,8 @@ TEST_F(IDMAPTest, idmap_basic) {
     {
         ASSERT_ANY_THROW(index_->Serialize());
         ASSERT_ANY_THROW(index_->Search(query_dataset, conf));
-        ASSERT_ANY_THROW(index_->Add(nullptr,conf));
-        ASSERT_ANY_THROW(index_->AddWithoutId(nullptr,conf));
+        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutId(nullptr, conf));
     }
 
     index_->Train(conf);
@@ -155,7 +155,7 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // cpu to gpu
-        ASSERT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_,-1,conf));
+        ASSERT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_, -1, conf));
         auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
@@ -165,7 +165,7 @@ TEST_F(IDMAPTest, copy_test) {
                      knowhere::KnowhereException);
 
         fiu_init(0);
-        fiu_enable("GPUIDMP.SerializeImpl.throw_exception",1, nullptr,0);
+        fiu_enable("GPUIDMP.SerializeImpl.throw_exception", 1, nullptr, 0);
         ASSERT_ANY_THROW(clone_index->Serialize());
         fiu_disable("GPUIDMP.SerializeImpl.throw_exception");
 

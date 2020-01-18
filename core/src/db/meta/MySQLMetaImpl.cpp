@@ -1260,7 +1260,7 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
     table_schema.partition_tag_ = valid_tag;
 
     status = CreateTable(table_schema);
-    fiu_do_on("MySQLMetaImpl.CreatePartition.aleady_exist",status = Status(DB_ALREADY_EXIST,""));
+    fiu_do_on("MySQLMetaImpl.CreatePartition.aleady_exist", status = Status(DB_ALREADY_EXIST, ""));
     if (status.code() == DB_ALREADY_EXIST) {
         return Status(DB_ALREADY_EXIST, "Partition already exists");
     }

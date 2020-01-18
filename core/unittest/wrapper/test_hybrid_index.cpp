@@ -160,47 +160,48 @@ TEST_F(KnowhereHybrid, test_invalid_index) {
     status = index_->SetQuantizer(quantizer);
     ASSERT_FALSE(status.ok());
 
-    fiu_enable("IVFHybridIndex.SetQuantizer.throw_knowhere_exception",1, nullptr,0);
+    fiu_enable("IVFHybridIndex.SetQuantizer.throw_knowhere_exception", 1, nullptr, 0);
     status = index_->SetQuantizer(quantizer);
     ASSERT_FALSE(status.ok());
     fiu_disable("IVFHybridIndex.SetQuantizer.throw_knowhere_exception");
 
-    fiu_enable("IVFHybridIndex.SetQuantizer.throw_std_exception",1, nullptr,0);
+    fiu_enable("IVFHybridIndex.SetQuantizer.throw_std_exception", 1, nullptr, 0);
     status = index_->SetQuantizer(quantizer);
     ASSERT_FALSE(status.ok());
     fiu_disable("IVFHybridIndex.SetQuantizer.throw_std_exception");
 
     status = index_->UnsetQuantizer();
     ASSERT_FALSE(status.ok());
-    fiu_enable("IVFHybridIndex.UnsetQuantizer.throw_knowhere_exception",1, nullptr,0);
+    fiu_enable("IVFHybridIndex.UnsetQuantizer.throw_knowhere_exception", 1, nullptr, 0);
     status = index_->UnsetQuantizer();
     ASSERT_FALSE(status.ok());
     fiu_disable("IVFHybridIndex.UnsetQuantizer.throw_knowhere_exception");
 
-    fiu_enable("IVFHybridIndex.UnsetQuantizer.throw_std_exception",1, nullptr,0);
+    fiu_enable("IVFHybridIndex.UnsetQuantizer.throw_std_exception", 1, nullptr, 0);
     status = index_->UnsetQuantizer();
     ASSERT_FALSE(status.ok());
     fiu_disable("IVFHybridIndex.UnsetQuantizer.throw_std_exception");
 
-    auto vecindex = index_->LoadData(quantizer,quantizer_cfg);
+    auto vecindex = index_->LoadData(quantizer, quantizer_cfg);
     ASSERT_EQ(vecindex, nullptr);
 
-    fiu_enable("IVFHybridIndex.LoadData.throw_std_exception",1, nullptr,0);
-    vecindex = index_->LoadData(quantizer,quantizer_cfg);
+    fiu_enable("IVFHybridIndex.LoadData.throw_std_exception", 1, nullptr, 0);
+    vecindex = index_->LoadData(quantizer, quantizer_cfg);
     ASSERT_EQ(vecindex, nullptr);
     fiu_disable("IVFHybridIndex.LoadData.throw_std_exception");
 
-    fiu_enable("IVFHybridIndex.LoadData.throw_knowhere_exception",1, nullptr,0);
-    vecindex = index_->LoadData(quantizer,quantizer_cfg);
+    fiu_enable("IVFHybridIndex.LoadData.throw_knowhere_exception", 1, nullptr, 0);
+    vecindex = index_->LoadData(quantizer, quantizer_cfg);
     ASSERT_EQ(vecindex, nullptr);
     fiu_disable("IVFHybridIndex.LoadData.throw_knowhere_exception");
 
-    index_->CopyToGpuWithQuantizer(DEVICEID,conf);
-    fiu_enable("IVFHybridIndex.LoadData.throw_knowhere_exception",1, nullptr,0);
-    index_->CopyToGpuWithQuantizer(DEVICEID,conf);
+    index_->CopyToGpuWithQuantizer(DEVICEID, conf);
+    fiu_enable("IVFHybridIndex.LoadData.throw_knowhere_exception", 1, nullptr, 0);
+    index_->CopyToGpuWithQuantizer(DEVICEID, conf);
     fiu_disable("IVFHybridIndex.LoadData.throw_knowhere_exception");
-    fiu_enable("IVFHybridIndex.LoadData.throw_std_exception",1, nullptr,0);
-    index_->CopyToGpuWithQuantizer(DEVICEID,conf);
+    fiu_enable("IVFHybridIndex.LoadData.throw_std_exception", 1, nullptr, 0);
+    index_->CopyToGpuWithQuantizer(DEVICEID, conf);
     fiu_disable("IVFHybridIndex.LoadData.throw_std_exception");
 }
+
 #endif

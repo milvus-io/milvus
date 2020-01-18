@@ -22,11 +22,11 @@
 #include <thread>
 #include <utility>
 
-#include "scheduler/task/SearchTask.h"
-#include "scheduler/SchedInst.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/task/SearchTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 

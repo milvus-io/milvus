@@ -29,11 +29,11 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
+#include <fiu-local.h>
 #include <chrono>
 #include <memory>
 #include <utility>
 #include <vector>
-#include <fiu-local.h>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"

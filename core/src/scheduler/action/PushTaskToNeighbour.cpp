@@ -42,7 +42,7 @@ get_neighbours(const ResourcePtr& self) {
     return neighbours;
 }
 
-//This function has not been invoked, comment it for code coverage
+// This function has not been invoked, comment it for code coverage
 #if 0
 std::vector<std::pair<ResourcePtr, Connection>>
 get_neighbours_with_connetion(const ResourcePtr& self) {

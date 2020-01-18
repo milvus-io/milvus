@@ -257,12 +257,12 @@ TEST(SchedulerTestResource, SPECIFIED_RESOURCE_TEST) {
     ASSERT_EQ(res_ptr, nullptr);
 }
 
-TEST_F(SchedulerTest,schedule){
+TEST_F(SchedulerTest, schedule) {
     scheduler_->Dump();
 }
 
-TEST(SchedulerService,service){
-    fiu_enable("load_simple_config_mock",1, nullptr,0);
+TEST(SchedulerService, service) {
+    fiu_enable("load_simple_config_mock", 1, nullptr, 0);
     StartSchedulerService();
     StopSchedulerService();
     fiu_disable("load_simple_config_mock");

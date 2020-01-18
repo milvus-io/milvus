@@ -60,17 +60,17 @@ TEST(PrometheusTest, PROMETHEUS_TEST) {
     instance.QueryVectorResponseSummaryObserve(1.0, 1);
     instance.QueryVectorResponsePerSecondGaugeSet(1.0);
     instance.CPUUsagePercentSet();
-    fiu_enable("SystemInfo.CPUPercent.mock",1, nullptr,0);
+    fiu_enable("SystemInfo.CPUPercent.mock", 1, nullptr, 0);
     instance.CPUUsagePercentSet();
     fiu_disable("SystemInfo.CPUPercent.mock");
     instance.RAMUsagePercentSet();
-    fiu_enable("SystemInfo.MemoryPercent.mock",1, nullptr,0);
+    fiu_enable("SystemInfo.MemoryPercent.mock", 1, nullptr, 0);
     instance.RAMUsagePercentSet();
     fiu_disable("SystemInfo.MemoryPercent.mock");
     instance.QueryResponsePerSecondGaugeSet(1.0);
     instance.GPUPercentGaugeSet();
-    fiu_enable("SystemInfo.GPUMemoryTotal.mock",1, nullptr,0);
-    fiu_enable("SystemInfo.GPUMemoryUsed.mock",1, nullptr,0);
+    fiu_enable("SystemInfo.GPUMemoryTotal.mock", 1, nullptr, 0);
+    fiu_enable("SystemInfo.GPUMemoryUsed.mock", 1, nullptr, 0);
     instance.GPUPercentGaugeSet();
     fiu_disable("SystemInfo.GPUMemoryTotal.mock");
     fiu_disable("SystemInfo.GPUMemoryUsed.mock");
@@ -85,21 +85,21 @@ TEST(PrometheusTest, PROMETHEUS_TEST) {
     instance.OctetsSet();
 
     instance.CPUCoreUsagePercentSet();
-    fiu_enable("SystemInfo.getTotalCpuTime.open_proc",1, nullptr,0);
+    fiu_enable("SystemInfo.getTotalCpuTime.open_proc", 1, nullptr, 0);
     instance.CPUCoreUsagePercentSet();
     fiu_disable("SystemInfo.getTotalCpuTime.open_proc");
-    fiu_enable("SystemInfo.getTotalCpuTime.read_proc",1, nullptr,0);
+    fiu_enable("SystemInfo.getTotalCpuTime.read_proc", 1, nullptr, 0);
     instance.CPUCoreUsagePercentSet();
     fiu_disable("SystemInfo.getTotalCpuTime.read_proc");
     instance.GPUTemperature();
-    fiu_enable("SystemInfo.GPUTemperature.mock",1, nullptr,0);
+    fiu_enable("SystemInfo.GPUTemperature.mock", 1, nullptr, 0);
     instance.GPUTemperature();
     fiu_disable("SystemInfo.GPUTemperature.mock");
     instance.CPUTemperature();
-    fiu_enable("SystemInfo.CPUTemperature.opendir",1, nullptr,0);
+    fiu_enable("SystemInfo.CPUTemperature.opendir", 1, nullptr, 0);
     instance.CPUTemperature();
     fiu_disable("SystemInfo.CPUTemperature.opendir");
-    fiu_enable("SystemInfo.CPUTemperature.openfile",1, nullptr,0);
+    fiu_enable("SystemInfo.CPUTemperature.openfile", 1, nullptr, 0);
     instance.CPUTemperature();
     fiu_disable("SystemInfo.CPUTemperature.openfile");
 

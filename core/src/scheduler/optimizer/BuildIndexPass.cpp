@@ -16,9 +16,9 @@
 // under the License.
 #include <fiu-local.h>
 
-#include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
+#include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #ifdef MILVUS_GPU_VERSION
 namespace milvus {

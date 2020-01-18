@@ -135,7 +135,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     uint64_t size = 0;
     auto status = impl_->Size(size);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(size,0);
+    ASSERT_EQ(size, 0);
 
     milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
@@ -299,11 +299,11 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     sleep(1);
     std::vector<int> files_to_delete;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
-    status = impl_->FilesByType(table_id,files_to_delete,files_schema);
+    status = impl_->FilesByType(table_id, files_to_delete, files_schema);
     ASSERT_TRUE(status.ok());
 
     table_file.table_id_ = table_id;
-    table_file.file_type_= milvus::engine::meta::TableFileSchema::TO_DELETE;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
     milvus::engine::OngoingFileChecker filter;
     table_file.file_id_ = files_schema.front().file_id_;
     filter.MarkOngoingFile(table_file);

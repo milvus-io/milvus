@@ -151,9 +151,9 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
     engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
     engine_ptr->BuildIndex("/tmp/milvus_index_6", milvus::engine::EngineType::FAISS_IVFFLAT);
-    engine_ptr->BuildIndex("/tmp/milvus_index_7",milvus::engine::EngineType::FAISS_IVFSQ8);
-    ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_8",milvus::engine::EngineType::FAISS_IVFSQ8H));
-    ASSERT_ANY_THROW(engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_9", milvus::engine::EngineType::FAISS_PQ));
+    engine_ptr->BuildIndex("/tmp/milvus_index_7", milvus::engine::EngineType::FAISS_IVFSQ8);
+    ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_8", milvus::engine::EngineType::FAISS_IVFSQ8H));
+    ASSERT_ANY_THROW(engine_ptr->BuildIndex("/tmp/milvus_index_9", milvus::engine::EngineType::FAISS_PQ));
     fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
 #endif
 

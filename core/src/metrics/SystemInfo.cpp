@@ -20,11 +20,11 @@
 #include "utils/Log.h"
 
 #include <dirent.h>
+#include <fiu-local.h>
 #include <sys/sysinfo.h>
 #include <sys/times.h>
 #include <unistd.h>
 #include <map>
-#include <fiu-local.h>
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -103,7 +103,7 @@ SystemInfo::ParseLine(char* line) {
 uint64_t
 SystemInfo::GetPhysicalMemory() {
     struct sysinfo memInfo;
-    sysinfo(& memInfo);
+    sysinfo(&memInfo);
     uint64_t totalPhysMem = memInfo.totalram;
     // Multiply in next statement to avoid int overflow on right hand side...
     totalPhysMem *= memInfo.mem_unit;

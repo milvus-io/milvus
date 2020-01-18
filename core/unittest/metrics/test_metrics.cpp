@@ -25,6 +25,7 @@
 #include <fiu-control.h>
 
 #define private public
+
 #include "cache/CpuCacheMgr.h"
 #include "server/Config.h"
 #include "metrics/utils.h"
@@ -66,7 +67,7 @@ TEST_F(MetricTest, METRIC_TEST) {
     milvus::server::SystemInfo::GetInstance().Init();
     milvus::server::Metrics::GetInstance().Init();
 
-    std::string system_info ;
+    std::string system_info;
     milvus::server::SystemInfo::GetInstance().GetSysInfoJsonStr(system_info);
 
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);

@@ -96,13 +96,13 @@ TEST_P(SPTAGTest, sptag_basic) {
         std::cout << "dist\n" << ss_dist.str() << std::endl;
     }
 
-    //Though these functions do nothing, use them to improve code coverage
+    // Though these functions do nothing, use them to improve code coverage
     {
         index_->Seal();
         knowhere::CPUSPTAGRNGIndexModel index_model;
-        //Function Serialize's implementation do'nt have return value,
-        //which will cause undefined behavior.
-        //index_model.Serialize();
+        // Function Serialize's implementation do'nt have return value,
+        // which will cause undefined behavior.
+        // index_model.Serialize();
         index_model.Load(knowhere::BinarySet());
     }
 }

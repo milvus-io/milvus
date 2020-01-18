@@ -45,7 +45,8 @@ ShowPartitionsRequest::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     auto status = ValidationUtil::ValidateTableName(table_name_);
-    fiu_do_on("ShowPartitionsRequest.OnExecute.invalid_table_name", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+    fiu_do_on("ShowPartitionsRequest.OnExecute.invalid_table_name",
+              status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
@@ -62,7 +63,8 @@ ShowPartitionsRequest::OnExecute() {
 
     std::vector<engine::meta::TableSchema> schema_array;
     status = DBWrapper::DB()->ShowPartitions(table_name_, schema_array);
-    fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+    fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail",
+              status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }

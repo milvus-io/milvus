@@ -68,7 +68,8 @@ ArchiveConf::ParseCritirias(const std::string& criterias) {
             continue;
         }
         try {
-            fiu_do_on("ArchiveConf.ParseCritirias.OptionsParseCritiriasOutOfRange", kv[1] = std::to_string(std::numeric_limits<int>::max() + 1UL));
+            fiu_do_on("ArchiveConf.ParseCritirias.OptionsParseCritiriasOutOfRange",
+                      kv[1] = std::to_string(std::numeric_limits<int>::max() + 1UL));
             auto value = std::stoi(kv[1]);
             criterias_[kv[0]] = value;
         } catch (std::out_of_range&) {

@@ -16,8 +16,8 @@
 // under the License.
 
 #include <faiss/index_io.h>
-#include <utility>
 #include <fiu-local.h>
+#include <utility>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"

@@ -157,7 +157,8 @@ IVFHybridIndex::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
 std::pair<VecIndexPtr, knowhere::QuantizerPtr>
 IVFHybridIndex::CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) {
     try {
-        fiu_do_on("IVFHybridIndex.CopyToGpuWithQuantizer.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFHybridIndex.CopyToGpuWithQuantizer.throw_knowhere_exception",
+                  throw knowhere::KnowhereException(""));
         fiu_do_on("IVFHybridIndex.CopyToGpuWithQuantizer.throw_std_exception", throw std::exception());
 
         // TODO(linxj): Hardcode here

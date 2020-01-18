@@ -104,6 +104,7 @@ TEST_P(KnowhereWrapperTest, WRAPPER_EXCEPTION_TEST) {
     std::string msg = ex.what();
     EXPECT_EQ(msg, err_msg);
 }
+
 #endif
 
 TEST_P(KnowhereWrapperTest, BASE_TEST) {

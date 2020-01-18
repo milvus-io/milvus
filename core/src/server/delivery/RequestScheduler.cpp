@@ -19,8 +19,8 @@
 #include "utils/Log.h"
 
 #include <fiu-local.h>
-#include <utility>
 #include <unistd.h>
+#include <utility>
 
 namespace milvus {
 namespace server {
@@ -91,7 +91,7 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
     }
 
     auto status = PutToQueue(request_ptr);
-    fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status=Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (!status.ok()) {
         SERVER_LOG_ERROR << "Put request to queue failed with code: " << status.ToString();
@@ -122,7 +122,7 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
             fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception1", throw std::exception());
             auto status = request->Execute();
             fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception", throw std::exception());
-            fiu_do_on("RequestScheduler.TakeToExecute.execute_fail", status=Status(SERVER_INVALID_ARGUMENT, ""));
+            fiu_do_on("RequestScheduler.TakeToExecute.execute_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
             if (!status.ok()) {
                 SERVER_LOG_ERROR << "Request failed with code: " << status.ToString();
             }
@@ -143,7 +143,7 @@ RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
         RequestQueuePtr queue = std::make_shared<RequestQueue>();
         queue->Put(request_ptr);
         request_groups_.insert(std::make_pair(group_name, queue));
-        fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue= nullptr);
+        fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue = nullptr);
 
         // start a thread
         ThreadPtr thread = std::make_shared<std::thread>(&RequestScheduler::TakeToExecute, this, queue);

@@ -48,19 +48,22 @@ CreatePartitionRequest::OnExecute() {
     try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_table_name", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_table_name",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
         status = ValidationUtil::ValidatePartitionName(partition_name_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_name", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_name",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
         status = ValidationUtil::ValidatePartitionTags({tag_});
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -68,7 +71,8 @@ CreatePartitionRequest::OnExecute() {
         // step 2: create partition
         status = DBWrapper::DB()->CreatePartition(table_name_, partition_name_, tag_);
         fiu_do_on("CreatePartitionRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
-        fiu_do_on("CreatePartitionRequest.OnExecute.create_partition_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreatePartitionRequest.OnExecute.create_partition_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             // partition could exist

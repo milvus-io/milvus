@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
-#include <thread>
 #include <fiu-control.h>
 #include <fiu-local.h>
+#include <gtest/gtest.h>
+#include <thread>
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #include "unittest/Helper.h"
@@ -108,7 +108,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         }
 
         {
-            //invalid quantizer config
+            // invalid quantizer config
             quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
             auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
             ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, nullptr));

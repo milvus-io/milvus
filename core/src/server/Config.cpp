@@ -657,6 +657,7 @@ Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
 
 Status
 Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
+    fiu_return_on("check_config_insert_buffer_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid insert buffer size: " + value +
                           ". Possible reason: cache_config.insert_buffer_size is not a positive integer.";
@@ -1236,7 +1237,7 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         std::ifstream tracer_config(value);
         Status s = tracer_config.good() ? Status::OK()
                                         : Status(SERVER_INVALID_ARGUMENT, "Failed to open tracer config file " + value +
-                                                                          ": " + std::strerror(errno));
+                                                                              ": " + std::strerror(errno));
         tracer_config.close();
         return s;
     }

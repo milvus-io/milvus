@@ -81,7 +81,7 @@ TEST_F(MetaTest, FALID_TEST) {
         //failed initialize
         auto options_1 = options;
         options_1.meta_.path_ = options.meta_.path_ + "1";
-        if(boost::filesystem::is_directory(options_1.meta_.path_)){
+        if (boost::filesystem::is_directory(options_1.meta_.path_)) {
             boost::filesystem::remove_all(options_1.meta_.path_);
         }
 
@@ -294,7 +294,7 @@ TEST_F(MetaTest, FALID_TEST) {
     {
         milvus::engine::meta::TableFileSchema file;
         file.table_id_ = table_id;
-        file.file_type_  = milvus::engine::meta::TableFileSchema::RAW;
+        file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
         status = impl_->CreateTableFile(file);
         ASSERT_TRUE(status.ok());
         file.file_size_ = std::numeric_limits<size_t>::max();
@@ -706,11 +706,11 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     std::vector<int> files_to_delete;
     milvus::engine::meta::TableFilesSchema files_schema;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
-    status = impl_->FilesByType(table_id,files_to_delete,files_schema);
+    status = impl_->FilesByType(table_id, files_to_delete, files_schema);
     ASSERT_TRUE(status.ok());
 
     table_file.table_id_ = table_id;
-    table_file.file_type_= milvus::engine::meta::TableFileSchema::TO_DELETE;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
     milvus::engine::OngoingFileChecker filter;
     table_file.file_id_ = files_schema.front().file_id_;
     filter.MarkOngoingFile(table_file);

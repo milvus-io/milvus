@@ -181,14 +181,13 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     fiu_init(0);
     fiu_enable("HasTableRequest.OnExecute.table_not_exist", 1, NULL, 0);
     handler->HasTable(&context, &request, &reply);
-    ASSERT_NE(reply.status().error_code(),::milvus::grpc::ErrorCode::SUCCESS);
+    ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
     fiu_disable("HasTableRequest.OnExecute.table_not_exist");
 
     fiu_enable("HasTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->HasTable(&context, &request, &reply);
-    ASSERT_NE(reply.status().error_code(),::milvus::grpc::ErrorCode::SUCCESS);
+    ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
     fiu_disable("HasTableRequest.OnExecute.throw_std_exception");
-
 }
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {
@@ -857,9 +856,10 @@ class AsyncDummyRequest : public milvus::server::BaseRequest {
         return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
     }
 
-    void TestSetStatus(){
+    void TestSetStatus() {
         SetStatus(milvus::SERVER_INVALID_ARGUMENT, "");
     }
+
  public:
     explicit AsyncDummyRequest(std::string& dummy)
         : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"), dummy, true) {
@@ -926,7 +926,6 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     milvus::server::RequestScheduler::GetInstance().Start();
     milvus::server::RequestScheduler::GetInstance().Stop();
 }
-
 
 TEST(RpcTest, RPC_SERVER_TEST) {
     using namespace milvus::server::grpc;

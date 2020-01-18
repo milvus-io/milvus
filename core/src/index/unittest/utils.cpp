@@ -72,7 +72,7 @@ BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
     query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
 }
 
-//not used
+// not used
 #if 0
 knowhere::DatasetPtr
 DataGen::GenQuery(const int& nq) {
@@ -239,7 +239,7 @@ PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
-//not used
+// not used
 #if 0
 void
 Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph, const char* filename) {

@@ -20,11 +20,11 @@
 #include "Utils.h"
 #include "server/Config.h"
 
+#include <fiu-local.h>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
-#include <fiu-local.h>
 
 namespace milvus {
 namespace scheduler {
@@ -64,7 +64,7 @@ load_simple_config() {
         std::vector<int64_t> build_gpu_ids;
         config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids);
         auto pcie = Connection("pcie", 12000);
-        fiu_do_on("load_simple_config_mock",build_gpu_ids.push_back(1));
+        fiu_do_on("load_simple_config_mock", build_gpu_ids.push_back(1));
 
         std::vector<int64_t> not_find_build_ids;
         for (auto& build_id : build_gpu_ids) {

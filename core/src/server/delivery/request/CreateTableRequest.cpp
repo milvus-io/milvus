@@ -63,7 +63,8 @@ CreateTableRequest::OnExecute() {
         }
 
         status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
-        fiu_do_on("CreateTableRequest.OnExecute.invalid_index_file_size", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreateTableRequest.OnExecute.invalid_index_file_size",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -92,7 +93,8 @@ CreateTableRequest::OnExecute() {
         // step 3: create table
         status = DBWrapper::DB()->CreateTable(table_info);
         fiu_do_on("CreateTableRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
-        fiu_do_on("CreateTableRequest.OnExecute.create_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreateTableRequest.OnExecute.create_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             // table could exist

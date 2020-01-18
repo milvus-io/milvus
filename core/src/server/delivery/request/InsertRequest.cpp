@@ -87,16 +87,16 @@ InsertRequest::OnExecute() {
         // step 3: check table flag
         // all user provide id, or all internal id
         bool user_provide_ids = !vectors_data_.id_array_.empty();
-        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id",
-            user_provide_ids = false; table_info.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
+        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
+                  table_info.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
                           "Table vector IDs are user-defined. Please provide IDs for all vectors of this table.");
         }
 
-        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2",
-            user_provide_ids = true; table_info.flag_ = engine::meta::FLAG_MASK_NO_USERID);
+        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
+                  table_info.flag_ = engine::meta::FLAG_MASK_NO_USERID);
         // user didn't provided id before, no need to provide user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
@@ -123,7 +123,7 @@ InsertRequest::OnExecute() {
                               "The vector dimension must be equal to the table dimension.");
             }
 
-        fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
+            fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
             if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");

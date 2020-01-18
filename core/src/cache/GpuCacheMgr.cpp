@@ -19,9 +19,9 @@
 #include "server/Config.h"
 #include "utils/Log.h"
 
+#include <fiu-local.h>
 #include <sstream>
 #include <utility>
-#include <fiu-local.h>
 
 namespace milvus {
 namespace cache {
