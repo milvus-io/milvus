@@ -98,10 +98,12 @@ class WebController : public oatpp::web::server::api::ApiController {
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.GetDevices(devices_dto);
         std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, devices_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, devices_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
         return response;
@@ -127,11 +129,14 @@ class WebController : public oatpp::web::server::api::ApiController {
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto status_dto = handler.GetAdvancedConfig(config_dto);
+
         std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            response = createDtoResponse(Status::CODE_200, config_dto);
-        } else {
-            response = createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, config_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
         return response;
@@ -152,13 +157,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
-        auto status_dto = handler.SetAdvancedConfig(body);
         std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_200, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        auto status_dto = handler.SetAdvancedConfig(body);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
 #ifdef MILVUS_GPU_VERSION
@@ -182,13 +191,18 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto gpu_config_dto = GPUConfigDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-        auto status_dto = handler.GetGpuConfig(gpu_config_dto);
 
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_200, gpu_config_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.GetGpuConfig(gpu_config_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, gpu_config_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(SetGPUConfig) {
@@ -207,11 +221,15 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto status_dto = handler.SetGpuConfig(body);
 
         std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_200, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
 #endif
@@ -227,7 +245,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         info->addConsumes<TableRequestDto::ObjectWrapper>("application/json");
 
-        info->addResponse<TableFieldsDto::ObjectWrapper>(Status::CODE_201, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
@@ -237,12 +255,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
+        std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.CreateTable(body);
-        if (0 != status_dto->code) {
-            return createDtoResponse(Status::CODE_400, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_201, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_201, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(ShowTables) {
@@ -257,17 +280,25 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(ShowTables)
 
-    ENDPOINT("GET", "/tables", ShowTables, QUERY(Int64, offset, "offset"), QUERY(Int64, page_size, "page_size")) {
+    ENDPOINT("GET", "/tables", ShowTables, REQUEST(
+        const std::shared_ptr<IncomingRequest>&, request)) {
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto response_dto = TableListFieldsDto::createShared();
-        auto status_dto = handler.ShowTables(offset, page_size, response_dto);
+        auto offset = request->getQueryParameter("offset", "0");
+        auto page_size = request->getQueryParameter("page_size", "10");
+
         std::shared_ptr<OutgoingResponse> response;
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_200, response_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        auto status_dto = handler.ShowTables(offset, page_size, response_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, response_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ADD_CORS(TableOptions)
@@ -296,20 +327,24 @@ class WebController : public oatpp::web::server::api::ApiController {
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
         auto fields_dto = TableFieldsDto::createShared();
         auto status_dto = handler.GetTable(table_name, query_params, fields_dto);
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_200, fields_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+
+        std::shared_ptr<OutgoingResponse> response;
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, fields_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(DropTable) {
         info->summary = "Drop table";
-
-        info->pathParams.add<String>("table_name");
 
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
@@ -321,15 +356,21 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("DELETE", "/tables/{table_name}", DropTable, PATH(String, table_name)) {
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.DropTable(table_name);
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_204, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_204, status_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ADD_CORS(IndexOptions)
@@ -341,29 +382,34 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT_INFO(CreateIndex) {
         info->summary = "Create index";
 
-        info->pathParams.add<String>("table_name");
-
         info->addConsumes<IndexRequestDto::ObjectWrapper>("application/json");
+
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST",
-             "/tables/{table_name}/indexes",
-             CreateIndex,
-             PATH(String, table_name),
-             BODY_DTO(IndexRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("POST", "/tables/{table_name}/indexes", CreateIndex,
+             PATH(String, table_name), BODY_DTO(IndexRequestDto::ObjectWrapper, body)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-        auto status_dto = handler.CreateIndex(table_name, body);
 
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_201, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.CreateIndex(table_name, body);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_201, status_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(GetIndex) {
@@ -382,15 +428,21 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto index_dto = IndexDto::createShared();
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.GetIndex(table_name, index_dto);
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_200, index_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, index_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(DropIndex) {
@@ -408,15 +460,21 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("DELETE", "/tables/{table_name}/indexes", DropIndex, PATH(String, table_name)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.DropIndex(table_name);
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_204, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_204, status_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ADD_CORS(PartitionsOptions)
@@ -434,6 +492,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
+        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(CreatePartition)
@@ -442,13 +501,21 @@ class WebController : public oatpp::web::server::api::ApiController {
              CreatePartition, PATH(String, table_name), BODY_DTO(PartitionRequestDto::ObjectWrapper, body)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-        auto status_dto = handler.CreatePartition(table_name, body);
 
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_201, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.CreatePartition(table_name, body);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_201, status_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(ShowPartitions) {
@@ -469,26 +536,29 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(ShowPartitions)
 
-    ENDPOINT("GET",
-             "/tables/{table_name}/partitions",
-             ShowPartitions,
-             PATH(String, table_name),
-             QUERY(Int64, offset, "offset"),
-             QUERY(Int64, page_size, "page_size")) {
-        auto status_dto = StatusDto::createShared();
+    ENDPOINT("GET", "/tables/{table_name}/partitions", ShowPartitions,
+             PATH(String, table_name), REQUEST(
+                 const std::shared_ptr<IncomingRequest>&, request)) {
+        auto offset = request->getQueryParameter("offset", "0");
+        auto page_size = request->getQueryParameter("page_size", "10");
+
         auto partition_list_dto = PartitionListDto::createShared();
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
-        status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
-        int64_t code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_200, partition_list_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, partition_list_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ADD_CORS(PartitionOptions)
@@ -510,22 +580,31 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(DropPartition)
 
-    ENDPOINT("DELETE",
-             "/tables/{table_name}/partitions/{partition_tag}",
-             DropPartition,
-             PATH(String, table_name),
-             PATH(String, partition_tag)) {
+    ENDPOINT("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition,
+             PATH(String, table_name), PATH(String, partition_tag)) {
         auto handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.DropPartition(table_name, partition_tag);
-        auto code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_204, status_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_204, status_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
+    }
+
+    ADD_CORS(VectorsOptions)
+
+    ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ENDPOINT_INFO(Insert) {
@@ -540,32 +619,28 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
-    ADD_CORS(VectorsOptions)
-
-    ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
-        return createResponse(Status::CODE_204, "No Content");
-    }
-
     ADD_CORS(Insert)
 
-    ENDPOINT("POST",
-             "/tables/{table_name}/vectors",
-             Insert,
-             PATH(String, table_name),
-             BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
+             PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
         auto ids_dto = VectorIdsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-        auto status_dto = handler.Insert(table_name, body, ids_dto);
 
-        int64_t code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_201, ids_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.Insert(table_name, body, ids_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_201, ids_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(Search) {
@@ -582,23 +657,26 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(Search)
 
-    ENDPOINT("PUT",
-             "/tables/{table_name}/vectors",
-             Search,
-             PATH(String, table_name),
-             BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("PUT", "/tables/{table_name}/vectors", Search,
+             PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
         auto results_dto = TopkResultsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.Search(table_name, body, results_dto);
-        int64_t code = status_dto->code->getValue();
-        if (0 == code) {
-            return createDtoResponse(Status::CODE_200, results_dto);
-        } else if (StatusCode::TABLE_NOT_EXISTS == code) {
-            return createDtoResponse(Status::CODE_404, status_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, results_dto);
+                break;
+            case StatusCode::TABLE_NOT_EXISTS:
+                response = createDtoResponse(Status::CODE_404, status_dto);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
     ENDPOINT_INFO(SystemMsg) {
@@ -608,7 +686,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         info->addResponse<CommandDto::ObjectWrapper>(Status::CODE_200, "application/json");
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(SystemMsg)
@@ -618,13 +695,18 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
-        auto status_dto = handler.Cmd(msg, cmd_dto);
 
-        if (0 == status_dto->code->getValue()) {
-            return createDtoResponse(Status::CODE_200, cmd_dto);
-        } else {
-            return createDtoResponse(Status::CODE_400, status_dto);
+        std::shared_ptr<OutgoingResponse> response;
+        auto status_dto = handler.Cmd(msg, cmd_dto);
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createDtoResponse(Status::CODE_200, cmd_dto);
+                break;
+            default:
+                return createDtoResponse(Status::CODE_400, status_dto);
         }
+
+        return response;
     }
 
 /**
