@@ -24,13 +24,17 @@ namespace web {
 Status
 CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& records, std::vector<float>& vectors) {
     size_t tal_size = 0;
-    records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& row_item) { tal_size += row_item->count(); });
+    records->forEach([&tal_size](const OList<OFloat32>::ObjectWrapper& row_item) {
+        tal_size += row_item->count();
+    });
 
     vectors.resize(tal_size);
     size_t index_offset = 0;
     records->forEach([&vectors, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
         row_item->forEach(
-            [&vectors, &index_offset](const OFloat32& item) { vectors[index_offset++] = item->getValue(); });
+            [&vectors, &index_offset](const OFloat32& item) {
+                vectors[index_offset++] = item->getValue();
+            });
     });
 
     return Status::OK();
@@ -39,7 +43,9 @@ CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& recor
 Status
 CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors) {
     size_t tal_size = 0;
-    records->forEach([&tal_size](const OList<OInt64>::ObjectWrapper& item) { tal_size += item->count(); });
+    records->forEach([&tal_size](const OList<OInt64>::ObjectWrapper& item) {
+        tal_size += item->count();
+    });
 
     vectors.resize(tal_size);
     size_t index_offset = 0;
@@ -58,6 +64,25 @@ CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& reco
     });
 
     return Status::OK();
+}
+
+bool
+IsIntStr(const std::string& str) {
+    if (str.empty()) {
+        return false;
+    }
+
+    if ('-' != str.at(0) && !std::isdigit(str.at(0))) {
+        return false;
+    }
+
+    for (char c : str.substr(1)) {
+        if (!std::isdigit(c)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 }  // namespace web

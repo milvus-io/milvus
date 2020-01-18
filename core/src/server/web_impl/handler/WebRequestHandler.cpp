@@ -439,20 +439,19 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
     int64_t page_size_value = 10;
 
     if (nullptr != offset.get()) {
-        try {
-            offset_value = std::stol(offset->std_str());
-        } catch (const std::exception& e) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only type of \'int\' allowed");
+        std::string offset_str = offset->std_str();
+        if (!IsIntStr(offset_str)) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only int supported");
         }
+        offset_value = std::stol(offset_str);
     }
 
     if (nullptr != page_size.get()) {
-        try {
-            page_size_value = std::stol(page_size->std_str());
-        } catch (const std::exception& e) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
-                              "Query param \'page_size\' is illegal, only type of \'int\' allowed");
+        std::string page_size_str = page_size->std_str();
+        if (!IsIntStr(page_size_str)) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'page_size\' is illegal, only int supported");
         }
+        page_size_value = std::stol(page_size_str);
     }
 
     if (offset_value < 0 || page_size_value < 0) {
@@ -557,21 +556,19 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
     int64_t page_size_value = 10;
 
     if (nullptr != offset.get()) {
-        try {
-            offset_value = std::stol(offset->std_str());
-        } catch (const std::exception& e) {
-            std::string msg = "Query param \'offset\' is illegal. Reason: " + std::string(e.what());
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        std::string offset_str = offset->std_str();
+        if (!IsIntStr(offset_str)) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only int supported");
         }
+        offset_value = std::stol(offset_str);
     }
 
     if (nullptr != page_size.get()) {
-        try {
-            page_size_value = std::stol(page_size->std_str());
-        } catch (const std::exception& e) {
-            std::string msg = "Query param \'page_size\' is illegal. Reason: " + std::string(e.what());
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        std::string page_size_str = page_size->std_str();
+        if (!IsIntStr(page_size_str)) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'page_size\' is illegal, only int supported");
         }
+        page_size_value = std::stol(page_size_str);
     }
 
     if (offset_value < 0 || page_size_value < 0) {
