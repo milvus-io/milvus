@@ -101,9 +101,6 @@ Config::ValidateConfig() {
     int64_t db_archive_days_threshold;
     CONFIG_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
 
-    int64_t db_insert_buffer_size;
-    CONFIG_CHECK(GetDBConfigInsertBufferSize(db_insert_buffer_size));
-
     /* storage config */
     std::string storage_primary_path;
     CONFIG_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
@@ -146,6 +143,9 @@ Config::ValidateConfig() {
 
     float cache_cpu_cache_threshold;
     CONFIG_CHECK(GetCacheConfigCpuCacheThreshold(cache_cpu_cache_threshold));
+
+    int64_t cache_insert_buffer_size;
+    CONFIG_CHECK(GetCacheConfigInsertBufferSize(cache_insert_buffer_size));
 
     bool cache_insert_data;
     CONFIG_CHECK(GetCacheConfigCacheInsertData(cache_insert_data));
@@ -203,7 +203,6 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
-    CONFIG_CHECK(SetDBConfigInsertBufferSize(CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT));
 
     /* storage config */
     CONFIG_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
@@ -223,6 +222,7 @@ Config::ResetDefaultConfig() {
     /* cache config */
     CONFIG_CHECK(SetCacheConfigCpuCacheCapacity(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT));
     CONFIG_CHECK(SetCacheConfigCpuCacheThreshold(CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT));
+    CONFIG_CHECK(SetCacheConfigInsertBufferSize(CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT));
     CONFIG_CHECK(SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT));
 
     /* engine config */
@@ -280,6 +280,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             return SetCacheConfigCpuCacheThreshold(value);
         } else if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA) {
             return SetCacheConfigCacheInsertData(value);
+        } else if (child_key == CONFIG_CACHE_INSERT_BUFFER_SIZE) {
+            return SetCacheConfigInsertBufferSize(value);
         }
     } else if (parent_key == CONFIG_ENGINE) {
         if (child_key == CONFIG_ENGINE_USE_BLAS_THRESHOLD) {
@@ -457,31 +459,6 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::CheckDBConfigInsertBufferSize(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid insert buffer size: " + value +
-                          ". Possible reason: db_config.insert_buffer_size is not a positive integer.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        int64_t buffer_size = std::stoll(value) * GB;
-        if (buffer_size <= 0) {
-            std::string msg = "Invalid insert buffer size: " + value +
-                              ". Possible reason: db_config.insert_buffer_size is not a positive integer.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-
-        uint64_t total_mem = 0, free_mem = 0;
-        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if (buffer_size >= total_mem) {
-            std::string msg = "Invalid insert buffer size: " + value +
-                              ". Possible reason: db_config.insert_buffer_size exceeds system memory.";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-    }
-    return Status::OK();
-}
-
 /* storage config */
 Status
 Config::CheckStorageConfigPrimaryPath(const std::string& value) {
@@ -617,13 +594,13 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
         }
 
         int64_t buffer_value;
-        CONFIG_CHECK(GetDBConfigInsertBufferSize(buffer_value));
+        CONFIG_CHECK(GetCacheConfigInsertBufferSize(buffer_value));
 
         int64_t insert_buffer_size = buffer_value * GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
             std::string msg = "Invalid cpu cache capacity: " + value +
                               ". Possible reason: sum of cache_config.cpu_cache_capacity and "
-                              "db_config.insert_buffer_size exceeds system memory.";
+                              "cache_config.insert_buffer_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -641,6 +618,31 @@ Config::CheckCacheConfigCpuCacheThreshold(const std::string& value) {
         if (cpu_cache_threshold <= 0.0 || cpu_cache_threshold >= 1.0) {
             std::string msg = "Invalid cpu cache threshold: " + value +
                               ". Possible reason: cache_config.cpu_cache_threshold is not in range (0.0, 1.0].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid insert buffer size: " + value +
+                          ". Possible reason: cache_config.insert_buffer_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        int64_t buffer_size = std::stoll(value) * GB;
+        if (buffer_size <= 0) {
+            std::string msg = "Invalid insert buffer size: " + value +
+                              ". Possible reason: cache_config.insert_buffer_size is not a positive integer.";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+
+        uint64_t total_mem = 0, free_mem = 0;
+        CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        if (buffer_size >= total_mem) {
+            std::string msg = "Invalid insert buffer size: " + value +
+                              ". Possible reason: cache_config.insert_buffer_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -944,14 +946,6 @@ Config::GetDBConfigArchiveDaysThreshold(int64_t& value) {
 }
 
 Status
-Config::GetDBConfigInsertBufferSize(int64_t& value) {
-    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT);
-    CONFIG_CHECK(CheckDBConfigInsertBufferSize(str));
-    value = std::stoll(str);
-    return Status::OK();
-}
-
-Status
 Config::GetDBConfigPreloadTable(std::string& value) {
     value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE);
     return Status::OK();
@@ -1047,6 +1041,15 @@ Config::GetCacheConfigCpuCacheThreshold(float& value) {
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT);
     CONFIG_CHECK(CheckCacheConfigCpuCacheThreshold(str));
     value = std::stof(str);
+    return Status::OK();
+}
+
+Status
+Config::GetCacheConfigInsertBufferSize(int64_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT);
+    CONFIG_CHECK(CheckCacheConfigInsertBufferSize(str));
+    value = std::stoll(str);
     return Status::OK();
 }
 
@@ -1238,12 +1241,6 @@ Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, value);
 }
 
-Status
-Config::SetDBConfigInsertBufferSize(const std::string& value) {
-    CONFIG_CHECK(CheckDBConfigInsertBufferSize(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, value);
-}
-
 /* storage config */
 Status
 Config::SetStorageConfigPrimaryPath(const std::string& value) {
@@ -1323,6 +1320,12 @@ Status
 Config::SetCacheConfigCpuCacheThreshold(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCpuCacheThreshold(value));
     return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
+}
+
+Status
+Config::SetCacheConfigInsertBufferSize(const std::string& value) {
+    CONFIG_CHECK(CheckCacheConfigInsertBufferSize(value));
+    return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
 }
 
 Status
