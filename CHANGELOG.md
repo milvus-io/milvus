@@ -18,6 +18,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#1029 - check if table exists when try to delete partition
 - \#1066 - optimize http insert and search speed
 - \#1067 - Add binary vectors support in http server
+- \#1075 - improve error message when page size or offset is illegal
+- \#1082 - check page_size or offset value to avoid float
 
 ## Feature
 - \#216 - Add CLI to get server info
