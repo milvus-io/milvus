@@ -172,12 +172,12 @@ read_index(const std::string& location) {
     TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
-    bool minio_enable = false;
+    bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
-    config.GetStorageConfigMinioEnable(minio_enable);
+    config.GetStorageConfigS3Enable(s3_enable);
 
     std::shared_ptr<storage::IOReader> reader_ptr;
-    if (minio_enable) {
+    if (s3_enable) {
         reader_ptr = std::make_shared<storage::S3IOReader>(location);
     } else {
         reader_ptr = std::make_shared<storage::FileIOReader>(location);
@@ -245,12 +245,12 @@ write_index(VecIndexPtr index, const std::string& location) {
         fiu_do_on("VecIndex.write_index.throw_no_space_exception",
                   throw Exception(SERVER_INVALID_ARGUMENT, "No space left on device"));
 
-        bool minio_enable = false;
+        bool s3_enable = false;
         server::Config& config = server::Config::GetInstance();
-        config.GetStorageConfigMinioEnable(minio_enable);
+        config.GetStorageConfigS3Enable(s3_enable);
 
         std::shared_ptr<storage::IOWriter> writer_ptr;
-        if (minio_enable) {
+        if (s3_enable) {
             writer_ptr = std::make_shared<storage::S3IOWriter>(location);
         } else {
             writer_ptr = std::make_shared<storage::FileIOWriter>(location);
