@@ -71,18 +71,18 @@ static const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
 static const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
 static const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
 static const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
-static const char* CONFIG_STORAGE_MINIO_ENABLE = "minio_enable";
-static const char* CONFIG_STORAGE_MINIO_ENABLE_DEFAULT = "false";
-static const char* CONFIG_STORAGE_MINIO_ADDRESS = "minio_address";
-static const char* CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT = "127.0.0.1";
-static const char* CONFIG_STORAGE_MINIO_PORT = "minio_port";
-static const char* CONFIG_STORAGE_MINIO_PORT_DEFAULT = "9000";
-static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY = "minio_access_key";
-static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT = "minioadmin";
-static const char* CONFIG_STORAGE_MINIO_SECRET_KEY = "minio_secret_key";
-static const char* CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT = "minioadmin";
-static const char* CONFIG_STORAGE_MINIO_BUCKET = "minio_bucket";
-static const char* CONFIG_STORAGE_MINIO_BUCKET_DEFAULT = "milvus-bucket";
+static const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
+static const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
+static const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
+static const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_STORAGE_S3_PORT = "s3_port";
+static const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
+static const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
+static const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
+static const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
+static const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -197,17 +197,17 @@ class Config {
     Status
     CheckStorageConfigSecondaryPath(const std::string& value);
     Status
-    CheckStorageConfigMinioEnable(const std::string& value);
+    CheckStorageConfigS3Enable(const std::string& value);
     Status
-    CheckStorageConfigMinioAddress(const std::string& value);
+    CheckStorageConfigS3Address(const std::string& value);
     Status
-    CheckStorageConfigMinioPort(const std::string& value);
+    CheckStorageConfigS3Port(const std::string& value);
     Status
-    CheckStorageConfigMinioAccessKey(const std::string& value);
+    CheckStorageConfigS3AccessKey(const std::string& value);
     Status
-    CheckStorageConfigMinioSecretKey(const std::string& value);
+    CheckStorageConfigS3SecretKey(const std::string& value);
     Status
-    CheckStorageConfigMinioBucket(const std::string& value);
+    CheckStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
@@ -287,17 +287,17 @@ class Config {
     Status
     GetStorageConfigSecondaryPath(std::string& value);
     Status
-    GetStorageConfigMinioEnable(bool& value);
+    GetStorageConfigS3Enable(bool& value);
     Status
-    GetStorageConfigMinioAddress(std::string& value);
+    GetStorageConfigS3Address(std::string& value);
     Status
-    GetStorageConfigMinioPort(std::string& value);
+    GetStorageConfigS3Port(std::string& value);
     Status
-    GetStorageConfigMinioAccessKey(std::string& value);
+    GetStorageConfigS3AccessKey(std::string& value);
     Status
-    GetStorageConfigMinioSecretKey(std::string& value);
+    GetStorageConfigS3SecretKey(std::string& value);
     Status
-    GetStorageConfigMinioBucket(std::string& value);
+    GetStorageConfigS3Bucket(std::string& value);
 
     /* metric config */
     Status
@@ -371,17 +371,17 @@ class Config {
     Status
     SetStorageConfigSecondaryPath(const std::string& value);
     Status
-    SetStorageConfigMinioEnable(const std::string& value);
+    SetStorageConfigS3Enable(const std::string& value);
     Status
-    SetStorageConfigMinioAddress(const std::string& value);
+    SetStorageConfigS3Address(const std::string& value);
     Status
-    SetStorageConfigMinioPort(const std::string& value);
+    SetStorageConfigS3Port(const std::string& value);
     Status
-    SetStorageConfigMinioAccessKey(const std::string& value);
+    SetStorageConfigS3AccessKey(const std::string& value);
     Status
-    SetStorageConfigMinioSecretKey(const std::string& value);
+    SetStorageConfigS3SecretKey(const std::string& value);
     Status
-    SetStorageConfigMinioBucket(const std::string& value);
+    SetStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status

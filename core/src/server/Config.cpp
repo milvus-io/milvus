@@ -111,24 +111,24 @@ Config::ValidateConfig() {
     std::string storage_secondary_path;
     CONFIG_CHECK(GetStorageConfigSecondaryPath(storage_secondary_path));
 
-    bool storage_minio_enable;
-    CONFIG_CHECK(GetStorageConfigMinioEnable(storage_minio_enable));
-    std::cout << "MinIO " << (storage_minio_enable ? "ENABLED !" : "DISABLED !") << std::endl;
+    bool storage_s3_enable;
+    CONFIG_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
+    std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
 
-    std::string storage_minio_address;
-    CONFIG_CHECK(GetStorageConfigMinioAddress(storage_minio_address));
+    std::string storage_s3_address;
+    CONFIG_CHECK(GetStorageConfigS3Address(storage_s3_address));
 
-    std::string storage_minio_port;
-    CONFIG_CHECK(GetStorageConfigMinioPort(storage_minio_port));
+    std::string storage_s3_port;
+    CONFIG_CHECK(GetStorageConfigS3Port(storage_s3_port));
 
-    std::string storage_minio_access_key;
-    CONFIG_CHECK(GetStorageConfigMinioAccessKey(storage_minio_access_key));
+    std::string storage_s3_access_key;
+    CONFIG_CHECK(GetStorageConfigS3AccessKey(storage_s3_access_key));
 
-    std::string storage_minio_secret_key;
-    CONFIG_CHECK(GetStorageConfigMinioSecretKey(storage_minio_secret_key));
+    std::string storage_s3_secret_key;
+    CONFIG_CHECK(GetStorageConfigS3SecretKey(storage_s3_secret_key));
 
-    std::string storage_minio_bucket;
-    CONFIG_CHECK(GetStorageConfigMinioBucket(storage_minio_bucket));
+    std::string storage_s3_bucket;
+    CONFIG_CHECK(GetStorageConfigS3Bucket(storage_s3_bucket));
 
     /* metric config */
     bool metric_enable_monitor;
@@ -208,12 +208,12 @@ Config::ResetDefaultConfig() {
     /* storage config */
     CONFIG_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
     CONFIG_CHECK(SetStorageConfigSecondaryPath(CONFIG_STORAGE_SECONDARY_PATH_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigMinioEnable(CONFIG_STORAGE_MINIO_ENABLE_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigMinioAddress(CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigMinioPort(CONFIG_STORAGE_MINIO_PORT_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigMinioAccessKey(CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigMinioSecretKey(CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT));
-    CONFIG_CHECK(SetStorageConfigMinioBucket(CONFIG_STORAGE_MINIO_BUCKET_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigS3AccessKey(CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigS3SecretKey(CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT));
+    CONFIG_CHECK(SetStorageConfigS3Bucket(CONFIG_STORAGE_S3_BUCKET_DEFAULT));
 
     /* metric config */
     CONFIG_CHECK(SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT));
@@ -497,35 +497,34 @@ Config::CheckStorageConfigSecondaryPath(const std::string& value) {
 }
 
 Status
-Config::CheckStorageConfigMinioEnable(const std::string& value) {
+Config::CheckStorageConfigS3Enable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg =
-            "Invalid storage config: " + value + ". Possible reason: storage_config.minio_enable is not a boolean.";
+            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }
 
 Status
-Config::CheckStorageConfigMinioAddress(const std::string& value) {
+Config::CheckStorageConfigS3Address(const std::string& value) {
     if (!ValidationUtil::ValidateIpAddress(value).ok()) {
-        std::string msg =
-            "Invalid minio address: " + value + ". Possible reason: storage_config.minio_address is invalid.";
+        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }
 
 Status
-Config::CheckStorageConfigMinioPort(const std::string& value) {
+Config::CheckStorageConfigS3Port(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid minio port: " + value + ". Possible reason: storage_config.port is not a number.";
+        std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     } else {
         int32_t port = std::stoi(value);
         if (!(port > 1024 && port < 65535)) {
-            std::string msg = "Invalid minio port: " + value +
-                              ". Possible reason: storage_config.port is not in range (1024, 65535).";
+            std::string msg = "Invalid s3 port: " + value +
+                              ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
@@ -533,25 +532,25 @@ Config::CheckStorageConfigMinioPort(const std::string& value) {
 }
 
 Status
-Config::CheckStorageConfigMinioAccessKey(const std::string& value) {
+Config::CheckStorageConfigS3AccessKey(const std::string& value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.minio_access_key is empty.");
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_access_key is empty.");
     }
     return Status::OK();
 }
 
 Status
-Config::CheckStorageConfigMinioSecretKey(const std::string& value) {
+Config::CheckStorageConfigS3SecretKey(const std::string& value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.minio_secret_key is empty.");
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_secret_key is empty.");
     }
     return Status::OK();
 }
 
 Status
-Config::CheckStorageConfigMinioBucket(const std::string& value) {
+Config::CheckStorageConfigS3Bucket(const std::string& value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "storage_config.minio_bucket is empty.");
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_bucket is empty.");
     }
     return Status::OK();
 }
@@ -972,41 +971,41 @@ Config::GetStorageConfigSecondaryPath(std::string& value) {
 }
 
 Status
-Config::GetStorageConfigMinioEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ENABLE, CONFIG_STORAGE_MINIO_ENABLE_DEFAULT);
-    CONFIG_CHECK(CheckStorageConfigMinioEnable(str));
+Config::GetStorageConfigS3Enable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, CONFIG_STORAGE_S3_ENABLE_DEFAULT);
+    CONFIG_CHECK(CheckStorageConfigS3Enable(str));
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     value = (str == "true" || str == "on" || str == "yes" || str == "1");
     return Status::OK();
 }
 
 Status
-Config::GetStorageConfigMinioAddress(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ADDRESS, CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT);
-    return CheckStorageConfigMinioAddress(value);
+Config::GetStorageConfigS3Address(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, CONFIG_STORAGE_S3_ADDRESS_DEFAULT);
+    return CheckStorageConfigS3Address(value);
 }
 
 Status
-Config::GetStorageConfigMinioPort(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_PORT, CONFIG_STORAGE_MINIO_PORT_DEFAULT);
-    return CheckStorageConfigMinioPort(value);
+Config::GetStorageConfigS3Port(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, CONFIG_STORAGE_S3_PORT_DEFAULT);
+    return CheckStorageConfigS3Port(value);
 }
 
 Status
-Config::GetStorageConfigMinioAccessKey(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ACCESS_KEY, CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT);
+Config::GetStorageConfigS3AccessKey(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT);
     return Status::OK();
 }
 
 Status
-Config::GetStorageConfigMinioSecretKey(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_SECRET_KEY, CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT);
+Config::GetStorageConfigS3SecretKey(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT);
     return Status::OK();
 }
 
 Status
-Config::GetStorageConfigMinioBucket(std::string& value) {
-    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_BUCKET, CONFIG_STORAGE_MINIO_BUCKET_DEFAULT);
+Config::GetStorageConfigS3Bucket(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, CONFIG_STORAGE_S3_BUCKET_DEFAULT);
     return Status::OK();
 }
 
@@ -1259,39 +1258,39 @@ Config::SetStorageConfigSecondaryPath(const std::string& value) {
 }
 
 Status
-Config::SetStorageConfigMinioEnable(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigMinioEnable(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ENABLE, value);
+Config::SetStorageConfigS3Enable(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigS3Enable(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, value);
 }
 
 Status
-Config::SetStorageConfigMinioAddress(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigMinioAddress(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ADDRESS, value);
+Config::SetStorageConfigS3Address(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigS3Address(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, value);
 }
 
 Status
-Config::SetStorageConfigMinioPort(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigMinioPort(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_PORT, value);
+Config::SetStorageConfigS3Port(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigS3Port(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, value);
 }
 
 Status
-Config::SetStorageConfigMinioAccessKey(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigMinioAccessKey(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_ACCESS_KEY, value);
+Config::SetStorageConfigS3AccessKey(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigS3AccessKey(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, value);
 }
 
 Status
-Config::SetStorageConfigMinioSecretKey(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigMinioSecretKey(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_SECRET_KEY, value);
+Config::SetStorageConfigS3SecretKey(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigS3SecretKey(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, value);
 }
 
 Status
-Config::SetStorageConfigMinioBucket(const std::string& value) {
-    CONFIG_CHECK(CheckStorageConfigMinioBucket(value));
-    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_MINIO_BUCKET, value);
+Config::SetStorageConfigS3Bucket(const std::string& value) {
+    CONFIG_CHECK(CheckStorageConfigS3Bucket(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, value);
 }
 
 /* metric config */
