@@ -442,7 +442,8 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
     if (nullptr != offset.get()) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only non-negative integer supported");
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'offset\' is illegal, only non-negative integer supported");
         }
         offset_value = std::stol(offset_str);
     }
@@ -450,7 +451,8 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
     if (nullptr != page_size.get()) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'page_size\' is illegal, only non-negative integer supported");
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'page_size\' is illegal, only non-negative integer supported");
         }
         page_size_value = std::stol(page_size_str);
     }
@@ -559,7 +561,8 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
     if (nullptr != offset.get()) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only non-negative integer supported");
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'offset\' is illegal, only non-negative integer supported");
         }
         offset_value = std::stol(offset_str);
     }
@@ -567,7 +570,8 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
     if (nullptr != page_size.get()) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'page_size\' is illegal, only non-negative integer supported");
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'page_size\' is illegal, only non-negative integer supported");
         }
         page_size_value = std::stol(page_size_str);
     }

@@ -1129,7 +1129,7 @@ TEST_F(WebControllerTest, CMD) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, ADVANCEDCONFIG) {
+TEST_F(WebControllerTest, ADVANCED_CONFIG) {
     auto response = client_ptr->getAdvanced(conncetion_ptr);
 
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -1157,10 +1157,16 @@ TEST_F(WebControllerTest, ADVANCEDCONFIG) {
     config_dto->use_blas_threshold = 1000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    //// test fault
+    // cpu cache capacity exceed total memory
+    config_dto->cpu_cache_capacity = 10000000;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
 #ifdef MILVUS_GPU_VERSION
-TEST_F(WebControllerTest, GPUCONFIG) {
+TEST_F(WebControllerTest, GPU_CONFIG) {
     auto response = client_ptr->getGPUConfig(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
@@ -1188,7 +1194,14 @@ TEST_F(WebControllerTest, GPUCONFIG) {
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
-    // test fault config
+    //// test fault config
+    // cache capacity exceed GPU mem size
+    gpu_config_dto->cache_capacity = 100000;
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    gpu_config_dto->cache_capacity = 1;
+
+    // duplicate resources
     gpu_config_dto->search_resources->clear();
     gpu_config_dto->search_resources->pushBack("GPU0");
     gpu_config_dto->search_resources->pushBack("GPU1");
@@ -1199,7 +1212,7 @@ TEST_F(WebControllerTest, GPUCONFIG) {
 
 #endif
 
-TEST_F(WebControllerTest, DEVICESCONFIG) {
+TEST_F(WebControllerTest, DEVICES_CONFIG) {
     auto response = WebControllerTest::client_ptr->getDevices(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
