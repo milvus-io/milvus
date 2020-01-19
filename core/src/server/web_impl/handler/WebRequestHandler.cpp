@@ -17,19 +17,20 @@
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
-#include <boost/algorithm/string.hpp>
 #include <cmath>
+#include <ctime>
 #include <string>
 #include <vector>
 
 #include "metrics/SystemInfo.h"
-#include "utils/Log.h"
-
 #include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
+#include "server/web_impl/utils/Util.h"
+#include "utils/StringHelpFunctions.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace server {
@@ -79,83 +80,9 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
-namespace {
-Status
-CopyRowRecords(const InsertRequestDto::ObjectWrapper& param, engine::VectorsData& vectors) {
-    vectors.float_data_.clear();
-    vectors.binary_data_.clear();
-    vectors.id_array_.clear();
-    vectors.vector_count_ = param->records->count();
-
-    // step 1: copy vector data
-    if (nullptr == param->records.get()) {
-        return Status(SERVER_INVALID_ROWRECORD_ARRAY, "");
-    }
-
-    size_t tal_size = 0;
-    for (int64_t i = 0; i < param->records->count(); i++) {
-        tal_size += param->records->get(i)->count();
-    }
-
-    std::vector<float>& datas = vectors.float_data_;
-    datas.resize(tal_size);
-    size_t index_offset = 0;
-    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
-        row_item->forEach([&datas, &index_offset](const OFloat32& item) {
-            datas[index_offset] = item->getValue();
-            index_offset++;
-        });
-    });
-
-    // step 2: copy id array
-    if (nullptr == param->ids.get()) {
-        return Status(SERVER_ILLEGAL_VECTOR_ID, "");
-    }
-
-    for (int64_t i = 0; i < param->ids->count(); i++) {
-        vectors.id_array_.emplace_back(param->ids->get(i)->getValue());
-    }
-
-    return Status::OK();
-}
-
-Status
-CopyRowRecords(const SearchRequestDto::ObjectWrapper& param, engine::VectorsData& vectors) {
-    vectors.float_data_.clear();
-    vectors.binary_data_.clear();
-    vectors.id_array_.clear();
-    vectors.vector_count_ = param->records->count();
-
-    // step 1: copy vector data
-    if (nullptr == param->records.get()) {
-        return Status(SERVER_INVALID_ROWRECORD_ARRAY, "");
-    }
-
-    size_t tal_size = 0;
-    for (int64_t i = 0; i < param->records->count(); i++) {
-        tal_size += param->records->get(i)->count();
-    }
-
-    std::vector<float>& datas = vectors.float_data_;
-    datas.resize(tal_size);
-    size_t index_offset = 0;
-    param->records->forEach([&datas, &index_offset](const OList<OFloat32>::ObjectWrapper& row_item) {
-        row_item->forEach([&datas, &index_offset](const OFloat32& item) {
-            datas[index_offset] = item->getValue();
-            index_offset++;
-        });
-    });
-
-    return Status::OK();
-}
-
-}  // namespace
-
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
-
 Status
-WebRequestHandler::GetTaleInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
-                               std::map<std::string, std::string>& table_info) {
+WebRequestHandler::GetTableInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields) {
     TableSchema schema;
     auto status = request_handler_.DescribeTable(context_ptr_, table_name, schema);
     if (!status.ok()) {
@@ -174,26 +101,28 @@ WebRequestHandler::GetTaleInfo(const std::shared_ptr<Context>& context, const st
         return status;
     }
 
-    table_info[KEY_TABLE_TABLE_NAME] = schema.table_name_;
-    table_info[KEY_TABLE_DIMENSION] = std::to_string(schema.dimension_);
-    table_info[KEY_TABLE_INDEX_METRIC_TYPE] = std::string(MetricMap.at(engine::MetricType(schema.metric_type_)));
-    table_info[KEY_TABLE_INDEX_FILE_SIZE] = std::to_string(schema.index_file_size_);
+    table_fields->table_name = schema.table_name_.c_str();
+    table_fields->dimension = schema.dimension_;
+    table_fields->index_file_size = schema.index_file_size_;
+    table_fields->index = IndexMap.at(engine::EngineType(index_param.index_type_)).c_str();
+    table_fields->nlist = index_param.nlist_;
+    table_fields->metric_type = MetricMap.at(engine::MetricType(schema.metric_type_)).c_str();
+    table_fields->count = count;
+}
 
-    table_info[KEY_INDEX_INDEX_TYPE] = std::string(IndexMap.at(engine::EngineType(index_param.index_type_)));
-    table_info[KEY_INDEX_NLIST] = std::to_string(index_param.nlist_);
-
-    table_info[KEY_TABLE_COUNT] = std::to_string(count);
+Status
+WebRequestHandler::CommandLine(const std::string& cmd, std::string& reply) {
+    return request_handler_.Cmd(context_ptr_, cmd, reply);
 }
 
 /////////////////////////////////////////// Router methods ////////////////////////////////////////////
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto getgb = [](uint64_t x) -> uint64_t { return x / 1024 / 1024 / 1024; };
     auto system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
-    devices_dto->cpu->memory = getgb(system_info.GetPhysicalMemory());
+    devices_dto->cpu->memory = system_info.GetPhysicalMemory() >> 30;
 
     devices_dto->gpus = devices_dto->gpus->createShared();
 
@@ -203,12 +132,12 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
     std::vector<uint64_t> device_mems = system_info.GPUMemoryTotal();
 
     if (count != device_mems.size()) {
-        ASSIGN_RETURN_STATUS_DTO(Status(UNEXPECTED_ERROR, "Can't obtain GPU info"));
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Can't obtain GPU info");
     }
 
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
-        device_dto->memory = getgb(device_mems.at(i));
+        device_dto->memory = device_mems.at(i) >> 30;
         devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 
@@ -220,35 +149,39 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
     Config& config = Config::GetInstance();
+    std::string reply;
+    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
 
-    int64_t value;
-    auto status = config.GetCacheConfigCpuCacheCapacity(value);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-    advanced_config->cpu_cache_capacity = value;
-
-    bool ok;
-    status = config.GetCacheConfigCacheInsertData(ok);
+    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
+    auto status = CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    advanced_config->cache_insert_data = ok;
+    advanced_config->cpu_cache_capacity = std::stol(reply);
 
-    status = config.GetEngineConfigUseBlasThreshold(value);
+    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA);
+    CommandLine(cache_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    advanced_config->use_blas_threshold = value;
+    advanced_config->cache_insert_data = ("1" == reply || "true" == reply);
+
+    auto engine_cmd_prefix = "get_config " + std::string(CONFIG_ENGINE) + ".";
+
+    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
+    CommandLine(engine_cmd_string, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+    advanced_config->use_blas_threshold = std::stol(reply);
 
 #ifdef MILVUS_GPU_VERSION
-
-    status = config.GetEngineConfigGpuSearchThreshold(value);
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
+    CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-    advanced_config->gpu_search_threshold = value;
-
+    advanced_config->gpu_search_threshold = std::stol(reply);
 #endif
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -256,44 +189,57 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    Config& config = Config::GetInstance();
-
     if (nullptr == advanced_config->cpu_cache_capacity.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
-    }
-    auto status =
-        config.SetCacheConfigCpuCacheCapacity(std::to_string(advanced_config->cpu_cache_capacity->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
     }
 
     if (nullptr == advanced_config->cache_insert_data.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
     }
-    status = config.SetCacheConfigCacheInsertData(std::to_string(advanced_config->cache_insert_data->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
 
     if (nullptr == advanced_config->use_blas_threshold.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
     }
-    status = config.SetEngineConfigUseBlasThreshold(std::to_string(advanced_config->use_blas_threshold->getValue()));
+
+#ifdef MILVUS_GPU_VERSION
+    if (nullptr == advanced_config->gpu_search_threshold.get()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
+    }
+#endif
+
+    std::string reply;
+    std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
+
+    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY) + " " +
+                                   std::to_string(advanced_config->cpu_cache_capacity->getValue());
+    auto status = CommandLine(cache_cmd_string, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA) + " " +
+                       std::to_string(advanced_config->cache_insert_data->getValue());
+    status = CommandLine(cache_cmd_string, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
+
+    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD) + " " +
+                             std::to_string(advanced_config->use_blas_threshold->getValue());
+    status = CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
 #ifdef MILVUS_GPU_VERSION
-
-    if (nullptr == advanced_config->gpu_search_threshold.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
-    }
-    status =
-        config.SetEngineConfigGpuSearchThreshold(std::to_string(advanced_config->gpu_search_threshold->getValue()));
+    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) + " " +
+                        std::to_string(advanced_config->gpu_search_threshold->getValue());
+    CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
-
 #endif
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -303,46 +249,52 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    Config& config = Config::GetInstance();
+    std::string reply;
+    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
 
-    bool enable;
-    auto status = config.GetGpuResourceConfigEnable(enable);
+    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE);
+    auto status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
-    gpu_config_dto->enable = enable;
+    gpu_config_dto->enable = reply == "1" || reply == "true";
 
-    if (!enable) {
+    if (!gpu_config_dto->enable->getValue()) {
         ASSIGN_RETURN_STATUS_DTO(Status::OK());
     }
 
-    int64_t capacity;
-    status = config.GetGpuResourceConfigCacheCapacity(capacity);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
-    gpu_config_dto->cache_capacity = capacity;
+    gpu_config_dto->cache_capacity = std::stol(reply);
 
-    std::vector<int64_t> values;
-    status = config.GetGpuResourceConfigSearchResources(values);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
+
+    std::vector<std::string> gpu_entry;
+    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
 
     gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
-    for (auto& device_id : values) {
-        gpu_config_dto->search_resources->pushBack("GPU" + OString(std::to_string(device_id).c_str()));
+    for (auto& device_id : gpu_entry) {
+        gpu_config_dto->search_resources->pushBack(OString(device_id.c_str())->toUpperCase());
     }
+    gpu_entry.clear();
 
-    values.clear();
-    status = config.GetGpuResourceConfigBuildIndexResources(values);
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
+    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
     gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-    for (auto& device_id : values) {
-        gpu_config_dto->build_index_resources->pushBack("GPU" + OString(std::to_string(device_id).c_str()));
+    for (auto& device_id : gpu_entry) {
+        gpu_config_dto->build_index_resources->pushBack(OString(device_id.c_str())->toUpperCase());
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
@@ -354,31 +306,44 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    Config& config = Config::GetInstance();
-
+    // Step 1: Check config param
     if (nullptr == gpu_config_dto->enable.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
-    }
-    auto status = config.SetGpuResourceConfigEnable(std::to_string(gpu_config_dto->enable->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    if (!gpu_config_dto->enable->getValue()) {
-        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources false");
     }
 
     if (nullptr == gpu_config_dto->cache_capacity.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
     }
-    status = config.SetGpuResourceConfigCacheCapacity(std::to_string(gpu_config_dto->cache_capacity->getValue()));
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
 
     if (nullptr == gpu_config_dto->search_resources.get()) {
         gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
         gpu_config_dto->search_resources->pushBack("GPU0");
+    }
+
+    if (nullptr == gpu_config_dto->build_index_resources.get()) {
+        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+        gpu_config_dto->build_index_resources->pushBack("GPU0");
+    }
+
+    // Step 2: Set config
+    std::string reply;
+    std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE) + " " +
+                                  std::to_string(gpu_config_dto->enable->getValue());
+    auto status = CommandLine(gpu_cmd_request, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
+    }
+
+    if (!gpu_config_dto->enable->getValue()) {
+        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
+    }
+
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY) + " " +
+                      std::to_string(gpu_config_dto->cache_capacity->getValue());
+    status = CommandLine(gpu_cmd_request, reply);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status);
     }
 
     std::vector<std::string> search_resources;
@@ -393,15 +358,13 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     if (len > 0) {
         search_resources_value.erase(len - 1);
     }
-    status = config.SetGpuResourceConfigSearchResources(search_resources_value);
+
+    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) + " " + search_resources_value;
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
 
-    if (nullptr == gpu_config_dto->build_index_resources.get()) {
-        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-        gpu_config_dto->build_index_resources->pushBack("GPU0");
-    }
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
         [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
@@ -415,7 +378,9 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
         build_resources_value.erase(len - 1);
     }
 
-    status = config.SetGpuResourceConfigBuildIndexResources(build_resources_value);
+    gpu_cmd_request =
+        gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) + " " + build_resources_value;
+    status = CommandLine(gpu_cmd_request, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status);
     }
@@ -461,74 +426,62 @@ WebRequestHandler::GetTable(const OString& table_name, const OQueryParams& query
         RETURN_STATUS_DTO(PATH_PARAM_LOSS, "Path param \'table_name\' is required!");
     }
 
-    Status status = Status::OK();
-
     // TODO: query string field `fields` npt used here
-    std::map<std::string, std::string> table_info;
-    status = GetTaleInfo(context_ptr_, table_name->std_str(), table_info);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
-    fields_dto->dimension = std::stol(table_info[KEY_TABLE_DIMENSION]);
-    fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
-    fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
-    fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
-    fields_dto->index_file_size = std::stol(table_info[KEY_TABLE_INDEX_FILE_SIZE]);
-    fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
+    auto status = GetTableInfo(table_name->std_str(), fields_dto);
 
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowTables(const OInt64& offset, const OInt64& page_size,
+WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
                               TableListFieldsDto::ObjectWrapper& response_dto) {
-    if (nullptr == offset.get()) {
-        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'offset\' is required");
+    int64_t offset_value = 0;
+    int64_t page_size_value = 10;
+
+    if (nullptr != offset.get()) {
+        try {
+            offset_value = std::stol(offset->std_str());
+        } catch (const std::exception& e) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only type of \'int\' allowed");
+        }
     }
 
-    if (nullptr == page_size.get()) {
-        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required");
+    if (nullptr != page_size.get()) {
+        try {
+            page_size_value = std::stol(page_size->std_str());
+        } catch (const std::exception& e) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'page_size\' is illegal, only type of \'int\' allowed");
+        }
     }
+
+    if (offset_value < 0 || page_size_value < 0) {
+        RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param 'offset' or 'page_size' should equal or bigger than 0");
+    }
+
     std::vector<std::string> tables;
-    Status status = Status::OK();
+    auto status = request_handler_.ShowTables(context_ptr_, tables);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
     response_dto->tables = response_dto->tables->createShared();
 
-    if (offset < 0 || page_size < 0) {
-        ASSIGN_RETURN_STATUS_DTO(
-            Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should bigger than 0"));
-    } else {
-        status = request_handler_.ShowTables(context_ptr_, tables);
+    if (offset_value >= tables.size()) {
+        ASSIGN_RETURN_STATUS_DTO(Status::OK());
+    }
+
+    response_dto->count = tables.size();
+
+    int64_t size = page_size_value + offset_value > tables.size() ? tables.size() - offset_value : page_size_value;
+    for (int64_t i = offset_value; i < size + offset_value; i++) {
+        auto table_fields_dto = TableFieldsDto::createShared();
+        status = GetTableInfo(tables.at(i), table_fields_dto);
         if (!status.ok()) {
-            ASSIGN_RETURN_STATUS_DTO(status)
+            break;
         }
-        if (offset < tables.size()) {
-            int64_t size = (page_size->getValue() + offset->getValue() > tables.size()) ? tables.size() - offset
-                                                                                        : page_size->getValue();
-            for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
-                std::map<std::string, std::string> table_info;
 
-                status = GetTaleInfo(context_ptr_, tables.at(i), table_info);
-                if (!status.ok()) {
-                    break;
-                }
-
-                auto table_fields_dto = TableFieldsDto::createShared();
-                table_fields_dto->table_name = table_info[KEY_TABLE_TABLE_NAME].c_str();
-                table_fields_dto->dimension = std::stol(table_info[std::string(KEY_TABLE_DIMENSION)]);
-                table_fields_dto->index_file_size = std::stol(table_info[std::string(KEY_TABLE_INDEX_FILE_SIZE)]);
-                table_fields_dto->index = table_info[KEY_INDEX_INDEX_TYPE].c_str();
-                table_fields_dto->nlist = std::stol(table_info[KEY_INDEX_NLIST]);
-                table_fields_dto->metric_type = table_info[KEY_TABLE_INDEX_METRIC_TYPE].c_str();
-                table_fields_dto->count = std::stol(table_info[KEY_TABLE_COUNT]);
-
-                response_dto->tables->pushBack(table_fields_dto);
-            }
-
-            response_dto->count = tables.size();
-        }
+        response_dto->tables->pushBack(table_fields_dto);
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -598,31 +551,50 @@ WebRequestHandler::CreatePartition(const OString& table_name, const PartitionReq
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OInt64& offset, const OInt64& page_size, const OString& table_name,
+WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
-    if (nullptr == offset.get()) {
-        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'offset\' is required!");
+    int64_t offset_value = 0;
+    int64_t page_size_value = 10;
+
+    if (nullptr != offset.get()) {
+        try {
+            offset_value = std::stol(offset->std_str());
+        } catch (const std::exception& e) {
+            std::string msg = "Query param \'offset\' is illegal. Reason: " + std::string(e.what());
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        }
     }
 
-    if (nullptr == page_size.get()) {
-        RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'page_size\' is required!");
+    if (nullptr != page_size.get()) {
+        try {
+            page_size_value = std::stol(page_size->std_str());
+        } catch (const std::exception& e) {
+            std::string msg = "Query param \'page_size\' is illegal. Reason: " + std::string(e.what());
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        }
+    }
+
+    if (offset_value < 0 || page_size_value < 0) {
+        ASSIGN_RETURN_STATUS_DTO(
+            Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
     }
 
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
-    if (status.ok()) {
-        partition_list_dto->partitions = partition_list_dto->partitions->createShared();
+    partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
-        if (offset->getValue() < partitions.size()) {
-            int64_t size = (offset->getValue() + page_size->getValue() > partitions.size()) ? partitions.size() - offset
-                                                                                            : page_size->getValue();
-            for (int64_t i = offset->getValue(); i < size + offset->getValue(); i++) {
-                auto partition_dto = PartitionFieldsDto::createShared();
-                partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
-                partition_dto->partition_tag = partitions.at(i).tag_.c_str();
-                partition_list_dto->partitions->pushBack(partition_dto);
-            }
+    if (offset_value < partitions.size()) {
+        int64_t size =
+            offset_value + page_size_value > partitions.size() ? partitions.size() - offset_value : page_size_value;
+        for (int64_t i = offset_value; i < size + offset_value; i++) {
+            auto partition_dto = PartitionFieldsDto::createShared();
+            partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
+            partition_dto->partition_tag = partitions.at(i).tag_.c_str();
+            partition_list_dto->partitions->pushBack(partition_dto);
         }
     }
 
@@ -637,15 +609,47 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
+WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& request,
                           VectorIdsDto::ObjectWrapper& ids_dto) {
-    engine::VectorsData vectors;
-    auto status = CopyRowRecords(param, vectors);
-    if (status.code() == SERVER_INVALID_ROWRECORD_ARRAY) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
+    TableSchema schema;
+    auto status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    status = request_handler_.Insert(context_ptr_, table_name->std_str(), vectors, param->tag->std_str());
+    auto metric = engine::MetricType(schema.metric_type_);
+    engine::VectorsData vectors;
+    bool bin_flag = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
+                    engine::MetricType::TANIMOTO == metric;
+
+    if (!bin_flag) {
+        if (nullptr == request->records.get()) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors");
+        }
+        vectors.vector_count_ = request->records->count();
+        status = CopyRowRecords(request->records, vectors.float_data_);
+    } else {
+        if (nullptr == request->records_bin.get()) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records_bin\' is required to fill vectors");
+        }
+        vectors.vector_count_ = request->records_bin->count();
+        status = CopyBinRowRecords(request->records_bin, vectors.binary_data_);
+    }
+
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
+
+    // step 2: copy id array
+    if (nullptr != request->ids.get()) {
+        auto& id_array = vectors.id_array_;
+        id_array.resize(request->ids->count());
+
+        size_t i = 0;
+        request->ids->forEach([&id_array, &i](const OInt64& item) { id_array[i++] = item->getValue(); });
+    }
+
+    status = request_handler_.Insert(context_ptr_, table_name->std_str(), vectors, request->tag->std_str());
 
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
@@ -658,42 +662,58 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
+WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& request,
                           TopkResultsDto::ObjectWrapper& results_dto) {
-    if (nullptr == search_request->topk.get()) {
+    if (nullptr == request->topk.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'topk\' is required in request body")
     }
-    int64_t topk_t = search_request->topk->getValue();
+    int64_t topk_t = request->topk->getValue();
 
-    if (nullptr == search_request->nprobe.get()) {
+    if (nullptr == request->nprobe.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'nprobe\' is required in request body")
     }
-    int64_t nprobe_t = search_request->nprobe->getValue();
+    int64_t nprobe_t = request->nprobe->getValue();
 
     std::vector<std::string> tag_list;
+    if (nullptr != request->tags.get()) {
+        request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
+    }
+
     std::vector<std::string> file_id_list;
-
-    if (nullptr != search_request->tags.get()) {
-        search_request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
+    if (nullptr != request->file_ids.get()) {
+        request->file_ids->forEach([&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
     }
 
-    if (nullptr != search_request->file_ids.get()) {
-        search_request->file_ids->forEach(
-            [&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
+    TableSchema schema;
+    auto status = request_handler_.DescribeTable(context_ptr_, table_name->std_str(), schema);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    if (nullptr == search_request->records.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill query vectors")
-    }
-
+    auto metric = engine::MetricType(schema.metric_type_);
+    bool bin_flag = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
+                    engine::MetricType::TANIMOTO == metric;
     engine::VectorsData vectors;
-    auto status = CopyRowRecords(search_request, vectors);
-    if (status.code() == SERVER_INVALID_ROWRECORD_ARRAY) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors")
+
+    if (!bin_flag) {
+        if (nullptr == request->records.get()) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records\' is required to fill vectors");
+        }
+        vectors.vector_count_ = request->records->count();
+        status = CopyRowRecords(request->records, vectors.float_data_);
+    } else {
+        if (nullptr == request->records_bin.get()) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'records_bin\' is required to fill vectors");
+        }
+        vectors.vector_count_ = request->records_bin->count();
+        status = CopyBinRowRecords(request->records_bin, vectors.binary_data_);
+    }
+
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
     }
 
     std::vector<Range> range_list;
-
     TopKQueryResult result;
     auto context_ptr = GenContextPtr("Web Handler");
     status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, range_list, topk_t, nprobe_t,
@@ -725,8 +745,14 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
 StatusDto::ObjectWrapper
 WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
+    std::string info = cmd->std_str();
+
+    if ("info" == info) {
+        info = "get_system_info";
+    }
+
     std::string reply_str;
-    auto status = request_handler_.Cmd(context_ptr_, cmd->std_str(), reply_str);
+    auto status = CommandLine(info, reply_str);
 
     if (status.ok()) {
         cmd_dto->reply = reply_str.c_str();

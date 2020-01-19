@@ -78,12 +78,14 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_fi
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/utils web_utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
 set(web_server_files
         ${web_handler_files}
         ${web_conponent_files}
         ${web_controller_files}
         ${web_dto_files}
+        ${web_utils_files}
         ${web_impl_files}
         )
 

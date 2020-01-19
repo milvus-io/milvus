@@ -60,8 +60,6 @@ static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
 
@@ -71,18 +69,18 @@ static const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
 static const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
 static const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
 static const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
-static const char* CONFIG_STORAGE_MINIO_ENABLE = "minio_enable";
-static const char* CONFIG_STORAGE_MINIO_ENABLE_DEFAULT = "false";
-static const char* CONFIG_STORAGE_MINIO_ADDRESS = "minio_address";
-static const char* CONFIG_STORAGE_MINIO_ADDRESS_DEFAULT = "127.0.0.1";
-static const char* CONFIG_STORAGE_MINIO_PORT = "minio_port";
-static const char* CONFIG_STORAGE_MINIO_PORT_DEFAULT = "9000";
-static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY = "minio_access_key";
-static const char* CONFIG_STORAGE_MINIO_ACCESS_KEY_DEFAULT = "minioadmin";
-static const char* CONFIG_STORAGE_MINIO_SECRET_KEY = "minio_secret_key";
-static const char* CONFIG_STORAGE_MINIO_SECRET_KEY_DEFAULT = "minioadmin";
-static const char* CONFIG_STORAGE_MINIO_BUCKET = "minio_bucket";
-static const char* CONFIG_STORAGE_MINIO_BUCKET_DEFAULT = "milvus-bucket";
+static const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
+static const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
+static const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
+static const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_STORAGE_S3_PORT = "s3_port";
+static const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
+static const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
+static const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
+static const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
+static const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -90,6 +88,8 @@ static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
+static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 
@@ -188,8 +188,6 @@ class Config {
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    CheckDBConfigInsertBufferSize(const std::string& value);
 
     /* storage config */
     Status
@@ -197,17 +195,17 @@ class Config {
     Status
     CheckStorageConfigSecondaryPath(const std::string& value);
     Status
-    CheckStorageConfigMinioEnable(const std::string& value);
+    CheckStorageConfigS3Enable(const std::string& value);
     Status
-    CheckStorageConfigMinioAddress(const std::string& value);
+    CheckStorageConfigS3Address(const std::string& value);
     Status
-    CheckStorageConfigMinioPort(const std::string& value);
+    CheckStorageConfigS3Port(const std::string& value);
     Status
-    CheckStorageConfigMinioAccessKey(const std::string& value);
+    CheckStorageConfigS3AccessKey(const std::string& value);
     Status
-    CheckStorageConfigMinioSecretKey(const std::string& value);
+    CheckStorageConfigS3SecretKey(const std::string& value);
     Status
-    CheckStorageConfigMinioBucket(const std::string& value);
+    CheckStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
@@ -222,6 +220,8 @@ class Config {
     CheckCacheConfigCpuCacheCapacity(const std::string& value);
     Status
     CheckCacheConfigCpuCacheThreshold(const std::string& value);
+    Status
+    CheckCacheConfigInsertBufferSize(const std::string& value);
     Status
     CheckCacheConfigCacheInsertData(const std::string& value);
 
@@ -277,8 +277,6 @@ class Config {
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigInsertBufferSize(int64_t& value);
-    Status
     GetDBConfigPreloadTable(std::string& value);
 
     /* storage config */
@@ -287,17 +285,17 @@ class Config {
     Status
     GetStorageConfigSecondaryPath(std::string& value);
     Status
-    GetStorageConfigMinioEnable(bool& value);
+    GetStorageConfigS3Enable(bool& value);
     Status
-    GetStorageConfigMinioAddress(std::string& value);
+    GetStorageConfigS3Address(std::string& value);
     Status
-    GetStorageConfigMinioPort(std::string& value);
+    GetStorageConfigS3Port(std::string& value);
     Status
-    GetStorageConfigMinioAccessKey(std::string& value);
+    GetStorageConfigS3AccessKey(std::string& value);
     Status
-    GetStorageConfigMinioSecretKey(std::string& value);
+    GetStorageConfigS3SecretKey(std::string& value);
     Status
-    GetStorageConfigMinioBucket(std::string& value);
+    GetStorageConfigS3Bucket(std::string& value);
 
     /* metric config */
     Status
@@ -312,6 +310,8 @@ class Config {
     GetCacheConfigCpuCacheCapacity(int64_t& value);
     Status
     GetCacheConfigCpuCacheThreshold(float& value);
+    Status
+    GetCacheConfigInsertBufferSize(int64_t& value);
     Status
     GetCacheConfigCacheInsertData(bool& value);
 
@@ -362,8 +362,6 @@ class Config {
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
-    Status
-    SetDBConfigInsertBufferSize(const std::string& value);
 
     /* storage config */
     Status
@@ -371,17 +369,17 @@ class Config {
     Status
     SetStorageConfigSecondaryPath(const std::string& value);
     Status
-    SetStorageConfigMinioEnable(const std::string& value);
+    SetStorageConfigS3Enable(const std::string& value);
     Status
-    SetStorageConfigMinioAddress(const std::string& value);
+    SetStorageConfigS3Address(const std::string& value);
     Status
-    SetStorageConfigMinioPort(const std::string& value);
+    SetStorageConfigS3Port(const std::string& value);
     Status
-    SetStorageConfigMinioAccessKey(const std::string& value);
+    SetStorageConfigS3AccessKey(const std::string& value);
     Status
-    SetStorageConfigMinioSecretKey(const std::string& value);
+    SetStorageConfigS3SecretKey(const std::string& value);
     Status
-    SetStorageConfigMinioBucket(const std::string& value);
+    SetStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
@@ -396,6 +394,8 @@ class Config {
     SetCacheConfigCpuCacheCapacity(const std::string& value);
     Status
     SetCacheConfigCpuCacheThreshold(const std::string& value);
+    Status
+    SetCacheConfigInsertBufferSize(const std::string& value);
     Status
     SetCacheConfigCacheInsertData(const std::string& value);
 

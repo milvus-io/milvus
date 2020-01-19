@@ -1,4 +1,3 @@
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -46,6 +45,9 @@ static const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
 
 static const char* NAME_METRIC_TYPE_L2 = "L2";
 static const char* NAME_METRIC_TYPE_IP = "IP";
+static const char* NAME_METRIC_TYPE_HAMMING = "HAMMING";
+static const char* NAME_METRIC_TYPE_JACCARD = "JACCARD";
+static const char* NAME_METRIC_TYPE_TANIMOTO = "TANIMOTO";
 
 ////////////////////////////////////////////////////
 

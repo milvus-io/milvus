@@ -194,7 +194,33 @@ ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    return ValidateTableName(partition_name);
+    std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
+    // Table name size shouldn't exceed 16384.
+    if (partition_name.size() > TABLE_NAME_SIZE_LIMIT) {
+        std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
+    }
+
+    // Table name first character should be underscore or character.
+    char first_char = partition_name[0];
+    if (first_char != '_' && std::isalpha(first_char) == 0) {
+        std::string msg = invalid_msg + "The first character of a partition name must be an underscore or letter.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
+    }
+
+    int64_t table_name_size = partition_name.size();
+    for (int64_t i = 1; i < table_name_size; ++i) {
+        char name_char = partition_name[i];
+        if (name_char != '_' && std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg + "Partition name can only contain numbers, letters, and underscores.";
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_TABLE_NAME, msg);
+        }
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -207,7 +233,7 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
         if (valid_tag.empty()) {
             std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
             SERVER_LOG_ERROR << msg;
-            return Status(SERVER_INVALID_NPROBE, msg);
+            return Status(SERVER_INVALID_TABLE_NAME, msg);
         }
     }
 
@@ -283,6 +309,9 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
     }
     try {
         int32_t value = std::stoi(str);
+        if (value < 0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Negative number");
+        }
     } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
@@ -304,6 +333,9 @@ Status
 ValidationUtil::ValidateStringIsFloat(const std::string& str) {
     try {
         float val = std::stof(str);
+        if (val < 0.0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Negative float: " + str);
+        }
     } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid float: " + str);
     }
