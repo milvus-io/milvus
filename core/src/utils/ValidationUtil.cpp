@@ -308,7 +308,7 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
     try {
-        int32_t value = std::stoi(str);
+        int64_t value = std::stol(str);
         if (value < 0) {
             return Status(SERVER_INVALID_ARGUMENT, "Negative number");
         }
