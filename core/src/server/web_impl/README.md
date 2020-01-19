@@ -65,7 +65,7 @@ Checks whether the web server is running.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/state" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/state" -H "accept: application/json"
 ```
 
 ##### Response
@@ -100,7 +100,7 @@ Gets CPU/GPU information from the host.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/devices" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/devices" -H "accept: application/json"
 ```
 
 ##### Response
@@ -134,7 +134,7 @@ Gets the values of parameters in `cache_config` and `engine_config` of the Milvu
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/config/advanced" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/config/advanced" -H "accept: application/json"
 ```
 
 ##### Response
@@ -188,7 +188,7 @@ Updates the values of parameters in `cache_config` and `engine_config` of the Mi
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19122/config/advanced" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"cpu_cache_capacity\":4,\"cache_insert_data\":false,\"use_blas_threshold\":1100,\"gpu_search_threshold\":1000}"
+$ curl -X PUT "http://192.168.1.65:19121/config/advanced" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"cpu_cache_capacity\":4,\"cache_insert_data\":false,\"use_blas_threshold\":1100,\"gpu_search_threshold\":1000}"
 ```
 
 ##### Response
@@ -217,7 +217,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/config/advanced"
+$ curl -X OPTIONS "http://192.168.1.65:19121/config/advanced"
 ```
 
 ### `/config/gpu_resources` (GET)
@@ -247,7 +247,7 @@ Gets the parameter values in `gpu_resource_threshold` of the Milvus configuratio
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/config/gpu_resources" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/config/gpu_resources" -H "accept: application/json"
 ```
 
 ##### Response
@@ -302,7 +302,7 @@ Updates the parameter values in `gpu_resource_config` of the Milvus configuratio
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19122/config/gpu_resources" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"enable\":true,\"cache_capacity\":1,\"search_resources\":[\"GPU0\"],\"build_index_resources\":[\"GPU0\"]}"
+$ curl -X PUT "http://192.168.1.65:19121/config/gpu_resources" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"enable\":true,\"cache_capacity\":1,\"search_resources\":[\"GPU0\"],\"build_index_resources\":[\"GPU0\"]}"
 ```
 
 ##### Response
@@ -331,7 +331,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/config/gpu_resources"
+$ curl -X OPTIONS "http://192.168.1.65:19121/config/gpu_resources"
 ```
 
 ### `/tables` (GET)
@@ -367,7 +367,7 @@ Gets all tables starting from `offset` and ends with `page_size`.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/tables?offset=0&page_size=1" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/tables?offset=0&page_size=1" -H "accept: application/json"
 ```
 
 ##### Response
@@ -420,7 +420,7 @@ Creates a table.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19122/tables" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"table_name\":\"test_table\",\"dimension\":1,\"index_file_size\":10,\"metric_type\":\"L2\"}"
+$ curl -X POST "http://192.168.1.65:19121/tables" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"table_name\":\"test_table\",\"dimension\":1,\"index_file_size\":10,\"metric_type\":\"L2\"}"
 ```
 
 ##### Response
@@ -449,7 +449,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables"
+$ curl -X OPTIONS "http://192.168.1.65:19121/tables"
 ```
 
 ### `/tables/{table_name}` (GET)
@@ -486,7 +486,7 @@ Gets all information about a table by name.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/tables/test_table" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/tables/test_table" -H "accept: application/json"
 ```
 
 ##### Response
@@ -528,7 +528,7 @@ Drops a table by name.
 
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19122/tables/test_table" -H "accept: application/json"
+$ curl -X DELETE "http://192.168.1.65:19121/tables/test_table" -H "accept: application/json"
 ```
 
 If the deletion is successful, no message will be returned.
@@ -558,7 +558,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table"
+$ curl -X OPTIONS "http://192.168.1.65:19121/tables/test_table"
 ```
 
 ### `/tables/{table_name}/indexes` (GET)
@@ -593,7 +593,7 @@ Gets the index type and nlist of a table.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/tables/test_table/indexes" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/tables/test_table/indexes" -H "accept: application/json"
 ```
 
 ##### Response
@@ -657,7 +657,7 @@ Updates the index type and nlist of a table.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19122/tables/test_table/indexes" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"index_type\":\"FLAT\",\"nlist\":16384}"
+$ curl -X POST "http://192.168.1.65:19121/tables/test_table/indexes" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"index_type\":\"FLAT\",\"nlist\":16384}"
 ```
 
 ##### Response
@@ -699,7 +699,7 @@ Drops an index for a table.
 ##### Request
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19122/tables/test_table/indexes" -H "accept: application/json"
+$ curl -X DELETE "http://192.168.1.65:19121/tables/test_table/indexes" -H "accept: application/json"
 ```
 
 If the deletion is successful, no message will be returned.
@@ -729,7 +729,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/indexes"
+$ curl -X OPTIONS "http://192.168.1.65:19121/tables/test_table/indexes"
 ```
 
 ### `/tables/{table_name}/partitions` (GET)
@@ -766,7 +766,7 @@ Gets all partitions in a table starting from `offset` and ends with `page_size`.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/tables/test_table/partitions?offset=0&page_size=3" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/tables/test_table/partitions?offset=0&page_size=3" -H "accept: application/json"
 ```
 
 ##### Response
@@ -801,7 +801,7 @@ Creates a partition in a table.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19122/tables/test_table/partitions" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"partition_name\": \"partition_1\",\"partition_tag\": \"test\"}"
+$ curl -X POST "http://192.168.1.65:19121/tables/test_table/partitions" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"partition_name\": \"partition_1\",\"partition_tag\": \"test\"}"
 ```
 
 ##### Response
@@ -835,7 +835,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/partitions"
+$ curl -X OPTIONS "http://192.168.1.65:19121/tables/test_table/partitions"
 ```
 
 ### `/tables/{table_name}/partitions/{partition_tag}` (DELETE)
@@ -871,7 +871,7 @@ Deletes a partition by tag.
 ##### Request
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19122/tables/test_table/partitions/tags_01" -H "accept: application/json"
+$ curl -X DELETE "http://192.168.1.65:19121/tables/test_table/partitions/tags_01" -H "accept: application/json"
 ```
 
 The deletion is successful if no information is returned.
@@ -901,7 +901,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/partitions/tag"
+$ curl -X OPTIONS "http://192.168.1.65:19121/tables/test_table/partitions/tag"
 ```
 
 ### `/tables/{table_name}/vectors` (PUT)
@@ -960,7 +960,7 @@ Searches vectors in a table.
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19122/tables/test_table/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"topk\":2,\"nprobe\":16,\"records\":[[0.1]]}"
+$ curl -X PUT "http://192.168.1.65:19121/tables/test_table/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"topk\":2,\"nprobe\":16,\"records\":[[0.1]]}"
 ```
 
 ##### Response
@@ -1022,7 +1022,7 @@ Inserts vectors to a table.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19122/tables/test_table/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"records\":[[0.1],[0.2],[0.3],[0.4]]}"
+$ curl -X POST "http://192.168.1.65:19121/tables/test_table/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"records\":[[0.1],[0.2],[0.3],[0.4]]}"
 ```
 
 ##### Response
@@ -1049,7 +1049,7 @@ Returns what request method the web server supports. This is useful in Cross-Ori
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/vectors"
+$ curl -X OPTIONS "http://192.168.1.65:19121/tables/test_table/vectors"
 ```
 
 ### `/system/{msg}` (GET)
@@ -1083,7 +1083,7 @@ Gets information about the Milvus server.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19122/system/version" -H "accept: application/json"
+$ curl -X GET "http://192.168.1.65:19121/system/version" -H "accept: application/json"
 ```
 
 ##### Response
