@@ -518,8 +518,11 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/tables/{table_name}/indexes", optionsIndexes, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST", "/tables/{table_name}/indexes",createIndex,
-             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
+    API_CALL("POST",
+             "/tables/{table_name}/indexes",
+             createIndex,
+             PATH(String, table_name, "table_name"),
+             BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
 
@@ -788,11 +791,16 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
 TEST_F(WebControllerTest, DROP_TABLE) {
     auto table_name = "table_drop_test" + OString(RandomName().c_str());
     GenTable(table_name, 128, 100, "L2");
-
     sleep(1);
 
     auto response = client_ptr->dropTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    table_name = "table_drop_test_not_exists_" + OString(RandomName().c_str());
+    response = client_ptr->dropTable(table_name, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
 }
 
 TEST_F(WebControllerTest, INSERT) {
@@ -808,6 +816,9 @@ TEST_F(WebControllerTest, INSERT) {
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::VectorIdsDto>(object_mapper.get());
     ASSERT_EQ(20, result_dto->ids->count());
+
+    response = client_ptr->insert(table_name + "ooowrweindexsgs", insert_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 
     response = client_ptr->dropTable(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
@@ -876,6 +887,10 @@ TEST_F(WebControllerTest, INDEX) {
     response = client_ptr->dropIndex(table_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
+    // create index without existing table
+    response = client_ptr->createIndex(table_name + "fgafafafafafUUUUUUa124254", index_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+
     index_dto->index_type = "J46";
     response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
@@ -918,6 +933,11 @@ TEST_F(WebControllerTest, INDEX) {
     auto result_index_dto = response->readBodyToDto<milvus::server::web::IndexDto>(object_mapper.get());
     ASSERT_EQ("FLAT", result_index_dto->index_type->std_str());
     ASSERT_EQ(10, result_index_dto->nlist->getValue());
+    // get index of table which not exists
+    response = client_ptr->getIndex(table_name + "dfaedXXXdfdfet4t343aa4", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
 }
 
 TEST_F(WebControllerTest, PARTITION) {
@@ -942,6 +962,11 @@ TEST_F(WebControllerTest, PARTITION) {
     auto create_result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, create_result_dto->code);
 
+    response = client_ptr->createPartition(table_name + "afafanotgitdiexists", par_param);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code);
+
     // insert 200 vectors into table with tag = 'tag01'
     OQueryParams query_params;
     // add partition tag
@@ -963,8 +988,18 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ("tag01", result_dto->partitions->get(0)->partition_tag->std_str());
     ASSERT_EQ(par_param->partition_name->std_str(), result_dto->partitions->get(0)->partition_name->std_str());
 
+    // show without existing tables
+    response = client_ptr->showPartitions(table_name + "dfafaefaluanqibazao990099", 0, 10, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
+
     response = client_ptr->dropPartition(table_name, "tag01", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    // drop without existing tabls
+    response = client_ptr->dropPartition(table_name + "565755682353464aaasafdsfagagqq1223", "tag01", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, SEARCH) {
@@ -1026,6 +1061,12 @@ TEST_F(WebControllerTest, SEARCH) {
     search_request_dto->tags->pushBack(par_param->partition_tag);
     response = client_ptr->search(table_name, search_request_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // Test search without existing table
+    response = client_ptr->search(table_name + "999piyanning", search_request_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
 }
 
 TEST_F(WebControllerTest, SEARCH_BIN) {
@@ -1149,6 +1190,14 @@ TEST_F(WebControllerTest, GPUCONFIG) {
 
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // test fault config
+    gpu_config_dto->search_resources->clear();
+    gpu_config_dto->search_resources->pushBack("GPU0");
+    gpu_config_dto->search_resources->pushBack("GPU1");
+    gpu_config_dto->search_resources->pushBack("GPU0");
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
 #endif
