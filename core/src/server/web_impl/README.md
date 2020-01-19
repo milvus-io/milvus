@@ -222,7 +222,7 @@ $ curl -X OPTIONS "http://192.168.1.65:19121/config/advanced"
 
 ### `/config/gpu_resources` (GET)
 
-Gets the parameter values in `gpu_resource_threshold` of the Milvus configuration file.
+Gets the parameter values in `gpu_resource_config` of the Milvus configuration file.
 
 > Note: This method is available only for GPU-supported Milvus.
 
