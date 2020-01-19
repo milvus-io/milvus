@@ -200,7 +200,7 @@ $ curl -X PUT "http://192.168.1.65:19121/config/advanced" -H "accept: applicatio
 
 ### `/config/advanced` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
@@ -313,7 +313,7 @@ $ curl -X PUT "http://192.168.1.65:19121/config/gpu_resources" -H "accept: appli
 
 ### `/config/gpu_resources` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 > Note: This method is available only for GPU-supported Milvus.
 
@@ -432,7 +432,7 @@ $ curl -X POST "http://192.168.1.65:19121/tables" -H "accept: application/json" 
 
 ### `/tables` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
@@ -535,7 +535,7 @@ If the deletion is successful, no message will be returned.
 
 ### `/tables/{table_name}` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
@@ -707,7 +707,7 @@ If the deletion is successful, no message will be returned.
 
 ### `/tables/{table_name}/indexes` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
@@ -812,7 +812,7 @@ $ curl -X POST "http://192.168.1.65:19121/tables/test_table/partitions" -H "acce
 
 ### `/tables/{table_name}/partitions` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
@@ -878,7 +878,7 @@ The deletion is successful if no information is returned.
 
 ### `/tables/{table_name}/partitions/{partition_tag}` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
@@ -1033,7 +1033,7 @@ $ curl -X POST "http://192.168.1.65:19121/tables/test_table/vectors" -H "accept:
 
 ### `/tables/{table_name}/vectors` (OPTIONS)
 
-Returns what request method the web server supports. This is useful in Cross-Origin Resource Sharing (CORS).
+Use this API for Cross-Origin Resource Sharing (CORS).
 
 #### Request
 
