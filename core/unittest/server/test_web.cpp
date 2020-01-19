@@ -508,7 +508,7 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("POST", "/tables", createTable, BODY_DTO(milvus::server::web::TableRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET", "/tables", showTables, QUERY(Int64, offset), QUERY(Int64, page_size))
+    API_CALL("GET", "/tables", showTables, QUERY(String, offset), QUERY(String, page_size))
 
     API_CALL("OPTIONS", "/tables/{table_name}", optionsTable, PATH(String, table_name, "table_name"))
 
@@ -518,11 +518,8 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/tables/{table_name}/indexes", optionsIndexes, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST",
-             "/tables/{table_name}/indexes",
-             createIndex,
-             PATH(String, table_name, "table_name"),
-             BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/indexes", createIndex,
+             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
 
@@ -530,44 +527,25 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/tables/{table_name}/partitions", optionsPartitions, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST",
-             "/tables/{table_name}/partitions",
-             createPartition,
-             PATH(String, table_name, "table_name"),
-             BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/partitions", createPartition,
+             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET",
-             "/tables/{table_name}/partitions",
-             showPartitions,
-             PATH(String, table_name, "table_name"),
-             QUERY(Int64, offset),
-             QUERY(Int64, page_size))
+    API_CALL("GET", "/tables/{table_name}/partitions", showPartitions,
+             PATH(String, table_name, "table_name"), QUERY(String, offset), QUERY(String, page_size))
 
-    API_CALL("OPTIONS",
-             "/tables/{table_name}/partitions/{partition_tag}",
-             optionsParTag,
-             PATH(String, table_name, "table_name"),
-             PATH(String, partition_tag, "partition_tag"))
+    API_CALL("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", optionsParTag,
+             PATH(String, table_name, "table_name"), PATH(String, partition_tag, "partition_tag"))
 
-    API_CALL("DELETE",
-             "/tables/{table_name}/partitions/{partition_tag}",
-             dropPartition,
-             PATH(String, table_name, "table_name"),
-             PATH(String, partition_tag))
+    API_CALL("DELETE", "/tables/{table_name}/partitions/{partition_tag}", dropPartition,
+             PATH(String, table_name, "table_name"), PATH(String, partition_tag))
 
     API_CALL("OPTIONS", "/tables/{table_name}/vectors", optionsVectors, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST",
-             "/tables/{table_name}/vectors",
-             insert,
-             PATH(String, table_name, "table_name"),
-             BODY_DTO(milvus::server::web::InsertRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/vectors", insert,
+             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::InsertRequestDto::ObjectWrapper, body))
 
-    API_CALL("PUT",
-             "/tables/{table_name}/vectors",
-             search,
-             PATH(String, table_name, "table_name"),
-             BODY_DTO(milvus::server::web::SearchRequestDto::ObjectWrapper, body))
+    API_CALL("PUT", "/tables/{table_name}/vectors", search,
+             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::SearchRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"))
 
@@ -772,19 +750,29 @@ TEST_F(WebControllerTest, GET_TABLE) {
 
 TEST_F(WebControllerTest, SHOW_TABLES) {
     // test query table limit 1
-    auto response = client_ptr->showTables(1, 1, conncetion_ptr);
+    auto response = client_ptr->showTables("1", "1", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::TableListFieldsDto>(object_mapper.get());
-    ASSERT_TRUE(result_dto->count->getValue() > 0);
+    ASSERT_TRUE(result_dto->count->getValue() >= 0);
 
     // test query table empty
-    response = client_ptr->showTables(0, 0, conncetion_ptr);
+    response = client_ptr->showTables("0", "0", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
-    response = client_ptr->showTables(-1, 0, conncetion_ptr);
+    response = client_ptr->showTables("-1", "0", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 
-    response = client_ptr->showTables(0, -10, conncetion_ptr);
+    response = client_ptr->showTables("0", "-10", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    // test wrong param
+    response = client_ptr->showTables("0.1", "1", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    response = client_ptr->showTables("1", "1.1", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    response = client_ptr->showTables("0", "90000000000000000000000000000000000000000000000000000000", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
@@ -981,15 +969,24 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // Show all partitins
-    response = client_ptr->showPartitions(table_name, 0, 10, conncetion_ptr);
+    response = client_ptr->showPartitions(table_name, "0", "10", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
     ASSERT_EQ(1, result_dto->partitions->count());
     ASSERT_EQ("tag01", result_dto->partitions->get(0)->partition_tag->std_str());
     ASSERT_EQ(par_param->partition_name->std_str(), result_dto->partitions->get(0)->partition_name->std_str());
 
+    response = client_ptr->showPartitions(table_name, "0", "-1", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    response = client_ptr->showPartitions(table_name, "0.1", "7", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    response = client_ptr->showPartitions(table_name, "0", "1.6", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    response = client_ptr->showPartitions(table_name, "567a", "1", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
     // show without existing tables
-    response = client_ptr->showPartitions(table_name + "dfafaefaluanqibazao990099", 0, 10, conncetion_ptr);
+    response = client_ptr->showPartitions(table_name + "dfafaefaluanqibazao990099", "0", "10", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
@@ -997,7 +994,7 @@ TEST_F(WebControllerTest, PARTITION) {
     response = client_ptr->dropPartition(table_name, "tag01", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
-    // drop without existing tabls
+    // drop without existing tables
     response = client_ptr->dropPartition(table_name + "565755682353464aaasafdsfagagqq1223", "tag01", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
