@@ -578,9 +578,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetGpuResourceConfigCacheThreshold("-0.1").ok());
 
     ASSERT_FALSE(config.SetGpuResourceConfigSearchResources("gpu10").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigSearchResources("gpu0, gpu0").ok());
 
     ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gup2").ok());
     ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gpu16").ok());
+    ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gpu0, gpu0, gpu1").ok());
 #endif
 }
 
