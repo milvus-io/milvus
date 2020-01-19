@@ -190,10 +190,10 @@ pipeline {
         }
     }
     post {
-        always {
+        unsuccessful {
             script {
                 boolean isNightlyTest = isTimeTriggeredBuild()
-                if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS') && isNightlyTest) {
+                if (isNightlyTest) {
                     // Send an email only if the build status has changed from green/unstable to red
                     emailext subject: '$DEFAULT_SUBJECT',
                     body: '$DEFAULT_CONTENT',
