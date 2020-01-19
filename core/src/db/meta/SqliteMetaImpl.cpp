@@ -517,9 +517,8 @@ SqliteMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_ls
     try {
         server::MetricCollector metric;
 
-        auto selected = ConnectorPtr->select(
-            columns(&TableSchema::flush_lsn_),
-            where(c(&TableSchema::table_id_) == table_id));
+        auto selected =
+            ConnectorPtr->select(columns(&TableSchema::flush_lsn_), where(c(&TableSchema::table_id_) == table_id));
 
         if (selected.size() > 0) {
             flush_lsn = std::get<0>(selected[0]);
@@ -533,7 +532,6 @@ SqliteMetaImpl::GetTableFlushLSN(const std::string& table_id, uint64_t& flush_ls
 
     return Status::OK();
 }
-
 
 Status
 SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) {
@@ -1045,7 +1043,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
         int64_t to_merge_files = 0;
         for (auto& file : selected) {
             TableFileSchema table_file;
-            table_file.file_size_ = std::get<4>(file);
+            table_file.file_size_ = std::get<5>(file);
             if (table_file.file_size_ >= table_schema.index_file_size_) {
                 continue;  // skip large file
             }
@@ -1593,8 +1591,7 @@ SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
 
         ENGINE_LOG_DEBUG << "Update global lsn = " << lsn;
     } catch (std::exception& e) {
-        std::string msg =
-            "Exception update global lsn = " + lsn;
+        std::string msg = "Exception update global lsn = " + lsn;
         return HandleException(msg, e.what());
     }
 

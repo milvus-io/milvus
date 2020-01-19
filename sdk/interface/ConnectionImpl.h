@@ -17,12 +17,12 @@
 
 #pragma once
 
-#include "MilvusApi.h"
-#include "../grpc/ClientProxy.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "../grpc/ClientProxy.h"
+#include "MilvusApi.h"
 
 namespace milvus {
 
@@ -65,9 +65,8 @@ class ConnectionImpl : public Connection {
            int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
-    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
-               const std::vector<int64_t>& query_id_array, int64_t topk,
-               int64_t nprobe, TopKQueryResult& topk_query_result) override;
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
+               int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
