@@ -34,9 +34,6 @@ CopyRowRecords(const OList<OList<OFloat32>::ObjectWrapper>::ObjectWrapper& recor
 Status
 CopyBinRowRecords(const OList<OList<OInt64>::ObjectWrapper>::ObjectWrapper& records, std::vector<uint8_t>& vectors);
 
-bool
-IsIntStr(const std::string& str);
-
 }  // namespace web
 }  // namespace server
 }  // namespace milvus
