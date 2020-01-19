@@ -801,8 +801,7 @@ Config::CheckGpuResourceConfigSearchResources(const std::vector<std::string>& va
     if (value_set.size() != value.size()) {
         std::string msg =
             "Invalid gpu build search resource. "
-            "Possible reason: gpu_resource_config.gpu_search_resources contain repeated resources "
-            "like \'gpu0, gpu0\'";
+            "Possible reason: gpu_resource_config.gpu_search_resources contains duplicate resources.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
@@ -827,8 +826,7 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
     if (value_set.size() != value.size()) {
         std::string msg =
             "Invalid gpu build index resource. "
-            "Possible reason: gpu_resource_config.build_index_resources contain repeated resources"
-            " like \'gpu0, gpu0\'";
+            "Possible reason: gpu_resource_config.build_index_resources contains duplicate resources.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
