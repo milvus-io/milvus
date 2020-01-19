@@ -336,7 +336,7 @@ $ curl -X OPTIONS "http://192.168.1.65:19122/config/gpu_resources"
 
 ### `/tables` (GET)
 
-Gets information about all tables.
+Gets all tables starting from `offset` and ends with `page_size`.
 
 #### Request
 
@@ -734,7 +734,7 @@ $ curl -X OPTIONS "http://192.168.1.65:19122/tables/test_table/indexes"
 
 ### `/tables/{table_name}/partitions` (GET)
 
-Gets all partitions in a table.
+Gets all partitions in a table starting from `offset` and ends with `page_size`.
 
 #### Request
 
@@ -920,7 +920,8 @@ Searches vectors in a table.
   "nprobe": integer($int64),
   "tags": [string],
   "file_ids": [string],
-  "records": [[number($float)]]
+  "records": [[number($float)]],
+  "records_bin": [[number($uint64)]]
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>PUT</td></tr>
@@ -934,11 +935,11 @@ Searches vectors in a table.
 | `nprobe`  |  Number of queried vector buckets. |  Yes  |
 | `tags`    |  Tags of partitions that you need to search. You do not have to specify this value if the table is not partitioned or you wish to search the whole table.   |  No |
 | `file_ids`    |  IDs of the vector files. You do not have to specify this value if you do not use Milvus in distributed scenarios. Also, if you assign a value to `file_ids`, the value of `tags` is ignored.    |   No  |
-| `records`    |   The list of query vectors to be searched in the table. Each vector value must be float data type, with the same dimension as that defined for the table.  |   Yes  |
+| `records`  |  Numeric vectors to insert to the table.  |  Yes  |
+| `records_bin` | Binary vectors to insert to the table. |    Yes   |
 
-<!---
-`tags` and `file_ids` are optional in other SDKs
--->
+> Note: Select `records` or `records_bin` depending on the metric used by the table. If the table uses `L2` or `IP`, you must use `records`. If the table uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `records_bin`.
+
 
 ##### Query Parameters
 
@@ -984,6 +985,7 @@ Inserts vectors to a table.
 {
   "tag": string,
   "records": [[number($float)]],
+  “records_bin”:[[number($uint64)]]
   "ids": [integer($int64)]
 }
 </code></pre> </td></tr>
@@ -995,8 +997,11 @@ Inserts vectors to a table.
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
 | `tag`     |  Tag of the partition to insert vectors to.   | No   |
-| `records`  |  Vectors to insert to the table. |  Yes  |
+| `records`  |  Numeric vectors to insert to the table.  |  Yes  |
+| `records_bin` | Binary vectors to insert to the table.  |    Yes    |
 | `ids`    |  IDs of the vectors to insert to the table. If you assign IDs to the vectors, you must provide IDs for all vectors in the table. If you do not specify this parameter, Milvus automatically assigns IDs to the vectors. |  No |
+
+> Note: Select `records` or `records_bin` depending on the metric used by the table. If the table uses `L2` or `IP`, you must use `records`. If the table uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `records_bin`.
 
 ##### Query Parameters
 
@@ -1015,7 +1020,6 @@ Inserts vectors to a table.
 #### Example
 
 ##### Request
-
 
 ```shell
 $ curl -X POST "http://192.168.1.65:19122/tables/test_table/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"records\":[[0.1],[0.2],[0.3],[0.4]]}"
