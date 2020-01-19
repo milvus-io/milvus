@@ -192,6 +192,9 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(GetGPUConfig)
 
     ENDPOINT("GET", "/config/gpu_resources", GetGPUConfig) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/config/gpu_resources\'");
+        tr.RecordSection("Receivd request");
+
         auto gpu_config_dto = GPUConfigDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
@@ -205,6 +208,9 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                          + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        tr.ElapseFromBegin(ttr);
         return response;
     }
 
@@ -219,6 +225,9 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(SetGPUConfig)
 
     ENDPOINT("PUT", "/config/gpu_resources", SetGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/config/gpu_resources\'");
+        tr.RecordSection("Received request.");
+
         WebRequestHandler handler = WebRequestHandler();
         auto status_dto = handler.SetGpuConfig(body);
 
@@ -231,6 +240,9 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
+        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                   + ", reason = " + status_dto->message->std_str() + ". Total cost";
+        tr.ElapseFromBegin(ttr);
         return response;
     }
 
@@ -254,7 +266,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(CreateTable)
 
     ENDPOINT("POST", "/tables", CreateTable, BODY_DTO(TableRequestDto::ObjectWrapper, body)) {
-        TimeRecorder tr("POST \'/tables\'");
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
