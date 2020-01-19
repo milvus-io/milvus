@@ -22,6 +22,9 @@ namespace server {
 namespace web {
 
 ////////////////////////////////////////////////////
+static const char* WEB_LOG_PREFIX = "[Web] ";
+
+////////////////////////////////////////////////////
 
 static const char* CORS_KEY_METHODS = "Access-Control-Allow-Methods";
 static const char* CORS_KEY_ORIGIN = "Access-Control-Allow-Origin";
