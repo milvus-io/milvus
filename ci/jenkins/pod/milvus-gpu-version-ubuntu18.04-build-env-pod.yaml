@@ -25,7 +25,8 @@ spec:
       limits:
         memory: "12Gi"
         cpu: "6.0"
-        nvidia.com/gpu: 1
+        # nvidia.com/gpu: 1
+        aliyun.com/gpu-mem: 2 # GiB
       requests:
         memory: "8Gi"
         cpu: "4.0"

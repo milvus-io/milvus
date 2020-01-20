@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#805 - IVFTest.gpu_seal_test unittest failed
 - \#831 - Judge branch error in CommonUtil.cpp
 - \#977 - Server crash when create tables concurrently
+- \#990 - check gpu resources setting when assign repeated value
 - \#995 - table count set to 0 if no tables found
 - \#1010 - improve error message when offset or page_size is equal 0
 - \#1022 - check if partition name is legal
@@ -18,6 +19,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#1029 - check if table exists when try to delete partition
 - \#1066 - optimize http insert and search speed
 - \#1067 - Add binary vectors support in http server
+- \#1075 - improve error message when page size or offset is illegal
+- \#1082 - check page_size or offset value to avoid float
 
 ## Feature
 - \#216 - Add CLI to get server info

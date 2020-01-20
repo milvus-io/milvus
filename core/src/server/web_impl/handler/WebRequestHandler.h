@@ -92,6 +92,7 @@ class WebRequestHandler {
  public:
     WebRequestHandler() {
         context_ptr_ = GenContextPtr("Web Handler");
+        request_handler_ = RequestHandler();
     }
 
     StatusDto::ObjectWrapper
