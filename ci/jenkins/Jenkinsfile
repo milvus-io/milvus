@@ -55,13 +55,6 @@ pipeline {
 
                 stages {
                     stage("Milvus CI") {
-                        when {
-                          anyOf {
-                            changeset 'ci/**'
-                            changeset 'docker/**'
-                            changeset 'core/**'
-                          }
-                        }
                         environment {
                             PACKAGE_VERSION = VersionNumber([
                                 versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
@@ -71,6 +64,13 @@ pipeline {
 
                         stages {
                             stage('Run Build') {
+                                when {
+                                  anyOf {
+                                    changeset 'ci/**'
+                                    changeset 'docker/**'
+                                    changeset 'core/**'
+                                  }
+                                }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-build-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -117,6 +117,13 @@ pipeline {
                             }
 
                             stage('Publish docker images') {
+                                when {
+                                  anyOf {
+                                    changeset 'ci/**'
+                                    changeset 'docker/**'
+                                    changeset 'core/**'
+                                  }
+                                }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-publish-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -139,6 +146,13 @@ pipeline {
                             }
 
                             stage('Deploy to Development') {
+                                when {
+                                  anyOf {
+                                    changeset 'ci/**'
+                                    changeset 'docker/**'
+                                    changeset 'core/**'
+                                  }
+                                }
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
                                     FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
