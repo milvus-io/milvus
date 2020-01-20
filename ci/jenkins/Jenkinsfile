@@ -9,6 +9,7 @@ pipeline {
     triggers {
         cron """${cron_timezone}
             ${cron_string}"""
+
         GenericTrigger(
             genericVariables: [
               [key: 'ref', value: '$.ref']
