@@ -9,14 +9,6 @@ pipeline {
     triggers {
         cron """${cron_timezone}
             ${cron_string}"""
-
-        GenericTrigger(
-            genericVariables: [
-              [key: 'ref', value: '$.ref']
-             ],
-            causeString: 'Triggered on $ref',
-            regexpFilterExpression: '"(ci|core|docker)/[^\"]+?"'
-        )
     }
 
     options {
@@ -42,6 +34,13 @@ pipeline {
 
     stages {
         stage ('Milvus Build and Test') {
+            when {
+              anyOf {
+                changeset 'ci/**'
+                changeset 'docker/**'
+                changeset 'core/**'
+              }
+            }
             matrix {
                 agent none
                 axes {
