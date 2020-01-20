@@ -3,11 +3,13 @@ name: Core
 # This workflow is triggered on pushes or pull request to the repository.
 on:
   push:
+    # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'ci/**'
       - 'core/**'
       - 'docker/**'
   pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'ci/**'
       - 'core/**'
