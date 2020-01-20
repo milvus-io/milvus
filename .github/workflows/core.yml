@@ -6,20 +6,18 @@ on:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'ci/**'
-      - '!ci/jenkins/**'
       - 'core/**'
       - 'docker/**'
-    paths-ignore:
-    - '**.md'
+      - '!**.md'
+      - '!ci/jenkins/**'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'ci/**'
-      - '!ci/jenkins/**'
       - 'core/**'
       - 'docker/**'
-    paths-ignore:
-    - '**.md'
+      - '!**.md'
+      - '!ci/jenkins/**'
 
 jobs:
   ubuntu:
