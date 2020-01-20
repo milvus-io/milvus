@@ -70,6 +70,11 @@ pipeline {
                                     changeset 'docker/**'
                                     changeset 'core/**'
                                   }
+                                  not {
+                                    anyOf {
+                                      changeset '**/*.md'
+                                    }
+                                  }
                                 }
                                 agent {
                                     kubernetes {
@@ -123,6 +128,11 @@ pipeline {
                                     changeset 'docker/**'
                                     changeset 'core/**'
                                   }
+                                  not {
+                                    anyOf {
+                                      changeset '**/*.md'
+                                    }
+                                  }
                                 }
                                 agent {
                                     kubernetes {
@@ -151,6 +161,11 @@ pipeline {
                                     changeset 'ci/**'
                                     changeset 'docker/**'
                                     changeset 'core/**'
+                                  }
+                                  not {
+                                    anyOf {
+                                      changeset '**/*.md'
+                                    }
                                   }
                                 }
                                 environment {
