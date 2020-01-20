@@ -34,13 +34,6 @@ pipeline {
 
     stages {
         stage ('Milvus Build and Test') {
-            when {
-              anyOf {
-                changeset 'ci/**'
-                changeset 'docker/**'
-                changeset 'core/**'
-              }
-            }
             matrix {
                 agent none
                 axes {
@@ -62,6 +55,13 @@ pipeline {
 
                 stages {
                     stage("Milvus CI") {
+                        when {
+                          anyOf {
+                            changeset 'ci/**'
+                            changeset 'docker/**'
+                            changeset 'core/**'
+                          }
+                        }
                         environment {
                             PACKAGE_VERSION = VersionNumber([
                                 versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
