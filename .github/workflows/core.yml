@@ -24,6 +24,7 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
+      # This step checks out a copy of your repository.
       - name: Checkout Milvus
         uses: actions/checkout@v1
       - name: Check Dockerfile
