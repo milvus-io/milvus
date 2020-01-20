@@ -57,6 +57,11 @@ TEST_F(ResourceMgrBaseTest, ADD) {
     auto resource = std::make_shared<TestResource>("test", 0, true);
     auto ret = empty_mgr_->Add(ResourcePtr(resource));
     ASSERT_EQ(ret.lock(), resource);
+
+    mgr1_->Start();
+    mgr1_->Add(ResourcePtr(resource));
+    ASSERT_EQ(ret.lock(), resource);
+    mgr1_->Stop();
 }
 
 TEST_F(ResourceMgrBaseTest, ADD_DISK) {
@@ -85,6 +90,11 @@ TEST_F(ResourceMgrBaseTest, INVALID_CONNECT) {
 
 TEST_F(ResourceMgrBaseTest, CLEAR) {
     ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
+    mgr1_->Start();
+    mgr1_->Clear();
+    mgr1_->Stop();
+    ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
+
     mgr1_->Clear();
     ASSERT_EQ(mgr1_->GetNumOfResource(), 0);
 }
@@ -158,6 +168,10 @@ TEST_F(ResourceMgrBaseTest, DUMP_TASKTABLES) {
     ASSERT_FALSE(mgr1_->DumpTaskTables().empty());
 }
 
+TEST_F(ResourceMgrBaseTest, Start) {
+    empty_mgr_->Start();
+}
+
 /************ ResourceMgrAdvanceTest ************/
 
 class ResourceMgrAdvanceTest : public testing::Test {
@@ -184,7 +198,9 @@ class ResourceMgrAdvanceTest : public testing::Test {
 
 TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     bool flag = false;
-    auto callback = [&](EventPtr event) { flag = true; };
+    auto callback = [&](EventPtr event) {
+        flag = true;
+    };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
     disk_res->task_table().Put(

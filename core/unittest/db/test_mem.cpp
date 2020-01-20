@@ -333,25 +333,6 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
-
-    {
-        auto options = GetOptions();
-        //Set insert_buffer_size = 1M, thus memory buffer is full sometimes insert vector
-        options.insert_buffer_size_ = 1 * milvus::engine::M;
-        auto db = milvus::engine::DBFactory::Build(options);
-        int64_t nb = 40960;
-        milvus::engine::VectorsData xb;
-        for (int i = 0; i < 10; ++i) {
-            BuildVectors(nb, xb);
-            stat = db->InsertVectors(GetTableName(), "", xb);
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        }
-
-        sleep(1);
-        xb.float_data_.clear();
-        xb.id_array_.clear();
-        stat = db->InsertVectors("zero_dim", "", xb);
-    }
 }
 
 TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {

@@ -101,7 +101,6 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
     if (request_ptr->IsAsync()) {
         return Status::OK();  // async execution, caller need to call WaitToFinish at somewhere
     }
-    sleep(1);
     return request_ptr->WaitToFinish();  // sync execution
 }
 

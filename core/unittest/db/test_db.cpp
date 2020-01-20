@@ -622,6 +622,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
 
+
     FIU_ENABLE_FIU("SqliteMetaImpl.CreateTableFile.throw_exception");
     std::this_thread::sleep_for(std::chrono::seconds(2));
     db_->Stop();

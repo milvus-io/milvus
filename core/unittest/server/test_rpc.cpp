@@ -619,6 +619,8 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     tableschema.set_table_name(table_name.table_name());
+    handler->DropTable(&context, &table_name, &response);
+    sleep(1);
     handler->CreateTable(&context, &tableschema, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
@@ -730,6 +732,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
 
+    sleep(2);
     handler->CreatePartition(&context, &partition_param, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 

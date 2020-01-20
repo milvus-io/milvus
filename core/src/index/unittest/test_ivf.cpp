@@ -118,12 +118,6 @@ TEST_P(IVFTest, ivf_basic) {
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
 
-    index_->AddWithoutIds(base_dataset, conf);
-    EXPECT_EQ(index_->Count(), 2 * nb);
-
-    knowhere::Graph graph;
-    index_->GenGraph(xb.data(), 10, graph, conf);
-
 #ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().Dump();
 #endif
