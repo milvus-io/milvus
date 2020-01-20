@@ -70,10 +70,10 @@ pipeline {
                                     changeset 'core/**'
                                     changeset 'docker/**'
                                     changeset 'test/**'
-                                  }
-                                  not {
-                                    anyOf {
-                                      changeset '**/*.md'
+                                    not {
+                                      anyOf {
+                                        changeset '**/*.md'
+                                      }
                                     }
                                   }
                                 }
@@ -129,10 +129,10 @@ pipeline {
                                     changeset 'core/**'
                                     changeset 'docker/**'
                                     changeset 'test/**'
-                                  }
-                                  not {
-                                    anyOf {
-                                      changeset '**/*.md'
+                                    not {
+                                      anyOf {
+                                        changeset '**/*.md'
+                                      }
                                     }
                                   }
                                 }
@@ -164,10 +164,10 @@ pipeline {
                                     changeset 'core/**'
                                     changeset 'docker/**'
                                     changeset 'test/**'
-                                  }
-                                  not {
-                                    anyOf {
-                                      changeset '**/*.md'
+                                    not {
+                                      anyOf {
+                                        changeset '**/*.md'
+                                      }
                                     }
                                   }
                                 }
