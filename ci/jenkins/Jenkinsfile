@@ -65,17 +65,19 @@ pipeline {
                         stages {
                             stage('Run Build') {
                                 when {
-                                  anyOf {
-                                    changeset 'ci/**'
-                                    changeset 'core/**'
-                                    changeset 'docker/**'
-                                    changeset 'test/**'
-                                    not {
-                                      anyOf {
-                                        changeset '**/*.md'
-                                      }
+                                    allOf {
+                                        anyOf {
+                                            changeset 'ci/**'
+                                            changeset 'core/**'
+                                            changeset 'docker/**'
+                                            changeset 'test/**'
+                                        }
+                                        not {
+                                            anyOf {
+                                                changeset '**/*.md'
+                                            }
+                                        }
                                     }
-                                  }
                                 }
                                 agent {
                                     kubernetes {
@@ -124,17 +126,19 @@ pipeline {
 
                             stage('Publish docker images') {
                                 when {
-                                  anyOf {
-                                    changeset 'ci/**'
-                                    changeset 'core/**'
-                                    changeset 'docker/**'
-                                    changeset 'test/**'
-                                    not {
-                                      anyOf {
-                                        changeset '**/*.md'
-                                      }
+                                    allOf {
+                                        anyOf {
+                                            changeset 'ci/**'
+                                            changeset 'core/**'
+                                            changeset 'docker/**'
+                                            changeset 'test/**'
+                                        }
+                                        not {
+                                            anyOf {
+                                                changeset '**/*.md'
+                                            }
+                                        }
                                     }
-                                  }
                                 }
                                 agent {
                                     kubernetes {
@@ -159,17 +163,19 @@ pipeline {
 
                             stage('Deploy to Development') {
                                 when {
-                                  anyOf {
-                                    changeset 'ci/**'
-                                    changeset 'core/**'
-                                    changeset 'docker/**'
-                                    changeset 'test/**'
-                                    not {
-                                      anyOf {
-                                        changeset '**/*.md'
-                                      }
+                                    allOf {
+                                        anyOf {
+                                            changeset 'ci/**'
+                                            changeset 'core/**'
+                                            changeset 'docker/**'
+                                            changeset 'test/**'
+                                        }
+                                        not {
+                                            anyOf {
+                                                changeset '**/*.md'
+                                            }
+                                        }
                                     }
-                                  }
                                 }
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
