@@ -9,7 +9,7 @@ pipeline {
     triggers {
         cron """${cron_timezone}
             ${cron_string}"""
-        genericTrigger causeString: 'Generic Cause', regexpFilterExpression: '"(ci|core|docker)/[^\"]+?"', regexpFilterText: '', token: ''
+        GenericTrigger regexpFilterExpression: '"(ci|core|docker)/[^\"]+?"'
     }
 
     options {
