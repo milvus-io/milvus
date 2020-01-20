@@ -8,12 +8,14 @@ on:
       - 'ci/**'
       - 'core/**'
       - 'docker/**'
+      - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'ci/**'
       - 'core/**'
       - 'docker/**'
+      - '!**.md'
 
 jobs:
   ubuntu:
