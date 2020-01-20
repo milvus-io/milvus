@@ -22,6 +22,7 @@
 #include <regex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "config/YamlConfigMgr.h"
@@ -791,9 +792,19 @@ Config::CheckGpuResourceConfigSearchResources(const std::vector<std::string>& va
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
+    std::unordered_set<std::string> value_set;
     for (auto& resource : value) {
         CONFIG_CHECK(CheckGpuResource(resource));
+        value_set.insert(resource);
     }
+
+    if (value_set.size() != value.size()) {
+        std::string msg =
+            "Invalid gpu build search resource. "
+            "Possible reason: gpu_resource_config.gpu_search_resources contains duplicate resources.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
     return Status::OK();
 }
 
@@ -806,8 +817,17 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
+    std::unordered_set<std::string> value_set;
     for (auto& resource : value) {
         CONFIG_CHECK(CheckGpuResource(resource));
+        value_set.insert(resource);
+    }
+
+    if (value_set.size() != value.size()) {
+        std::string msg =
+            "Invalid gpu build index resource. "
+            "Possible reason: gpu_resource_config.build_index_resources contains duplicate resources.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     return Status::OK();
