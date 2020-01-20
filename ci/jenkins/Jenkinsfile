@@ -67,8 +67,9 @@ pipeline {
                                 when {
                                   anyOf {
                                     changeset 'ci/**'
-                                    changeset 'docker/**'
                                     changeset 'core/**'
+                                    changeset 'docker/**'
+                                    changeset 'test/**'
                                   }
                                   not {
                                     anyOf {
@@ -125,8 +126,9 @@ pipeline {
                                 when {
                                   anyOf {
                                     changeset 'ci/**'
-                                    changeset 'docker/**'
                                     changeset 'core/**'
+                                    changeset 'docker/**'
+                                    changeset 'test/**'
                                   }
                                   not {
                                     anyOf {
@@ -159,8 +161,9 @@ pipeline {
                                 when {
                                   anyOf {
                                     changeset 'ci/**'
-                                    changeset 'docker/**'
                                     changeset 'core/**'
+                                    changeset 'docker/**'
+                                    changeset 'test/**'
                                   }
                                   not {
                                     anyOf {
