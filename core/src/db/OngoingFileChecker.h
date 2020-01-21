@@ -55,7 +55,7 @@ class OngoingFileChecker : public meta::Meta::CleanUpFilter {
 
  private:
     std::mutex mutex_;
-    Table2Files ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
+    Table2FileRef ongoing_files_;  // table id mapping to (file id mapping to ongoing ref-count)
 };
 
 }  // namespace engine

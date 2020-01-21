@@ -24,7 +24,6 @@
 #include <map>
 #include <mutex>
 #include <string>
-#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -35,10 +34,10 @@ class IndexFailedChecker {
     CleanFailedIndexFileOfTable(const std::string& table_id);
 
     Status
-    GetFailedIndexFileOfTable(const std::string& table_id, std::vector<std::string>& failed_files);
+    GetErrMsgForTable(const std::string& table_id, std::string& err_msg);
 
     Status
-    MarkFailedIndexFile(const meta::TableFileSchema& file);
+    MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg);
 
     Status
     MarkSucceedIndexFile(const meta::TableFileSchema& file);
@@ -48,7 +47,7 @@ class IndexFailedChecker {
 
  private:
     std::mutex mutex_;
-    Table2Files index_failed_files_;  // table id mapping to (file id mapping to failed times)
+    Table2FileErr index_failed_files_;  // table id mapping to (file id mapping to failed times)
 };
 
 }  // namespace engine

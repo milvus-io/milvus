@@ -15,9 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "db/IndexFailedChecker.h"
-
 #include <utility>
+#include <vector>
+
+#include "db/IndexFailedChecker.h"
 
 namespace milvus {
 namespace engine {
@@ -33,35 +34,31 @@ IndexFailedChecker::CleanFailedIndexFileOfTable(const std::string& table_id) {
 }
 
 Status
-IndexFailedChecker::GetFailedIndexFileOfTable(const std::string& table_id, std::vector<std::string>& failed_files) {
-    failed_files.clear();
+IndexFailedChecker::GetErrMsgForTable(const std::string& table_id, std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
     auto iter = index_failed_files_.find(table_id);
     if (iter != index_failed_files_.end()) {
-        File2RefCount& failed_map = iter->second;
-        for (auto it_file = failed_map.begin(); it_file != failed_map.end(); ++it_file) {
-            failed_files.push_back(it_file->first);
-        }
+        err_msg = iter->second.begin()->second[0];
     }
 
     return Status::OK();
 }
 
 Status
-IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file) {
+IndexFailedChecker::MarkFailedIndexFile(const meta::TableFileSchema& file, const std::string& err_msg) {
     std::lock_guard<std::mutex> lck(mutex_);
 
     auto iter = index_failed_files_.find(file.table_id_);
     if (iter == index_failed_files_.end()) {
-        File2RefCount failed_files;
-        failed_files.insert(std::make_pair(file.file_id_, 1));
+        File2ErrArray failed_files;
+        failed_files.insert(std::make_pair(file.file_id_, std::vector<std::string>(1, err_msg)));
         index_failed_files_.insert(std::make_pair(file.table_id_, failed_files));
     } else {
         auto it_failed_files = iter->second.find(file.file_id_);
         if (it_failed_files != iter->second.end()) {
-            it_failed_files->second++;
+            it_failed_files->second.push_back(err_msg);
         } else {
-            iter->second.insert(std::make_pair(file.file_id_, 1));
+            iter->second.insert(std::make_pair(file.file_id_, std::vector<std::string>(1, err_msg)));
         }
     }
 
@@ -95,7 +92,7 @@ IndexFailedChecker::IgnoreFailedIndexFiles(meta::TableFilesSchema& table_files) 
         if (it_failed_files != index_failed_files_.end()) {
             auto it_failed_file = it_failed_files->second.find((*it_file).file_id_);
             if (it_failed_file != it_failed_files->second.end()) {
-                if (it_failed_file->second >= INDEX_FAILED_RETRY_TIME) {
+                if (it_failed_file->second.size() >= INDEX_FAILED_RETRY_TIME) {
                     it_file = table_files.erase(it_file);
                     continue;
                 }
