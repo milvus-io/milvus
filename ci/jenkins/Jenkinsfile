@@ -67,6 +67,7 @@ pipeline {
                                 when {
                                     allOf {
                                         anyOf {
+                                            triggeredBy 'timer'
                                             changeset 'ci/**'
                                             changeset 'core/**'
                                             changeset 'docker/**'
@@ -128,6 +129,7 @@ pipeline {
                                 when {
                                     allOf {
                                         anyOf {
+                                            triggeredBy 'timer'
                                             changeset 'ci/**'
                                             changeset 'core/**'
                                             changeset 'docker/**'
@@ -165,6 +167,7 @@ pipeline {
                                 when {
                                     allOf {
                                         anyOf {
+                                            triggeredBy 'timer'
                                             changeset 'ci/**'
                                             changeset 'core/**'
                                             changeset 'docker/**'
