@@ -750,6 +750,7 @@ WebRequestHandler::Cmd(const OString& cmd, const OQueryParams& query_params, Com
     std::string info = cmd->std_str();
     auto status = Status::OK();
 
+    // TODO: (yhz) now only support load table into memory, may remove in the future
     if ("task" == info) {
         auto action = query_params.get("action");
         if (nullptr == action.get()) {
