@@ -262,5 +262,71 @@ TEST(WalTest, LargeScaleRecords) {
 }
 
 TEST(WalTest, MultiThreadTest) {
+    std::string data_path = "/home/zilliz/workspace/data/";
+    MXLogConfiguration wal_config;
+    wal_config.mxlog_path = "/tmp/milvus/wal/";
+    wal_config.record_size = 2 * 1024 * 1024;
+    wal_config.buffer_size = 32 * 1024 * 1024;
+    wal_config.recovery_error_ignore = true;
+    WalManager manager(wal_config);
+    manager.mxlog_config_.buffer_size = 32 * 1024 * 1024;
+    manager.Init(nullptr);
+    auto read_fun = [&] () {
+        std::ifstream fin(data_path + "1.dat", std::ios::in);
+        std::vector<milvus::engine::IDNumber> ids;
+        std::vector<float> vecs;
+        std::vector<uint8_t> bins;
+        int type = -1;
+        std::string line;
 
+        while (getline(fin, line)) {
+            std::istringstream istr(line);
+            int cur_type, cur_id;
+            istr >> cur_type;
+            if (cur_type != type) {
+                switch (type) {
+                    case 0: manager.Flush();break;
+                    case 1: manager.Insert("insert_vector", "parti1", ids, vecs); break;
+                    case 2: manager.Insert("insert_binary", "parti2", ids, bins); break;
+                    case 3: manager.DeleteById("insert_vector", ids); break;
+                    default: std::cout << "invalid type: " << type << std::endl; break;
+                }
+                ids.clear();
+                vecs.clear();
+                bins.clear();
+            }
+            type = cur_type;
+            istr >> cur_id;
+            ids.emplace_back(cur_id);
+            if (cur_type == 1) {
+                float v;
+                for (auto i = 0; i < 10; ++ i) {
+                     istr >> v;
+                    vecs.emplace_back(v);
+                }
+            } else if (cur_type == 2) {
+                 uint8_t b;
+                for (auto i = 0; i < 20; ++ i) {
+                     istr >> b;
+                    bins.emplace_back(b);
+                }
+            }
+        }
+        switch (type) {
+            case 0: manager.Flush();break;
+            case 1: manager.Insert("insert_vector", "parti1", ids, vecs); break;
+            case 2: manager.Insert("insert_binary", "parti2", ids, bins); break;
+            case 3: manager.DeleteById("insert_vector", ids); break;
+            default: std::cout << "invalid type: " << type << std::endl; break;
+        }
+        fin.close();
+    };
+
+    auto write_fun = [&] () {
+
+    };
+    std::thread read_thread(read_fun);
+    std::thread write_thread(write_fun);
+    read_thread.join();
+    write_thread.join();
 }
