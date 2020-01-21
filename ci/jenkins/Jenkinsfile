@@ -67,6 +67,7 @@ pipeline {
                                 when {
                                     allOf {
                                         anyOf {
+                                            expression { isEmptyChangelog() == true }
                                             changeset 'ci/**'
                                             changeset 'core/**'
                                             changeset 'docker/**'
@@ -128,6 +129,7 @@ pipeline {
                                 when {
                                     allOf {
                                         anyOf {
+                                            expression { isEmptyChangelog() == true }
                                             changeset 'ci/**'
                                             changeset 'core/**'
                                             changeset 'docker/**'
@@ -165,6 +167,7 @@ pipeline {
                                 when {
                                     allOf {
                                         anyOf {
+                                            expression { isEmptyChangelog() == true }
                                             changeset 'ci/**'
                                             changeset 'core/**'
                                             changeset 'docker/**'
@@ -252,6 +255,13 @@ pipeline {
             }
         }
     }
+}
+
+boolean isEmptyChangelog() {
+    if (currentBuild.changeSets.size() == 0) {
+        return true
+    }
+    return false
 }
 
 boolean isTimeTriggeredBuild() {
