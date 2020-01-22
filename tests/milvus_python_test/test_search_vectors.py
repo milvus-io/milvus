@@ -1,5 +1,7 @@
 import pdb
 import copy
+import struct
+
 import pytest
 import threading
 import datetime
@@ -7,27 +9,28 @@ import logging
 from time import sleep
 from multiprocessing import Process
 import numpy
-from milvus import Milvus, IndexType, MetricType
+from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
 table_id = "test_search"
 add_interval_time = 2
-vectors = gen_vectors(100, dim)
+vectors = gen_vectors(6000, dim)
 # vectors /= numpy.linalg.norm(vectors)
 # vectors = vectors.tolist()
 nprobe = 1
 epsilon = 0.001
 tag = "1970-01-01"
+raw_vectors, binary_vectors = gen_binary_vectors(6000, dim)
 
 
 class TestSearchBase:
-    def init_data(self, connect, table, nb=100):
+    def init_data(self, connect, table, nb=6000):
         '''
         Generate vectors and add it in table, before search vectors
         '''
         global vectors
-        if nb == 100:
+        if nb == 6000:
             add_vectors = vectors
         else:  
             add_vectors = gen_vectors(nb, dim)
@@ -37,6 +40,25 @@ class TestSearchBase:
         sleep(add_interval_time)
         return add_vectors, ids
 
+    def init_binary_data(self, connect, table, nb=6000, insert=True):
+        '''
+        Generate vectors and add it in table, before search vectors
+        '''
+        ids = []
+        global binary_vectors
+        global raw_vectors
+        if nb == 6000:
+            add_vectors = binary_vectors
+            add_raw_vectors = raw_vectors
+        else:  
+            add_raw_vectors, add_vectors = gen_binary_vectors(nb, dim)
+            # add_vectors /= numpy.linalg.norm(add_vectors)
+            # add_vectors = add_vectors.tolist()
+        if insert is True:
+            status, ids = connect.add_vectors(table, add_vectors)
+            sleep(add_interval_time)
+        return add_raw_vectors, add_vectors, ids
+
     """
     generate valid create_index params
     """
@@ -44,25 +66,48 @@ class TestSearchBase:
         scope="function",
         params=gen_index_params()
     )
-    def get_index_params(self, request, args):
-        if "internal" not in args:
+    def get_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("skip pq case temporary")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
 
     @pytest.fixture(
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, args):
-        if "internal" not in args:
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("skip pq case temporary")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_jaccard_index_params(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_hamming_index_params(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
     """
     generate top-k params
     """
@@ -250,7 +295,7 @@ class TestSearchBase:
         status = connect.create_partition(table, partition_name, tag)
         status = connect.create_partition(table, new_partition_name, new_tag)
         vectors, ids = self.init_data(connect, partition_name)
-        new_vectors, new_ids = self.init_data(connect, new_partition_name, nb=1000)
+        new_vectors, new_ids = self.init_data(connect, new_partition_name, nb=6001)
         status = connect.create_index(table, index_params)
         query_vec = [vectors[0], new_vectors[0]]
         top_k = 10
@@ -285,7 +330,7 @@ class TestSearchBase:
         status = connect.create_partition(table, partition_name, tag)
         status = connect.create_partition(table, new_partition_name, new_tag)
         vectors, ids = self.init_data(connect, partition_name)
-        new_vectors, new_ids = self.init_data(connect, new_partition_name, nb=1000)
+        new_vectors, new_ids = self.init_data(connect, new_partition_name, nb=6001)
         status = connect.create_index(table, index_params)
         query_vec = [vectors[0], new_vectors[0]]
         top_k = 10
@@ -307,7 +352,6 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: search status ok, and the length of the result is top_k
         '''
-        
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         vectors, ids = self.init_data(connect, ip_table)
@@ -562,6 +606,81 @@ class TestSearchBase:
         status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
         assert abs(result[0][0].distance - max(distance_0, distance_1)) <= gen_inaccuracy(result[0][0].distance)
 
+    def test_search_distance_jaccard_flat_index(self, connect, jac_table):
+        '''
+        target: search ip_table, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 1
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, jac_table, nb=2)
+        index_params = {
+            "index_type": IndexType.FLAT,
+            "nlist": 16384
+        }
+        connect.create_index(jac_table, index_params)
+        logging.getLogger().info(connect.describe_table(jac_table))
+        logging.getLogger().info(connect.describe_index(jac_table))
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, jac_table, nb=1, insert=False)
+        distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
+        distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
+        status, result = connect.search_vectors(jac_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
+
+    def test_search_distance_hamming_flat_index(self, connect, ham_table):
+        '''
+        target: search ip_table, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 1
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, ham_table, nb=2)
+        index_params = {
+            "index_type": IndexType.FLAT,
+            "nlist": 16384
+        }
+        connect.create_index(ham_table, index_params)
+        logging.getLogger().info(connect.describe_table(ham_table))
+        logging.getLogger().info(connect.describe_index(ham_table))
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, ham_table, nb=1, insert=False)
+        distance_0 = hamming(query_int_vectors[0], int_vectors[0])
+        distance_1 = hamming(query_int_vectors[0], int_vectors[1])
+        status, result = connect.search_vectors(ham_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert abs(result[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
+
+    def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_table):
+        '''
+        target: search ip_table, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        '''
+        # from scipy.spatial import distance
+        top_k = 1
+        nprobe = 512
+        int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_table, nb=2)
+        index_params = {
+            "index_type": IndexType.FLAT,
+            "nlist": 16384
+        }
+        connect.create_index(tanimoto_table, index_params)
+        logging.getLogger().info(connect.describe_table(tanimoto_table))
+        logging.getLogger().info(connect.describe_index(tanimoto_table))
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, tanimoto_table, nb=1, insert=False)
+        distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
+        distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
+        status, result = connect.search_vectors(tanimoto_table, top_k, nprobe, query_vecs)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
+
     def test_search_distance_ip_index_params(self, connect, ip_table, get_index_params):
         '''
         target: search table, and check the result: distance
@@ -576,6 +695,8 @@ class TestSearchBase:
         logging.getLogger().info(connect.describe_index(ip_table))
         query_vecs = [[0.50 for i in range(dim)]]
         status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
+        logging.getLogger().debug(status)
+        logging.getLogger().debug(result)
         distance_0 = numpy.inner(numpy.array(query_vecs[0]), numpy.array(vectors[0]))
         distance_1 = numpy.inner(numpy.array(query_vecs[0]), numpy.array(vectors[1]))
         assert abs(result[0][0].distance - max(distance_0, distance_1)) <= gen_inaccuracy(result[0][0].distance)
@@ -622,7 +743,7 @@ class TestSearchBase:
              'index_type': IndexType.FLAT,
              'store_raw_vector': False}
         # create table
-        milvus = Milvus()
+        milvus = get_milvus()
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vectors, ids = self.init_data(milvus, table, nb=nb)
@@ -635,7 +756,7 @@ class TestSearchBase:
                 assert result[i][0].distance == 0.0
 
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=search, args=(milvus, ))
             processes.append(p)
@@ -663,7 +784,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create table
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             milvus.create_table(param)
             status, ids = milvus.add_vectors(table, vectors)
@@ -705,7 +826,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create table
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             milvus.create_table(param)
             status, ids = milvus.add_vectors(table, vectors)
@@ -739,12 +860,12 @@ class TestSearchParamsInvalid(object):
     index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
     logging.getLogger().info(index_param)
 
-    def init_data(self, connect, table, nb=100):
+    def init_data(self, connect, table, nb=6000):
         '''
         Generate vectors and add it in table, before search vectors
         '''
         global vectors
-        if nb == 100:
+        if nb == 6000:
             add_vectors = vectors
         else:  
             add_vectors = gen_vectors(nb, dim)

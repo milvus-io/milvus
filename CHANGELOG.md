@@ -10,16 +10,29 @@ Please mark all change in change log and use the issue from GitHub
 - \#770 - Server unittest run failed on low-end server
 - \#805 - IVFTest.gpu_seal_test unittest failed
 - \#831 - Judge branch error in CommonUtil.cpp
+- \#977 - Server crash when create tables concurrently
+- \#990 - check gpu resources setting when assign repeated value
+- \#995 - table count set to 0 if no tables found
+- \#1010 - improve error message when offset or page_size is equal 0
+- \#1022 - check if partition name is legal
+- \#1028 - check if table exists when show partitions
+- \#1029 - check if table exists when try to delete partition
+- \#1066 - optimize http insert and search speed
+- \#1067 - Add binary vectors support in http server
+- \#1075 - improve error message when page size or offset is illegal
+- \#1082 - check page_size or offset value to avoid float
 
 ## Feature
 - \#216 - Add CLI to get server info
 - \#343 - Add Opentracing
 - \#665 - Support get/set config via CLI
+- \#759 - Put C++ sdk out of milvus/core
 - \#766 - If partition tag is similar, wrong partition is searched
 - \#771 - Add server build commit info interface
-- \#759 - Put C++ sdk out of milvus/core
+- \#788 - Add web server into server module
 - \#813 - Add push mode for prometheus monitor
 - \#815 - Support MinIO storage
+- \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#910 - Change Milvus c++ standard to c++17
 
 ## Improvement
@@ -32,6 +45,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#908 - Move "primary_path" and "secondary_path" to storage config
 - \#931 - Remove "collector" from config
 - \#966 - Update NOTICE.md
+- \#1002 - Rename minio to s3 in Storage Config section
+- \#1078 - Move 'insert_buffer_size' to Cache Config section
 
 ## Task
 

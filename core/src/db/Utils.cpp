@@ -57,7 +57,7 @@ GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSche
         // round robin according to a file counter
         std::lock_guard<std::mutex> lock(index_file_counter_mutex);
         index = index_file_counter % path_count;
-        index_file_counter++;
+        ++index_file_counter;
     } else {
         // for other type files, they could be merged or deleted
         // so we round robin according to their file id
@@ -119,11 +119,11 @@ DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool 
         }
     }
 
-    bool minio_enable = false;
+    bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
-    config.GetStorageConfigMinioEnable(minio_enable);
+    config.GetStorageConfigS3Enable(s3_enable);
 
-    if (minio_enable) {
+    if (s3_enable) {
         std::string table_path = options.path_ + TABLES_FOLDER + table_id;
 
         auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
@@ -156,10 +156,10 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
 
-    bool minio_enable = false;
+    bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
-    config.GetStorageConfigMinioEnable(minio_enable);
-    if (minio_enable) {
+    config.GetStorageConfigS3Enable(s3_enable);
+    if (s3_enable) {
         /* need not check file existence */
         table_file.location_ = file_path;
         return Status::OK();

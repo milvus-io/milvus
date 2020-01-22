@@ -1,14 +1,31 @@
 #Configuration File for CodeCov
 coverage:
+  notify:
+    require_ci_to_pass: yes
+
   precision: 2
   round: down
   range: "70...100"
 
   status:
-    project: on
+    project:
+      default:
+        threshold: 0.2 #Allow the coverage to drop by threshold%, and posting a success status.
     patch: yes
     changes: no
 
 comment:
-  layout: "header, diff, changes, tree"
+  layout: "reach, diff, flags, files"
   behavior: default
+  require_changes: no
+
+flags:
+  nightly:
+    joined: false
+
+ignore:
+  - "LICENSES"
+  - ".git"
+  - "*.yml"
+  - "*.md"
+  - "docs/.*"

@@ -18,7 +18,7 @@
 #pragma once
 
 #include "server/delivery/request/BaseRequest.h"
-#include "src/utils/Status.h"
+#include "utils/Status.h"
 
 #include <memory>
 #include <string>
@@ -47,15 +47,15 @@ class RequestHandler {
                 int64_t nlist);
 
     Status
-    Insert(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
-           std::vector<float>& data_list, const std::string& partition_tag, std::vector<int64_t>& id_array);
+    Insert(const std::shared_ptr<Context>& context, const std::string& table_name, engine::VectorsData& vectors,
+           const std::string& partition_tag);
 
     Status
     ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
 
     Status
-    Search(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
-           const std::vector<float>& data_list, const std::vector<Range>& range_list, int64_t topk, int64_t nprobe,
+    Search(const std::shared_ptr<Context>& context, const std::string& table_name, const engine::VectorsData& vectors,
+           const std::vector<Range>& range_list, int64_t topk, int64_t nprobe,
            const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
            TopKQueryResult& result);
 

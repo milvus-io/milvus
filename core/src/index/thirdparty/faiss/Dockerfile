@@ -22,7 +22,7 @@ WORKDIR /opt/faiss
 
 # --with-cuda=/usr/local/cuda-8.0 
 RUN ./configure --prefix=/usr --libdir=/usr/lib64 --without-cuda
-RUN make -j $(nproc)
+RUN make -j "$(nproc)"
 RUN make -C python
 RUN make test
 RUN make install
