@@ -250,7 +250,7 @@ pipeline {
                         [$class: 'RequesterRecipientProvider']
                     ],
                     replyTo: '$DEFAULT_REPLYTO',
-                    to: '$DEFAULT_RECIPIENTS'
+                    to: 'dev.milvus@zilliz.com'
                 }
             }
         }
