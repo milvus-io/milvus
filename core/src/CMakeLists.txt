@@ -92,6 +92,30 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/utils web_utils_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_utils_files}
+        ${web_impl_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
@@ -105,6 +129,7 @@ set(engine_files
         ${db_insert_files}
         ${db_meta_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
@@ -127,12 +152,18 @@ set(prometheus_lib
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
+        curl
         )
 
 set(boost_lib
         libboost_system.a
         libboost_filesystem.a
         libboost_serialization.a
+        )
+
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
         )
 
 set(third_party_libs
@@ -143,6 +174,9 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
+        ${s3_client_lib}
+        curl
+        crypto
         )
 
 if (MILVUS_GPU_VERSION)
@@ -228,6 +262,7 @@ set(server_libs
         milvus_engine
         metrics
         tracing
+        oatpp
         )
 
 add_executable(milvus_server
@@ -237,6 +272,7 @@ add_executable(milvus_server
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${web_server_files}
         ${server_context_files}
         ${utils_files}
         ${tracing_files}

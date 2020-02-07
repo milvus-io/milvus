@@ -5,7 +5,7 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import Milvus, IndexType, MetricType
+from milvus import IndexType, MetricType
 from utils import *
 
 
@@ -17,6 +17,7 @@ nprobe = 1
 epsilon = 0.0001
 tag = "1970-01-01"
 
+
 class TestAddBase:
     """
     ******************************************************************
@@ -27,12 +28,12 @@ class TestAddBase:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, args):
-        if "internal" not in args:
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in open source")
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("Skip PQ Temporary")
+                pytest.skip("sq8h not support in cpu mode")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_add_vector_create_table(self, connect, table):
@@ -575,38 +576,8 @@ class TestAddBase:
         assert status.OK()
         assert len(result) == 1
 
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_multi_threading(self, connect, table):
-        '''
-        target: test add vectors, with multi threading
-        method: 10 thread add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        thread_num = 4
-        loops = 100
-        threads = []
-        total_ids = []
-        vector = gen_single_vector(dim)
-        def add():
-            i = 0
-            while i < loops:
-                status, ids = connect.add_vectors(table, vector)
-                total_ids.append(ids[0])
-                i = i + 1
-        for i in range(thread_num):
-            x = threading.Thread(target=add, args=())
-            threads.append(x)
-            x.start()
-            time.sleep(0.2)
-        for th in threads:
-            th.join()
-        assert len(total_ids) == thread_num * loops
-        # make sure ids not the same
-        assert len(set(total_ids)) == thread_num * loops
-
     # TODO: enable
-    # @pytest.mark.repeat(5)
+    # @pytest.mark.repeat(10)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def _test_add_vector_with_multiprocessing(self, args):
         '''
@@ -614,36 +585,35 @@ class TestAddBase:
         method: 10 processed add vectors concurrently
         expected: status ok and result length is equal to the length off added vectors
         '''
-        table = gen_unique_str("test_add_vector_with_multiprocessing")
+        table = gen_unique_str()
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         param = {'table_name': table,
                  'dimension': dim,
-                 'index_file_size': index_file_size}
-        # create table
-        milvus = Milvus()
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.L2}
+        milvus = get_milvus()
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vector = gen_single_vector(dim)
-
         process_num = 4
-        loop_num = 10
+        loop_num = 5
         processes = []
-        # with dependent connection
-        def add(milvus):
+        def add():
+            milvus = get_milvus()
+            milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
                 status, ids = milvus.add_vectors(table, vector)
                 i = i + 1
+            milvus.disconnect()
         for i in range(process_num):
-            milvus = Milvus()
-            milvus.connect(uri=uri)
-            p = Process(target=add, args=(milvus,))
+            p = Process(target=add, args=())
             processes.append(p)
             p.start()
             time.sleep(0.2)
         for p in processes:
             p.join()
-        time.sleep(3)
+        time.sleep(2)
         status, count = milvus.get_table_row_count(table)
         assert count == process_num * loop_num
 
@@ -680,10 +650,12 @@ class TestAddIP:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, args):
-        if "internal" not in args:
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in open source")
+                pytest.skip("sq8h not support in cpu mode")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
 
     def test_add_vector_create_table(self, connect, ip_table):
@@ -1146,78 +1118,6 @@ class TestAddIP:
         assert status.OK()
         assert len(result) == 1
 
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_multi_threading(self, connect, ip_table):
-        '''
-        target: test add vectors, with multi threading
-        method: 10 thread add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        thread_num = 4
-        loops = 100
-        threads = []
-        total_ids = []
-        vector = gen_single_vector(dim)
-        def add():
-            i = 0
-            while i < loops:
-                status, ids = connect.add_vectors(ip_table, vector)
-                total_ids.append(ids[0])
-                i = i + 1
-        for i in range(thread_num):
-            x = threading.Thread(target=add, args=())
-            threads.append(x)
-            x.start()
-            time.sleep(0.2)
-        for th in threads:
-            th.join()
-        assert len(total_ids) == thread_num * loops
-        # make sure ids not the same
-        assert len(set(total_ids)) == thread_num * loops
-
-    # TODO: enable
-    # @pytest.mark.repeat(5)
-    @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_add_vector_with_multiprocessing(self, args):
-        '''
-        target: test add vectors, with multi processes
-        method: 10 processed add vectors concurrently
-        expected: status ok and result length is equal to the length off added vectors
-        '''
-        table = gen_unique_str("test_add_vector_with_multiprocessing")
-        uri = "tcp://%s:%s" % (args["ip"], args["port"])
-        param = {'table_name': table,
-                 'dimension': dim,
-                 'index_file_size': index_file_size}
-        # create table
-        milvus = Milvus()
-        milvus.connect(uri=uri)
-        milvus.create_table(param)
-        vector = gen_single_vector(dim)
-
-        process_num = 4
-        loop_num = 10
-        processes = []
-        # with dependent connection
-        def add(milvus):
-            i = 0
-            while i < loop_num:
-                status, ids = milvus.add_vectors(table, vector)
-                i = i + 1
-        for i in range(process_num):
-            milvus = Milvus()
-            milvus.connect(uri=uri)
-            p = Process(target=add, args=(milvus,))
-            processes.append(p)
-            p.start()
-            time.sleep(0.2)
-        for p in processes:
-            p.join()
-        time.sleep(3)
-        status, count = milvus.get_table_row_count(table)
-        assert count == process_num * loop_num
-
     def test_add_vector_multi_tables(self, connect):
         '''
         target: test add vectors is correct or not with multiple tables of IP
@@ -1242,7 +1142,6 @@ class TestAddIP:
                 assert status.OK()
 
 class TestAddAdvance:
-
     @pytest.fixture(
         scope="function",
         params=[
@@ -1279,6 +1178,42 @@ class TestAddAdvance:
         nb = insert_count
         insert_vec_list = gen_vectors(nb, dim)
         status, ids = connect.add_vectors(ip_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_much_jaccard(self, connect, jac_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_much_hamming(self, connect, ham_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(ham_table, insert_vec_list)
+        assert len(ids) == nb
+        assert status.OK()
+
+    def test_insert_much_tanimoto(self, connect, tanimoto_table, insert_count):
+        '''
+        target: test add vectors with different length of vectors
+        method: set different vectors as add method params
+        expected: length of ids is equal to the length of vectors
+        '''
+        nb = insert_count
+        tmp, insert_vec_list = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(tanimoto_table, insert_vec_list)
         assert len(ids) == nb
         assert status.OK()
 
@@ -1344,3 +1279,17 @@ class TestAddTableVectorsInvalid(object):
         tmp_vectors[1][1] = gen_vector
         with pytest.raises(Exception) as e:
             status, result = connect.add_vectors(table, tmp_vectors)
+
+    @pytest.mark.level(2)
+    def test_add_vectors_with_invalid_vectors_jaccard(self, connect, jac_table, gen_vector):
+        tmp_vectors = copy.deepcopy(self.vectors)
+        tmp_vectors[1][1] = gen_vector
+        with pytest.raises(Exception) as e:
+            status, result = connect.add_vectors(jac_table, tmp_vectors)
+
+    @pytest.mark.level(2)
+    def test_add_vectors_with_invalid_vectors_hamming(self, connect, ham_table, gen_vector):
+        tmp_vectors = copy.deepcopy(self.vectors)
+        tmp_vectors[1][1] = gen_vector
+        with pytest.raises(Exception) as e:
+            status, result = connect.add_vectors(ham_table, tmp_vectors)

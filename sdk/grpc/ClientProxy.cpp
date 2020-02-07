@@ -34,9 +34,15 @@ UriCheck(const std::string& uri) {
 
 void
 CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
-    auto vector_data = target->mutable_vector_data();
-    vector_data->Resize(static_cast<int>(src.data.size()), 0.0);
-    memcpy(vector_data->mutable_data(), src.data.data(), src.data.size() * sizeof(float));
+    if (!src.float_data.empty()) {
+        auto vector_data = target->mutable_float_data();
+        vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
+        memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
+    }
+
+    if (!src.binary_data.empty()) {
+        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
+    }
 }
 
 Status
@@ -248,6 +254,9 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         // step 3: search vectors
         ::milvus::grpc::TopKQueryResult result;
         Status status = client_ptr_->Search(result, search_param);
+        if (result.row_num() == 0) {
+            return status;
+        }
 
         // step 4: convert result array
         topk_query_result.reserve(result.row_num());
@@ -455,5 +464,25 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
         return Status(StatusCode::UnknownError, "fail to drop partition: " + std::string(ex.what()));
     }
 }
+
+Status
+ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
+    try {
+        return client_ptr_->Cmd(value, "get_config " + node_name);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Fail to get config: " + node_name);
+    }
+}
+
+Status
+ClientProxy::SetConfig(const std::string& node_name, const std::string& value) const {
+    try {
+        std::string dummy;
+        return client_ptr_->Cmd(dummy, "set_config " + node_name + " " + value);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Fail to set config: " + node_name);
+    }
+}
+
 
 }  // namespace milvus

@@ -78,6 +78,15 @@ CreateTableRequest::OnExecute() {
         table_info.index_file_size_ = index_file_size_;
         table_info.metric_type_ = metric_type_;
 
+        // some metric type only support binary vector, adapt the index type
+        if (ValidationUtil::IsBinaryMetricType(metric_type_)) {
+            if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
+                table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
+            } else if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
+                table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            }
+        }
+
         // step 3: create table
         status = DBWrapper::DB()->CreateTable(table_info);
         if (!status.ok()) {

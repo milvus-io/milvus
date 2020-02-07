@@ -68,7 +68,7 @@ TraverseFiles(const meta::DatePartionedTableFilesSchema& date_files, meta::Table
 }  // namespace
 
 DBImpl::DBImpl(const DBOptions& options)
-    : options_(options), shutting_down_(true), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
+    : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     Start();
@@ -83,12 +83,12 @@ DBImpl::~DBImpl() {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::Start() {
-    if (!shutting_down_.load(std::memory_order_acquire)) {
+    if (initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
 
     // ENGINE_LOG_TRACE << "DB service start";
-    shutting_down_.store(false, std::memory_order_release);
+    initialized_.store(true, std::memory_order_release);
 
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
@@ -101,11 +101,10 @@ DBImpl::Start() {
 
 Status
 DBImpl::Stop() {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
-
-    shutting_down_.store(true, std::memory_order_release);
+    initialized_.store(false, std::memory_order_release);
 
     // makesure all memory data serialized
     std::set<std::string> sync_table_ids;
@@ -129,7 +128,7 @@ DBImpl::DropAll() {
 
 Status
 DBImpl::CreateTable(meta::TableSchema& table_schema) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -140,7 +139,7 @@ DBImpl::CreateTable(meta::TableSchema& table_schema) {
 
 Status
 DBImpl::DropTable(const std::string& table_id, const meta::DatesT& dates) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -149,7 +148,7 @@ DBImpl::DropTable(const std::string& table_id, const meta::DatesT& dates) {
 
 Status
 DBImpl::DescribeTable(meta::TableSchema& table_schema) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -160,7 +159,7 @@ DBImpl::DescribeTable(meta::TableSchema& table_schema) {
 
 Status
 DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -169,7 +168,7 @@ DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
 
 Status
 DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -189,7 +188,7 @@ DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
 
 Status
 DBImpl::PreloadTable(const std::string& table_id) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -248,7 +247,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
 
 Status
 DBImpl::UpdateTableFlag(const std::string& table_id, int64_t flag) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -257,7 +256,7 @@ DBImpl::UpdateTableFlag(const std::string& table_id, int64_t flag) {
 
 Status
 DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -267,7 +266,7 @@ DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
 Status
 DBImpl::CreatePartition(const std::string& table_id, const std::string& partition_name,
                         const std::string& partition_tag) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -276,7 +275,7 @@ DBImpl::CreatePartition(const std::string& table_id, const std::string& partitio
 
 Status
 DBImpl::DropPartition(const std::string& partition_name) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -294,7 +293,7 @@ DBImpl::DropPartition(const std::string& partition_name) {
 
 Status
 DBImpl::DropPartitionByTag(const std::string& table_id, const std::string& partition_tag) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -310,7 +309,7 @@ DBImpl::DropPartitionByTag(const std::string& table_id, const std::string& parti
 
 Status
 DBImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchema>& partition_schema_array) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -318,10 +317,9 @@ DBImpl::ShowPartitions(const std::string& table_id, std::vector<meta::TableSchem
 }
 
 Status
-DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_tag, uint64_t n, const float* vectors,
-                      IDNumbers& vector_ids) {
+DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_tag, VectorsData& vectors) {
     //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -338,15 +336,15 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     }
 
     // insert vectors into target table
-    milvus::server::CollectInsertMetrics metrics(n, status);
-    status = mem_mgr_->InsertVectors(target_table_name, n, vectors, vector_ids);
+    milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
+    status = mem_mgr_->InsertVectors(target_table_name, vectors);
 
     return status;
 }
 
 Status
 DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -389,7 +387,7 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
 
 Status
 DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -398,7 +396,7 @@ DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
 
 Status
 DBImpl::DropIndex(const std::string& table_id) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -408,26 +406,24 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-              const float* vectors, ResultIds& result_ids, ResultDistances& result_distances) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+              ResultIds& result_ids, ResultDistances& result_distances) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     meta::DatesT dates = {utils::GetDate()};
-    Status result =
-        Query(context, table_id, partition_tags, k, nq, nprobe, vectors, dates, result_ids, result_distances);
+    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors, dates, result_ids, result_distances);
     return result;
 }
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nq, uint64_t nprobe,
-              const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-              ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+              const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -461,7 +457,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -471,12 +467,11 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq, uint64_t nprobe,
-                      const float* vectors, const meta::DatesT& dates, ResultIds& result_ids,
-                      ResultDistances& result_distances) {
+                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
+                      const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -502,7 +497,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nq, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -512,7 +507,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
 
 Status
 DBImpl::Size(uint64_t& result) {
-    if (shutting_down_.load(std::memory_order_acquire)) {
+    if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
@@ -524,11 +519,11 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
                    ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
-    server::CollectQueryMetrics metrics(nq);
+    server::CollectQueryMetrics metrics(vectors.vector_count_);
 
     TimeRecorder rc("");
 
@@ -536,7 +531,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     auto status = ongoing_files_checker_.MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nq, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nprobe, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
@@ -566,7 +561,7 @@ DBImpl::BackgroundTimerTask() {
     Status status;
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (shutting_down_.load(std::memory_order_acquire)) {
+        if (!initialized_.load(std::memory_order_acquire)) {
             WaitMergeFileFinish();
             WaitBuildIndexFinish();
 
@@ -601,7 +596,7 @@ DBImpl::WaitBuildIndexFinish() {
 void
 DBImpl::StartMetricTask() {
     static uint64_t metric_clock_tick = 0;
-    metric_clock_tick++;
+    ++metric_clock_tick;
     if (metric_clock_tick % METRIC_ACTION_INTERVAL != 0) {
         return;
     }
@@ -631,6 +626,7 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().CPUCoreUsagePercentSet();
     server::Metrics::GetInstance().GPUTemperature();
     server::Metrics::GetInstance().CPUTemperature();
+    server::Metrics::GetInstance().PushToGateway();
 
     // ENGINE_LOG_TRACE << "Metric task finished";
 }
@@ -654,7 +650,7 @@ DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
 void
 DBImpl::StartCompactionTask() {
     static uint64_t compact_clock_tick = 0;
-    compact_clock_tick++;
+    ++compact_clock_tick;
     if (compact_clock_tick % COMPACT_ACTION_INTERVAL != 0) {
         return;
     }
@@ -801,7 +797,7 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
         MergeFiles(table_id, kv.first, kv.second);
         status = ongoing_files_checker_.UnmarkOngoingFiles(files);
 
-        if (shutting_down_.load(std::memory_order_acquire)) {
+        if (!initialized_.load(std::memory_order_acquire)) {
             ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table: " << table_id;
             break;
         }
@@ -821,7 +817,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
             ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
         }
 
-        if (shutting_down_.load(std::memory_order_acquire)) {
+        if (!initialized_.load(std::memory_order_acquire)) {
             ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action";
             break;
         }
@@ -844,7 +840,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 void
 DBImpl::StartBuildIndexTask(bool force) {
     static uint64_t index_clock_tick = 0;
-    index_clock_tick++;
+    ++index_clock_tick;
     if (!force && (index_clock_tick % INDEX_ACTION_INTERVAL != 0)) {
         return;
     }
@@ -924,7 +920,7 @@ DBImpl::GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>
             (*it).row_count_ < meta::BUILD_INDEX_THRESHOLD) {
             it = files.erase(it);
         } else {
-            it++;
+            ++it;
         }
     }
 
@@ -1054,7 +1050,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
 
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10 * 1000, times * 100)));
         GetFilesToBuildIndex(table_id, file_types, table_files);
-        times++;
+        ++times;
 
         index_failed_checker_.IgnoreFailedIndexFiles(table_files);
     }

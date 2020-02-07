@@ -26,7 +26,7 @@ Contributions to Milvus fall into the following categories.
 
 ### Contributing code
 
-If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow).
+If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in your pull request's comment and update CHANGELOG.md.
 
 The Milvus team members will review your pull requests, and once it is accepted, the status of the projects to which it is associated will be changed to **Reviewer approved**. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
 

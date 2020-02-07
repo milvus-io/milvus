@@ -74,6 +74,21 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/utils web_utils_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_utils_files}
+        ${web_impl_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
 set(server_delivery_files
@@ -83,6 +98,15 @@ set(server_delivery_files
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
 
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
@@ -108,6 +132,7 @@ set(common_files
         ${thirdparty_files}
         ${scheduler_files}
         ${wrapper_files}
+        ${storage_files}
         ${helper_files}
         ${server_context_files}
         ${tracing_files}
@@ -129,6 +154,10 @@ set(unittest_libs
         opentracing
         opentracing_mocktracer
         fiu
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
+        curl
+        crypto
         )
 if (MILVUS_WITH_PROMETHEUS)
     set(unittest_libs ${unittest_libs}
@@ -161,3 +190,4 @@ add_subdirectory(wrapper)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)
+add_subdirectory(storage)

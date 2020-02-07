@@ -3,11 +3,9 @@ import pdb
 import pytest
 import logging
 import itertools
-
+import numpy
 from time import sleep
 from multiprocessing import Process
-import numpy
-from milvus import Milvus
 from milvus import IndexType, MetricType
 from utils import *
 
@@ -50,6 +48,34 @@ class TestTable:
                  'dimension': dim,
                  'index_file_size': index_file_size, 
                  'metric_type': MetricType.IP}
+        status = connect.create_table(param)
+        assert status.OK()
+
+    def test_create_table_jaccard(self, connect):
+        '''
+        target: test create normal table 
+        method: create table with corrent params
+        expected: create status return ok
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size, 
+                 'metric_type': MetricType.JACCARD}
+        status = connect.create_table(param)
+        assert status.OK()
+
+    def test_create_table_hamming(self, connect):
+        '''
+        target: test create normal table
+        method: create table with corrent params
+        expected: create status return ok
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.HAMMING}
         status = connect.create_table(param)
         assert status.OK()
 
@@ -195,6 +221,40 @@ class TestTable:
         assert res.table_name == table_name
         assert res.metric_type == MetricType.IP
 
+    @pytest.mark.level(2)
+    def test_table_describe_table_name_jaccard(self, connect):
+        '''
+        target: test describe table created with correct params 
+        method: create table, assert the value returned by describe method
+        expected: table_name equals with the table name created
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.JACCARD}
+        connect.create_table(param)
+        status, res = connect.describe_table(table_name)
+        assert res.table_name == table_name
+        assert res.metric_type == MetricType.JACCARD
+
+    @pytest.mark.level(2)
+    def test_table_describe_table_name_hamming(self, connect):
+        '''
+        target: test describe table created with correct params
+        method: create table, assert the value returned by describe method
+        expected: table_name equals with the table name created
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.HAMMING}
+        connect.create_table(param)
+        status, res = connect.describe_table(table_name)
+        assert res.table_name == table_name
+        assert res.metric_type == MetricType.HAMMING
+
     # TODO: enable
     @pytest.mark.level(2)
     def _test_table_describe_table_name_multiprocessing(self, connect, args):
@@ -218,7 +278,7 @@ class TestTable:
         process_num = 4
         processes = []
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=describetable, args=(milvus,))
             processes.append(p)
@@ -277,6 +337,28 @@ class TestTable:
         '''
         status = connect.delete_table(ip_table)
         assert not assert_has_table(connect, ip_table)
+
+    @pytest.mark.level(2)
+    def test_delete_table_jaccard(self, connect, jac_table):
+        '''
+        target: test delete table created with correct params 
+        method: create table and then delete, 
+            assert the value returned by delete method
+        expected: status ok, and no table in tables
+        '''
+        status = connect.delete_table(jac_table)
+        assert not assert_has_table(connect, jac_table)
+
+    @pytest.mark.level(2)
+    def test_delete_table_hamming(self, connect, ham_table):
+        '''
+        target: test delete table created with correct params
+        method: create table and then delete,
+            assert the value returned by delete method
+        expected: status ok, and no table in tables
+        '''
+        status = connect.delete_table(ham_table)
+        assert not assert_has_table(connect, ham_table)
 
     @pytest.mark.level(2)
     def test_table_delete_without_connection(self, table, dis_connect):
@@ -376,7 +458,7 @@ class TestTable:
             assert status.OK()
 
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=deletetable, args=(milvus,))
             processes.append(p)
@@ -460,6 +542,34 @@ class TestTable:
         connect.create_table(param)
         assert assert_has_table(connect, table_name)
 
+    def test_has_table_jaccard(self, connect):
+        '''
+        target: test if the created table existed
+        method: create table, assert the value returned by has_table method
+        expected: True
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.JACCARD}
+        connect.create_table(param)
+        assert assert_has_table(connect, table_name)
+
+    def test_has_table_hamming(self, connect):
+        '''
+        target: test if the created table existed
+        method: create table, assert the value returned by has_table method
+        expected: True
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.HAMMING}
+        connect.create_table(param)
+        assert assert_has_table(connect, table_name)
+
     @pytest.mark.level(2)
     def test_has_table_without_connection(self, table, dis_connect):
         '''
@@ -518,6 +628,38 @@ class TestTable:
         assert status.OK()
         assert table_name in result
 
+    def test_show_tables_jaccard(self, connect):
+        '''
+        target: test show tables is correct or not, if table created
+        method: create table, assert the value returned by show_tables method is equal to 0
+        expected: table_name in show tables   
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.JACCARD}
+        connect.create_table(param)    
+        status, result = connect.show_tables()
+        assert status.OK()
+        assert table_name in result
+
+    def test_show_tables_hamming(self, connect):
+        '''
+        target: test show tables is correct or not, if table created
+        method: create table, assert the value returned by show_tables method is equal to 0
+        expected: table_name in show tables
+        '''
+        table_name = gen_unique_str("test_table")
+        param = {'table_name': table_name,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.HAMMING}
+        connect.create_table(param)
+        status, result = connect.show_tables()
+        assert status.OK()
+        assert table_name in result
+
     @pytest.mark.level(2)
     def test_show_tables_without_connection(self, dis_connect):
         '''
@@ -569,7 +711,7 @@ class TestTable:
         processes = []
 
         for i in range(process_num):
-            milvus = Milvus()
+            milvus = get_milvus()
             milvus.connect(uri=uri)
             p = Process(target=showtables, args=(milvus,))
             processes.append(p)
@@ -590,12 +732,12 @@ class TestTable:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, args):
-        if "internal" not in args:
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in open source")
-            # if request.param["index_type"] == IndexType.IVF_PQ:
-            #     pytest.skip("sq8h not support in open source")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
         return request.param
 
     @pytest.mark.level(1)
@@ -612,6 +754,22 @@ class TestTable:
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_params)
         status = connect.preload_table(ip_table)
+        assert status.OK()
+
+    @pytest.mark.level(1)
+    def test_preload_table_jaccard(self, connect, jac_table, get_simple_index_params):
+        index_params = get_simple_index_params
+        status, ids = connect.add_vectors(jac_table, vectors)
+        status = connect.create_index(jac_table, index_params)
+        status = connect.preload_table(jac_table)
+        assert status.OK()
+
+    @pytest.mark.level(1)
+    def test_preload_table_hamming(self, connect, ham_table, get_simple_index_params):
+        index_params = get_simple_index_params
+        status, ids = connect.add_vectors(ham_table, vectors)
+        status = connect.create_index(ham_table, index_params)
+        status = connect.preload_table(ham_table)
         assert status.OK()
 
     @pytest.mark.level(1)

@@ -13,17 +13,11 @@ timeout(time: 15, unit: 'MINUTES') {
         def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
 
         try {
-            def isExistSourceImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
-            if (isExistSourceImage == 0) {
-                def removeSourceImageStatus = sh(returnStatus: true, script: "docker rmi ${imageName}")
-            }
+            deleteImages("${imageName}", true)
 
             def customImage = docker.build("${imageName}")
 
-            def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${params.DOKCER_REGISTRY_URL}/${imageName} 2>&1 > /dev/null")
-            if (isExistTargeImage == 0) {
-                def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${params.DOKCER_REGISTRY_URL}/${imageName}")
-            }
+            deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
 
             docker.withRegistry("https://${params.DOKCER_REGISTRY_URL}", "${params.DOCKER_CREDENTIALS_ID}") {
                 customImage.push()
@@ -31,15 +25,28 @@ timeout(time: 15, unit: 'MINUTES') {
         } catch (exc) {
             throw exc
         } finally {
-            def isExistSourceImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
-            if (isExistSourceImage == 0) {
-                def removeSourceImageStatus = sh(returnStatus: true, script: "docker rmi ${imageName}")
-            }
-
-            def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${params.DOKCER_REGISTRY_URL}/${imageName} 2>&1 > /dev/null")
-            if (isExistTargeImage == 0) {
-                def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${params.DOKCER_REGISTRY_URL}/${imageName}")
-            }
+            deleteImages("${imageName}", true)
+            deleteImages("${params.DOKCER_REGISTRY_URL}/${imageName}", true)
         }
     }
 }
+
+boolean deleteImages(String imageName, boolean force) {
+    def imageNameStr = imageName.trim()
+    def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageNameStr} 2>&1 > /dev/null")
+    if (isExistImage == 0) {
+        def deleteImageStatus = 0
+        if (force) {
+            def imageID = sh(returnStdout: true, script: "docker inspect --type=image --format \"{{.ID}}\" ${imageNameStr}")
+            deleteImageStatus = sh(returnStatus: true, script: "docker rmi -f ${imageID}")
+        } else {
+            deleteImageStatus = sh(returnStatus: true, script: "docker rmi ${imageNameStr}")
+        }
+
+        if (deleteImageStatus != 0) {
+            return false
+        }
+    }
+    return true
+}
+

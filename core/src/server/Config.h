@@ -28,6 +28,14 @@
 namespace milvus {
 namespace server {
 
+#define CONFIG_CHECK(func) \
+    do {                   \
+        Status s = func;   \
+        if (!s.ok()) {     \
+            return s;      \
+        }                  \
+    } while (false)
+
 static const char* CONFIG_NODE_DELIMITER = ".";
 static const char* CONFIG_VERSION = "version";
 
@@ -41,23 +49,38 @@ static const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
 static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
+static const char* CONFIG_SERVER_WEB_PORT = "web_port";
+static const char* CONFIG_SERVER_WEB_PORT_DEFAULT = "19121";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
-static const char* CONFIG_DB_PRIMARY_PATH = "primary_path";
-static const char* CONFIG_DB_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
-static const char* CONFIG_DB_SECONDARY_PATH = "secondary_path";
-static const char* CONFIG_DB_SECONDARY_PATH_DEFAULT = "";
 static const char* CONFIG_DB_BACKEND_URL = "backend_url";
 static const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+
+/* storage config */
+static const char* CONFIG_STORAGE = "storage_config";
+static const char* CONFIG_STORAGE_PRIMARY_PATH = "primary_path";
+static const char* CONFIG_STORAGE_PRIMARY_PATH_DEFAULT = "/tmp/milvus";
+static const char* CONFIG_STORAGE_SECONDARY_PATH = "secondary_path";
+static const char* CONFIG_STORAGE_SECONDARY_PATH_DEFAULT = "";
+static const char* CONFIG_STORAGE_S3_ENABLE = "s3_enable";
+static const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
+static const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
+static const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_STORAGE_S3_PORT = "s3_port";
+static const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "9000";
+static const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
+static const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
+static const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "minioadmin";
+static const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
+static const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "milvus-bucket";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -65,6 +88,8 @@ static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "4";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_cache_threshold";
 static const char* CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE = "insert_buffer_size";
+static const char* CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT = "1";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 
@@ -72,11 +97,10 @@ static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 static const char* CONFIG_METRIC = "metric_config";
 static const char* CONFIG_METRIC_ENABLE_MONITOR = "enable_monitor";
 static const char* CONFIG_METRIC_ENABLE_MONITOR_DEFAULT = "false";
-static const char* CONFIG_METRIC_COLLECTOR = "collector";
-static const char* CONFIG_METRIC_COLLECTOR_DEFAULT = "prometheus";
-static const char* CONFIG_METRIC_PROMETHEUS = "prometheus_config";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
-static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
+static const char* CONFIG_METRIC_ADDRESS = "address";
+static const char* CONFIG_METRIC_ADDRESS_DEFAULT = "127.0.0.1";
+static const char* CONFIG_METRIC_PORT = "port";
+static const char* CONFIG_METRIC_PORT_DEFAULT = "9091";
 
 /* engine config */
 static const char* CONFIG_ENGINE = "engine_config";
@@ -154,34 +178,50 @@ class Config {
     CheckServerConfigDeployMode(const std::string& value);
     Status
     CheckServerConfigTimeZone(const std::string& value);
+    Status
+    CheckServerConfigWebPort(const std::string& value);
 
     /* db config */
-    Status
-    CheckDBConfigPrimaryPath(const std::string& value);
-    Status
-    CheckDBConfigSecondaryPath(const std::string& value);
     Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
+
+    /* storage config */
     Status
-    CheckDBConfigInsertBufferSize(const std::string& value);
+    CheckStorageConfigPrimaryPath(const std::string& value);
+    Status
+    CheckStorageConfigSecondaryPath(const std::string& value);
+    Status
+    CheckStorageConfigS3Enable(const std::string& value);
+    Status
+    CheckStorageConfigS3Address(const std::string& value);
+    Status
+    CheckStorageConfigS3Port(const std::string& value);
+    Status
+    CheckStorageConfigS3AccessKey(const std::string& value);
+    Status
+    CheckStorageConfigS3SecretKey(const std::string& value);
+    Status
+    CheckStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
     CheckMetricConfigEnableMonitor(const std::string& value);
     Status
-    CheckMetricConfigCollector(const std::string& value);
+    CheckMetricConfigAddress(const std::string& value);
     Status
-    CheckMetricConfigPrometheusPort(const std::string& value);
+    CheckMetricConfigPort(const std::string& value);
 
     /* cache config */
     Status
     CheckCacheConfigCpuCacheCapacity(const std::string& value);
     Status
     CheckCacheConfigCpuCacheThreshold(const std::string& value);
+    Status
+    CheckCacheConfigInsertBufferSize(const std::string& value);
     Status
     CheckCacheConfigCacheInsertData(const std::string& value);
 
@@ -226,12 +266,10 @@ class Config {
     GetServerConfigDeployMode(std::string& value);
     Status
     GetServerConfigTimeZone(std::string& value);
+    Status
+    GetServerConfigWebPort(std::string& value);
 
     /* db config */
-    Status
-    GetDBConfigPrimaryPath(std::string& value);
-    Status
-    GetDBConfigSecondaryPath(std::string& value);
     Status
     GetDBConfigBackendUrl(std::string& value);
     Status
@@ -239,23 +277,41 @@ class Config {
     Status
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
-    GetDBConfigInsertBufferSize(int64_t& value);
-    Status
     GetDBConfigPreloadTable(std::string& value);
+
+    /* storage config */
+    Status
+    GetStorageConfigPrimaryPath(std::string& value);
+    Status
+    GetStorageConfigSecondaryPath(std::string& value);
+    Status
+    GetStorageConfigS3Enable(bool& value);
+    Status
+    GetStorageConfigS3Address(std::string& value);
+    Status
+    GetStorageConfigS3Port(std::string& value);
+    Status
+    GetStorageConfigS3AccessKey(std::string& value);
+    Status
+    GetStorageConfigS3SecretKey(std::string& value);
+    Status
+    GetStorageConfigS3Bucket(std::string& value);
 
     /* metric config */
     Status
     GetMetricConfigEnableMonitor(bool& value);
     Status
-    GetMetricConfigCollector(std::string& value);
+    GetMetricConfigAddress(std::string& value);
     Status
-    GetMetricConfigPrometheusPort(std::string& value);
+    GetMetricConfigPort(std::string& value);
 
     /* cache config */
     Status
     GetCacheConfigCpuCacheCapacity(int64_t& value);
     Status
     GetCacheConfigCpuCacheThreshold(float& value);
+    Status
+    GetCacheConfigInsertBufferSize(int64_t& value);
     Status
     GetCacheConfigCacheInsertData(bool& value);
 
@@ -296,34 +352,50 @@ class Config {
     SetServerConfigDeployMode(const std::string& value);
     Status
     SetServerConfigTimeZone(const std::string& value);
+    Status
+    SetServerConfigWebPort(const std::string& value);
 
     /* db config */
-    Status
-    SetDBConfigPrimaryPath(const std::string& value);
-    Status
-    SetDBConfigSecondaryPath(const std::string& value);
     Status
     SetDBConfigBackendUrl(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     SetDBConfigArchiveDaysThreshold(const std::string& value);
+
+    /* storage config */
     Status
-    SetDBConfigInsertBufferSize(const std::string& value);
+    SetStorageConfigPrimaryPath(const std::string& value);
+    Status
+    SetStorageConfigSecondaryPath(const std::string& value);
+    Status
+    SetStorageConfigS3Enable(const std::string& value);
+    Status
+    SetStorageConfigS3Address(const std::string& value);
+    Status
+    SetStorageConfigS3Port(const std::string& value);
+    Status
+    SetStorageConfigS3AccessKey(const std::string& value);
+    Status
+    SetStorageConfigS3SecretKey(const std::string& value);
+    Status
+    SetStorageConfigS3Bucket(const std::string& value);
 
     /* metric config */
     Status
     SetMetricConfigEnableMonitor(const std::string& value);
     Status
-    SetMetricConfigCollector(const std::string& value);
+    SetMetricConfigAddress(const std::string& value);
     Status
-    SetMetricConfigPrometheusPort(const std::string& value);
+    SetMetricConfigPort(const std::string& value);
 
     /* cache config */
     Status
     SetCacheConfigCpuCacheCapacity(const std::string& value);
     Status
     SetCacheConfigCpuCacheThreshold(const std::string& value);
+    Status
+    SetCacheConfigInsertBufferSize(const std::string& value);
     Status
     SetCacheConfigCacheInsertData(const std::string& value);
 

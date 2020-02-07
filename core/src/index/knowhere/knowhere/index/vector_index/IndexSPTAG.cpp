@@ -218,9 +218,9 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 DatasetPtr
 CPUSPTAGRNG::Search(const DatasetPtr& dataset, const Config& config) {
     SetParameters(config);
-    if (config != nullptr) {
-        config->CheckValid();  // throw exception
-    }
+    //    if (config != nullptr) {
+    //        config->CheckValid();  // throw exception
+    //    }
 
     auto p_data = dataset->Get<const float*>(meta::TENSOR);
     for (auto i = 0; i < 10; ++i) {
