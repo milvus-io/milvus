@@ -16,23 +16,25 @@
 // under the License.
 
 #include <algorithm>
-#include <iterator>
 #include <cassert>
+#include <iterator>
+#include <utility>
+#include <vector>
 
-#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
+#include "hnswlib/hnswalg.h"
 #include "hnswlib/space_ip.h"
 #include "hnswlib/space_l2.h"
-#include "hnswlib/hnswalg.h"
 
 namespace knowhere {
 
 BinarySet
 IndexHNSW::Serialize() {
-    if (!index_ ) {
+    if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 

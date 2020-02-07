@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <memory>
 #include <mutex>
 
 #include "hnswlib/hnswlib.h"
@@ -36,14 +37,14 @@ class IndexHNSW : public VectorIndex {
     DatasetPtr
     Search(const DatasetPtr& dataset, const Config& config) override;
 
-//    void
-//    set_preprocessor(PreprocessorPtr preprocessor) override;
-//
-//    void
-//    set_index_model(IndexModelPtr model) override;
-//
-//    PreprocessorPtr
-//    BuildPreprocessor(const DatasetPtr& dataset, const Config& config) override;
+    //    void
+    //    set_preprocessor(PreprocessorPtr preprocessor) override;
+    //
+    //    void
+    //    set_index_model(IndexModelPtr model) override;
+    //
+    //    PreprocessorPtr
+    //    BuildPreprocessor(const DatasetPtr& dataset, const Config& config) override;
 
     IndexModelPtr
     Train(const DatasetPtr& dataset, const Config& config) override;

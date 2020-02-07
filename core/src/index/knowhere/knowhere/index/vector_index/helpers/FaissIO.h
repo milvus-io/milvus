@@ -29,7 +29,7 @@ struct MemoryIOWriter : public faiss::IOWriter {
     size_t
     operator()(const void* ptr, size_t size, size_t nitems) override;
 
-    template<typename T>
+    template <typename T>
     size_t
     write(T* ptr, size_t size, size_t nitems = 1) {
         operator()((const void*)ptr, size, nitems);
@@ -44,7 +44,7 @@ struct MemoryIOReader : public faiss::IOReader {
     size_t
     operator()(void* ptr, size_t size, size_t nitems) override;
 
-    template<typename T>
+    template <typename T>
     size_t
     read(T* ptr, size_t size, size_t nitems = 1) {
         operator()((void*)ptr, size, nitems);
