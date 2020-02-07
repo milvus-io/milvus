@@ -16,14 +16,15 @@
 // under the License.
 
 #include "wrapper/ConfAdapter.h"
-#include "WrapperException.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "server/Config.h"
-#include "utils/Log.h"
 
 #include <cmath>
 #include <memory>
 #include <vector>
+
+#include "WrapperException.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "server/Config.h"
+#include "utils/Log.h"
 
 // TODO(lxj): add conf checker
 
@@ -263,6 +264,17 @@ knowhere::Config
 SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
     auto conf = std::make_shared<knowhere::BKTCfg>();
     conf->k = metaconf.k;
+    return conf;
+}
+
+knowhere::Config
+HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::HNSWCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+
+    conf->ef = 100;  // ef can be auto-configured by using sample data.
+    conf->M = 16;    // A reasonable range of M is from 5 to 48.
     return conf;
 }
 

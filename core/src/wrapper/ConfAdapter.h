@@ -17,10 +17,10 @@
 
 #pragma once
 
+#include <memory>
+
 #include "VecIndex.h"
 #include "knowhere/common/Config.h"
-
-#include <memory>
 
 namespace milvus {
 namespace engine {
@@ -110,6 +110,12 @@ class SPTAGBKTConfAdapter : public ConfAdapter {
 
     knowhere::Config
     MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
+};
+
+class HNSWConfAdapter : public ConfAdapter {
+ public:
+    knowhere::Config
+    Match(const TempMetaConf& metaconf) override;
 };
 
 }  // namespace engine

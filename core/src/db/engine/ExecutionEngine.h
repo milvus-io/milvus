@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "utils/Status.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -37,7 +37,8 @@ enum class EngineType {
     FAISS_PQ,
     SPTAG_KDT,
     SPTAG_BKT,
-    MAX_VALUE = SPTAG_BKT,
+    HNSW,
+    MAX_VALUE = HNSW,
 };
 
 enum class MetricType {

@@ -16,8 +16,10 @@
 // under the License.
 
 #include "wrapper/VecIndex.h"
+
 #include "VecImpl.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
@@ -30,6 +32,7 @@
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
+
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
@@ -141,6 +144,10 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::IVFSQ>();
             break;
         }
+        case IndexType::HNSW: {
+            index = std::make_shared<knowhere::IndexHNSW>();
+            break;
+        }
 
 #ifdef MILVUS_GPU_VERSION
         case IndexType::FAISS_IVFFLAT_GPU: {
@@ -188,7 +195,9 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
         }
-        default: { return nullptr; }
+        default: {
+            return nullptr;
+        }
     }
     return std::make_shared<VecIndexImpl>(index, type);
 }
@@ -300,7 +309,9 @@ ConvertToCpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFPQ_MIX: {
             return IndexType::FAISS_IVFPQ_CPU;
         }
-        default: { return type; }
+        default: {
+            return type;
+        }
     }
 }
 
@@ -319,7 +330,9 @@ ConvertToGpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFPQ_CPU: {
             return IndexType::FAISS_IVFPQ_GPU;
         }
-        default: { return type; }
+        default: {
+            return type;
+        }
     }
 }
 }  // namespace engine

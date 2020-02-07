@@ -16,6 +16,11 @@
 // under the License.
 
 #include "db/engine/ExecutionEngineImpl.h"
+
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "knowhere/common/Config.h"
@@ -25,15 +30,10 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
 #include "wrapper/VecIndex.h"
-
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
 //#define ON_SEARCH
 namespace milvus {
@@ -146,6 +146,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::SPTAG_BKT: {
             index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
+            break;
+        }
+        case EngineType::HNSW: {
+            index = GetVecIndexFactory(IndexType::HNSW);
             break;
         }
         default: {

@@ -50,6 +50,7 @@ enum class IndexType {
     NSG_MIX,
     FAISS_IVFPQ_MIX,
     SPTAG_BKT_RNT_CPU,
+    HNSW,
 };
 
 class VecIndex;

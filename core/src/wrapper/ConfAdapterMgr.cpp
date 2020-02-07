@@ -16,6 +16,7 @@
 // under the License.
 
 #include "wrapper/ConfAdapterMgr.h"
+
 #include "utils/Exception.h"
 
 namespace milvus {
@@ -59,6 +60,8 @@ AdapterMgr::RegisterAdapter() {
 
     REGISTER_CONF_ADAPTER(SPTAGKDTConfAdapter, IndexType::SPTAG_KDT_RNT_CPU, sptag_kdt);
     REGISTER_CONF_ADAPTER(SPTAGBKTConfAdapter, IndexType::SPTAG_BKT_RNT_CPU, sptag_bkt);
+
+    REGISTER_CONF_ADAPTER(HNSWConfAdapter, IndexType::HNSW, hnsw);
 }
 
 }  // namespace engine
