@@ -605,8 +605,6 @@ DBImpl::StartMetricTask() {
         return;
     }
 
-    // ENGINE_LOG_TRACE << "Start metric task";
-
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
@@ -633,8 +631,6 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUTemperature();
     server::Metrics::GetInstance().CPUTemperature();
     server::Metrics::GetInstance().PushToGateway();
-
-    // ENGINE_LOG_TRACE << "Metric task finished";
 }
 
 Status
