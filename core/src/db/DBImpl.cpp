@@ -1077,6 +1077,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     // failed to build index for some files, return error
     std::string err_msg;
     index_failed_checker_.GetErrMsgForTable(table_id, err_msg);
+    fiu_do_on("DBImpl.BuildTableIndexRecursively.not_empty_err_msg", err_msg.append("fiu"));
     if (!err_msg.empty()) {
         return Status(DB_ERROR, err_msg);
     }

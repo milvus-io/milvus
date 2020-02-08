@@ -798,10 +798,10 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
         fiu_disable("DBImpl.BuildTableIndexRecursively.fail_build_table_Index_for_partition");
 
-        FIU_ENABLE_FIU("DBImpl.BuildTableIndexRecursively.not_empty_failed_files");
+	FIU_ENABLE_FIU("DBImpl.BuildTableIndexRecursively.not_empty_err_msg");
         stat = db_->CreateIndex(table_info.table_id_, index);
         ASSERT_FALSE(stat.ok());
-        fiu_disable("DBImpl.BuildTableIndexRecursively.not_empty_failed_files");
+	fiu_disable("DBImpl.BuildTableIndexRecursively.not_empty_err_msg");
 
         uint64_t row_count = 0;
         stat = db_->GetTableRowCount(TABLE_NAME, row_count);
