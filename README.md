@@ -18,9 +18,33 @@ Milvus is the world's fastest similarity search engine for massive-scale feature
 
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md).
 
-Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/sdk) SDKs. 
-
 Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0.md).
+
+## Roadmap
+
+To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/milestones).
+
+It is a Work in Progress, and is subject to reasonable adjustments when necessary. And we greatly welcome any comments/requirements/suggestions regarding Milvus roadmap.:clap:
+
+## Application scenarios
+
+Milvus is broadly applicable to a variety of areas. Below screenshot showcases our content-based image retrieval demo system built based on Milvus and VGG.
+
+[![image retrieval demo](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)
+
+To explore more Milvus solutions and application scenarios, see our [bootcamp](https://github.com/milvus-io/bootcamp) repository.
+
+## Test reports
+
+See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
+
+## Supported clients
+
+- [Go](https://github.com/milvus-io/milvus-sdk-go)
+- [Python](https://github.com/milvus-io/pymilvus)
+- [Java](https://github.com/milvus-io/milvus-sdk-java)
+- [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+- [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
 
 ## Get started
 
@@ -41,7 +65,9 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 
 ## Join our community
 
-To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
+:heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
+
+See our [community](https://github.com/milvus-io/community) repository to learn about our governance and access more community resources.
 
 ## Contributors
 
@@ -69,10 +95,6 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 ## Resources
 
 - [Milvus.io](https://www.milvus.io)
-
-- [Milvus bootcamp](https://github.com/milvus-io/bootcamp)
-
-- [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
 
 - [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
 
