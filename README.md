@@ -7,7 +7,7 @@
 ![Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
 [![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
-[![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-7-orange.svg?style=flat-square)](#contributors-)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
