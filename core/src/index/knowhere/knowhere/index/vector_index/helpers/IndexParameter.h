@@ -68,6 +68,10 @@ constexpr int64_t DEFAULT_BKTNUMBER = INVALID_VALUE;
 constexpr int64_t DEFAULT_BKTKMEANSK = INVALID_VALUE;
 constexpr int64_t DEFAULT_BKTLEAFSIZE = INVALID_VALUE;
 
+// HNSW Config
+constexpr int64_t DEFAULT_M = INVALID_VALUE;
+constexpr int64_t DEFAULT_EF = INVALID_VALUE;
+
 struct IVFCfg : public Cfg {
     int64_t nlist = DEFAULT_NLIST;
     int64_t nprobe = DEFAULT_NPROBE;
@@ -241,5 +245,13 @@ struct BinIDMAPCfg : public Cfg {
         return false;
     }
 };
+
+struct HNSWCfg : public Cfg {
+    int64_t M = DEFAULT_M;
+    int64_t ef = DEFAULT_EF;
+
+    HNSWCfg() = default;
+};
+using HNSWConfig = std::shared_ptr<HNSWCfg>;
 
 }  // namespace knowhere

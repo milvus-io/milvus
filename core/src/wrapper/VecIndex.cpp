@@ -16,10 +16,12 @@
 // under the License.
 
 #include "wrapper/VecIndex.h"
+
 #include "VecImpl.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
@@ -38,6 +40,7 @@
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
+
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
@@ -97,6 +100,10 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
         }
         case IndexType::FAISS_IVFSQ8_CPU: {
             index = std::make_shared<knowhere::IVFSQ>();
+            break;
+        }
+        case IndexType::HNSW: {
+            index = std::make_shared<knowhere::IndexHNSW>();
             break;
         }
 
