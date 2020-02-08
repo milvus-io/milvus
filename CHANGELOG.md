@@ -47,6 +47,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#966 - Update NOTICE.md
 - \#1002 - Rename minio to s3 in Storage Config section
 - \#1078 - Move 'insert_buffer_size' to Cache Config section
+- \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 
 ## Task
 
