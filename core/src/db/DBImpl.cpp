@@ -895,7 +895,7 @@ DBImpl::BackgroundBuildIndex() {
                 Status status = job->GetStatus();
                 ENGINE_LOG_ERROR << "Building index job " << job->id() << " failed: " << status.ToString();
 
-                index_failed_checker_.MarkFailedIndexFile(file_schema);
+                index_failed_checker_.MarkFailedIndexFile(file_schema, status.message());
             } else {
                 ENGINE_LOG_DEBUG << "Building index job " << job->id() << " succeed.";
 
@@ -1066,13 +1066,10 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     }
 
     // failed to build index for some files, return error
-    std::vector<std::string> failed_files;
-    index_failed_checker_.GetFailedIndexFileOfTable(table_id, failed_files);
-    if (!failed_files.empty()) {
-        std::string msg = "Failed to build index for " + std::to_string(failed_files.size()) +
-                          ((failed_files.size() == 1) ? " file" : " files");
-        msg += ", please double check index parameters.";
-        return Status(DB_ERROR, msg);
+    std::string err_msg;
+    index_failed_checker_.GetErrMsgForTable(table_id, err_msg);
+    if (!err_msg.empty()) {
+        return Status(DB_ERROR, err_msg);
     }
 
     return Status::OK();
