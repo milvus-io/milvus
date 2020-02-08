@@ -17,6 +17,7 @@
 
 #include "db/engine/ExecutionEngineImpl.h"
 
+#include <fiu-local.h>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -37,11 +38,6 @@
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
 #include "wrapper/VecIndex.h"
-
-#include <fiu-local.h>
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
 //#define ON_SEARCH
 namespace milvus {
