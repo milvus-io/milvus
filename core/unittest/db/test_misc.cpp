@@ -128,30 +128,30 @@ TEST(DBMiscTest, CHECKER_TEST) {
         milvus::engine::meta::TableFileSchema schema;
         schema.table_id_ = "aaa";
         schema.file_id_ = "5000";
-        checker.MarkFailedIndexFile(schema);
+        checker.MarkFailedIndexFile(schema, "5000 fail");
         schema.table_id_ = "bbb";
         schema.file_id_ = "5001";
-        checker.MarkFailedIndexFile(schema);
+        checker.MarkFailedIndexFile(schema, "5001 fail");
 
-        std::vector<std::string> failed_files;
-        checker.GetFailedIndexFileOfTable("aaa", failed_files);
-        ASSERT_EQ(failed_files.size(), 1UL);
+        std::string err_msg;
+        checker.GetErrMsgForTable("aaa", err_msg);
+        ASSERT_EQ(err_msg, "5000 fail");
 
         schema.table_id_ = "bbb";
         schema.file_id_ = "5002";
-        checker.MarkFailedIndexFile(schema);
-        checker.MarkFailedIndexFile(schema);
+        checker.MarkFailedIndexFile(schema, "5002 fail");
+        checker.MarkFailedIndexFile(schema, "5002 fail");
 
         milvus::engine::meta::TableFilesSchema table_files = {schema};
         checker.IgnoreFailedIndexFiles(table_files);
         ASSERT_TRUE(table_files.empty());
 
-        checker.GetFailedIndexFileOfTable("bbb", failed_files);
-        ASSERT_EQ(failed_files.size(), 2UL);
+        checker.GetErrMsgForTable("bbb", err_msg);
+        ASSERT_EQ(err_msg, "5001 fail");
 
         checker.MarkSucceedIndexFile(schema);
-        checker.GetFailedIndexFileOfTable("bbb", failed_files);
-        ASSERT_EQ(failed_files.size(), 1UL);
+        checker.GetErrMsgForTable("bbb", err_msg);
+        ASSERT_EQ(err_msg, "5001 fail");
     }
 
     {
