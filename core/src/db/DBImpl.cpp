@@ -779,7 +779,7 @@ DBImpl::BackgroundTimerTask() {
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(options_.auto_flush_interval_));
+        std::this_thread::sleep_for(std::chrono::milliseconds(options_.auto_flush_interval_));
 
         StartMetricTask();
         StartCompactionTask();
