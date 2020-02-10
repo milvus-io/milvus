@@ -257,7 +257,7 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
     }
     lck.unlock();
 
-    WAL_LOG_INFO << table_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
+//    WAL_LOG_INFO << table_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }

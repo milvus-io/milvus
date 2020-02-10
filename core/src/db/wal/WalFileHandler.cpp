@@ -23,7 +23,8 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path) : file_path_(mxlog_path), file_size_(0) {
+MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path)
+    : file_path_(mxlog_path), p_file_(nullptr) {
 }
 
 MXLogFileHandler::~MXLogFileHandler() {
@@ -33,13 +34,7 @@ MXLogFileHandler::~MXLogFileHandler() {
 bool
 MXLogFileHandler::OpenFile() {
     p_file_ = fopen((file_path_ + file_name_).c_str(), file_mode_.c_str());
-    if (!p_file_) {
-        // todo: log error
-        return false;
-    }
-    file_size_ = 0;
-    GetFileSize();
-    return true;
+    return p_file_ != nullptr;
 }
 
 bool
@@ -49,9 +44,7 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
             return false;
     }
 
-    if (data_offset != 0) {
-        fseek(p_file_, data_offset, SEEK_SET);
-    }
+    fseek(p_file_, data_offset, SEEK_SET);
 
     if (data_size != 0) {
         auto res = fread(buf, 1, data_size, p_file_);
@@ -68,7 +61,7 @@ MXLogFileHandler::Write(char* buf, uint32_t data_size, bool is_sync) {
             return false;
     }
     auto res = fwrite(buf, 1, data_size, p_file_);
-    return (res == file_size_);
+    return (res == data_size);
 }
 
 bool
@@ -107,22 +100,18 @@ MXLogFileHandler::IsOpen() {
 
 uint32_t
 MXLogFileHandler::GetFileSize() {
-    if (file_size_)
-        return file_size_;
-
     struct stat statbuf;
     if (0 == stat((file_path_ + file_name_).c_str(), &statbuf)) {
-        file_size_ = (uint32_t)statbuf.st_size;
+        return (uint32_t)statbuf.st_size;
     }
 
-    return file_size_;
+    return 0;
 }
 
 void
 MXLogFileHandler::DeleteFile() {
     remove((file_path_ + file_name_).c_str());
     p_file_ = NULL;
-    file_size_ = 0;
     file_name_ = "";
 }
 

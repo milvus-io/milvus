@@ -40,7 +40,7 @@ enum class MXLogType {
     Delete,
     Update,
     Flush,
-    None,
+    None
 };
 
 struct MXLogRecord {
