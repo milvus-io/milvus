@@ -869,7 +869,9 @@ DBImpl::StartCompactionTask() {
         return;
     }
 
-    Flush();
+    if (!wal_enable_) {
+        Flush();
+    }
 
     // compaction has been finished?
     {
