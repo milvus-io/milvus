@@ -78,7 +78,6 @@ DBImpl::DBImpl(const DBOptions& options)
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
     wal_enable_ = options_.wal_enable_;
-    auto_flush_interval_ = 1000;
 
     if (wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
@@ -1457,19 +1456,32 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 }
 
 Status
-DBImpl::UpdateWALTableFlushed(const std::set<std::string>& table_id) {
-    for (auto& it : table_id) {
-        uint64_t lsn = 0;
-        auto status = meta_ptr_->GetTableFlushLSN(it, lsn);
-        if (status.ok()) {
-            wal_mgr_->TableFlushed(it, lsn);
-        }
-    }
-    return Status::OK();
-}
-
-Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    auto wal_table_flushed = [&](const std::string& table_id) -> uint64_t {
+        uint64_t lsn = 0;
+        meta_ptr_->GetTableFlushLSN(table_id, lsn);
+        wal_mgr_->TableFlushed(table_id, lsn);
+        return lsn;
+    };
+
+    auto tables_flushed = [&](const std::set<std::string>& table_ids) -> uint64_t {
+        uint64_t max_lsn = 0;
+        if (!table_ids.empty()) {
+            for (auto& table : table_ids) {
+                uint64_t table_lsn = wal_table_flushed(table);
+                if (table_lsn > max_lsn) {
+                    max_lsn = table_lsn;
+                }
+            }
+
+            std::lock_guard<std::mutex> lck(compact_result_mutex_);
+            for (auto& table : table_ids) {
+                compact_table_ids_.insert(table);
+            }
+        }
+        return max_lsn;
+    };
+
     Status status;
 
     switch (record.type) {
@@ -1484,15 +1496,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
                                              (record.data_size / sizeof(uint8_t)), (const u_int8_t*)record.data,
                                              record.lsn, flushed_tables);
-            // even though !status.ok, run Merge
-            if (!flushed_tables.empty()) {
-                UpdateWALTableFlushed(flushed_tables);
-                std::lock_guard<std::mutex> lck(compact_result_mutex_);
-                for (auto& table : flushed_tables) {
-                    compact_table_ids_.insert(table);
-                }
-                //                Merge(flushed_tables);
-            }
+            // even though !status.ok, run
+            tables_flushed(flushed_tables);
             break;
         }
 
@@ -1507,15 +1512,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             status =
                 mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, (record.data_size / sizeof(float)),
                                         (const float*)record.data, record.lsn, flushed_tables);
-            // even though !status.ok, run Merge
-            if (!flushed_tables.empty()) {
-                UpdateWALTableFlushed(flushed_tables);
-                std::lock_guard<std::mutex> lck(compact_result_mutex_);
-                for (auto& table : flushed_tables) {
-                    compact_table_ids_.insert(table);
-                }
-                //                Merge(flushed_tables);
-            }
+            // even though !status.ok, run
+            tables_flushed(flushed_tables);
             break;
         }
 
@@ -1529,19 +1527,22 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         }
 
         case wal::MXLogType::Flush: {
-            std::set<std::string> table_ids;
             if (!record.table_id.empty()) {
-                table_ids.insert(record.table_id);
-            }
-            status = mem_mgr_->Flush(table_ids);
-            UpdateWALTableFlushed(table_ids);
-            {
+                // flush one table
+                status = mem_mgr_->Flush(record.table_id);
+                wal_table_flushed(record.table_id);
+
                 std::lock_guard<std::mutex> lck(compact_result_mutex_);
-                for (auto& table_id : table_ids) {
-                    compact_table_ids_.insert(table_id);
-                }
+                compact_table_ids_.insert(record.table_id);
+
+            } else {
+                // flush all tables
+                std::set<std::string> table_ids;
+                status = mem_mgr_->Flush(table_ids);
+
+                uint64_t lsn = tables_flushed(table_ids);
+                wal_mgr_->RemoveOldFiles(lsn);
             }
-            //        Merge(table_ids);
             break;
         }
     }
@@ -1552,7 +1553,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 void
 DBImpl::BackgroundWalTask() {
     auto get_next_auto_flush_time = [&]() {
-        return std::chrono::system_clock::now() + std::chrono::milliseconds(auto_flush_interval_);
+        return std::chrono::system_clock::now() + std::chrono::milliseconds(options_.auto_flush_interval_);
     };
     auto next_auto_flush_time = get_next_auto_flush_time();
 

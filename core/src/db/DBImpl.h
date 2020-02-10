@@ -210,9 +210,6 @@ class DBImpl : public DB {
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
     Status
-    UpdateWALTableFlushed(const std::set<std::string>& table_id);
-
-    Status
     ExecWalRecord(const wal::MXLogRecord& record);
 
     void
@@ -222,8 +219,6 @@ class DBImpl : public DB {
     const DBOptions options_;
 
     std::atomic<bool> initialized_;
-
-    int32_t auto_flush_interval_;
 
     std::thread bg_timer_thread_;
 
