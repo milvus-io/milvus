@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
 #include "WalMetaHandler.h"

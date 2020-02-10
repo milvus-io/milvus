@@ -36,6 +36,8 @@ namespace engine {
 class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
+    using MemIdMap = std::map<std::string, MemTablePtr>;
+    using MemList = std::vector<MemTablePtr>;
 
     MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
     }
@@ -89,10 +91,8 @@ class MemManagerImpl : public MemManager {
     ToImmutable(const std::string& table_id);
 
     uint64_t
-    GetMaxLSN();
+    GetMaxLSN(const MemList& tables);
 
-    using MemIdMap = std::map<std::string, MemTablePtr>;
-    using MemList = std::vector<MemTablePtr>;
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
     meta::MetaPtr meta_;

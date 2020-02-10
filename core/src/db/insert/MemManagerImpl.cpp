@@ -107,13 +107,18 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
     ids.resize(length);
     memcpy(ids.data(), vector_ids, length * sizeof(IDNumber));
 
-    // TODO(zhiru): loop for now
-    for (auto& id : ids) {
-        auto status = mem->Delete(id);
-        if (!status.ok()) {
-            return status;
-        }
+    auto status = mem->Delete(ids);
+    if (!status.ok()) {
+        return status;
     }
+
+    //    // TODO(zhiru): loop for now
+    //    for (auto& id : ids) {
+    //        auto status = mem->Delete(id);
+    //        if (!status.ok()) {
+    //            return status;
+    //        }
+    //    }
 
     return Status::OK();
 }
@@ -121,7 +126,7 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
 Status
 MemManagerImpl::Flush(const std::string& table_id) {
     ToImmutable(table_id);
-
+    // TODO: There is actually only one memTable in the immutable list
     MemList temp_immutable_list;
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -129,8 +134,8 @@ MemManagerImpl::Flush(const std::string& table_id) {
     }
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
+    auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        auto max_lsn = GetMaxLSN();
         mem->Serialize(max_lsn);
     }
 
@@ -149,11 +154,12 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids) {
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     table_ids.clear();
+    auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        auto max_lsn = GetMaxLSN();
         mem->Serialize(max_lsn);
         table_ids.insert(mem->GetTableId());
     }
+    meta_->SetGlobalLastLSN(max_lsn);
 
     return Status::OK();
 }
@@ -240,11 +246,11 @@ MemManagerImpl::GetCurrentMem() {
 }
 
 uint64_t
-MemManagerImpl::GetMaxLSN() {
+MemManagerImpl::GetMaxLSN(const MemList& tables) {
     uint64_t max_lsn = 0;
-    for (auto& kv : mem_id_map_) {
-        auto cur_lsn = kv.second->GetLSN();
-        if (kv.second->GetLSN() > max_lsn) {
+    for (auto& table : tables) {
+        auto cur_lsn = table->GetLSN();
+        if (table->GetLSN() > max_lsn) {
             max_lsn = cur_lsn;
         }
     }
