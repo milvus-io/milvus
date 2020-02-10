@@ -16,6 +16,7 @@
 // under the License.
 
 #include "db/wal/WalMetaHandler.h"
+
 #include <cstring>
 
 namespace milvus {

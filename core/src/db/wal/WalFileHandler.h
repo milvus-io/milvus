@@ -18,6 +18,7 @@
 #pragma once
 
 #include <string>
+
 #include "WalDefinations.h"
 
 namespace milvus {
