@@ -106,7 +106,7 @@ TEST_F(SearchByIdTest, basic) {
 
     int topk = 10, nprobe = 10;
 
-    for (long i : ids_to_search) {
+    for (auto i : ids_to_search) {
         //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
@@ -165,7 +165,7 @@ TEST_F(SearchByIdTest, with_delete) {
 
     int topk = 10, nprobe = 10;
 
-    for (long i : ids_to_search) {
+    for (auto i : ids_to_search) {
         //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;

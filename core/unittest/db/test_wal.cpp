@@ -17,17 +17,17 @@
 
 #include "db/wal/WalDefinations.h"
 #define private public
-#include "db/wal/WalMetaHandler.h"
+#include "db/wal/WalBuffer.h"
 #include "db/wal/WalFileHandler.h"
 #include "db/wal/WalManager.h"
-#include "db/wal/WalBuffer.h"
+#include "db/wal/WalMetaHandler.h"
 #include "utils/Error.h"
 
-#include <fstream>
-#include <sstream>
 #include <gtest/gtest.h>
 #include <stdlib.h>
 #include <time.h>
+#include <fstream>
+#include <sstream>
 #include <thread>
 
 using namespace milvus::engine::wal;
@@ -116,8 +116,7 @@ TEST(WalTest, BUFFER_TEST) {
     ins_vct_rd_2.table_id = "insert_table";
     ins_vct_rd_2.partition_tag = "parti1";
     ins_vct_rd_2.length = 100;
-    ins_vct_rd_2.ids = (const milvus::engine::IDNumber*)
-        malloc(ins_vct_rd_2.length * sizeof(milvus::engine::IDNumber));
+    ins_vct_rd_2.ids = (const milvus::engine::IDNumber*)malloc(ins_vct_rd_2.length * sizeof(milvus::engine::IDNumber));
     ins_vct_rd_2.data_size = 100 * sizeof(uint8_t);
     ins_vct_rd_2.data = malloc(ins_vct_rd_2.data_size);
     ASSERT_EQ(buffer.Append(ins_vct_rd_2), milvus::WAL_SUCCESS);
@@ -127,8 +126,7 @@ TEST(WalTest, BUFFER_TEST) {
     ins_vct_rd_3.table_id = "insert_table";
     ins_vct_rd_3.partition_tag = "parti1";
     ins_vct_rd_3.length = 100;
-    ins_vct_rd_3.ids = (const milvus::engine::IDNumber*)
-        malloc(ins_vct_rd_3.length * sizeof(milvus::engine::IDNumber));
+    ins_vct_rd_3.ids = (const milvus::engine::IDNumber*)malloc(ins_vct_rd_3.length * sizeof(milvus::engine::IDNumber));
     ins_vct_rd_3.data_size = 10 * 10 * sizeof(float);
     ins_vct_rd_3.data = malloc(ins_vct_rd_3.data_size);
     ASSERT_EQ(buffer.Append(ins_vct_rd_3), milvus::WAL_SUCCESS);
@@ -155,7 +153,6 @@ TEST(WalTest, BUFFER_TEST) {
     ASSERT_EQ(record.partition_tag, ins_vct_rd_2.partition_tag);
     ASSERT_EQ(record.length, ins_vct_rd_2.length);
     ASSERT_EQ(record.data_size, ins_vct_rd_2.data_size);
-
 
     ASSERT_EQ(buffer.Next(last_lsn, record), milvus::WAL_SUCCESS);
     ASSERT_EQ(record.type, ins_vct_rd_3.type);
@@ -224,11 +221,21 @@ TEST(WalTest, LargeScaleRecords) {
         istr >> cur_type;
         if (cur_type != type) {
             switch (type) {
-                case 0: manager1.Flush();break;
-                case 1: manager1.Insert("insert_vector", "parti1", ids, vecs); break;
-                case 2: manager1.Insert("insert_binary", "parti2", ids, bins); break;
-                case 3: manager1.DeleteById("insert_vector", ids); break;
-                default: std::cout << "invalid type: " << type << std::endl; break;
+                case 0:
+                    manager1.Flush();
+                    break;
+                case 1:
+                    manager1.Insert("insert_vector", "parti1", ids, vecs);
+                    break;
+                case 2:
+                    manager1.Insert("insert_binary", "parti2", ids, bins);
+                    break;
+                case 3:
+                    manager1.DeleteById("insert_vector", ids);
+                    break;
+                default:
+                    std::cout << "invalid type: " << type << std::endl;
+                    break;
             }
             ids.clear();
             vecs.clear();
@@ -239,24 +246,34 @@ TEST(WalTest, LargeScaleRecords) {
         ids.emplace_back(cur_id);
         if (cur_type == 1) {
             float v;
-            for (auto i = 0; i < 10; ++ i) {
+            for (auto i = 0; i < 10; ++i) {
                 istr >> v;
                 vecs.emplace_back(v);
             }
         } else if (cur_type == 2) {
             uint8_t b;
-            for (auto i = 0; i < 20; ++ i) {
+            for (auto i = 0; i < 20; ++i) {
                 istr >> b;
                 bins.emplace_back(b);
             }
         }
     }
     switch (type) {
-        case 0: manager1.Flush();break;
-        case 1: manager1.Insert("insert_vector", "parti1", ids, vecs); break;
-        case 2: manager1.Insert("insert_binary", "parti2", ids, bins); break;
-        case 3: manager1.DeleteById("insert_vector", ids); break;
-        default: std::cout << "invalid type: " << type << std::endl; break;
+        case 0:
+            manager1.Flush();
+            break;
+        case 1:
+            manager1.Insert("insert_vector", "parti1", ids, vecs);
+            break;
+        case 2:
+            manager1.Insert("insert_binary", "parti2", ids, bins);
+            break;
+        case 3:
+            manager1.DeleteById("insert_vector", ids);
+            break;
+        default:
+            std::cout << "invalid type: " << type << std::endl;
+            break;
     }
     fin.close();
 }
@@ -271,7 +288,7 @@ TEST(WalTest, MultiThreadTest) {
     WalManager manager(wal_config);
     manager.mxlog_config_.buffer_size = 32 * 1024 * 1024;
     manager.Init(nullptr);
-    auto read_fun = [&] () {
+    auto read_fun = [&]() {
         std::ifstream fin(data_path + "1.dat", std::ios::in);
         std::vector<milvus::engine::IDNumber> ids;
         std::vector<float> vecs;
@@ -285,11 +302,21 @@ TEST(WalTest, MultiThreadTest) {
             istr >> cur_type;
             if (cur_type != type) {
                 switch (type) {
-                    case 0: manager.Flush();break;
-                    case 1: manager.Insert("insert_vector", "parti1", ids, vecs); break;
-                    case 2: manager.Insert("insert_binary", "parti2", ids, bins); break;
-                    case 3: manager.DeleteById("insert_vector", ids); break;
-                    default: std::cout << "invalid type: " << type << std::endl; break;
+                    case 0:
+                        manager.Flush();
+                        break;
+                    case 1:
+                        manager.Insert("insert_vector", "parti1", ids, vecs);
+                        break;
+                    case 2:
+                        manager.Insert("insert_binary", "parti2", ids, bins);
+                        break;
+                    case 3:
+                        manager.DeleteById("insert_vector", ids);
+                        break;
+                    default:
+                        std::cout << "invalid type: " << type << std::endl;
+                        break;
                 }
                 ids.clear();
                 vecs.clear();
@@ -300,29 +327,39 @@ TEST(WalTest, MultiThreadTest) {
             ids.emplace_back(cur_id);
             if (cur_type == 1) {
                 float v;
-                for (auto i = 0; i < 10; ++ i) {
-                     istr >> v;
+                for (auto i = 0; i < 10; ++i) {
+                    istr >> v;
                     vecs.emplace_back(v);
                 }
             } else if (cur_type == 2) {
-                 uint8_t b;
-                for (auto i = 0; i < 20; ++ i) {
-                     istr >> b;
+                uint8_t b;
+                for (auto i = 0; i < 20; ++i) {
+                    istr >> b;
                     bins.emplace_back(b);
                 }
             }
         }
         switch (type) {
-            case 0: manager.Flush();break;
-            case 1: manager.Insert("insert_vector", "parti1", ids, vecs); break;
-            case 2: manager.Insert("insert_binary", "parti2", ids, bins); break;
-            case 3: manager.DeleteById("insert_vector", ids); break;
-            default: std::cout << "invalid type: " << type << std::endl; break;
+            case 0:
+                manager.Flush();
+                break;
+            case 1:
+                manager.Insert("insert_vector", "parti1", ids, vecs);
+                break;
+            case 2:
+                manager.Insert("insert_binary", "parti2", ids, bins);
+                break;
+            case 3:
+                manager.DeleteById("insert_vector", ids);
+                break;
+            default:
+                std::cout << "invalid type: " << type << std::endl;
+                break;
         }
         fin.close();
     };
 
-    auto write_fun = [&] () {
+    auto write_fun = [&]() {
 
     };
     std::thread read_thread(read_fun);
