@@ -22,6 +22,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+
 #include "WalBuffer.h"
 #include "WalDefinations.h"
 #include "WalFileHandler.h"
