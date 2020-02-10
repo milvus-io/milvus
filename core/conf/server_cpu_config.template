@@ -180,17 +180,18 @@ tracing_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Wal Config           | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | Switch of function wal.                                    | Boolean    | 0.0.0.0         |
+# enable               | Switch of function wal.                                    | Boolean    | false           |         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# port                 | Port that Milvus server monitors. Port range (1024, 65535) | Integer    | 19530           |
+# recovery_error_ignore| Whether ignore the error which happens during wal recovery | Boolean    | true            |
+#                      | stage.                                                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# deploy_mode          | Milvus deployment type:                                    | DeployMode | single          |
-#                      |   single, cluster_readonly, cluster_writable               |            |                 |
+# buffer_size          | The size of two buffers in wal, both read buffer and write | Integer    | 128             |
+#                      | buffer share the same size. Unit is MB.                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# time_zone            | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
+# record_size          | Max size of one single wal record. Unit is MB.             | Integer    | 2               |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# web_port             | Port that Milvus web server monitors.                      | Integer    | 19121           |
-#                      | Port range (1024, 65535)                                   |            |                 |
+# wal_path             | The root path of wal relative files, include wal meta      | String     | NULL            |
+#                      | files.                                                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 wal_config:
   enable: false
