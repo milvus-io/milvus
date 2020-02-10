@@ -71,11 +71,6 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
 DatasetPtr
 IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
-    auto search_cfg = std::dynamic_pointer_cast<HNSWCfg>(config);
-    if (search_cfg != nullptr) {
-        search_cfg->CheckValid();  // throw exception
-    }
-
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -83,7 +78,7 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
     using P = std::pair<float, int64_t>;
     auto compare = [](P v1, P v2) { return v1.second < v2.second; };
-    std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(p_data, search_cfg->k, compare);
+    std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(p_data, config->k, compare);
 
     std::vector<float> dist(ret.size());
     std::vector<int64_t> ids(ret.size());
@@ -92,7 +87,7 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                    [](const std::pair<float, int64_t>& e) { return e.second; });
 
-    auto elems = rows * search_cfg->k;
+    auto elems = rows * config->k;
     assert(elems == ret.size());
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
