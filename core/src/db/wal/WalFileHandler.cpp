@@ -16,6 +16,7 @@
 // under the License.
 
 #include "db/wal/WalFileHandler.h"
+
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -23,8 +24,7 @@ namespace milvus {
 namespace engine {
 namespace wal {
 
-MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path)
-    : file_path_(mxlog_path), p_file_(nullptr) {
+MXLogFileHandler::MXLogFileHandler(const std::string& mxlog_path) : file_path_(mxlog_path), p_file_(nullptr) {
 }
 
 MXLogFileHandler::~MXLogFileHandler() {

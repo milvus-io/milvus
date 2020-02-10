@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 
@@ -34,14 +35,7 @@ using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchema
 #define WAL_BUFFER_MIN_SIZE ((uint32_t)64 * 1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 
-enum class MXLogType {
-    InsertBinary,
-    InsertVector,
-    Delete,
-    Update,
-    Flush,
-    None
-};
+enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None };
 
 struct MXLogRecord {
     uint64_t lsn;

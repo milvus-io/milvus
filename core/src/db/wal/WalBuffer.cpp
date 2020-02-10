@@ -16,7 +16,9 @@
 // under the License.
 
 #include "db/wal/WalBuffer.h"
+
 #include <cstring>
+
 #include "db/wal/WalDefinations.h"
 #include "utils/Log.h"
 

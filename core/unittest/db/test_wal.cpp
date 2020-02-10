@@ -90,7 +90,7 @@ TEST(WalTest, BUFFER_TEST) {
     buffer.Reset(((uint64_t)4 << 32));
 
     milvus::engine::wal::MXLogRecord ins_vct_rd_1;
-    ins_vct_rd_1.type = MXLogType::InsertVector;
+    ins_vct_rd_1.type = milvus::engine::wal::MXLogType::InsertVector;
     ins_vct_rd_1.table_id = "insert_table";
     ins_vct_rd_1.partition_tag = "parti1";
     ins_vct_rd_1.length = 1;
@@ -360,7 +360,6 @@ TEST(WalTest, MultiThreadTest) {
     };
 
     auto write_fun = [&]() {
-
     };
     std::thread read_thread(read_fun);
     std::thread write_thread(write_fun);
