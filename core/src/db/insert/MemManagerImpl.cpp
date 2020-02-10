@@ -107,13 +107,18 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
     ids.resize(length);
     memcpy(ids.data(), vector_ids, length * sizeof(IDNumber));
 
-    // TODO(zhiru): loop for now
-    for (auto& id : ids) {
-        auto status = mem->Delete(id);
-        if (!status.ok()) {
-            return status;
-        }
+    auto status = mem->Delete(ids);
+    if (!status.ok()) {
+        return status;
     }
+
+    //    // TODO(zhiru): loop for now
+    //    for (auto& id : ids) {
+    //        auto status = mem->Delete(id);
+    //        if (!status.ok()) {
+    //            return status;
+    //        }
+    //    }
 
     return Status::OK();
 }
