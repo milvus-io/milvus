@@ -22,7 +22,7 @@ NVCCFLAGS    = -I $(CUDA_ROOT)/targets/x86_64-linux/include/ \
 -Xcudafe --diag_suppress=unrecognized_attribute \
 $(CUDA_ARCH) \
 -lineinfo \
--ccbin $(CXX)
+-ccbin $(CXX) -DFAISS_USE_FLOAT16
 
 OS = $(shell uname -s)
 
