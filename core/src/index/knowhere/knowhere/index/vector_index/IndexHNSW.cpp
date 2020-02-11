@@ -15,21 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "knowhere/index/vector_index/IndexHNSW.h"
+
 #include <algorithm>
 #include <cassert>
 #include <iterator>
 #include <utility>
 #include <vector>
 
-#include "knowhere/adapter/VectorAdapter.h"
-#include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexHNSW.h"
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "knowhere/common/Log.h"
-
 #include "hnswlib/hnswalg.h"
 #include "hnswlib/space_ip.h"
 #include "hnswlib/space_l2.h"
+#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
 
@@ -75,35 +75,33 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-
     GETTENSOR(dataset)
+
+    size_t id_size = sizeof(int64_t) * config->k;
+    size_t dist_size = sizeof(float) * config->k;
+    auto p_id = (int64_t*)malloc(id_size * rows);
+    auto p_dist = (float*)malloc(dist_size * rows);
+
     using P = std::pair<float, int64_t>;
     auto compare = [](P v1, P v2) { return v1.second < v2.second; };
-    std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(p_data, config->k, compare);
+#pragma omp parallel for
+    for (unsigned int i = 0; i < rows; ++i) {
+        const float* single_query = p_data + i * dim;
+        std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(single_query, config->k, compare);
+        std::vector<float> dist(ret.size());
+        std::vector<int64_t> ids(ret.size());
+        std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
+                       [](const std::pair<float, int64_t>& e) { return e.first; });
+        std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
+                       [](const std::pair<float, int64_t>& e) { return e.second; });
 
-    std::vector<float> dist(ret.size());
-    std::vector<int64_t> ids(ret.size());
-    std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                   [](const std::pair<float, int64_t>& e) { return e.first; });
-    std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
-                   [](const std::pair<float, int64_t>& e) { return e.second; });
-
-    auto elems = rows * config->k;
-    // auto sss = ret.size();
-    // KNOWHERE_LOG_DEBUG << "size1: " << elems;
-    // KNOWHERE_LOG_DEBUG << "size2: " << sss;
-    // assert(elems == ret.size());
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
-    memcpy(p_dist, dist.data(), p_dist_size);
-    memcpy(p_id, ids.data(), p_id_size);
+        memcpy(p_dist + i * dist_size, dist.data(), dist_size);
+        memcpy(p_id + i * id_size, ids.data(), id_size);
+    }
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
-    
     return ret_ds;
 }
 
