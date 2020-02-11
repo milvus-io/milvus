@@ -533,6 +533,38 @@ DBImpl::Flush() {
 }
 
 Status
+DBImpl::Compact(const std::string& table_id) {
+    // TODO: WAL???
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // Get files to compact from meta.
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::BACKUP};
+    meta::TableFilesSchema files_to_compact;
+    auto status = meta_ptr_->FilesByType(table_id, file_types, files_to_compact);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get files to compact: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    ongoing_files_checker_.MarkOngoingFiles(files_to_compact);
+    for (auto& file : files_to_compact) {
+        status = CompactFile(table_id, file);
+    }
+    ongoing_files_checker_.UnmarkOngoingFiles(files_to_compact);
+
+    return status;
+}
+
+Status
+DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file) {
+
+}
+
+Status
 DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
