@@ -17,26 +17,28 @@
 
 #include "db/wal/WalDefinations.h"
 #define private public
+#include <gtest/gtest.h>
+#include <stdlib.h>
+#include <time.h>
+
+#include <fstream>
+#include <sstream>
+#include <thread>
+
 #include "db/wal/WalBuffer.h"
 #include "db/wal/WalFileHandler.h"
 #include "db/wal/WalManager.h"
 #include "db/wal/WalMetaHandler.h"
 #include "utils/Error.h"
 
-#include <gtest/gtest.h>
-#include <stdlib.h>
-#include <time.h>
-#include <fstream>
-#include <sstream>
-#include <thread>
-
 #define WAL_GTEST_PATH "/tmp/milvus/wal/test/"  // end with '/'
 
-void MakeEmptyTestPath() {
+void
+MakeEmptyTestPath() {
     if (access(WAL_GTEST_PATH, 0) == -1) {
         ::system("rm -rf " WAL_GTEST_PATH);
     }
-    ::system("mkdir -m 774 -p "WAL_GTEST_PATH);
+    ::system("mkdir -m 774 -p " WAL_GTEST_PATH);
 }
 
 TEST(WalTest, FILE_HANDLER_TEST) {
@@ -82,7 +84,6 @@ TEST(WalTest, META_HANDLER_TEST) {
     ASSERT_TRUE(meta_handler.GetMXLogInternalMeta(internal_lsn));
     ASSERT_EQ(wal_lsn, internal_lsn);
 }
-
 
 TEST(WalTest, BUFFER_TEST) {
     MakeEmptyTestPath();
@@ -178,7 +179,6 @@ TEST(WalTest, BUFFER_TEST) {
     free((void*)ins_vct_rd_3.ids);
     free((void*)ins_vct_rd_3.data);
 }
-
 
 #if 0
 TEST(WalTest, MANAGER_TEST) {
