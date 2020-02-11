@@ -20,6 +20,8 @@
 #include <gtest/gtest.h>
 #include <chrono>
 #include <memory>
+#include <fiu-control.h>
+#include <fiu-local.h>
 
 #include "db/DB.h"
 #include "db/meta/MySQLMetaImpl.h"
@@ -42,6 +44,10 @@
 #define INIT_TIMER
 #define START_TIMER
 #define STOP_TIMER(name)
+#endif
+
+#ifdef FIU_ENABLE
+#define FIU_ENABLE_FIU(name) fiu_enable(name, 1, nullptr, 0)
 #endif
 
 static const char* CONFIG_PATH = "/tmp/milvus_test";

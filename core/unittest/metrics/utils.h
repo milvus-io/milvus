@@ -24,7 +24,7 @@
 #include "db/DB.h"
 #include "db/meta/MySQLMetaImpl.h"
 #include "db/meta/SqliteMetaImpl.h"
-
+#include <fiu-control.h>
 #define TIMING
 
 #ifdef TIMING
@@ -40,6 +40,10 @@
 #define INIT_TIMER
 #define START_TIMER
 #define STOP_TIMER(name)
+#endif
+
+#ifdef FIU_ENABLE
+#define FIU_ENABLE_FIU(name) fiu_enable(name, 1, nullptr, 0)
 #endif
 
 void

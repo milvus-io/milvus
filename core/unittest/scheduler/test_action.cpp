@@ -14,18 +14,27 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 #include <fiu-local.h>
+#include <fiu-control.h>
+#include <gtest/gtest.h>
+#include <src/scheduler/task/BuildIndexTask.h>
+#include <src/scheduler/task/SearchTask.h>
+#include <src/scheduler/optimizer/FaissIVFFlatPass.h>
 
-#include "easyloggingpp/easylogging++.h"
+#include "scheduler/optimizer/BuildIndexPass.h"
+#include "scheduler/optimizer/FaissFlatPass.h"
+#include "scheduler/optimizer/FaissIVFPQPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8HPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8Pass.h"
 
-INITIALIZE_EASYLOGGINGPP
+namespace milvus {
+namespace scheduler {
 
-int
-main(int argc, char** argv) {
-    fiu_init(0);
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+#ifdef MILVUS_GPU_VERSION
+TEST(Action_Test, TESTACTION) {
 }
+
+#endif
+
+}  // namespace scheduler
+}  // namespace milvus

@@ -16,6 +16,7 @@
 // under the License.
 
 #include "db/meta/MySQLConnectionPool.h"
+#include <fiu-local.h>
 
 namespace milvus {
 namespace engine {
@@ -65,6 +66,8 @@ MySQLConnectionPool::getDB() {
 mysqlpp::Connection*
 MySQLConnectionPool::create() {
     try {
+        fiu_do_on("MySQLConnectionPool.create.throw_exception", throw mysqlpp::ConnectionFailed());
+
         // Create connection using the parameters we were passed upon
         // creation.
         auto conn = new mysqlpp::Connection();

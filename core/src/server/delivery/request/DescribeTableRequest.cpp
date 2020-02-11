@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 
 namespace milvus {
@@ -53,6 +54,9 @@ DescribeTableRequest::OnExecute() {
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
+        fiu_do_on("DescribeTableRequest.OnExecute.describe_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("DescribeTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             return status;
         }

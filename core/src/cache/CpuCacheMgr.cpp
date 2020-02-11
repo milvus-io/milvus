@@ -19,6 +19,7 @@
 #include "server/Config.h"
 #include "utils/Log.h"
 
+#include <fiu-local.h>
 #include <utility>
 
 namespace milvus {

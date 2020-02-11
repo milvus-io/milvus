@@ -25,6 +25,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <fiu-local.h>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
@@ -231,7 +232,7 @@ MetaTest::TearDown() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 milvus::engine::DBOptions
-MySqlDBTest::GetOptions() {
+MySqlDBTest:: GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = test_env->getURI();

@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 
 namespace milvus {
@@ -49,6 +50,9 @@ PreloadTableRequest::OnExecute() {
 
         // step 2: check table existence
         status = DBWrapper::DB()->PreloadTable(table_name_);
+        fiu_do_on("PreloadTableRequest.OnExecute.preload_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("PreloadTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             return status;
         }

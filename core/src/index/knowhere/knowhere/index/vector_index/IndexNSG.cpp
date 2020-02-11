@@ -19,12 +19,16 @@
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+
 #ifdef MILVUS_GPU_VERSION
+
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+
 #endif
 
+#include <fiu-local.h>
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
@@ -39,6 +43,7 @@ NSG::Serialize() {
     }
 
     try {
+        fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
         algo::NsgIndex* index = index_.get();
 
         MemoryIOWriter writer;
@@ -57,6 +62,7 @@ NSG::Serialize() {
 void
 NSG::Load(const BinarySet& index_binary) {
     try {
+        fiu_do_on("NSG.Load.throw_exception", throw std::exception());
         auto binary = index_binary.GetByName("NSG");
 
         MemoryIOReader reader;
