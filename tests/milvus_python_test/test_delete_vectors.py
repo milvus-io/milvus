@@ -26,6 +26,19 @@ class TestDeleteBase:
       The following cases are used to test `delete_by_id` function
     ******************************************************************
     """
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
+                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
+        else:
+            pytest.skip("Only support CPU mode")
+        return request.param
+
     # TODO: bug
     def test_delete_vector_search(self, connect, table):
         '''
@@ -44,11 +57,9 @@ class TestDeleteBase:
         # pdb.set_trace()
         status, res = connect.search_vectors(table, top_k, nprobe, vector) 
         logging.getLogger().info(res)
-        logging.getLogger().info(ids)
         assert status.OK()
         assert len(res) == 0
 
-    # TODO: soft delete
     def test_delete_vector_table_count(self, connect, table):
         '''
         target: test delete vector
@@ -65,7 +76,7 @@ class TestDeleteBase:
         status = connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert status.OK()
-        assert res == 1
+        assert res == 0 
 
     def test_delete_vector_id_not_exised(self, connect, table):
         '''
@@ -123,10 +134,32 @@ class TestDeleteBase:
         assert res[1][0].id == ids[1]
         assert res[2][0].distance > epsilon
 
-    # TODO
-    def test_create_index_after_delete(self, connect, table):
-        pass
-
+    def test_create_index_after_delete(self, connect, table, get_simple_index_params):
+        '''
+        method: add vectors and delete, then create index
+        expected: status ok, vectors deleted, index created
+        '''
+        index_params = get_simple_index_params
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        status = connect.flush([table])
+        status = connect.create_index(table, index_params)
+        assert status.OK()
+        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].distance > epsilon
+        assert res[1][0].distance < epsilon
+        assert res[1][0].id == ids[1]
+        assert res[2][0].distance > epsilon
+        
 
 class TestDeleteIndexedVectors:
     """
@@ -134,9 +167,66 @@ class TestDeleteIndexedVectors:
       The following cases are used to test `delete_by_id` function
     ******************************************************************
     """
-    # TODO: bug
-    def test_delete_vectors_after_index_created(self, connect, table):
-        pass
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
+                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
+        else:
+            pytest.skip("Only support CPU mode")
+        return request.param
+
+    def test_delete_vectors_after_index_created_search(self, connect, table, get_simple_index_params):
+        '''
+        target: test delete vector after index created
+        method: add vector, create index and delete vector
+        expected: status ok, vector deleted
+        '''
+        index_params = get_simple_index_params
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(table, vector)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.create_index(table, index_params) 
+        assert status.OK()
+        status = connect.delete_by_id(table, ids)
+        assert status.OK()
+        status = connect.flush([table])
+        # pdb.set_trace()
+        status, res = connect.search_vectors(table, top_k, nprobe, vector) 
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert len(res) == 0
+
+    def test_add_vectors_delete_vector(self, connect, table, get_simple_index_params):
+        '''
+        method: add vectors and delete
+        expected: status ok, vectors deleted
+        '''
+        index_params = get_simple_index_params
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.create_index(table, index_params) 
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        status = connect.flush([table])
+        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].distance > epsilon
+        assert res[1][0].distance < epsilon
+        assert res[1][0].id == ids[1]
+        assert res[2][0].distance > epsilon
 
 
 class TestDeleteBinary:
