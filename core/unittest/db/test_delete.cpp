@@ -20,6 +20,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <thread>
 
@@ -259,4 +260,42 @@ TEST_F(DeleteTest, delete_with_index) {
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
     }
+}
+
+TEST_F(DeleteTest, delete_single_vector) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 1;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    stat = db_->InsertVectors(GetTableName(), "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->DeleteVectors(GetTableName(), xb.id_array_);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, xb, result_ids, result_distances);
+    ASSERT_EQ(result_ids[0], -1);
+    //        ASSERT_LT(result_distances[0], 1e-4);
+    ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
