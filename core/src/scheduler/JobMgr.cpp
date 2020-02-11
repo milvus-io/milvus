@@ -20,6 +20,7 @@
 #include <src/db/Utils.h>
 #include <src/segment/SegmentReader.h>
 
+#include <limits>
 #include <utility>
 
 #include "SchedInst.h"
