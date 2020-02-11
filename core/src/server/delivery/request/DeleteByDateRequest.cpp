@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,8 +55,13 @@ DeleteByDateRequest::OnExecute() {
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_info);
+        fiu_do_on("DeleteByDateRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
+        fiu_do_on("DeleteByDateRequest.OnExecute.describe_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("DeleteByDateRequest.OnExecute.throw_std_exception", throw std::exception());
+
         if (!status.ok()) {
-            if (status.code(), DB_NOT_FOUND) {
+            if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
@@ -80,6 +86,8 @@ DeleteByDateRequest::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
         status = DBWrapper::DB()->DropTable(table_name_, dates);
+        fiu_do_on("DeleteByDateRequest.OnExecute.drop_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

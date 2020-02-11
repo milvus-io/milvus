@@ -64,7 +64,7 @@ class Path {
         if (!path_.empty()) {
             return path_[0];
         } else {
-            return nullptr;
+            return "";
         }
     }
 

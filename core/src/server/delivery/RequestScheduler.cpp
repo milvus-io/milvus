@@ -18,6 +18,8 @@
 #include "server/delivery/RequestScheduler.h"
 #include "utils/Log.h"
 
+#include <fiu-local.h>
+#include <unistd.h>
 #include <utility>
 
 namespace milvus {
@@ -74,7 +76,6 @@ RequestScheduler::Stop() {
     for (auto& iter : execute_threads_) {
         if (iter == nullptr)
             continue;
-
         iter->join();
     }
     request_groups_.clear();
@@ -90,6 +91,8 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
     }
 
     auto status = PutToQueue(request_ptr);
+    fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (!status.ok()) {
         SERVER_LOG_ERROR << "Put request to queue failed with code: " << status.ToString();
         return status;
@@ -98,7 +101,6 @@ RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
     if (request_ptr->IsAsync()) {
         return Status::OK();  // async execution, caller need to call WaitToFinish at somewhere
     }
-
     return request_ptr->WaitToFinish();  // sync execution
 }
 
@@ -116,7 +118,10 @@ RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
         }
 
         try {
+            fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception1", throw std::exception());
             auto status = request->Execute();
+            fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception", throw std::exception());
+            fiu_do_on("RequestScheduler.TakeToExecute.execute_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
             if (!status.ok()) {
                 SERVER_LOG_ERROR << "Request failed with code: " << status.ToString();
             }
@@ -137,9 +142,12 @@ RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
         RequestQueuePtr queue = std::make_shared<RequestQueue>();
         queue->Put(request_ptr);
         request_groups_.insert(std::make_pair(group_name, queue));
+        fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue = nullptr);
 
         // start a thread
         ThreadPtr thread = std::make_shared<std::thread>(&RequestScheduler::TakeToExecute, this, queue);
+
+        fiu_do_on("RequestScheduler.PutToQueue.push_null_thread", execute_threads_.push_back(nullptr));
         execute_threads_.push_back(thread);
         SERVER_LOG_INFO << "Create new thread for request group: " << group_name;
     }

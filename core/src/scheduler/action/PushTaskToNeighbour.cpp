@@ -42,6 +42,8 @@ get_neighbours(const ResourcePtr& self) {
     return neighbours;
 }
 
+// This function has not been invoked, comment it for code coverage
+#if 0
 std::vector<std::pair<ResourcePtr, Connection>>
 get_neighbours_with_connetion(const ResourcePtr& self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
@@ -87,6 +89,7 @@ Action::PushTaskToNeighbourRandomly(TaskTableItemPtr task_item, const ResourcePt
         // TODO(wxyu): process
     }
 }
+#endif
 
 void
 Action::PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& self) {
@@ -96,10 +99,12 @@ Action::PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& se
     }
 }
 
+#if 0
 void
 Action::PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest) {
     dest->task_table().Put(task_item->task, task_item);
 }
+#endif
 
 void
 Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,

@@ -22,6 +22,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 
 namespace milvus {
@@ -52,8 +53,11 @@ CountTableRequest::OnExecute() {
         // step 2: get row count
         uint64_t row_count = 0;
         status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
+        fiu_do_on("CountTableRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
+        fiu_do_on("CountTableRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CountTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
-            if (status.code(), DB_NOT_FOUND) {
+            if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;

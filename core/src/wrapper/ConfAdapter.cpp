@@ -17,6 +17,7 @@
 
 #include "wrapper/ConfAdapter.h"
 
+#include <fiu-local.h>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -160,7 +161,7 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
             }
         }
     }
-
+    fiu_do_on("IVFPQConfAdapter.Match.empty_resset", resset.clear());
     if (resset.empty()) {
         // todo(linxj): throw exception here.
         WRAPPER_LOG_ERROR << "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-"

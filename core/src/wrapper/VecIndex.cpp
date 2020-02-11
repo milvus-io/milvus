@@ -49,6 +49,8 @@
 #include "wrapper/gpu/GPUVecImpl.h"
 #endif
 
+#include <fiu-local.h>
+
 namespace milvus {
 namespace engine {
 
@@ -142,6 +144,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             config.GetGpuResourceConfigEnable(gpu_resource_enable);
             if (gpu_resource_enable) {
                 index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+                fiu_do_on("GetVecIndexFactory.IVFSQHybrid.mock", index = std::make_shared<knowhere::IVF>());
                 return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
             } else {
                 throw Exception(DB_ERROR, "No GPU resources for IndexType::FAISS_IVFSQ8_HYBRID");
@@ -171,6 +174,8 @@ LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binar
 
 VecIndexPtr
 read_index(const std::string& location) {
+    fiu_return_on("read_null_index", nullptr);
+    fiu_do_on("vecIndex.throw_read_exception", throw std::exception());
     TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -241,6 +246,11 @@ write_index(VecIndexPtr index, const std::string& location) {
 
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
+
+        fiu_do_on("VecIndex.write_index.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("VecIndex.write_index.throw_std_exception", throw std::exception());
+        fiu_do_on("VecIndex.write_index.throw_no_space_exception",
+                  throw Exception(SERVER_INVALID_ARGUMENT, "No space left on device"));
 
         bool s3_enable = false;
         server::Config& config = server::Config::GetInstance();

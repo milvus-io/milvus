@@ -56,6 +56,7 @@ TEST(MetricbaseTest, METRICBASE_TEST) {
     instance.RAMUsagePercentSet();
     instance.QueryResponsePerSecondGaugeSet(1.0);
     instance.GPUPercentGaugeSet();
+
     instance.GPUMemoryUsageGaugeSet();
     instance.AddVectorsPerSecondGaugeSet(1, 1, 1);
     instance.QueryIndexTypePerSecondSet("IVF", 1.0);
