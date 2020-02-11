@@ -28,7 +28,7 @@ MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
 
     wal_meta_fp_ = fopen(file_full_path.c_str(), "r+");
     if (wal_meta_fp_ == nullptr) {
-        wal_meta_fp_ = fopen(file_full_path.c_str(), "w");
+        wal_meta_fp_ = fopen(file_full_path.c_str(), "w+");
     }
 }
 
@@ -47,8 +47,8 @@ MXLogMetaHandler::GetMXLogInternalMeta(uint64_t& wal_lsn) {
 
     // todo: add crc
     fseek(wal_meta_fp_, 0, SEEK_SET);
-    size_t read_len = fread(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_);
-    if (read_len != sizeof(wal_lsn)) {
+    size_t read_cnt = fread(&wal_lsn, sizeof(wal_lsn), 1, wal_meta_fp_);
+    if (read_cnt != 1) {
         wal_lsn = 0;
     }
     return true;
