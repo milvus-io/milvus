@@ -14,10 +14,11 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+#include <fiu-local.h>
 
-#include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
+#include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #ifdef MILVUS_GPU_VERSION
 namespace milvus {
@@ -27,8 +28,9 @@ void
 BuildIndexPass::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids_);
+    fiu_do_on("BuildIndexPass.Init.get_config_fail", s = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!s.ok()) {
-        throw;
+        throw std::exception();
     }
 }
 
@@ -36,7 +38,7 @@ bool
 BuildIndexPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::BuildIndexTask)
         return false;
-
+    fiu_do_on("BuildIndexPass.Run.empty_gpu_ids", build_gpu_ids_.clear());
     if (build_gpu_ids_.empty()) {
         SERVER_LOG_WARNING << "BuildIndexPass cannot get build index gpu!";
         return false;

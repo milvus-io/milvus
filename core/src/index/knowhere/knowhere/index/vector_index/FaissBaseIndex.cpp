@@ -16,6 +16,7 @@
 // under the License.
 
 #include <faiss/index_io.h>
+#include <fiu-local.h>
 #include <utility>
 
 #include "knowhere/common/Exception.h"
@@ -31,6 +32,7 @@ FaissBaseIndex::FaissBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std
 BinarySet
 FaissBaseIndex::SerializeImpl() {
     try {
+        fiu_do_on("FaissBaseIndex.SerializeImpl.throw_exception", throw std::exception());
         faiss::Index* index = index_.get();
 
         // SealImpl();
