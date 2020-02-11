@@ -25,6 +25,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
+#include "knowhere/common/Log.h"
 
 #include "hnswlib/hnswalg.h"
 #include "hnswlib/space_ip.h"
@@ -88,17 +89,22 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
                    [](const std::pair<float, int64_t>& e) { return e.second; });
 
     auto elems = rows * config->k;
-    assert(elems == ret.size());
+    // auto sss = ret.size();
+    // KNOWHERE_LOG_DEBUG << "size1: " << elems;
+    // KNOWHERE_LOG_DEBUG << "size2: " << sss;
+    // assert(elems == ret.size());
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
-    memcpy(p_dist, dist.data(), dist.size() * sizeof(float));
-    memcpy(p_id, ids.data(), ids.size() * sizeof(int64_t));
+    memcpy(p_dist, dist.data(), p_dist_size);
+    memcpy(p_id, ids.data(), p_id_size);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
+    
+    return ret_ds;
 }
 
 IndexModelPtr
