@@ -83,20 +83,20 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     auto p_dist = (float*)malloc(dist_size * rows);
 
     using P = std::pair<float, int64_t>;
-    auto compare = [](P v1, P v2) { return v1.second < v2.second; };
+    auto compare = [](P v1, P v2) { return v1.first < v2.first; };
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         const float* single_query = p_data + i * dim;
         std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(single_query, config->k, compare);
-        std::vector<float> dist(ret.size());
-        std::vector<int64_t> ids(ret.size());
+        std::vector<float> dist;
+        std::vector<int64_t> ids;
         std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
                        [](const std::pair<float, int64_t>& e) { return e.first; });
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
-        memcpy(p_dist + i * dist_size, dist.data(), dist_size);
-        memcpy(p_id + i * id_size, ids.data(), id_size);
+        memcpy(p_dist + i * config->k, dist.data(), dist_size);
+        memcpy(p_id + i * config->k, ids.data(), id_size);
     }
 
     auto ret_ds = std::make_shared<Dataset>();
