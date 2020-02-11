@@ -58,7 +58,7 @@ static const char* VALID_CONFIG_STR =
     "engine_config:\n"
     "  use_blas_threshold: 20            \n"
     "\n"
-#ifdef MILVUS_GPU_VERSION
+    #ifdef MILVUS_GPU_VERSION
     "gpu_resource_config:\n"
     "  enable: true                      # whether to enable GPU resources\n"
     "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
@@ -66,7 +66,11 @@ static const char* VALID_CONFIG_STR =
     "    - gpu0\n"
     "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
     "    - gpu0\n"
-#endif
+    #endif
+    "\n"
+    "sequence_config:\n"
+    "  - seq1\n"
+    "  - seq2\n"
     "\n";
 
 static const char* INVALID_CONFIG_STR = "*INVALID*";

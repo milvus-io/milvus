@@ -30,6 +30,8 @@
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include "unittest/utils.h"
 
 using ::testing::Combine;
@@ -42,7 +44,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
-        // Init_with_default();
+// Init_with_default();
 #ifdef MILVUS_GPU_VERSION
         int64_t MB = 1024 * 1024;
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, MB * 200, MB * 600, 1);
@@ -85,14 +87,34 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 
 TEST_F(NSGInterfaceTest, basic_test) {
     assert(!xb.empty());
-
+    fiu_init(0);
+    // untrained index
+    {
+        ASSERT_ANY_THROW(index_->Search(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Serialize());
+    }
+    train_conf->gpu_id = knowhere::INVALID_VALUE;
+    auto model_invalid_gpu = index_->Train(base_dataset, train_conf);
+    train_conf->gpu_id = DEVICEID;
     auto model = index_->Train(base_dataset, train_conf);
     auto result = index_->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     auto binaryset = index_->Serialize();
+    {
+        fiu_enable("NSG.Serialize.throw_exception", 1, nullptr, 0);
+        ASSERT_ANY_THROW(index_->Serialize());
+        fiu_disable("NSG.Serialize.throw_exception");
+    }
+
     auto new_index = std::make_shared<knowhere::NSG>();
     new_index->Load(binaryset);
+    {
+        fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);
+        ASSERT_ANY_THROW(new_index->Load(binaryset));
+        fiu_disable("NSG.Load.throw_exception");
+    }
+
     auto new_result = new_index->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 

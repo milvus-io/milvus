@@ -37,7 +37,7 @@ FaissIVFSQ8Pass::Init() {
     }
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
-        throw;
+        throw std::exception();
     }
 #endif
 }

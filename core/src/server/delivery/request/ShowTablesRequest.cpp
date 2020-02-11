@@ -20,6 +20,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -41,9 +42,10 @@ ShowTablesRequest::OnExecute() {
     TimeRecorderAuto rc("ShowTablesRequest");
 
     std::vector<engine::meta::TableSchema> schema_array;
-    auto statuts = DBWrapper::DB()->AllTables(schema_array);
-    if (!statuts.ok()) {
-        return statuts;
+    auto status = DBWrapper::DB()->AllTables(schema_array);
+    fiu_do_on("ShowTablesRequest.OnExecute.show_tables_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+    if (!status.ok()) {
+        return status;
     }
 
     for (auto& schema : schema_array) {
