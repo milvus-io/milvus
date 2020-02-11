@@ -271,7 +271,12 @@ XSearchTask::Execute() {
             }
             std::vector<int64_t> mapped_ids;
             for (auto& offset : output_ids) {
-                mapped_ids.emplace_back(uids[offset]);
+                if (offset == -1) {
+                    // empty result
+                    mapped_ids.emplace_back(offset);
+                } else {
+                    mapped_ids.emplace_back(uids[offset]);
+                }
             }
 
             // step 3: pick up topk result

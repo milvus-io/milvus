@@ -20,6 +20,7 @@
 #include <src/db/Utils.h>
 #include <src/segment/SegmentReader.h>
 
+#include <limits>
 #include <utility>
 
 #include "SchedInst.h"
@@ -89,7 +90,8 @@ JobMgr::worker_function() {
         auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
         if (search_job != nullptr) {
             scheduler::ResultIds ids(search_job->nq() * search_job->topk(), -1);
-            scheduler::ResultDistances distances(search_job->nq() * search_job->topk(), 0.0);
+            scheduler::ResultDistances distances(search_job->nq() * search_job->topk(),
+                                                 std::numeric_limits<float>::max());
             search_job->GetResultIds() = ids;
             search_job->GetResultDistances() = distances;
 
