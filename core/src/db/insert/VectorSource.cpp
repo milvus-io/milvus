@@ -76,9 +76,9 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         std::vector<uint8_t> vectors;
         auto size = num_vectors_added * table_file_schema.dimension_ * sizeof(uint8_t);
         vectors.resize(size);
-        memcpy(vectors.data(), vectors_.float_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
+        memcpy(vectors.data(), vectors_.binary_data_.data() + current_num_vectors_added * table_file_schema.dimension_,
                size);
-        status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors_.binary_data_, vector_ids_to_add);
+        status = segment_writer_ptr->AddVectors(table_file_schema.file_id_, vectors, vector_ids_to_add);
     }
 
     // Clear vector data

@@ -115,6 +115,9 @@ class WalManager {
     uint64_t
     Flush(const std::string table_id = "");
 
+    void
+    RemoveOldFiles(uint64_t flushed_lsn);
+
  private:
     WalManager
     operator=(WalManager&);
