@@ -101,6 +101,9 @@ Config::ValidateConfig() {
     int64_t db_archive_days_threshold;
     CONFIG_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
 
+    int auto_flush_interval;
+    CONFIG_CHECK(GetDBConfigAutoFlushInterval(auto_flush_interval));
+
     /* storage config */
     std::string storage_primary_path;
     CONFIG_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
@@ -186,6 +189,22 @@ Config::ValidateConfig() {
     /* tracing config */
     std::string tracing_config_path;
     CONFIG_CHECK(GetTracingConfigJsonConfigPath(tracing_config_path));
+
+    /* wal config */
+    bool enable;
+    CONFIG_CHECK(GetWalConfigEnable(enable));
+
+    bool recovery_error_ignore;
+    CONFIG_CHECK(GetWalConfigRecoveryErrorIgnore(recovery_error_ignore));
+
+    uint32_t buffer_size;
+    CONFIG_CHECK(GetWalConfigBufferSize(buffer_size));
+
+    uint32_t record_size;
+    CONFIG_CHECK(GetWalConfigRecordSize(record_size));
+
+    std::string wal_path;
+    CONFIG_CHECK(GetWalConfigWalPath(wal_path));
 
     return Status::OK();
 }
@@ -456,6 +475,17 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
                           ". Possible reason: db_config.archive_days_threshold is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+    return Status::OK();
+}
+
+Status
+Config::CheckDBConfigAutoFlushInterval(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid db configuration auto_flush_interval: " + value +
+                          ". Possible reason: db.auto_flush_interval is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
     return Status::OK();
 }
 
@@ -989,6 +1019,17 @@ Config::GetDBConfigArchiveDaysThreshold(int64_t& value) {
 Status
 Config::GetDBConfigPreloadTable(std::string& value) {
     value = GetConfigStr(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE);
+    return Status::OK();
+}
+
+Status
+Config::GetDBConfigAutoFlushInterval(int& value) {
+    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT);
+    Status s = CheckDBConfigAutoFlushInterval(str);
+    if (!s.ok()) {
+        return s;
+    }
+    value = (int)std::stoi(str);
     return Status::OK();
 }
 

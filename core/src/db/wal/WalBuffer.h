@@ -79,11 +79,18 @@ class MXLogBuffer {
     GetReadLsn();
 
     bool
-    SetWriteLsn(uint64_t lsn);
+    ResetWriteLsn(uint64_t lsn);
+
+    void
+    SetFileNoFrom(uint32_t file_no);
+
+    void
+    RemoveOldFiles(uint64_t flushed_lsn);
 
  private:
     uint32_t
     SurplusSpace();
+
     uint32_t
     RecordSize(const MXLogRecord& record);
 
@@ -91,6 +98,7 @@ class MXLogBuffer {
     uint32_t mxlog_buffer_size_;  // from config
     BufferPtr buf_[2];
     std::mutex mutex_;
+    uint32_t file_no_from_;
     MXLogBufferHandler mxlog_buffer_reader_;
     MXLogBufferHandler mxlog_buffer_writer_;
     MXLogFileHandler mxlog_writer_;

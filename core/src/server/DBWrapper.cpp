@@ -44,6 +44,12 @@ DBWrapper::StartService() {
         return s;
     }
 
+    s = config.GetDBConfigAutoFlushInterval(opt.auto_flush_interval_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
     std::string path;
     s = config.GetStorageConfigPrimaryPath(path);
     if (!s.ok()) {

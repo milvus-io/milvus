@@ -71,35 +71,37 @@ WalManager::Init(const meta::MetaPtr& meta) {
             return WAL_META_ERROR;
         }
 
-        uint64_t max_flused_lsn = 0;
+        uint64_t min_flused_lsn = ~0;
         for (auto schema : table_schema_array) {
             TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
             tables_[schema.table_id_] = tb_lsn;
 
-            if (max_flused_lsn < schema.flush_lsn_) {
-                max_flused_lsn = schema.flush_lsn_;
+            if (min_flused_lsn > schema.flush_lsn_) {
+                min_flused_lsn = schema.flush_lsn_;
             }
         }
 
         meta->GetGlobalLastLSN(recovery_start);
-        if (recovery_start < max_flused_lsn) {
-            recovery_start = max_flused_lsn;
+        if (recovery_start < min_flused_lsn) {
+            recovery_start = min_flused_lsn;
         }
     }
 
+    ErrorCode error_code = WAL_ERROR;
     p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
 
-    ErrorCode error_code;
-    if (p_buffer_->Init(recovery_start, applied_lsn)) {
-        error_code = WAL_SUCCESS;
-    } else if (mxlog_config_.recovery_error_ignore) {
-        p_buffer_->Reset(applied_lsn);
-        error_code = WAL_SUCCESS;
-    } else {
-        error_code = WAL_FILE_ERROR;
+    if (p_buffer_ != nullptr) {
+        if (p_buffer_->Init(recovery_start, applied_lsn)) {
+            error_code = WAL_SUCCESS;
+        } else if (mxlog_config_.recovery_error_ignore) {
+            p_buffer_->Reset(applied_lsn);
+            error_code = WAL_SUCCESS;
+        } else {
+            error_code = WAL_FILE_ERROR;
+        }
     }
 
-    return WAL_SUCCESS;
+    return error_code;
 }
 
 ErrorCode
@@ -246,7 +248,7 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
 
         auto error_code = p_buffer_->Append(record);
         if (error_code != WAL_SUCCESS) {
-            p_buffer_->SetWriteLsn(last_applied_lsn_);
+            p_buffer_->ResetWriteLsn(last_applied_lsn_);
             return false;
         }
         new_lsn = record.lsn;
@@ -260,7 +262,7 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
     }
     lck.unlock();
 
-    //    WAL_LOG_INFO << table_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
+    WAL_LOG_INFO << table_id << " insert in part " << partition_tag << " with lsn " << new_lsn;
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
@@ -289,7 +291,7 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 
         auto error_code = p_buffer_->Append(record);
         if (error_code != WAL_SUCCESS) {
-            p_buffer_->SetWriteLsn(last_applied_lsn_);
+            p_buffer_->ResetWriteLsn(last_applied_lsn_);
             return false;
         }
         new_lsn = record.lsn;
@@ -344,6 +346,13 @@ WalManager::Flush(const std::string table_id) {
     WAL_LOG_INFO << table_id << " want to be flush, lsn " << lsn;
 
     return lsn;
+}
+
+void
+WalManager::RemoveOldFiles(uint64_t flushed_lsn) {
+    if (p_buffer_ != nullptr) {
+        p_buffer_->RemoveOldFiles(flushed_lsn);
+    }
 }
 
 template bool

@@ -63,7 +63,7 @@ MXLogBuffer::~MXLogBuffer() {
  */
 bool
 MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
-    WAL_LOG_DEBUG << std::hex << "start_lsn " << start_lsn << " end_lsn " << end_lsn << std::dec;
+    WAL_LOG_DEBUG << "start_lsn " << start_lsn << " end_lsn " << end_lsn;
 
     ParserLsn(start_lsn, mxlog_buffer_reader_.file_no, mxlog_buffer_reader_.buf_offset);
     ParserLsn(end_lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
@@ -159,12 +159,14 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
         }
     }
 
+    SetFileNoFrom(mxlog_buffer_reader_.file_no);
+
     return true;
 }
 
 void
 MXLogBuffer::Reset(uint64_t lsn) {
-    WAL_LOG_DEBUG << std::hex << "reset lsn " << lsn << std::dec;
+    WAL_LOG_DEBUG << "reset lsn " << lsn;
 
     buf_[0] = BufferPtr(new char[mxlog_buffer_size_]);
     buf_[1] = BufferPtr(new char[mxlog_buffer_size_]);
@@ -181,6 +183,8 @@ MXLogBuffer::Reset(uint64_t lsn) {
     mxlog_writer_.CloseFile();
     mxlog_writer_.SetFileName(ToFileName(mxlog_buffer_writer_.file_no));
     mxlog_writer_.SetFileOpenMode("w");
+
+    SetFileNoFrom(mxlog_buffer_reader_.file_no);
 }
 
 // buffer writer cares about surplus space of buffer
@@ -355,7 +359,7 @@ MXLogBuffer::GetReadLsn() {
 }
 
 bool
-MXLogBuffer::SetWriteLsn(uint64_t lsn) {
+MXLogBuffer::ResetWriteLsn(uint64_t lsn) {
     int32_t old_file_no = mxlog_buffer_writer_.file_no;
     ParserLsn(lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
     if (old_file_no == mxlog_buffer_writer_.file_no) {
@@ -379,6 +383,40 @@ MXLogBuffer::SetWriteLsn(uint64_t lsn) {
     }
 
     return true;
+}
+
+void
+MXLogBuffer::SetFileNoFrom(uint32_t file_no) {
+    file_no_from_ = file_no;
+
+    if (file_no > 0) {
+        // remove the files whose No. are less than file_no
+        MXLogFileHandler file_handler(mxlog_writer_.GetFilePath());
+        do {
+            file_handler.SetFileName(ToFileName(--file_no));
+            if (!file_handler.FileExists()) {
+                break;
+            }
+            WAL_LOG_INFO << "Delete wal file " << file_no;
+            file_handler.DeleteFile();
+        } while (file_no > 0);
+    }
+}
+
+void
+MXLogBuffer::RemoveOldFiles(uint64_t flushed_lsn) {
+    uint32_t file_no;
+    uint32_t offset;
+    ParserLsn(flushed_lsn, file_no, offset);
+
+    if (file_no_from_ < file_no) {
+        MXLogFileHandler file_handler(mxlog_writer_.GetFilePath());
+        do {
+            file_handler.SetFileName(ToFileName(file_no_from_));
+            WAL_LOG_INFO << "Delete wal file " << file_no_from_;
+            file_handler.DeleteFile();
+        } while (++file_no_from_ < file_no);
+    }
 }
 
 }  // namespace wal

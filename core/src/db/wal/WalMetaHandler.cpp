@@ -56,6 +56,10 @@ MXLogMetaHandler::GetMXLogInternalMeta(uint64_t& wal_lsn) {
 
 bool
 MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t& wal_lsn) {
+    if (wal_meta_fp_ == nullptr) {
+        return false;
+    }
+
     // todo: add crc
 
     fseek(wal_meta_fp_, 0, SEEK_SET);
