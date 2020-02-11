@@ -62,6 +62,8 @@ static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
+static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1000";
 
 /* storage config */
 static const char* CONFIG_STORAGE = "storage_config";
@@ -200,6 +202,8 @@ class Config {
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
+    Status
+    CheckDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
@@ -300,6 +304,8 @@ class Config {
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
     GetDBConfigPreloadTable(std::string& value);
+    Status
+    GetDBConfigAutoFlushInterval(int& value);
 
     /* storage config */
     Status

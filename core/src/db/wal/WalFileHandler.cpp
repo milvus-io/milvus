@@ -111,7 +111,6 @@ MXLogFileHandler::GetFileSize() {
 void
 MXLogFileHandler::DeleteFile() {
     remove((file_path_ + file_name_).c_str());
-    p_file_ = NULL;
     file_name_ = "";
 }
 

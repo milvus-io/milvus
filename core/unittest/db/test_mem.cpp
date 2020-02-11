@@ -284,7 +284,42 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 }
 
-//TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
+TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
+    milvus::engine::meta::TableSchema table_info;
+    table_info.dimension_ = TABLE_DIM;
+    table_info.table_id_ = GetTableName();
+    table_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
+    table_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int insert_loop = 10;
+    for (int k = 0; k < insert_loop; ++k) {
+        milvus::engine::VectorsData vectors;
+        int64_t nb = 10000;
+        vectors.vector_count_ = nb;
+        vectors.binary_data_.clear();
+        vectors.binary_data_.resize(nb * TABLE_DIM);
+        uint8_t* data = vectors.binary_data_.data();
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> distribution{0, std::numeric_limits<uint8_t>::max()};
+        for (int i = 0; i < nb; i++) {
+            for (int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = distribution(gen);
+        }
+        milvus::engine::IDNumbers vector_ids;
+        stat = db_->InsertVectors(GetTableName(), "", vectors);
+        ASSERT_TRUE(stat.ok());
+    }
+}
+// TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
 //    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
 //    auto stat = db_->CreateTable(table_info);
 //
@@ -357,7 +392,6 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
 //
 //    search.join();
 //}
-
 
 TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
