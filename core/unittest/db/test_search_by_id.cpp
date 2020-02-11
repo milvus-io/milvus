@@ -20,6 +20,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <thread>
 
@@ -173,6 +174,6 @@ TEST_F(SearchByIdTest, with_delete) {
 
         stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, i, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], -1);
-        ASSERT_EQ(result_distances[0], 0);
+        ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
     }
 }
