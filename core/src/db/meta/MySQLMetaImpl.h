@@ -65,6 +65,10 @@ class MySQLMetaImpl : public Meta {
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
 
     Status
+    GetTableFilesBySegmentId(const std::string& table_id, const std::string& segment_id,
+                             TableFilesSchema& table_files) override;
+
+    Status
     UpdateTableIndex(const std::string& table_id, const TableIndex& index) override;
 
     Status

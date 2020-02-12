@@ -115,6 +115,11 @@ TEST_F(DeleteTest, delete_in_mem) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
+    uint64_t row_count;
+    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, nb - search_vectors.size());
+
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
@@ -177,6 +182,11 @@ TEST_F(DeleteTest, delete_on_disk) {
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
+
+    uint64_t row_count;
+    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, nb - search_vectors.size());
 
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
@@ -248,6 +258,11 @@ TEST_F(DeleteTest, delete_with_index) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
+    uint64_t row_count;
+    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, nb - ids_to_delete.size());
+
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
@@ -289,7 +304,12 @@ TEST_F(DeleteTest, delete_single_vector) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    int topk = 10, nprobe = 10;
+    uint64_t row_count;
+    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, 0);
+
+    int topk = 1, nprobe = 1;
 
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;

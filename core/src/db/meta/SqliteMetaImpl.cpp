@@ -481,6 +481,54 @@ SqliteMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<siz
 }
 
 Status
+SqliteMetaImpl::GetTableFilesBySegmentId(const std::string& table_id, const std::string& segment_id,
+                                         milvus::engine::meta::TableFilesSchema& table_files) {
+    try {
+        table_files.clear();
+        auto files = ConnectorPtr->select(
+            columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
+                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
+                    &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
+            where(c(&TableFileSchema::table_id_) == table_id and c(&TableFileSchema::segment_id_) == segment_id and
+                  c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        Status result;
+        for (auto& file : files) {
+            TableFileSchema file_schema;
+            file_schema.table_id_ = table_id;
+            file_schema.id_ = std::get<0>(file);
+            file_schema.segment_id_ = std::get<1>(file);
+            file_schema.file_id_ = std::get<2>(file);
+            file_schema.file_type_ = std::get<3>(file);
+            file_schema.file_size_ = std::get<4>(file);
+            file_schema.row_count_ = std::get<5>(file);
+            file_schema.date_ = std::get<6>(file);
+            file_schema.engine_type_ = std::get<7>(file);
+            file_schema.created_on_ = std::get<8>(file);
+            file_schema.dimension_ = table_schema.dimension_;
+            file_schema.index_file_size_ = table_schema.index_file_size_;
+            file_schema.nlist_ = table_schema.nlist_;
+            file_schema.metric_type_ = table_schema.metric_type_;
+
+            utils::GetTableFilePath(options_, file_schema);
+
+            table_files.emplace_back(file_schema);
+        }
+
+        ENGINE_LOG_DEBUG << "Get table files by segment id";
+        return result;
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when lookup table files by segment id", e.what());
+    }
+}
+
+Status
 SqliteMetaImpl::UpdateTableFlag(const std::string& table_id, int64_t flag) {
     try {
         server::MetricCollector metric;
