@@ -40,6 +40,8 @@ class MXLogFileHandler {
     OpenFile();
     bool
     CloseFile();
+    int64_t
+    Load(char* buf, uint32_t data_offset);
     bool
     Load(char* buf, uint32_t data_offset, uint32_t data_size);
     bool
