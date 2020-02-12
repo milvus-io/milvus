@@ -92,7 +92,7 @@ TEST(WalTest, META_HANDLER_TEST) {
 TEST(WalTest, BUFFER_INIT_TEST) {
     MakeEmptyTestPath();
 
-    FILE *fi = nullptr;
+    FILE* fi = nullptr;
     char buff[128];
     milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, 0);
 
@@ -122,10 +122,11 @@ TEST(WalTest, BUFFER_INIT_TEST) {
     uint32_t end_file_no = 3;
     uint32_t end_buf_off = 64;
     uint64_t end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
+
     ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file not exist
     fi = fopen(WAL_GTEST_PATH "3.wal", "w");
     fclose(fi);
-    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file size zero
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file size zero
     fi = fopen(WAL_GTEST_PATH "3.wal", "w");
     fwrite(buff, 1, end_buf_off - 1, fi);
     fclose(fi);
@@ -147,19 +148,19 @@ TEST(WalTest, BUFFER_INIT_TEST) {
     end_file_no = 5;
     end_buf_off = 64;
     end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
-    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file 4 not exist
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file 4 not exist
     fi = fopen(WAL_GTEST_PATH "4.wal", "w");
     fwrite(buff, 1, start_buf_off, fi);
     fclose(fi);
-    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file 5 not exist
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file 5 not exist
     fi = fopen(WAL_GTEST_PATH "5.wal", "w");
     fclose(fi);
-    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file 5 size error
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file 5 size error
     fi = fopen(WAL_GTEST_PATH "5.wal", "w");
     fwrite(buff, 1, end_buf_off, fi);
     fclose(fi);
-    buffer.mxlog_buffer_size_ = 0; // to correct the buff size by buffer_size_need
-    ASSERT_TRUE(buffer.Init(start_lsn, end_lsn)); // success
+    buffer.mxlog_buffer_size_ = 0;                 // to correct the buff size by buffer_size_need
+    ASSERT_TRUE(buffer.Init(start_lsn, end_lsn));  // success
     ASSERT_EQ(buffer.mxlog_buffer_reader_.file_no, start_file_no);
     ASSERT_EQ(buffer.mxlog_buffer_reader_.buf_offset, start_buf_off);
     ASSERT_EQ(buffer.mxlog_buffer_writer_.file_no, end_file_no);
