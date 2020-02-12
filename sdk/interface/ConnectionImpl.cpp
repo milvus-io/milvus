@@ -187,4 +187,9 @@ ConnectionImpl::Flush() {
     return client_proxy_->Flush();
 }
 
+Status
+ConnectionImpl::CompactTable(const std::string& table_name) {
+    return client_proxy_->CompactTable(table_name);
+}
+
 }  // namespace milvus

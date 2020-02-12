@@ -99,6 +99,9 @@ class GrpcClient {
     Flush(const std::string& table_name);
 
     Status
+    Compact(milvus::grpc::TableName& table_name);
+
+    Status
     Disconnect();
 
  private:

@@ -22,6 +22,7 @@
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/delivery/request/CmdRequest.h"
+#include "server/delivery/request/CompactRequest.h"
 #include "server/delivery/request/CountTableRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
@@ -219,6 +220,14 @@ RequestHandler::DropPartition(const std::shared_ptr<Context>& context, const std
 Status
 RequestHandler::Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names) {
     BaseRequestPtr request_ptr = FlushRequest::Create(context, table_names);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::string& table_name) {
+    BaseRequestPtr request_ptr = CompactRequest::Create(context, table_name);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
