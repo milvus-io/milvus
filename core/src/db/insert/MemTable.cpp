@@ -266,15 +266,12 @@ MemTable::ApplyDeletes() {
             break;
         }
         for (auto& file : segment_files) {
-            if (file.file_type_ == meta::TableFileSchema::RAW ||
-                file.file_type_ == meta::TableFileSchema::TO_INDEX ||
-                file.file_type_ == meta::TableFileSchema::INDEX ||
-                file.file_type_ == meta::TableFileSchema::BACKUP) {
+            if (file.file_type_ == meta::TableFileSchema::RAW || file.file_type_ == meta::TableFileSchema::TO_INDEX ||
+                file.file_type_ == meta::TableFileSchema::INDEX || file.file_type_ == meta::TableFileSchema::BACKUP) {
                 file.row_count_ -= delete_count;
                 table_files_to_update.emplace_back(file);
             }
         }
-
     }
 
     status = meta_->UpdateTableFiles(table_files_to_update);
