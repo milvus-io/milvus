@@ -171,16 +171,17 @@ MemTable::ApplyDeletes() {
 
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
-    meta::TableFilesSchema table_files_schema;
-    auto status = meta_->FilesByType(table_id_, file_types, table_files_schema);
+    meta::TableFilesSchema table_files;
+    auto status = meta_->FilesByType(table_id_, file_types, table_files);
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
-    std::unordered_map<std::string, std::vector<segment::doc_id_t>> ids_to_check_map;
+    std::unordered_map<size_t, std::vector<segment::doc_id_t>> ids_to_check_map;
 
-    for (auto& table_file : table_files_schema) {
+    for (size_t i = 0; i < table_files.size(); ++i) {
+        auto& table_file = table_files[i];
         std::string segment_dir;
         utils::GetParentPath(table_file.location_, segment_dir);
 
@@ -190,17 +191,22 @@ MemTable::ApplyDeletes() {
 
         for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {
-                ids_to_check_map[table_file.location_].emplace_back(id);
+                ids_to_check_map[i].emplace_back(id);
             }
         }
     }
 
+    meta::TableFilesSchema table_files_to_update;
+
     for (auto& kv : ids_to_check_map) {
+        auto& table_file = table_files[kv.first];
+
         std::string segment_dir;
-        utils::GetParentPath(kv.first, segment_dir);
+        utils::GetParentPath(table_file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
 
-        auto index = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(kv.first));
+        auto index =
+            std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(table_file.location_));
         faiss::ConcurrentBitsetPtr blacklist = nullptr;
         if (index != nullptr) {
             status = index->GetBlacklist(blacklist);
@@ -221,8 +227,11 @@ MemTable::ApplyDeletes() {
 
         segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
 
+        size_t delete_count = 0;
         for (size_t i = 0; i < uids.size(); ++i) {
             if (std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]) != ids_to_check.end()) {
+                delete_count++;
+
                 deleted_docs->AddDeletedDoc(i);
                 id_bloom_filter_ptr->Remove(uids[i]);
 
@@ -248,7 +257,27 @@ MemTable::ApplyDeletes() {
         if (!status.ok()) {
             break;
         }
+
+        // Update table file row count
+        auto& segment_id = table_file.segment_id_;
+        meta::TableFilesSchema segment_files;
+        status = meta_->GetTableFilesBySegmentId(table_file.table_id_, segment_id, segment_files);
+        if (!status.ok()) {
+            break;
+        }
+        for (auto& file : segment_files) {
+            if (file.file_type_ == meta::TableFileSchema::RAW ||
+                file.file_type_ == meta::TableFileSchema::TO_INDEX ||
+                file.file_type_ == meta::TableFileSchema::INDEX ||
+                file.file_type_ == meta::TableFileSchema::BACKUP) {
+                file.row_count_ -= delete_count;
+                table_files_to_update.emplace_back(file);
+            }
+        }
+
     }
+
+    status = meta_->UpdateTableFiles(table_files_to_update);
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
