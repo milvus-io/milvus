@@ -121,9 +121,10 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
                 return false;
             }
 
-            if (!mxlog_writer_.Load(buf_[0].get() + mxlog_buffer_reader_.buf_offset, mxlog_buffer_reader_.buf_offset,
-                                    mxlog_buffer_writer_.buf_offset - mxlog_buffer_reader_.buf_offset)) {
-                WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.buf_offset;
+            auto read_offset = mxlog_buffer_reader_.buf_offset;
+            auto read_size = mxlog_buffer_writer_.buf_offset - mxlog_buffer_reader_.buf_offset;
+            if (!mxlog_writer_.Load(buf_[0].get() + read_offset, read_offset, read_size)) {
+                WAL_LOG_ERROR << "load wal file error " << read_offset << " " << read_size;
                 return false;
             }
         }
@@ -135,13 +136,10 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
         MXLogFileHandler file_handler(mxlog_writer_.GetFilePath());
         file_handler.SetFileName(ToFileName(mxlog_buffer_reader_.file_no));
         file_handler.SetFileOpenMode("r");
-        if (!file_handler.FileExists()) {
-            WAL_LOG_ERROR << "wal file not exist " << mxlog_buffer_reader_.file_no;
-            return false;
-        }
-        mxlog_buffer_reader_.max_offset = file_handler.GetFileSize();
-        file_handler.Load(buf_[0].get() + mxlog_buffer_reader_.buf_offset, mxlog_buffer_reader_.buf_offset,
-                          mxlog_buffer_reader_.max_offset - mxlog_buffer_reader_.buf_offset);
+        
+        auto read_offset = mxlog_buffer_reader_.buf_offset;
+        auto read_size = file_handler.Load(buf_[0].get() + read_offset, read_offset);
+        mxlog_buffer_reader_.max_offset = read_size + read_offset;
         file_handler.CloseFile();
 
         // write buffer
@@ -301,8 +299,8 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
             WAL_LOG_ERROR << "read wal file error " << mxlog_buffer_reader_.file_no;
             return WAL_FILE_ERROR;
         }
-        auto file_size = (uint32_t)mxlog_reader.GetFileSize();
-        if (!mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0, file_size)) {
+        auto file_size = mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0);
+        if (file_size <= 0) {
             WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.file_no;
             return WAL_FILE_ERROR;
         }

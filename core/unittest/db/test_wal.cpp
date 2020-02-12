@@ -35,20 +35,20 @@
 
 void
 MakeEmptyTestPath() {
-    if (access(WAL_GTEST_PATH, 0) == -1) {
-        ::system("rm -rf " WAL_GTEST_PATH);
+    if (access(WAL_GTEST_PATH, 0) == 0) {
+        ::system("rm -rf " WAL_GTEST_PATH "*");
+    } else {
+        ::system("mkdir -m 777 -p " WAL_GTEST_PATH);
     }
-    ::system("mkdir -m 774 -p " WAL_GTEST_PATH);
 }
 
 TEST(WalTest, FILE_HANDLER_TEST) {
     MakeEmptyTestPath();
 
     std::string file_name = "1.wal";
-    std::string open_mode = "w+";
     milvus::engine::wal::MXLogFileHandler file_handler(WAL_GTEST_PATH);
     file_handler.SetFileName(file_name);
-    file_handler.SetFileOpenMode(open_mode);
+    file_handler.SetFileOpenMode("w");
     ASSERT_FALSE(file_handler.FileExists());
     ASSERT_FALSE(file_handler.IsOpen());
 
@@ -57,20 +57,24 @@ TEST(WalTest, FILE_HANDLER_TEST) {
     ASSERT_EQ(0, file_handler.GetFileSize());
 
     std::string write_content = "hello, world!\n";
-    auto write_res = file_handler.Write(const_cast<char*>(write_content.data()), write_content.size());
-    ASSERT_TRUE(write_res);
+    ASSERT_TRUE(file_handler.Write(const_cast<char*>(write_content.data()), write_content.size()));
+    ASSERT_TRUE(file_handler.CloseFile());
+
+    file_handler.SetFileOpenMode("r");
     char* buf = (char*)malloc(write_content.size() + 10);
     memset(buf, 0, write_content.size() + 10);
-    auto load_res = file_handler.Load(buf, 0, write_content.size());
-    ASSERT_TRUE(load_res);
-    ASSERT_EQ(strlen(buf), write_content.size());
+    ASSERT_TRUE(file_handler.Load(buf, 0, write_content.size()));
+    ASSERT_STREQ(buf, write_content.c_str());
     free(buf);
+    ASSERT_TRUE(file_handler.CloseFile());
     file_handler.DeleteFile();
 
+    file_handler.SetFileOpenMode("w");
     file_handler.ReBorn("2");
     write_content += ", aaaaa";
     file_handler.Write(const_cast<char*>(write_content.data()), write_content.size());
     ASSERT_EQ("2", file_handler.GetFileName());
+    ASSERT_TRUE(file_handler.CloseFile());
     file_handler.DeleteFile();
 }
 
@@ -85,99 +89,199 @@ TEST(WalTest, META_HANDLER_TEST) {
     ASSERT_EQ(wal_lsn, internal_lsn);
 }
 
+TEST(WalTest, BUFFER_INIT_TEST) {
+    MakeEmptyTestPath();
+
+    FILE *fi = nullptr;
+    char buff[128];
+    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, 0);
+
+    // start_lsn == end_lsn, start_lsn == 0
+    ASSERT_TRUE(buffer.Init(0, 0));
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.file_no, 0);
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.buf_offset, 0);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.file_no, 0);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.buf_offset, 0);
+    ASSERT_EQ(buffer.file_no_from_, 0);
+
+    // start_lsn == end_lsn, start_lsn != 0
+    uint32_t file_no = 1;
+    uint32_t buf_off = 32;
+    uint64_t lsn = (uint64_t)file_no << 32 | buf_off;
+    ASSERT_TRUE(buffer.Init(lsn, lsn));
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.file_no, file_no + 1);
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.buf_offset, 0);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.file_no, file_no + 1);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.buf_offset, 0);
+    ASSERT_EQ(buffer.file_no_from_, file_no + 1);
+
+    // start_lsn != end_lsn, start_file == end_file
+    uint32_t start_file_no = 3;
+    uint32_t start_buf_off = 32;
+    uint64_t start_lsn = (uint64_t)start_file_no << 32 | start_buf_off;
+    uint32_t end_file_no = 3;
+    uint32_t end_buf_off = 64;
+    uint64_t end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file not exist    
+    fi = fopen(WAL_GTEST_PATH "3.wal", "w");
+    fclose(fi);
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file size zero
+    fi = fopen(WAL_GTEST_PATH "3.wal", "w");
+    fwrite(buff, 1, end_buf_off - 1, fi);
+    fclose(fi);
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file size error
+    fi = fopen(WAL_GTEST_PATH "3.wal", "w");
+    fwrite(buff, 1, end_buf_off, fi);
+    fclose(fi);
+    ASSERT_TRUE(buffer.Init(start_lsn, end_lsn));  // success
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.file_no, start_file_no);
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.buf_offset, start_buf_off);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.file_no, end_file_no);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.buf_offset, end_buf_off);
+    ASSERT_EQ(buffer.file_no_from_, start_file_no);
+
+    // start_lsn != end_lsn, start_file != end_file
+    start_file_no = 4;
+    start_buf_off = 32;
+    start_lsn = (uint64_t)start_file_no << 32 | start_buf_off;
+    end_file_no = 5;
+    end_buf_off = 64;
+    end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file 4 not exist
+    fi = fopen(WAL_GTEST_PATH "4.wal", "w");
+    fwrite(buff, 1, start_buf_off, fi);
+    fclose(fi);
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file 5 not exist
+    fi = fopen(WAL_GTEST_PATH "5.wal", "w");
+    fclose(fi);
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file 5 size error
+    fi = fopen(WAL_GTEST_PATH "5.wal", "w");
+    fwrite(buff, 1, end_buf_off, fi);
+    fclose(fi);
+    buffer.mxlog_buffer_size_ = 0; // to correct the buff size by buffer_size_need
+    ASSERT_TRUE(buffer.Init(start_lsn, end_lsn)); // success
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.file_no, start_file_no);
+    ASSERT_EQ(buffer.mxlog_buffer_reader_.buf_offset, start_buf_off);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.file_no, end_file_no);
+    ASSERT_EQ(buffer.mxlog_buffer_writer_.buf_offset, end_buf_off);
+    ASSERT_EQ(buffer.file_no_from_, start_file_no);
+    ASSERT_EQ(buffer.mxlog_buffer_size_, end_buf_off);
+}
+
 TEST(WalTest, BUFFER_TEST) {
     MakeEmptyTestPath();
 
-    uint32_t buf_size = 2 * 1024;
-    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, buf_size);
-    buffer.mxlog_buffer_size_ = 2 * 1024;
-    uint32_t start_file_no = 3;
-    uint32_t start_buf_off = 230;
-    uint32_t end_file_no = 5;
-    uint32_t end_buf_off = 630;
-    uint64_t start_lsn, end_lsn;
-    start_lsn = (uint64_t)start_file_no << 32 | start_buf_off;
-    end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
-    buffer.Init(start_lsn, end_lsn);
-    ASSERT_EQ(start_lsn, buffer.GetReadLsn());
-    buffer.Reset(((uint64_t)4 << 32));
+    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, WAL_BUFFER_MAX_SIZE + 1);
 
-    milvus::engine::wal::MXLogRecord ins_vct_rd_1;
-    ins_vct_rd_1.type = milvus::engine::wal::MXLogType::InsertVector;
-    ins_vct_rd_1.table_id = "insert_table";
-    ins_vct_rd_1.partition_tag = "parti1";
-    ins_vct_rd_1.length = 1;
-    milvus::engine::IDNumber id = 2;
-    ins_vct_rd_1.ids = &id;
-    ins_vct_rd_1.data_size = 2 * sizeof(float);
-    float vecs[2] = {1.2, 3.4};
-    ins_vct_rd_1.data = &vecs;
-    ASSERT_EQ(buffer.Append(ins_vct_rd_1), milvus::WAL_SUCCESS);
+    uint32_t file_no = 4;
+    uint32_t buf_off = 100;
+    uint64_t lsn = (uint64_t)file_no << 32 | buf_off;
+    buffer.mxlog_buffer_size_ = 1000;
+    buffer.Reset(lsn);
 
-    milvus::engine::wal::MXLogRecord del_rd;
-    del_rd.type = milvus::engine::wal::MXLogType::Delete;
-    del_rd.table_id = "insert_table";
-    del_rd.partition_tag = "parti1";
-    del_rd.length = 1;
-    del_rd.ids = &id;
-    del_rd.data_size = 0;
-    del_rd.data = nullptr;
-    ASSERT_EQ(buffer.Append(del_rd), milvus::WAL_SUCCESS);
+    milvus::engine::wal::MXLogRecord record[4];
+    milvus::engine::wal::MXLogRecord read_rst;
 
-    milvus::engine::wal::MXLogRecord ins_vct_rd_2;
-    ins_vct_rd_2.type = milvus::engine::wal::MXLogType::InsertBinary;
-    ins_vct_rd_2.table_id = "insert_table";
-    ins_vct_rd_2.partition_tag = "parti1";
-    ins_vct_rd_2.length = 100;
-    ins_vct_rd_2.ids = (const milvus::engine::IDNumber*)malloc(ins_vct_rd_2.length * sizeof(milvus::engine::IDNumber));
-    ins_vct_rd_2.data_size = 100 * sizeof(uint8_t);
-    ins_vct_rd_2.data = malloc(ins_vct_rd_2.data_size);
-    ASSERT_EQ(buffer.Append(ins_vct_rd_2), milvus::WAL_SUCCESS);
+    // write 0
+    record[0].type = milvus::engine::wal::MXLogType::InsertVector;
+    record[0].table_id = "insert_table";
+    record[0].partition_tag = "parti1";
+    record[0].length = 50;
+    record[0].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
+    record[0].data_size = record[0].length * sizeof(float);
+    record[0].data = malloc(record[0].data_size);
+    ASSERT_EQ(buffer.Append(record[0]), milvus::WAL_SUCCESS);
+    uint32_t new_file_no = uint32_t(record[0].lsn >> 32);
+    ASSERT_EQ(new_file_no, ++file_no);
 
-    milvus::engine::wal::MXLogRecord ins_vct_rd_3;
-    ins_vct_rd_3.type = milvus::engine::wal::MXLogType::InsertVector;
-    ins_vct_rd_3.table_id = "insert_table";
-    ins_vct_rd_3.partition_tag = "parti1";
-    ins_vct_rd_3.length = 100;
-    ins_vct_rd_3.ids = (const milvus::engine::IDNumber*)malloc(ins_vct_rd_3.length * sizeof(milvus::engine::IDNumber));
-    ins_vct_rd_3.data_size = 10 * 10 * sizeof(float);
-    ins_vct_rd_3.data = malloc(ins_vct_rd_3.data_size);
-    ASSERT_EQ(buffer.Append(ins_vct_rd_3), milvus::WAL_SUCCESS);
+    // write 1
+    record[1].type = milvus::engine::wal::MXLogType::Delete;
+    record[1].table_id = "insert_table";
+    record[1].partition_tag = "parti1";
+    record[1].length = 10;
+    record[1].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
+    record[1].data_size = 0;
+    record[1].data = nullptr;
+    ASSERT_EQ(buffer.Append(record[1]), milvus::WAL_SUCCESS);
+    new_file_no = uint32_t(record[1].lsn >> 32);
+    ASSERT_EQ(new_file_no, file_no);
 
-    milvus::engine::wal::MXLogRecord record;
-    uint64_t last_lsn = (uint64_t)10 << 32;
-    ASSERT_EQ(buffer.Next(last_lsn, record), milvus::WAL_SUCCESS);
-    ASSERT_EQ(record.type, ins_vct_rd_1.type);
-    ASSERT_EQ(record.table_id, ins_vct_rd_1.table_id);
-    ASSERT_EQ(record.partition_tag, ins_vct_rd_1.partition_tag);
-    ASSERT_EQ(record.length, ins_vct_rd_1.length);
-    ASSERT_EQ(record.data_size, ins_vct_rd_1.data_size);
+    // read 0
+    ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(read_rst.type, record[0].type);
+    ASSERT_EQ(read_rst.table_id, record[0].table_id);
+    ASSERT_EQ(read_rst.partition_tag, record[0].partition_tag);
+    ASSERT_EQ(read_rst.length, record[0].length);
+    ASSERT_EQ(memcmp(read_rst.ids, record[0].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
+    ASSERT_EQ(read_rst.data_size, record[0].data_size);
+    ASSERT_EQ(memcmp(read_rst.data, record[0].data, read_rst.data_size), 0);
+    
+    // read 1
+    ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(read_rst.type, record[1].type);
+    ASSERT_EQ(read_rst.table_id, record[1].table_id);
+    ASSERT_EQ(read_rst.partition_tag, record[1].partition_tag);
+    ASSERT_EQ(read_rst.length, record[1].length);
+    ASSERT_EQ(memcmp(read_rst.ids, record[1].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
+    ASSERT_EQ(read_rst.data_size, 0);
+    ASSERT_EQ(read_rst.data, nullptr);
 
-    ASSERT_EQ(buffer.Next(last_lsn, record), milvus::WAL_SUCCESS);
-    ASSERT_EQ(record.type, del_rd.type);
-    ASSERT_EQ(record.table_id, del_rd.table_id);
-    ASSERT_EQ(record.partition_tag, del_rd.partition_tag);
-    ASSERT_EQ(record.length, del_rd.length);
-    ASSERT_EQ(record.data_size, del_rd.data_size);
+    // read empty
+    ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(read_rst.type, milvus::engine::wal::MXLogType::None);
 
-    ASSERT_EQ(buffer.Next(last_lsn, record), milvus::WAL_SUCCESS);
-    ASSERT_EQ(record.type, ins_vct_rd_2.type);
-    ASSERT_EQ(record.table_id, ins_vct_rd_2.table_id);
-    ASSERT_EQ(record.partition_tag, ins_vct_rd_2.partition_tag);
-    ASSERT_EQ(record.length, ins_vct_rd_2.length);
-    ASSERT_EQ(record.data_size, ins_vct_rd_2.data_size);
+    // write 2 (new file)
+    record[2].type = milvus::engine::wal::MXLogType::InsertVector;
+    record[2].table_id = "insert_table";
+    record[2].partition_tag = "parti1";
+    record[2].length = 50;
+    record[2].ids = (milvus::engine::IDNumber*)malloc(record[2].length * sizeof(milvus::engine::IDNumber));
+    record[2].data_size = record[2].length * sizeof(float);
+    record[2].data = malloc(record[2].data_size);
+    ASSERT_EQ(buffer.Append(record[2]), milvus::WAL_SUCCESS);
+    new_file_no = uint32_t(record[2].lsn >> 32);
+    ASSERT_EQ(new_file_no, ++file_no);
 
-    ASSERT_EQ(buffer.Next(last_lsn, record), milvus::WAL_SUCCESS);
-    ASSERT_EQ(record.type, ins_vct_rd_3.type);
-    ASSERT_EQ(record.table_id, ins_vct_rd_3.table_id);
-    ASSERT_EQ(record.partition_tag, ins_vct_rd_3.partition_tag);
-    ASSERT_EQ(record.length, ins_vct_rd_3.length);
-    ASSERT_EQ(record.data_size, ins_vct_rd_3.data_size);
+    // write 3 (new file)
+    record[3].type = milvus::engine::wal::MXLogType::InsertBinary;
+    record[3].table_id = "insert_table";
+    record[3].partition_tag = "parti1";
+    record[3].length = 100;
+    record[3].ids = (milvus::engine::IDNumber*)malloc(record[3].length * sizeof(milvus::engine::IDNumber));
+    record[3].data_size = record[3].length * sizeof(uint8_t);
+    record[3].data = malloc(record[3].data_size);
+    ASSERT_EQ(buffer.Append(record[3]), milvus::WAL_SUCCESS);
+    new_file_no = uint32_t(record[3].lsn >> 32);
+    ASSERT_EQ(new_file_no, ++file_no);
 
-    free((void*)ins_vct_rd_2.ids);
-    free((void*)ins_vct_rd_2.data);
-    free((void*)ins_vct_rd_3.ids);
-    free((void*)ins_vct_rd_3.data);
+    // read 2
+    ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(read_rst.type, record[2].type);
+    ASSERT_EQ(read_rst.table_id, record[2].table_id);
+    ASSERT_EQ(read_rst.partition_tag, record[2].partition_tag);
+    ASSERT_EQ(read_rst.length, record[2].length);
+    ASSERT_EQ(memcmp(read_rst.ids, record[2].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
+    ASSERT_EQ(read_rst.data_size, record[2].data_size);
+    ASSERT_EQ(memcmp(read_rst.data, record[2].data, read_rst.data_size), 0);
+
+    // read 3
+    ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(read_rst.type, record[3].type);
+    ASSERT_EQ(read_rst.table_id, record[3].table_id);
+    ASSERT_EQ(read_rst.partition_tag, record[3].partition_tag);
+    ASSERT_EQ(read_rst.length, record[3].length);
+    ASSERT_EQ(memcmp(read_rst.ids, record[3].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
+    ASSERT_EQ(read_rst.data_size, record[3].data_size);
+    ASSERT_EQ(memcmp(read_rst.data, record[3].data, read_rst.data_size), 0);
+
+    for (int i = 0; i < 3; i++) {
+        if (record[i].ids != nullptr) {
+            free((void*)record[i].ids);
+        }
+        if (record[i].data != nullptr) {
+            free((void*)record[i].data);
+        }
+    }
 }
 
 #if 0
