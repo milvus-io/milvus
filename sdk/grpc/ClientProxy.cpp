@@ -24,7 +24,7 @@
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
 //#define GRPC_MULTIPLE_THREAD;
-#define MILVUS_SDK_VERSION "0.6.0";
+#define MILVUS_SDK_VERSION "0.7.0";
 
 namespace milvus {
 bool
@@ -545,6 +545,18 @@ ClientProxy::Flush() {
         return client_ptr_->Flush("");
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to flush");
+    }
+}
+
+Status
+ClientProxy::CompactTable(const std::string& table_name) {
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        Status status = client_ptr_->Compact(grpc_table_name);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to compact table: " + std::string(ex.what()));
     }
 }
 

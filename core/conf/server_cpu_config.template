@@ -198,4 +198,4 @@ wal_config:
   recovery_error_ignore: true
   buffer_size: 128   # MB
   record_size: 2     # MB
-  wal_path:
+  wal_path: /tmp/milvus/wal

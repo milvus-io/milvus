@@ -409,6 +409,24 @@ GrpcClient::Flush(const std::string& table_name) {
 }
 
 Status
+GrpcClient::Compact(milvus::grpc::TableName& table_name) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->Compact(&context, table_name, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "Compact gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
+    return Status::OK();
+}
+
+Status
 GrpcClient::Disconnect() {
     stub_.release();
     return Status::OK();

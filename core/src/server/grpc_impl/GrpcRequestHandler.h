@@ -278,6 +278,15 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request, ::milvus::grpc::Status* response);
 
+    // *
+    // @brief This method is used to compact table
+    //
+    // @param TableName, target table name.
+    //
+    // @return Status
+    ::grpc::Status
+    Compact(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request, ::milvus::grpc::Status* response);
+
     GrpcRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {
         request_handler_ = handler;

@@ -734,7 +734,7 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "7\n\017DeleteByIDParam\022\022\n\ntable_name\030\001 \001(\t\022\020"
   "\n\010id_array\030\002 \003(\003\"J\n\021DeleteByDateParam\022!\n"
   "\005range\030\001 \001(\0132\022.milvus.grpc.Range\022\022\n\ntabl"
-  "e_name\030\002 \001(\t2\202\013\n\rMilvusService\022>\n\013Create"
+  "e_name\030\002 \001(\t2\274\013\n\rMilvusService\022>\n\013Create"
   "Table\022\030.milvus.grpc.TableSchema\032\023.milvus"
   ".grpc.Status\"\000\022<\n\010HasTable\022\026.milvus.grpc"
   ".TableName\032\026.milvus.grpc.BoolReply\"\000\022C\n\r"
@@ -769,7 +769,9 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "am\032\023.milvus.grpc.Status\"\000\022=\n\014PreloadTabl"
   "e\022\026.milvus.grpc.TableName\032\023.milvus.grpc."
   "Status\"\000\0227\n\005Flush\022\027.milvus.grpc.FlushPar"
-  "am\032\023.milvus.grpc.Status\"\000b\006proto3"
+  "am\032\023.milvus.grpc.Status\"\000\0228\n\007Compact\022\026.m"
+  "ilvus.grpc.TableName\032\023.milvus.grpc.Statu"
+  "s\"\000b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[1] = {
   &::descriptor_table_status_2eproto,
@@ -802,7 +804,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 3313,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 3371,
   &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 23, 1,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
   file_level_metadata_milvus_2eproto, 23, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,

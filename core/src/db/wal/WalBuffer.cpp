@@ -136,7 +136,7 @@ MXLogBuffer::Init(uint64_t start_lsn, uint64_t end_lsn) {
         MXLogFileHandler file_handler(mxlog_writer_.GetFilePath());
         file_handler.SetFileName(ToFileName(mxlog_buffer_reader_.file_no));
         file_handler.SetFileOpenMode("r");
-        
+
         auto read_offset = mxlog_buffer_reader_.buf_offset;
         auto read_size = file_handler.Load(buf_[0].get() + read_offset, read_offset);
         mxlog_buffer_reader_.max_offset = read_size + read_offset;

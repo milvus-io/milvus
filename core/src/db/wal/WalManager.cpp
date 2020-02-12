@@ -32,8 +32,8 @@ namespace wal {
 
 WalManager::WalManager(const MXLogConfiguration& config) {
     mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
-    mxlog_config_.buffer_size = config.buffer_size;
-    mxlog_config_.record_size = config.record_size;
+    mxlog_config_.buffer_size = config.buffer_size * 1024 * 1024;
+    mxlog_config_.record_size = config.record_size * 1024 * 1024;
     mxlog_config_.mxlog_path = config.mxlog_path;
 
     // check the path end with '/'

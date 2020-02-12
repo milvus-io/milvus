@@ -211,6 +211,38 @@ DBTest2::GetOptions() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWAL::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
+    options.meta_.path_ = CONFIG_PATH;
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+
+    options.wal_enable_ = true;
+    options.recovery_error_ignore_ = true;
+    options.buffer_size_ = 128;
+    options.record_size_ = 2;
+    options.mxlog_path_ = "/tmp/milvus_test/wal/";
+
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWAL_Recovery_Error::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
+    options.meta_.path_ = CONFIG_PATH;
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+
+    options.wal_enable_ = true;
+    options.recovery_error_ignore_ = false;
+    options.buffer_size_ = 128;
+    options.record_size_ = 2;
+    options.mxlog_path_ = "/tmp/milvus_test/wal/";
+
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 MetaTest::SetUp() {
     BaseTest::SetUp();
