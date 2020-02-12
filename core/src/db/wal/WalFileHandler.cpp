@@ -37,6 +37,24 @@ MXLogFileHandler::OpenFile() {
     return p_file_ != nullptr;
 }
 
+int64_t
+MXLogFileHandler::Load(char* buf, uint32_t data_offset) {
+    if (!IsOpen()) {
+        if (!OpenFile())
+            return -1;
+    }
+
+    auto read_size = (int64_t)GetFileSize() - (int64_t)data_offset;
+    if (read_size < 0) {
+        return -1;
+    }
+
+    fseek(p_file_, data_offset, SEEK_SET);
+    fread(buf, 1, read_size, p_file_);
+
+    return read_size;
+}
+
 bool
 MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
     if (!IsOpen()) {
@@ -44,13 +62,15 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
             return false;
     }
 
-    fseek(p_file_, data_offset, SEEK_SET);
-
     if (data_size != 0) {
-        auto res = fread(buf, 1, data_size, p_file_);
-        return (res == data_size);
-    }
+        auto file_size = GetFileSize();
+        if ((file_size < data_offset) || (file_size - data_offset < data_size)) {
+            return false;
+        }
 
+        fseek(p_file_, data_offset, SEEK_SET);
+        fread(buf, 1, data_size, p_file_);
+    }
     return true;
 }
 
@@ -61,6 +81,7 @@ MXLogFileHandler::Write(char* buf, uint32_t data_size, bool is_sync) {
             return false;
     }
     auto res = fwrite(buf, 1, data_size, p_file_);
+    fflush(p_file_);
     return (res == data_size);
 }
 
