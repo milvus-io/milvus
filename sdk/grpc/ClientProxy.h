@@ -121,6 +121,9 @@ class ClientProxy : public Connection {
     Status
     Flush() override;
 
+    Status
+    CompactTable(const std::string& table_name) override;
+
  private:
     std::shared_ptr<::grpc::Channel> channel_;
     std::shared_ptr<GrpcClient> client_ptr_;

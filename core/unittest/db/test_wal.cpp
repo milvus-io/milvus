@@ -122,7 +122,8 @@ TEST(WalTest, BUFFER_INIT_TEST) {
     uint32_t end_file_no = 3;
     uint32_t end_buf_off = 64;
     uint64_t end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
-    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file not exist
+
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file not exist
     fi = fopen(WAL_GTEST_PATH "3.wal", "w");
     fclose(fi);
     ASSERT_FALSE(buffer.Init(start_lsn, end_lsn));  // file size zero
