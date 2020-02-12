@@ -813,6 +813,74 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
 }
 
 Status
+MySQLMetaImpl::GetTableFilesBySegmentIds(const std::string& table_id, const std::vector<std::string>& segment_ids,
+                                         milvus::engine::meta::TableFilesSchema& table_files) {
+    if (segment_ids.empty()) {
+        return Status::OK();
+    }
+
+    std::stringstream idSS;
+    for (auto& id : segment_ids) {
+        idSS << "segment_id = " << id << " OR ";
+    }
+    std::string idStr = idSS.str();
+    idStr = idStr.substr(0, idStr.size() - 4);  // remove the last " OR "
+
+    try {
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            if (connectionPtr == nullptr) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query getTableFileQuery = connectionPtr->query();
+            getTableFileQuery
+                << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id << " AND ("
+                << idStr << ")"
+                << " AND file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFilesBySegmentIds: " << getTableFileQuery.str();
+
+            res = getTableFileQuery.store();
+        }  // Scoped Connection
+
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        DescribeTable(table_schema);
+
+        Status ret;
+        for (auto& resRow : res) {
+            TableFileSchema file_schema;
+            file_schema.id_ = resRow["id"];
+            file_schema.table_id_ = table_id;
+            resRow["segment_id"].to_string(file_schema.segment_id_);
+            file_schema.index_file_size_ = table_schema.index_file_size_;
+            file_schema.engine_type_ = resRow["engine_type"];
+            file_schema.nlist_ = table_schema.nlist_;
+            file_schema.metric_type_ = table_schema.metric_type_;
+            resRow["file_id"].to_string(file_schema.file_id_);
+            file_schema.file_type_ = resRow["file_type"];
+            file_schema.file_size_ = resRow["file_size"];
+            file_schema.row_count_ = resRow["row_count"];
+            file_schema.date_ = resRow["date"];
+            file_schema.created_on_ = resRow["created_on"];
+            file_schema.dimension_ = table_schema.dimension_;
+
+            utils::GetTableFilePath(options_, file_schema);
+            table_files.emplace_back(file_schema);
+        }
+
+        ENGINE_LOG_DEBUG << "Get table files by segment id";
+        return ret;
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES BY SEGMENT IDS", e.what());
+    }
+}
+
+Status
 MySQLMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& index) {
     try {
         server::MetricCollector metric;

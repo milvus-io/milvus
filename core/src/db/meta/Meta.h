@@ -86,6 +86,10 @@ class Meta {
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) = 0;
 
     virtual Status
+    GetTableFilesBySegmentIds(const std::string& table_id, const std::vector<std::string>& segment_ids,
+                              TableFilesSchema& table_files) = 0;
+
+    virtual Status
     UpdateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status
