@@ -64,6 +64,10 @@ class SqliteMetaImpl : public Meta {
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
 
     Status
+    GetTableFilesBySegmentIds(const std::string& table_id, const std::vector<std::string>& segment_ids,
+                              TableFilesSchema& table_files) override;
+
+    Status
     UpdateTableIndex(const std::string& table_id, const TableIndex& index) override;
 
     Status
