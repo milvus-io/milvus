@@ -30,6 +30,18 @@ MXLogMetaHandler::MXLogMetaHandler(const std::string& internal_meta_file_path) {
     if (wal_meta_fp_ == nullptr) {
         wal_meta_fp_ = fopen(file_full_path.c_str(), "w+");
     }
+    else
+    {
+        uint64_t all_wal_lsn[3] = {0,0,0};
+        fseek(wal_meta_fp_, 0, SEEK_SET);
+        fread(&all_wal_lsn, sizeof(all_wal_lsn), 1, wal_meta_fp_);
+        if(all_wal_lsn[2] == all_wal_lsn[1]){
+            latest_wal_lsn_ = all_wal_lsn[2];
+        }
+        else{
+            latest_wal_lsn_ = all_wal_lsn[0];
+        }
+    }
 }
 
 MXLogMetaHandler::~MXLogMetaHandler() {
@@ -41,16 +53,7 @@ MXLogMetaHandler::~MXLogMetaHandler() {
 
 bool
 MXLogMetaHandler::GetMXLogInternalMeta(uint64_t& wal_lsn) {
-    if (wal_meta_fp_ == nullptr) {
-        return false;
-    }
-
-    // todo: add crc
-    fseek(wal_meta_fp_, 0, SEEK_SET);
-    size_t read_cnt = fread(&wal_lsn, sizeof(wal_lsn), 1, wal_meta_fp_);
-    if (read_cnt != 1) {
-        wal_lsn = 0;
-    }
+    wal_lsn = latest_wal_lsn_;
     return true;
 }
 
@@ -60,10 +63,16 @@ MXLogMetaHandler::SetMXLogInternalMeta(const uint64_t& wal_lsn) {
         return false;
     }
 
-    // todo: add crc
-
+    uint64_t all_wal_lsn[3] = {latest_wal_lsn_,wal_lsn,wal_lsn};
     fseek(wal_meta_fp_, 0, SEEK_SET);
-    return (sizeof(wal_lsn) == fwrite(&wal_lsn, 1, sizeof(wal_lsn), wal_meta_fp_));
+    auto rt_val = fwrite(&all_wal_lsn, 1, sizeof(all_wal_lsn), wal_meta_fp_);
+    if (rt_val == sizeof(all_wal_lsn))
+    {
+        latest_wal_lsn_ = wal_lsn;
+        fflush(wal_meta_fp_);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace wal
