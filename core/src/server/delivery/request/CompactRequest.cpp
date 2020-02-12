@@ -48,7 +48,7 @@ CompactRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        //status = DBWrapper::DB()->Compact(table_name_);
+        // status = DBWrapper::DB()->Compact(table_name_);
         if (!status.ok()) {
             return status;
         }

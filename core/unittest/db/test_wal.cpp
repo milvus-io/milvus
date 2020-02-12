@@ -122,7 +122,7 @@ TEST(WalTest, BUFFER_INIT_TEST) {
     uint32_t end_file_no = 3;
     uint32_t end_buf_off = 64;
     uint64_t end_lsn = (uint64_t)end_file_no << 32 | end_buf_off;
-    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file not exist    
+    ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file not exist
     fi = fopen(WAL_GTEST_PATH "3.wal", "w");
     fclose(fi);
     ASSERT_FALSE(buffer.Init(start_lsn, end_lsn)); // file size zero
@@ -215,7 +215,7 @@ TEST(WalTest, BUFFER_TEST) {
     ASSERT_EQ(memcmp(read_rst.ids, record[0].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
     ASSERT_EQ(read_rst.data_size, record[0].data_size);
     ASSERT_EQ(memcmp(read_rst.data, record[0].data, read_rst.data_size), 0);
-    
+
     // read 1
     ASSERT_EQ(buffer.Next(record[1].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[1].type);
