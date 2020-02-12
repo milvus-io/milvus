@@ -481,15 +481,15 @@ SqliteMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<siz
 }
 
 Status
-SqliteMetaImpl::GetTableFilesBySegmentIds(const std::string& table_id, const std::vector<std::string>& segment_ids,
-                                          milvus::engine::meta::TableFilesSchema& table_files) {
+SqliteMetaImpl::GetTableFilesBySegmentId(const std::string& table_id, const std::string& segment_id,
+                                         milvus::engine::meta::TableFilesSchema& table_files) {
     try {
         table_files.clear();
         auto files = ConnectorPtr->select(
             columns(&TableFileSchema::id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
                     &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
                     &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
-            where(c(&TableFileSchema::table_id_) == table_id and in(&TableFileSchema::segment_id_, segment_ids) and
+            where(c(&TableFileSchema::table_id_) == table_id and c(&TableFileSchema::segment_id_) == segment_id and
                   c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
         TableSchema table_schema;
         table_schema.table_id_ = table_id;

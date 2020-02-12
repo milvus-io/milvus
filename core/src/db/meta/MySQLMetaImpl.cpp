@@ -813,19 +813,8 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
 }
 
 Status
-MySQLMetaImpl::GetTableFilesBySegmentIds(const std::string& table_id, const std::vector<std::string>& segment_ids,
-                                         milvus::engine::meta::TableFilesSchema& table_files) {
-    if (segment_ids.empty()) {
-        return Status::OK();
-    }
-
-    std::stringstream idSS;
-    for (auto& id : segment_ids) {
-        idSS << "segment_id = " << id << " OR ";
-    }
-    std::string idStr = idSS.str();
-    idStr = idStr.substr(0, idStr.size() - 4);  // remove the last " OR "
-
+MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& table_id, const std::string& segment_id,
+                                        milvus::engine::meta::TableFilesSchema& table_files) {
     try {
         mysqlpp::StoreQueryResult res;
         {
@@ -838,11 +827,11 @@ MySQLMetaImpl::GetTableFilesBySegmentIds(const std::string& table_id, const std:
             mysqlpp::Query getTableFileQuery = connectionPtr->query();
             getTableFileQuery
                 << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id << " AND ("
-                << idStr << ")"
-                << " AND file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
+                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
+                << " AND segment_id = " << mysqlpp::quote << segment_id << " AND file_type <> "
+                << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFilesBySegmentIds: " << getTableFileQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFilesBySegmentId: " << getTableFileQuery.str();
 
             res = getTableFileQuery.store();
         }  // Scoped Connection
@@ -876,7 +865,7 @@ MySQLMetaImpl::GetTableFilesBySegmentIds(const std::string& table_id, const std:
         ENGINE_LOG_DEBUG << "Get table files by segment id";
         return ret;
     } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES BY SEGMENT IDS", e.what());
+        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES BY SEGMENT ID", e.what());
     }
 }
 
