@@ -14,7 +14,7 @@ dim = 128
 index_file_size = 10
 table_id = "test_mix"
 add_interval_time = 2
-vectors = gen_vectors(100000, dim)
+vectors = gen_vectors(10000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
 top_k = 1
@@ -80,7 +80,6 @@ class TestMixBase:
         '''
         nq = 10000
         nlist= 16384
-        vectors = gen_vectors(nq, dim)
         table_list = []
         idx = []
 
