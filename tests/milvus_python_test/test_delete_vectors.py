@@ -159,6 +159,70 @@ class TestDeleteBase:
         assert res[1][0].distance < epsilon
         assert res[1][0].id == ids[1]
         assert res[2][0].distance > epsilon
+
+    def test_add_vector_after_delete(self, connect, table):
+        '''
+        method: add vectors and delete, then add vector
+        expected: status ok, vectors deleted, vector added
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        status = connect.flush([table])
+        status, tmp_ids = connect.add_vectors(table, [vectors[0], vectors[-1]])
+        assert status.OK()
+        status = connect.flush([table])
+        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].id == tmp_ids[0]
+        assert res[0][0].distance < epsilon
+        assert res[1][0].distance < epsilon
+        assert res[2][0].id == tmp_ids[-1]
+        assert res[2][0].distance < epsilon
+
+    def test_delete_multiable_times(self, connect, table):
+        '''
+        method: add vectors and delete id serveral times
+        expected: status ok, vectors deleted, and status ok for next delete operation
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        status = connect.flush([table])
+        for i in range(10):
+            status = connect.delete_by_id(table, delete_ids)
+            assert status.OK()
+
+    def test_delete_no_flush_multiable_times(self, connect, table):
+        '''
+        method: add vectors and delete id serveral times
+        expected: status ok, vectors deleted, and status ok for next delete operation
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        for i in range(10):
+            status = connect.delete_by_id(table, delete_ids)
+            assert status.OK()
         
 
 class TestDeleteIndexedVectors:
@@ -329,6 +393,31 @@ class TestDeleteBinary:
         assert res[0][0].id != ids[0]
         assert res[1][0].id == ids[1]
         assert res[2][0].id != ids[-1]
+
+    def test_add_after_delete_vector(self, connect, jac_table):
+        '''
+        method: add vectors and delete, add
+        expected: status ok, vectors added
+        '''
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_table, vectors)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        delete_ids = [ids[0], ids[-1]]
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status = connect.delete_by_id(jac_table, delete_ids)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        status, tmp_ids = connect.add_vectors(jac_table, [vectors[0], vectors[-1]])
+        assert status.OK()
+        status = connect.flush([jac_table])
+        status, res = connect.search_vectors(jac_table, top_k, nprobe, query_vecs)
+        assert status.OK()
+        logging.getLogger().info(res)
+        assert res[0][0].id == tmp_ids[0]
+        assert res[1][0].id == ids[1]
+        assert res[2][0].id == tmp_ids[-1]
 
 
 class TestDeleteIdsIngalid(object):
