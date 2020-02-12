@@ -17,6 +17,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <fiu-local.h>
 
 #include "easyloggingpp/easylogging++.h"
 
@@ -24,6 +25,7 @@ INITIALIZE_EASYLOGGINGPP
 
 int
 main(int argc, char** argv) {
+    fiu_init(0);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

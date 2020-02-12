@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 
@@ -60,6 +61,8 @@ DropPartitionRequest::OnExecute() {
 
     if (!partition_name.empty()) {
         status = ValidationUtil::ValidateTableName(partition_name);
+        fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -68,6 +71,8 @@ DropPartitionRequest::OnExecute() {
         engine::meta::TableSchema table_info;
         table_info.table_id_ = partition_name;
         status = DBWrapper::DB()->DescribeTable(table_info);
+        fiu_do_on("DropPartitionRequest.OnExecute.describe_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST,
@@ -80,11 +85,15 @@ DropPartitionRequest::OnExecute() {
         return DBWrapper::DB()->DropPartition(partition_name);
     } else {
         status = ValidationUtil::ValidateTableName(table_name);
+        fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
         status = ValidationUtil::ValidatePartitionTags({partition_tag});
+        fiu_do_on("DropPartitionRequest.OnExecute.invalid_partition_tags",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

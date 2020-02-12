@@ -54,7 +54,7 @@ class TimeRecorderAuto : public TimeRecorder {
  public:
     explicit TimeRecorderAuto(const std::string& header, int64_t log_level = 1);
 
-    ~TimeRecorderAuto();
+    ~TimeRecorderAuto() override;
 };
 
 }  // namespace milvus

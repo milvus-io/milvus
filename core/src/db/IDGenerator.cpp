@@ -18,6 +18,7 @@
 #include "db/IDGenerator.h"
 
 #include <assert.h>
+#include <fiu-local.h>
 #include <chrono>
 #include <iostream>
 

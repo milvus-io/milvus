@@ -16,6 +16,12 @@
 // under the License.
 
 #include "db/engine/ExecutionEngineImpl.h"
+
+#include <fiu-local.h>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "knowhere/common/Config.h"
@@ -32,10 +38,6 @@
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
 #include "wrapper/VecIndex.h"
-
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
 //#define ON_SEARCH
 namespace milvus {
@@ -138,7 +140,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     server::Config& config = server::Config::GetInstance();
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
+    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled", gpu_resource_enable = false);
 #endif
+
+    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.invalid_type", type = EngineType::INVALID);
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -194,6 +199,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::SPTAG_BKT: {
             index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
+            break;
+        }
+        case EngineType::HNSW: {
+            index = GetVecIndexFactory(IndexType::HNSW);
             break;
         }
         case EngineType::FAISS_BIN_IDMAP: {

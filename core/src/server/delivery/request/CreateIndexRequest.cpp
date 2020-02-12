@@ -22,6 +22,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 
@@ -53,6 +54,8 @@ CreateIndexRequest::OnExecute() {
 
         bool has_table = false;
         status = DBWrapper::DB()->HasTable(table_name_, has_table);
+        fiu_do_on("CreateIndexRequest.OnExecute.not_has_table", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
         if (!status.ok()) {
             return status;
         }
@@ -92,6 +95,9 @@ CreateIndexRequest::OnExecute() {
         bool enable_gpu = false;
         server::Config& config = server::Config::GetInstance();
         s = config.GetGpuResourceConfigEnable(enable_gpu);
+        fiu_do_on("CreateIndexRequest.OnExecute.ip_meteric",
+                  table_info.metric_type_ = static_cast<int>(engine::MetricType::IP));
+
         if (s.ok() && adapter_index_type == (int)engine::EngineType::FAISS_PQ &&
             table_info.metric_type_ == (int)engine::MetricType::IP) {
             return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
@@ -103,6 +109,8 @@ CreateIndexRequest::OnExecute() {
         index.engine_type_ = adapter_index_type;
         index.nlist_ = nlist_;
         status = DBWrapper::DB()->CreateIndex(table_name_, index);
+        fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

@@ -24,8 +24,7 @@ TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : heade
     start_ = last_ = stdclock::now();
 }
 
-TimeRecorder::~TimeRecorder() {
-}
+TimeRecorder::~TimeRecorder() = default;
 
 std::string
 TimeRecorder::GetTimeSpanStr(double span) {
