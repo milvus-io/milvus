@@ -178,6 +178,20 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
     }
 
+    {
+        // delete by id
+        std::vector<int64_t> delete_ids = {search_id_array[0], search_id_array[1]};
+        stat = conn->DeleteByID(TABLE_NAME, delete_ids);
+        std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
+
+        stat = conn->FlushTable(TABLE_NAME);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+
+        // compact table
+        stat = conn->CompactTable(TABLE_NAME);
+        std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+    }
+
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;

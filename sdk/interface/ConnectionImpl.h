@@ -122,6 +122,9 @@ class ConnectionImpl : public Connection {
     Status
     Flush() override;
 
+    Status
+    CompactTable(const std::string& table_name) override;
+
  private:
     std::shared_ptr<ClientProxy> client_proxy_;
 };

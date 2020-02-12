@@ -1579,14 +1579,18 @@ SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
     try {
         server::MetricCollector metric;
 
-        EnvironmentSchema env;
         auto selected = ConnectorPtr->select(columns(&EnvironmentSchema::global_lsn_));
         if (selected.size() == 0) {
+            EnvironmentSchema env;
             env.global_lsn_ = lsn;
             ConnectorPtr->insert(env);
         } else {
-            env.global_lsn_ = lsn;
-            ConnectorPtr->update(env);
+            uint64_t last_lsn = std::get<0>(selected[0]);
+            if (lsn == last_lsn) {
+                return Status::OK();
+            }
+
+            ConnectorPtr->update_all(set(c(&EnvironmentSchema::global_lsn_) = lsn));
         }
 
         ENGINE_LOG_DEBUG << "Update global lsn = " << lsn;

@@ -102,6 +102,9 @@ class RequestHandler {
 
     Status
     Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names);
+
+    Status
+    Compact(const std::shared_ptr<Context>& context, const std::string& table_name);
 };
 
 }  // namespace server

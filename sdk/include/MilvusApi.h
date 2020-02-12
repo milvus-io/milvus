@@ -514,6 +514,18 @@ class Connection {
      */
     virtual Status
     Flush() = 0;
+
+    /**
+     * @brief compact table, remove deleted vectors
+     *
+     * This method is used to compact table
+     *
+     * @param table_name, target table's name.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    CompactTable(const std::string& table_name) = 0;
 };
 
 }  // namespace milvus

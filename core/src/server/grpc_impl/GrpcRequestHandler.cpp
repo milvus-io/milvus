@@ -567,6 +567,17 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
     return ::grpc::Status::OK;
 }
 
+::grpc::Status
+GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                            ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    Status status = request_handler_.Compact(context_map_[context], request->table_name());
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus

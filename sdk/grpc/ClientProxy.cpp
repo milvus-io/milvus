@@ -548,4 +548,16 @@ ClientProxy::Flush() {
     }
 }
 
+Status
+ClientProxy::CompactTable(const std::string& table_name) {
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        Status status = client_ptr_->Compact(grpc_table_name);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to compact table: " + std::string(ex.what()));
+    }
+}
+
 }  // namespace milvus

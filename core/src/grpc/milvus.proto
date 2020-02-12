@@ -391,4 +391,13 @@ service MilvusService {
      * @return Status
      */
     rpc Flush(FlushParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to compact table
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc Compact(TableName) returns (Status) {}
 }
