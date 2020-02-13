@@ -96,6 +96,24 @@ class TestDeleteBase:
         assert status.OK()
         assert res == 0 
 
+    def test_delete_vector_table_count_no_flush(self, connect, table):
+        '''
+        target: test delete vector
+        method: add vector and delete, no flush(using auto flush)
+        expected: status ok, vector deleted
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(table, vector)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.delete_by_id(table, ids)
+        assert status.OK()
+        time.sleep(2)
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        assert res == 0 
+
     def test_delete_vector_id_not_exised(self, connect, table):
         '''
         target: test delete vector, params vector_id not existed
