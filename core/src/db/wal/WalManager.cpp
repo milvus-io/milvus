@@ -32,8 +32,8 @@ namespace wal {
 
 WalManager::WalManager(const MXLogConfiguration& config) {
     mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
-    mxlog_config_.buffer_size = config.buffer_size;
-    mxlog_config_.record_size = config.record_size;
+    mxlog_config_.buffer_size = config.buffer_size * 1024 * 1024;
+    mxlog_config_.record_size = config.record_size * 1024 * 1024;
     mxlog_config_.mxlog_path = config.mxlog_path;
 
     // check the path end with '/'
@@ -57,39 +57,51 @@ WalManager::Init(const meta::MetaPtr& meta) {
     uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     if (p_meta_handler_ != nullptr) {
-        if (!p_meta_handler_->GetMXLogInternalMeta(applied_lsn)) {
-            return WAL_META_ERROR;
-        }
-        last_applied_lsn_ = applied_lsn;
+        p_meta_handler_->GetMXLogInternalMeta(applied_lsn);
     }
 
     uint64_t recovery_start = 0;
     if (meta != nullptr) {
+        meta->GetGlobalLastLSN(recovery_start);
+
         std::vector<meta::TableSchema> table_schema_array;
         auto status = meta->AllTables(table_schema_array);
         if (!status.ok()) {
             return WAL_META_ERROR;
         }
 
-        uint64_t min_flused_lsn = ~0;
-        for (auto schema : table_schema_array) {
-            TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
-            tables_[schema.table_id_] = tb_lsn;
-
-            if (min_flused_lsn > schema.flush_lsn_) {
-                min_flused_lsn = schema.flush_lsn_;
+        if (!table_schema_array.empty()) {
+            // get min and max flushed lsn
+            uint64_t min_flused_lsn = table_schema_array[0].flush_lsn_;
+            uint64_t max_flused_lsn = table_schema_array[0].flush_lsn_;
+            for (size_t i = 1; i < table_schema_array.size(); i++) {
+                if (min_flused_lsn > table_schema_array[i].flush_lsn_) {
+                    min_flused_lsn = table_schema_array[i].flush_lsn_;
+                } else if (max_flused_lsn < table_schema_array[i].flush_lsn_) {
+                    max_flused_lsn = table_schema_array[i].flush_lsn_;
+                }
             }
-        }
+            if (applied_lsn < max_flused_lsn) {
+                // a new WAL folder?
+                applied_lsn = max_flused_lsn;
+            }
+            if (recovery_start < min_flused_lsn) {
+                // not flush all yet
+                recovery_start = min_flused_lsn;
+            }
 
-        meta->GetGlobalLastLSN(recovery_start);
-        if (recovery_start < min_flused_lsn) {
-            recovery_start = min_flused_lsn;
+            for (auto& schema : table_schema_array) {
+                TableLsn tb_lsn = {schema.flush_lsn_, applied_lsn};
+                tables_[schema.table_id_] = tb_lsn;
+            }
         }
     }
 
+    // globalFlushedLsn <= max_flused_lsn is always true,
+    // so recovery_start <= applied_lsn is always true.
+
     ErrorCode error_code = WAL_ERROR;
     p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
-
     if (p_buffer_ != nullptr) {
         if (p_buffer_->Init(recovery_start, applied_lsn)) {
             error_code = WAL_SUCCESS;
@@ -101,6 +113,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
     }
 
+    last_applied_lsn_ = applied_lsn;
     return error_code;
 }
 
@@ -319,6 +332,7 @@ WalManager::Flush(const std::string table_id) {
 
     uint64_t lsn = 0;
     if (table_id.empty()) {
+        // flush all tables
         lck.lock();
         for (auto& it : tables_) {
             if (it.second.wal_lsn > it.second.flush_lsn) {
@@ -328,6 +342,7 @@ WalManager::Flush(const std::string table_id) {
         }
 
     } else {
+        // flush one table
         lck.lock();
         auto it = tables_.find(table_id);
         if (it != tables_.end()) {

@@ -24,7 +24,7 @@
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
 //#define GRPC_MULTIPLE_THREAD;
-#define MILVUS_SDK_VERSION "0.6.0";
+#define MILVUS_SDK_VERSION "0.7.0";
 
 namespace milvus {
 bool

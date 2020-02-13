@@ -747,3 +747,28 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     db_->GetTableRowCount(TABLE_NAME, row_count);
     ASSERT_EQ(row_count, 0UL);
 }
+
+TEST_F(DBTestWAL, DB_TEST) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    for (int i = 0; i < 5; i++) {
+        stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    stat = db_->Flush(table_info.table_id_);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    std::vector<milvus::engine::meta::DateT> dates;
+    stat = db_->DropTable(table_info.table_id_, dates);
+    ASSERT_TRUE(stat.ok());
+}

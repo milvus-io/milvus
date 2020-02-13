@@ -420,7 +420,7 @@ TEST_F(WebHandlerTest, CMD) {
     cmd = "version";
     status_dto = handler->Cmd(cmd, cmd_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
-    ASSERT_EQ("0.6.0", cmd_dto->reply->std_str());
+    ASSERT_EQ("0.7.0", cmd_dto->reply->std_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////

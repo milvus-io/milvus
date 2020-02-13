@@ -40,11 +40,13 @@ class MXLogMetaHandler {
 
     bool
     GetMXLogInternalMeta(uint64_t& wal_lsn);
+
     bool
-    SetMXLogInternalMeta(const uint64_t& wal_lsn);
+    SetMXLogInternalMeta(uint64_t wal_lsn);
 
  private:
     FILE* wal_meta_fp_;
+    uint64_t latest_wal_lsn_ = 0;
 };
 
 using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;

@@ -1499,8 +1499,8 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
             std::set<std::string> flushed_tables;
             status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
-                                             (record.data_size / sizeof(uint8_t)), (const u_int8_t*)record.data,
-                                             record.lsn, flushed_tables);
+                                             (record.data_size / record.length / sizeof(uint8_t)),
+                                             (const u_int8_t*)record.data, record.lsn, flushed_tables);
             // even though !status.ok, run
             tables_flushed(flushed_tables);
             break;
@@ -1514,9 +1514,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             }
 
             std::set<std::string> flushed_tables;
-            status =
-                mem_mgr_->InsertVectors(record.table_id, record.length, record.ids, (record.data_size / sizeof(float)),
-                                        (const float*)record.data, record.lsn, flushed_tables);
+            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
+                                             (record.data_size / record.length / sizeof(float)),
+                                             (const float*)record.data, record.lsn, flushed_tables);
             // even though !status.ok, run
             tables_flushed(flushed_tables);
             break;
