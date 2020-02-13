@@ -119,34 +119,31 @@ WalManager::Init(const meta::MetaPtr& meta) {
 
 ErrorCode
 WalManager::GetNextRecovery(MXLogRecord& record) {
-    ErrorCode error_code = WAL_ERROR;
+    ErrorCode error_code = WAL_SUCCESS;
+    while (true) {
+        error_code = p_buffer_->Next(last_applied_lsn_, record);
+        if (error_code != WAL_SUCCESS) {
+            if (mxlog_config_.recovery_error_ignore) {
+                // reset and break recovery
+                p_buffer_->Reset(last_applied_lsn_);
 
-    if (p_buffer_ != nullptr) {
-        do {
-            error_code = p_buffer_->Next(last_applied_lsn_, record);
-            if (error_code != WAL_SUCCESS) {
-                if (mxlog_config_.recovery_error_ignore) {
-                    // reset and break recovery
-                    p_buffer_->Reset(last_applied_lsn_);
+                record.type = MXLogType::None;
+                error_code = WAL_SUCCESS;
+            }
+            break;
+        }
+        if (record.type == MXLogType::None) {
+            break;
+        }
 
-                    record.type = MXLogType::None;
-                    error_code = WAL_SUCCESS;
-                }
+        // background thread has not started.
+        // so, needn't lock here.
+        auto it = tables_.find(record.table_id);
+        if (it != tables_.end()) {
+            if (it->second.flush_lsn < record.lsn) {
                 break;
             }
-            if (record.type == MXLogType::None) {
-                break;
-            }
-
-            // background thread has not started.
-            // so, needn't lock here.
-            auto it = tables_.find(record.table_id);
-            if (it != tables_.end()) {
-                if (it->second.flush_lsn < record.lsn) {
-                    break;
-                }
-            }
-        } while (true);
+        }
     }
 
     WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
@@ -157,50 +154,52 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
 
 ErrorCode
 WalManager::GetNextRecord(MXLogRecord& record) {
-    ErrorCode error_code = WAL_ERROR;
-
-    if (p_buffer_ != nullptr) {
-        std::unique_lock<std::mutex> lck(mutex_);
+    auto check_flush = [&]() -> bool {
+        std::lock_guard<std::mutex> lck(mutex_);
         if (flush_info_.second != 0) {
             if (p_buffer_->GetReadLsn() >= flush_info_.second) {
                 // can exec flush requirement
                 record.type = MXLogType::Flush;
                 record.lsn = flush_info_.second;
                 record.table_id = flush_info_.first;
-                // clear flush_info_
+                // clear flush_info
                 flush_info_.second = 0;
 
-                WAL_LOG_INFO << "flush lsn " << record.lsn << " flush table " << record.table_id;
-                return WAL_SUCCESS;
+                WAL_LOG_INFO << "record flush table " << record.table_id << " lsn " << record.lsn;
+                return true;
             }
         }
-        lck.unlock();
+        return false;
+    };
 
-        do {
-            error_code = p_buffer_->Next(last_applied_lsn_, record);
-            if (error_code != WAL_SUCCESS || record.type == MXLogType::None) {
-                break;
-            }
-
-            lck.lock();
-            auto it = tables_.find(record.table_id);
-            if (it != tables_.end()) {
-                break;
-            }
-            lck.unlock();
-        } while (true);
+    if (check_flush()) {
+        return WAL_SUCCESS;
     }
 
-    WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
-                 << error_code;
+    ErrorCode error_code = WAL_SUCCESS;
+    while (WAL_SUCCESS == p_buffer_->Next(last_applied_lsn_, record)) {
+        if (record.type == MXLogType::None) {
+            if (check_flush()) {
+                return WAL_SUCCESS;
+            }
+            break;
+        }
 
+        std::lock_guard<std::mutex> lck(mutex_);
+        auto it = tables_.find(record.table_id);
+        if (it != tables_.end()) {
+            break;
+        }
+    }
+
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " table " << record.table_id << " lsn " << record.lsn;
     return error_code;
 }
 
 uint64_t
 WalManager::CreateTable(const std::string& table_id) {
-    WAL_LOG_INFO << "create table " << table_id;
-    std::unique_lock<std::mutex> lck(mutex_);
+    WAL_LOG_INFO << "create table " << table_id << " " << last_applied_lsn_;
+    std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
     tables_[table_id] = {applied_lsn, applied_lsn};
     return applied_lsn;
@@ -209,7 +208,7 @@ WalManager::CreateTable(const std::string& table_id) {
 void
 WalManager::DropTable(const std::string& table_id) {
     WAL_LOG_INFO << "drop table " << table_id;
-    std::unique_lock<std::mutex> lck(mutex_);
+    std::lock_guard<std::mutex> lck(mutex_);
     tables_.erase(table_id);
 }
 
