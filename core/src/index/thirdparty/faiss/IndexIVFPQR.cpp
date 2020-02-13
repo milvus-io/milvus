@@ -14,7 +14,7 @@
 #include <faiss/utils/distances.h>
 
 #include <faiss/impl/FaissAssert.h>
-
+#include <faiss/FaissHook.h>
 
 namespace faiss {
 

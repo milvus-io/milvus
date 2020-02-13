@@ -37,7 +37,7 @@
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/Index2Layer.h>
 #include <faiss/impl/AuxIndexStructures.h>
-
+#include <faiss/FaissHook.h>
 
 extern "C" {
 

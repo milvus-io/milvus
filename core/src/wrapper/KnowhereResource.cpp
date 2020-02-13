@@ -16,6 +16,7 @@
 
 #include "scheduler/Utils.h"
 #include "server/Config.h"
+#include "faiss/FaissHook.h"
 
 #include <fiu-local.h>
 #include <map>
@@ -31,6 +32,8 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
 KnowhereResource::Initialize() {
+    faiss::hook_init();
+
 #ifdef MILVUS_GPU_VERSION
     Status s;
     bool enable_gpu = false;
