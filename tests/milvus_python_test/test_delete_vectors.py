@@ -336,7 +336,7 @@ class TestDeleteBinary:
         status = connect.flush([jac_table])
         status, res = connect.get_table_row_count(jac_table)
         assert status.OK()
-        assert res == 1
+        assert res == 0
 
     def test_delete_vector_id_not_exised(self, connect, jac_table):
         '''
