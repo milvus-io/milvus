@@ -45,6 +45,7 @@ class MXLogMetaHandler {
 
  private:
     FILE* wal_meta_fp_;
+    uint64_t latest_wal_lsn_ = 0;
 };
 
 using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;
