@@ -31,6 +31,8 @@
 #include "db/wal/WalMetaHandler.h"
 #include "utils/Error.h"
 
+namespace {
+
 #define WAL_GTEST_PATH "/tmp/milvus/wal/test/"  // end with '/'
 
 void
@@ -41,6 +43,8 @@ MakeEmptyTestPath() {
         ::system("mkdir -m 777 -p " WAL_GTEST_PATH);
     }
 }
+
+} // namespace
 
 TEST(WalTest, FILE_HANDLER_TEST) {
     MakeEmptyTestPath();
@@ -81,12 +85,42 @@ TEST(WalTest, FILE_HANDLER_TEST) {
 TEST(WalTest, META_HANDLER_TEST) {
     MakeEmptyTestPath();
 
-    milvus::engine::wal::MXLogMetaHandler meta_handler(WAL_GTEST_PATH);
-    uint64_t wal_lsn = 103920;
-    ASSERT_TRUE(meta_handler.SetMXLogInternalMeta(wal_lsn));
-    uint64_t internal_lsn;
-    ASSERT_TRUE(meta_handler.GetMXLogInternalMeta(internal_lsn));
-    ASSERT_EQ(wal_lsn, internal_lsn);
+    uint64_t wal_lsn = 0;
+    uint64_t new_lsn = 103920;
+    milvus::engine::wal::MXLogMetaHandler *meta_handler = nullptr;
+
+    // first start
+    meta_handler = new milvus::engine::wal::MXLogMetaHandler(WAL_GTEST_PATH);
+    ASSERT_TRUE(meta_handler->GetMXLogInternalMeta(wal_lsn));
+    ASSERT_EQ(wal_lsn, 0);
+    delete meta_handler;
+
+    // never write
+    meta_handler = new milvus::engine::wal::MXLogMetaHandler(WAL_GTEST_PATH);
+    ASSERT_TRUE(meta_handler->GetMXLogInternalMeta(wal_lsn));
+    ASSERT_EQ(wal_lsn, 0);
+    // write
+    ASSERT_TRUE(meta_handler->SetMXLogInternalMeta(new_lsn));
+    delete meta_handler;
+
+    // read
+    meta_handler = new milvus::engine::wal::MXLogMetaHandler(WAL_GTEST_PATH);
+    ASSERT_TRUE(meta_handler->GetMXLogInternalMeta(wal_lsn));
+    ASSERT_EQ(wal_lsn, new_lsn);
+    delete meta_handler;
+
+    // read error
+    std::string file_full_path = WAL_GTEST_PATH;
+    file_full_path += milvus::engine::wal::WAL_META_FILE_NAME;
+    FILE *fi = fopen(file_full_path.c_str(), "w");
+    uint64_t w[3] = {3, 4, 3};
+    fwrite(w, sizeof(w), 1, fi);
+    fclose(fi);
+
+    meta_handler = new milvus::engine::wal::MXLogMetaHandler(WAL_GTEST_PATH);
+    ASSERT_TRUE(meta_handler->GetMXLogInternalMeta(wal_lsn));
+    ASSERT_EQ(wal_lsn, 3);
+    delete meta_handler;
 }
 
 TEST(WalTest, BUFFER_INIT_TEST) {

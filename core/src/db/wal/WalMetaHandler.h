@@ -40,8 +40,9 @@ class MXLogMetaHandler {
 
     bool
     GetMXLogInternalMeta(uint64_t& wal_lsn);
+
     bool
-    SetMXLogInternalMeta(const uint64_t& wal_lsn);
+    SetMXLogInternalMeta(uint64_t wal_lsn);
 
  private:
     FILE* wal_meta_fp_;
