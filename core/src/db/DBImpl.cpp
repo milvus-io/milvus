@@ -533,6 +533,11 @@ DBImpl::Flush() {
 }
 
 Status
+DBImpl::Compact(const std::string& table_id) {
+    return Status::OK();
+}
+
+Status
 DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
