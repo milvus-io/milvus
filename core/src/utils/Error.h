@@ -97,6 +97,7 @@ constexpr ErrorCode DB_ALREADY_EXIST = ToDbErrorCode(4);
 constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 constexpr ErrorCode DB_INVALID_META_URI = ToDbErrorCode(7);
+constexpr ErrorCode DB_EMPTY_TABLE = ToDbErrorCode(8);
 
 // knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
