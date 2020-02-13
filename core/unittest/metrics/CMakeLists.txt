@@ -14,6 +14,7 @@
 set(test_files
         test_metricbase.cpp
         test_metrics.cpp
+        test_instructionset.cpp
         utils.cpp
         )
 
