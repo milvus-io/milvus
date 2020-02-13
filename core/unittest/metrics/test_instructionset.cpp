@@ -47,6 +47,7 @@ TEST(InstructionSetTest, INSTRUCTION_SET_TEST) {
     support_message("BMI1",        milvus::server::InstructionSet::BMI1());
     support_message("BMI2",        milvus::server::InstructionSet::BMI2());
     support_message("CLFSH",       milvus::server::InstructionSet::CLFSH());
+    support_message("CMOV",        milvus::server::InstructionSet::CMOV());
     support_message("CMPXCHG16B",  milvus::server::InstructionSet::CMPXCHG16B());
     support_message("CX8",         milvus::server::InstructionSet::CX8());
     support_message("ERMS",        milvus::server::InstructionSet::ERMS());
