@@ -660,6 +660,10 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         for (auto& schema : partition_array) {
             status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
         }
+
+        if (files_array.empty()) {
+            return Status(DB_EMPTY_TABLE, "Table is empty");
+        }
     } else {
         // get files from specified partitions
         std::set<std::string> partition_name_array;
@@ -667,6 +671,10 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
         for (auto& partition_name : partition_name_array) {
             status = GetFilesToSearch(partition_name, ids, dates, files_array);
+        }
+
+        if (files_array.empty()) {
+            return Status(DB_EMPTY_TABLE, "Partition is empty");
         }
     }
 
