@@ -610,7 +610,7 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     }
 
     // Drop index again, in case some files were in the index building process during compaction
-    // TODO: might be too frequent
+    // TODO: might be too frequent?
     DropIndex(table_id);
 
     // Update table files state
