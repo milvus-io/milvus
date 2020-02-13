@@ -98,6 +98,9 @@ class DB {
     virtual Status
     Flush() = 0;
 
+    virtual Status
+    Compact(const std::string& table_id) = 0;
+
     //    virtual Status
     //    Merge(const std::set<std::string>& table_ids) = 0;
 

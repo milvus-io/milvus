@@ -107,6 +107,9 @@ class DBImpl : public DB {
     Status
     Flush() override;
 
+    Status
+    Compact(const std::string& table_id) override;
+
     //    Status
     //    Merge(const std::set<std::string>& table_ids) override;
 
