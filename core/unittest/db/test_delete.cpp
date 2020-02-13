@@ -388,3 +388,58 @@ TEST_F(DeleteTest, delete_add_create_index) {
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
+
+TEST_F(DeleteTest, compact_basic) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 100;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    stat = db_->InsertVectors(GetTableName(), "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    std::vector<milvus::engine::IDNumber> ids_to_delete;
+    ids_to_delete.emplace_back(xb.id_array_.front());
+    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t row_count;
+    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, 9);
+
+    stat = db_->Compact(GetTableName());
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 1, nprobe = 1;
+
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+    milvus::engine::VectorsData qb = xb;
+    qb.float_data_.resize(TABLE_DIM);
+    qb.vector_count_ = 1;
+    qb.id_array_.clear();
+    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, qb, result_ids, result_distances);
+
+    ASSERT_EQ(result_ids[0], xb2.id_array_.front());
+    ASSERT_LT(result_distances[0], 1e-4);
+
+    result_ids.clear();
+    result_distances.clear();
+    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_delete.front(), result_ids,
+                          result_distances);
+    ASSERT_EQ(result_ids[0], -1);
+    ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
+}
