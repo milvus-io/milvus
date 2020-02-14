@@ -33,36 +33,29 @@ MXLogFileHandler::~MXLogFileHandler() {
 
 bool
 MXLogFileHandler::OpenFile() {
-    p_file_ = fopen((file_path_ + file_name_).c_str(), file_mode_.c_str());
-    return p_file_ != nullptr;
+    if (p_file_ == nullptr) {
+        p_file_ = fopen((file_path_ + file_name_).c_str(), file_mode_.c_str());
+    }
+    return (p_file_ != nullptr);
 }
 
-int64_t
+uint32_t
 MXLogFileHandler::Load(char* buf, uint32_t data_offset) {
-    if (!IsOpen()) {
-        if (!OpenFile())
-            return -1;
+    uint32_t read_size = 0;
+    if (OpenFile()) {
+        uint32_t file_size = GetFileSize();
+        if (file_size > data_offset) {
+            read_size = file_size - data_offset;
+            fseek(p_file_, data_offset, SEEK_SET);
+            fread(buf, 1, read_size, p_file_);
+        }
     }
-
-    auto read_size = (int64_t)GetFileSize() - (int64_t)data_offset;
-    if (read_size < 0) {
-        return -1;
-    }
-
-    fseek(p_file_, data_offset, SEEK_SET);
-    fread(buf, 1, read_size, p_file_);
-
     return read_size;
 }
 
 bool
 MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
-    if (!IsOpen()) {
-        if (!OpenFile())
-            return false;
-    }
-
-    if (data_size != 0) {
+    if (OpenFile() && data_size != 0) {
         auto file_size = GetFileSize();
         if ((file_size < data_offset) || (file_size - data_offset < data_size)) {
             return false;
@@ -76,32 +69,29 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
 
 bool
 MXLogFileHandler::Write(char* buf, uint32_t data_size, bool is_sync) {
-    if (!IsOpen()) {
-        if (!OpenFile())
-            return false;
+    uint32_t written_size = 0;
+    if (OpenFile() && data_size != 0) {
+        written_size = fwrite(buf, 1, data_size, p_file_);
+        fflush(p_file_);
     }
-    auto res = fwrite(buf, 1, data_size, p_file_);
-    fflush(p_file_);
-    return (res == data_size);
+    return (written_size == data_size);
 }
 
 bool
-MXLogFileHandler::ReBorn(const std::string& file_name) {
+MXLogFileHandler::ReBorn(const std::string& file_name, const std::string& open_mode) {
     CloseFile();
     SetFileName(file_name);
+    SetFileOpenMode(open_mode);
     return OpenFile();
 }
 
 bool
 MXLogFileHandler::CloseFile() {
-    bool rst = true;
     if (p_file_ != nullptr) {
-        rst = (fclose(p_file_) == 0);
-        if (rst) {
-            p_file_ = nullptr;
-        }
+        fclose(p_file_);
+        p_file_ = nullptr;
     }
-    return rst;
+    return true;
 }
 
 std::string
@@ -112,11 +102,6 @@ MXLogFileHandler::GetFilePath() {
 std::string
 MXLogFileHandler::GetFileName() {
     return file_name_;
-}
-
-bool
-MXLogFileHandler::IsOpen() {
-    return p_file_ != NULL;
 }
 
 uint32_t
