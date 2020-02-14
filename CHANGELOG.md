@@ -34,6 +34,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#813 - Add push mode for prometheus monitor
 - \#815 - Support MinIO storage
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
+- \#853 - Support HNSW
 - \#910 - Change Milvus c++ standard to c++17
 
 ## Improvement
