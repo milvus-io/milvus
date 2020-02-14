@@ -363,6 +363,104 @@ TEST(WalTest, BUFFER_TEST) {
     }
 }
 
+TEST(WalTest, MANAGER_INIT_TEST) {
+    MakeEmptyTestPath();
+
+    milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
+    milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
+
+    milvus::engine::meta::TableSchema table_schema_1;
+    table_schema_1.table_id_ = "table1";
+    table_schema_1.flush_lsn_ = (uint64_t)1 << 32 | 60;
+    meta->CreateTable(table_schema_1);
+
+    milvus::engine::meta::TableSchema table_schema_2;
+    table_schema_2.table_id_ = "table2";
+    table_schema_2.flush_lsn_ = (uint64_t)1 << 32 | 20;
+    meta->CreateTable(table_schema_2);
+
+    milvus::engine::meta::TableSchema table_schema_3;
+    table_schema_3.table_id_ = "table3";
+    table_schema_3.flush_lsn_ = (uint64_t)2 << 32 | 40;
+    meta->CreateTable(table_schema_3);
+
+    milvus::engine::wal::MXLogConfiguration wal_config;
+    wal_config.mxlog_path = WAL_GTEST_PATH;
+    wal_config.mxlog_path.pop_back();
+    wal_config.record_size = 2;
+    wal_config.buffer_size = 64;
+    wal_config.recovery_error_ignore = false;
+
+    std::shared_ptr<milvus::engine::wal::WalManager> manager;
+    manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_FILE_ERROR);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_reader_.file_no, 1);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_reader_.buf_offset, 20);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_writer_.file_no, 2);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_writer_.buf_offset, 40);
+
+    wal_config.recovery_error_ignore = true;
+    manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
+    ASSERT_EQ(manager->last_applied_lsn_, table_schema_3.flush_lsn_);
+}
+
+TEST(WalTest, MANAGER_RECOVERY_TEST) {
+    MakeEmptyTestPath();
+
+    milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
+    milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
+
+    milvus::engine::wal::MXLogConfiguration wal_config;
+    wal_config.mxlog_path = WAL_GTEST_PATH;
+    wal_config.record_size = 2;
+    wal_config.buffer_size = 64;
+    wal_config.recovery_error_ignore = true;
+
+    std::shared_ptr<milvus::engine::wal::WalManager> manager;
+    manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
+
+    milvus::engine::meta::TableSchema schema;
+    schema.table_id_ = "table";
+    schema.flush_lsn_ = 0;
+    meta->CreateTable(schema);
+
+    std::vector<int64_t> ids(1024, 0);
+    std::vector<float> data_float(1024 * 512, 0);
+    manager->CreateTable(schema.table_id_);
+    ASSERT_TRUE(manager->Insert(schema.table_id_, "", ids, data_float));
+
+    // recovery
+    manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
+
+    milvus::engine::wal::MXLogRecord record;
+    while (1) {
+        ASSERT_EQ(manager->GetNextRecovery(record), milvus::WAL_SUCCESS);
+        if (record.type == milvus::engine::wal::MXLogType::None) {
+            break;
+        }
+        ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::InsertVector);
+        ASSERT_EQ(record.table_id, schema.table_id_);
+        ASSERT_EQ(record.partition_tag, "");
+    }
+
+    // change read, write point to let error happen
+    uint32_t write_file_no = 10;
+    manager->p_buffer_->mxlog_buffer_writer_.file_no = write_file_no;
+    manager->p_buffer_->mxlog_buffer_writer_.buf_offset = 0;
+    manager->p_buffer_->mxlog_buffer_writer_.buf_idx = 1 - manager->p_buffer_->mxlog_buffer_reader_.buf_idx;
+    manager->p_buffer_->mxlog_buffer_reader_.max_offset == manager->p_buffer_->mxlog_buffer_reader_.buf_offset;
+    manager->last_applied_lsn_ = (uint64_t) write_file_no << 32;
+    // error happen and reset
+    ASSERT_EQ(manager->GetNextRecovery(record), milvus::WAL_SUCCESS);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_reader_.file_no, write_file_no);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_reader_.buf_offset, 0);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_writer_.file_no, write_file_no);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_writer_.buf_offset, 0);
+}
+
 TEST(WalTest, MANAGER_TEST) {
     MakeEmptyTestPath();
 
