@@ -21,11 +21,11 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-#include <utility>
-
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
+#include <fiu-local.h>
+#include <utility>
 
 namespace knowhere {
 
@@ -300,7 +300,7 @@ IVFSQHybrid::SerializeImpl() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-
+    fiu_do_on("IVFSQHybrid.SerializeImpl.zero_gpu_mode", gpu_mode = 0);
     if (gpu_mode == 0) {
         MemoryIOWriter writer;
         faiss::write_index(index_.get(), &writer);

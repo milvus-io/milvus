@@ -21,6 +21,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 
 namespace milvus {
@@ -38,6 +39,7 @@ DropIndexRequest::Create(const std::shared_ptr<Context>& context, const std::str
 Status
 DropIndexRequest::OnExecute() {
     try {
+        fiu_do_on("DropIndexRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "DropIndexRequest(table=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
@@ -49,6 +51,7 @@ DropIndexRequest::OnExecute() {
 
         bool has_table = false;
         status = DBWrapper::DB()->HasTable(table_name_, has_table);
+        fiu_do_on("DropIndexRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -59,6 +62,7 @@ DropIndexRequest::OnExecute() {
 
         // step 2: check table existence
         status = DBWrapper::DB()->DropIndex(table_name_);
+        fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

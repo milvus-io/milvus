@@ -42,6 +42,8 @@
 #define THREAD_MULTIPLY_CPU 1
 #endif
 
+#include <fiu-local.h>
+
 namespace milvus {
 namespace server {
 
@@ -62,6 +64,8 @@ CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
     thread_count *= THREAD_MULTIPLY_CPU;
+    fiu_do_on("CommonUtil.GetSystemAvailableThreads.zero_thread", thread_count = 0);
+
     if (thread_count == 0) {
         thread_count = 8;
     }
@@ -95,6 +99,7 @@ CommonUtil::CreateDirectory(const std::string& path) {
     fs::path fs_path(path);
     fs::path parent_path = fs_path.parent_path();
     Status err_status = CreateDirectory(parent_path.string());
+    fiu_do_on("CommonUtil.CreateDirectory.create_parent_fail", err_status = Status(SERVER_INVALID_ARGUMENT, ""));
     if (!err_status.ok()) {
         return err_status;
     }
@@ -105,6 +110,7 @@ CommonUtil::CreateDirectory(const std::string& path) {
     }
 
     int makeOK = mkdir(path.c_str(), S_IRWXU | S_IRGRP | S_IROTH);
+    fiu_do_on("CommonUtil.CreateDirectory.create_dir_fail", makeOK = 1);
     if (makeOK != 0) {
         return Status(SERVER_UNEXPECTED_ERROR, "failed to create directory: " + path);
     }
@@ -183,6 +189,7 @@ CommonUtil::GetExePath() {
     const size_t buf_len = 1024;
     char buf[buf_len];
     size_t cnt = readlink("/proc/self/exe", buf, buf_len);
+    fiu_do_on("CommonUtil.GetExePath.readlink_fail", cnt = -1);
     if (cnt < 0 || cnt >= buf_len) {
         return "";
     }
@@ -190,6 +197,7 @@ CommonUtil::GetExePath() {
     buf[cnt] = '\0';
 
     std::string exe_path = buf;
+    fiu_do_on("CommonUtil.GetExePath.exe_path_error", exe_path = "/");
     if (exe_path.rfind('/') != exe_path.length() - 1) {
         std::string sub_str = exe_path.substr(0, exe_path.rfind('/'));
         return sub_str + "/";

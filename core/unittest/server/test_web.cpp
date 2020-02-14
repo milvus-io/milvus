@@ -413,12 +413,13 @@ TEST_F(WebHandlerTest, CMD) {
     auto cmd_dto = milvus::server::web::CommandDto::createShared();
 
     cmd = "status";
-    auto status_dto = handler->Cmd(cmd, cmd_dto);
+    OQueryParams query_params;
+    auto status_dto = handler->Cmd(cmd, query_params, cmd_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ("OK", cmd_dto->reply->std_str());
 
     cmd = "version";
-    status_dto = handler->Cmd(cmd, cmd_dto);
+    status_dto = handler->Cmd(cmd, query_params, cmd_dto);
     ASSERT_EQ(0, status_dto->code->getValue());
     ASSERT_EQ("0.6.0", cmd_dto->reply->std_str());
 }
@@ -547,7 +548,7 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("PUT", "/tables/{table_name}/vectors", search,
              PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::SearchRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"))
+    API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"), QUERY(String, action), QUERY(String, target))
 
 #include OATPP_CODEGEN_END(ApiClient)
 };
@@ -1122,11 +1123,27 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
 }
 
 TEST_F(WebControllerTest, CMD) {
-    auto response = client_ptr->cmd("status", conncetion_ptr);
+    auto response = client_ptr->cmd("status", "", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
-    response = client_ptr->cmd("version", conncetion_ptr);
+    response = client_ptr->cmd("version", "", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->cmd("mode", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->cmd("tasktable", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->cmd("info", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    GenTable("test_cmd", 16, 10, "L2");
+    response = client_ptr->cmd("task", "load", "test_cmd", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    // task without existing table
+    response = client_ptr->cmd("task", "load", "test_cmdXXXXXXXXXXXX", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, ADVANCED_CONFIG) {

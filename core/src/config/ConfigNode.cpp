@@ -19,6 +19,7 @@
 #include "utils/Error.h"
 #include "utils/Log.h"
 
+#include <fiu-local.h>
 #include <algorithm>
 #include <sstream>
 #include <string>

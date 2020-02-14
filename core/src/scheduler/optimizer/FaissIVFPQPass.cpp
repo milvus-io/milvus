@@ -24,6 +24,8 @@
 #include "server/Config.h"
 #include "utils/Log.h"
 
+#include <fiu-local.h>
+
 namespace milvus {
 namespace scheduler {
 
@@ -37,7 +39,7 @@ FaissIVFPQPass::Init() {
     }
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
-        throw;
+        throw std::exception();
     }
 #endif
 }

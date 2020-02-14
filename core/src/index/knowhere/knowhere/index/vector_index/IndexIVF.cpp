@@ -29,6 +29,7 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
+#include <fiu-local.h>
 #include <chrono>
 #include <memory>
 #include <utility>
@@ -119,6 +120,8 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
 
     try {
+        fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
+        fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
         auto elems = rows * search_cfg->k;
 
         size_t p_id_size = sizeof(int64_t) * elems;

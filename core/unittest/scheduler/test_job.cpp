@@ -15,46 +15,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include <gtest/gtest.h>
 
-#include <chrono>
-#include <string>
+#include "scheduler/job/Job.h"
+#include "scheduler/job/BuildIndexJob.h"
+#include "scheduler/job/DeleteJob.h"
+#include "scheduler/job/SearchJob.h"
 
 namespace milvus {
-
-class TimeRecorder {
-    using stdclock = std::chrono::high_resolution_clock;
-
+namespace scheduler {
+class TestJob : public Job {
  public:
-    explicit TimeRecorder(const std::string& header, int64_t log_level = 1);
-
-    virtual ~TimeRecorder();  // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
-
-    double
-    RecordSection(const std::string& msg);
-
-    double
-    ElapseFromBegin(const std::string& msg);
-
-    static std::string
-    GetTimeSpanStr(double span);
-
- private:
-    void
-    PrintTimeRecord(const std::string& msg, double span);
-
- private:
-    std::string header_;
-    stdclock::time_point start_;
-    stdclock::time_point last_;
-    int64_t log_level_;
+    TestJob() : Job(JobType::INVALID) {}
 };
 
-class TimeRecorderAuto : public TimeRecorder {
- public:
-    explicit TimeRecorderAuto(const std::string& header, int64_t log_level = 1);
+TEST(JobTest, TestJob) {
+    engine::DBOptions options;
+    auto build_index_ptr = std::make_shared<BuildIndexJob>(nullptr, options);
+    build_index_ptr->Dump();
+    build_index_ptr->AddToIndexFiles(nullptr);
 
-    ~TimeRecorderAuto() override;
-};
+    TestJob test_job;
+    test_job.Dump();
 
+    auto delete_ptr = std::make_shared<DeleteJob>("table_id", nullptr, 1);
+    delete_ptr->Dump();
+
+    engine::VectorsData vectors;
+    auto search_ptr = std::make_shared<SearchJob>(nullptr, 1, 1, vectors);
+    search_ptr->Dump();
+    search_ptr->AddIndexFile(nullptr);
+}
+
+}  // namespace scheduler
 }  // namespace milvus

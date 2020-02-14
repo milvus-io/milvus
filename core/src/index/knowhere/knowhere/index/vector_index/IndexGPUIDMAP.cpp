@@ -21,6 +21,7 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
+#include <fiu-local.h>
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -61,6 +62,7 @@ GPUIDMAP::CopyGpuToCpu(const Config& config) {
 BinarySet
 GPUIDMAP::SerializeImpl() {
     try {
+        fiu_do_on("GPUIDMP.SerializeImpl.throw_exception", throw std::exception());
         MemoryIOWriter writer;
         {
             faiss::Index* index = index_.get();

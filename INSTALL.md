@@ -78,33 +78,33 @@ $ ./stop_server.sh
 
 ## Compile Milvus on Docker
 
-With the following Docker images, you should be able to compile Milvus on any Linux platform that run Docker. To build a GPU supported Milvus, you neeed to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
+With the following Docker images, you should be able to compile Milvus on any Linux platform that run Docker. To build a GPU supported Milvus, you need to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
 
 ### Step 1 Pull Milvus Docker images
 
 Pull CPU-only image:
 
 ```shell
-$ docker pull milvusdb/milvus-cpu-build-env:v0.6.0-ubuntu18.04
+$ docker pull milvusdb/milvus-cpu-build-env:latest
 ```
 
 Pull GPU-enabled image:
 
 ```shell
-$ docker pull milvusdb/milvus-gpu-build-env:v0.6.0-ubuntu18.04
+$ docker pull milvusdb/milvus-gpu-build-env:latest
 ```
 ### Step 2 Start the Docker container
 
 Start a CPU-only container:
 
 ```shell
-$ docker run -it -p 19530:19530 -d milvusdb/milvus-cpu-build-env:v0.6.0-ubuntu18.04
+$ docker run -it -p 19530:19530 -d milvusdb/milvus-cpu-build-env:latest
 ```
 
 Start a GPU container:
 
 ```shell
-$ docker run --runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:v0.6.0-ubuntu18.04
+$ docker run --runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
 ```
 To enter the container:
 
@@ -113,37 +113,35 @@ $ docker exec -it [container_id] bash
 ```
 ### Step 3 Download Milvus source code
 
-Download Milvus source code:
+Download latest Milvus source code:
 
 ```shell
 $ cd /home
-$ wget https://github.com/milvus-io/milvus/archive/0.6.0.tar.gz
+$ git clone https://github.com/milvus-io/milvus
 ```
 
-Extract the source package:
+To enter its core directory:
 
 ```shell
-$ tar xvf ./v0.6.0.tar.gz
+$ cd ./milvus/core
 ```
 
-The source code is extracted into a folder called `milvus-0.6.0`. To enter its core directory:
-
-```shell
-$ cd ./milvus-0.6.0/core
-```
 ### Step 4 Compile Milvus in the container
 
 If you are using a CPU-only image, compile it like this:
+
 ```shell
 $ ./build.sh -t Release
 ```
 
 If you are using a GPU-enabled image, you need to add a `-g` parameter:
+
 ```shell
 $ ./build.sh -g -t Release
 ```
 
 Then start Milvus server：
+
 ```shell
 $ ./start_server.sh
 ```
@@ -160,3 +158,5 @@ Then try reinstalling the latest CMake from source with `--system-curl` option:
    $ sudo make install
    ```
 If the `--system-curl` command doesn't work, you can also reinstall CMake in **Ubuntu Software** on your local computer.
+
+2. If you encounter the following error when compiling in a Docker image: `internal compiler error`. Try increasing the memory allocated to docker.

@@ -32,12 +32,6 @@ class CommandDto: public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, reply, "reply");
 };
 
-class CmdFieldsDto : public OObject {
-    DTO_INIT(CmdFieldsDto, Object)
-
-    DTO_FIELD(Fields<String>::ObjectWrapper, reply);
-};
-
 #include OATPP_CODEGEN_END(DTO)
 
 } // namespace web
