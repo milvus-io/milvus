@@ -543,12 +543,22 @@ DBImpl::Compact(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
+    bool has_table;
+    auto status = HasTable(table_id, has_table);
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+        return Status(DB_NOT_FOUND, "Table to compact does not exist");
+    }
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
+
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
 
     // Drop all index
-    auto status = DropIndex(table_id);
+    status = DropIndex(table_id);
     if (!status.ok()) {
-        std::string err_msg = "Failed to drop index in compact: " + status.ToString();
+        std::string err_msg = "Failed to drop index in compact: " + status.message();
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
@@ -558,7 +568,7 @@ DBImpl::Compact(const std::string& table_id) {
     meta::TableFilesSchema files_to_compact;
     status = meta_ptr_->FilesByType(table_id, file_types, files_to_compact);
     if (!status.ok()) {
-        std::string err_msg = "Failed to get files to compact: " + status.ToString();
+        std::string err_msg = "Failed to get files to compact: " + status.message();
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
@@ -588,7 +598,7 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     Status status = meta_ptr_->CreateTableFile(compacted_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
+        ENGINE_LOG_ERROR << "Failed to create table file: " << status.message();
         return status;
     }
 
