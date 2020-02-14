@@ -291,7 +291,7 @@ class TestCompactBase:
         assert status.OK()
 
 
-class TestCompactBinary:
+class TestCompactJAC:
     """
     ******************************************************************
       The following cases are used to test `compact` function
@@ -435,3 +435,149 @@ class TestCompactBinary:
         logging.getLogger().info(res)
         assert status.OK()
 
+
+class TestCompactIP:
+    """
+    ******************************************************************
+      The following cases are used to test `compact` function
+    ******************************************************************
+    """
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_and_compact(self, connect, ip_table):
+        '''
+        target: test add vector and compact 
+        method: add vector and compact table
+        expected: status ok, vector added
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(ip_table, vector)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_delete_and_compact(self, connect, ip_table):
+        '''
+        target: test add vector, delete it and compact 
+        method: add vector, delete it and compact table
+        expected: status ok, vectors added and deleted
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(ip_table, vector)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.delete_by_id(ip_table, ids)
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+    
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_and_compact_twice(self, connect, ip_table):
+        '''
+        target: test add vector and compact twice
+        method: add vector and compact table twice
+        expected: status ok
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(ip_table, vector)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_delete_and_compact_twice(self, connect, ip_table):
+        '''
+        target: test add vector, delete it and compact twice
+        method: add vector, delete it and compact table twice
+        expected: status ok, vectors added and deleted
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(ip_table, vector)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.delete_by_id(ip_table, ids)
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_after_compact(self, connect, ip_table):
+        '''
+        target: test add vector after compact 
+        method: after compact operation, add vector
+        expected: status ok, vector added
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(ip_table, vectors)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(ip_table, vector)
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_delete_vectors_after_compact(self, connect, ip_table):
+        '''
+        target: test delete vectors after compact
+        method: after compact operation, delete vectors
+        expected: status ok, vectors deleted
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(ip_table, vectors)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.delete_by_id(ip_table, ids)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_search_after_compact(self, connect, ip_table):
+        '''
+        target: test search after compact
+        method: after compact operation, search vector
+        expected: status ok
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(ip_table, vectors)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        status = connect.compact(ip_table)
+        assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        query_vecs = [vectors[0]]
+        status, res = connect.search_vectors(ip_table, top_k, nprobe, query_vecs) 
+        logging.getLogger().info(res)
+        assert status.OK()
+
+    
