@@ -21,6 +21,7 @@
 #include <segment/SegmentReader.h>
 #include <wrapper/VecIndex.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -101,6 +102,8 @@ MemTable::GetTableFileCount() {
 
 Status
 MemTable::Serialize(uint64_t wal_lsn) {
+    auto start = std::chrono::high_resolution_clock::now();
+
     if (!doc_ids_to_delete_.empty()) {
         auto status = ApplyDeletes();
         if (!status.ok()) {
@@ -115,6 +118,9 @@ MemTable::Serialize(uint64_t wal_lsn) {
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
+
+        ENGINE_LOG_DEBUG << "Flushed segment " << (*mem_table_file)->GetSegmentId();
+
         {
             std::lock_guard<std::mutex> lock(mutex_);
             mem_table_file = mem_table_file_list_.erase(mem_table_file);
@@ -128,6 +134,10 @@ MemTable::Serialize(uint64_t wal_lsn) {
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Finished flushing for table " << table_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }
@@ -169,6 +179,10 @@ MemTable::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
+    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
     meta::TableFilesSchema table_files;
@@ -196,10 +210,14 @@ MemTable::ApplyDeletes() {
         }
     }
 
+    ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes";
+
     meta::TableFilesSchema table_files_to_update;
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
+
+        ENGINE_LOG_DEBUG << "Applying deletes in segment: " << table_file.segment_id_;
 
         std::string segment_dir;
         utils::GetParentPath(table_file.location_, segment_dir);
@@ -233,7 +251,10 @@ MemTable::ApplyDeletes() {
                 delete_count++;
 
                 deleted_docs->AddDeletedDoc(i);
-                id_bloom_filter_ptr->Remove(uids[i]);
+
+                if (id_bloom_filter_ptr->Check(uids[i])) {
+                    id_bloom_filter_ptr->Remove(uids[i]);
+                }
 
                 if (blacklist != nullptr) {
                     if (!blacklist->test(i)) {
@@ -253,10 +274,14 @@ MemTable::ApplyDeletes() {
         if (!status.ok()) {
             break;
         }
+        ENGINE_LOG_DEBUG << "Appended " << deleted_docs->GetSize()
+                         << " deleted docs in segment: " << table_file.segment_id_;
+
         status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
             break;
         }
+        ENGINE_LOG_DEBUG << "Updated bloom filter in segment: " << table_file.segment_id_;
 
         // Update table file row count
         auto& segment_id = table_file.segment_id_;
@@ -275,6 +300,7 @@ MemTable::ApplyDeletes() {
     }
 
     status = meta_->UpdateTableFiles(table_files_to_update);
+    ENGINE_LOG_DEBUG << "Updated meta in table: " << table_id_;
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
@@ -283,6 +309,10 @@ MemTable::ApplyDeletes() {
     }
 
     doc_ids_to_delete_.clear();
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Finished applying deletes in table " << table_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }

@@ -585,3 +585,8 @@ TEST_F(DeleteTest, compact_with_index) {
         ASSERT_GT(result_distances[0], 1);
     }
 }
+
+TEST_F(DeleteTest, compact_non_existing_table) {
+    auto status = db_->Compact("non_existing_table");
+    ASSERT_FALSE(status.ok());
+}

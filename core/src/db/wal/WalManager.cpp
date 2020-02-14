@@ -156,14 +156,13 @@ ErrorCode
 WalManager::GetNextRecord(MXLogRecord& record) {
     auto check_flush = [&]() -> bool {
         std::lock_guard<std::mutex> lck(mutex_);
-        if (flush_info_.second != 0) {
-            if (p_buffer_->GetReadLsn() >= flush_info_.second) {
+        if (flush_info_.IsValid()) {
+            if (p_buffer_->GetReadLsn() >= flush_info_.lsn_) {
                 // can exec flush requirement
                 record.type = MXLogType::Flush;
-                record.lsn = flush_info_.second;
-                record.table_id = flush_info_.first;
-                // clear flush_info
-                flush_info_.second = 0;
+                record.table_id = flush_info_.table_id_;
+                record.lsn = flush_info_.lsn_;
+                flush_info_.Clear();
 
                 WAL_LOG_INFO << "record flush table " << record.table_id << " lsn " << record.lsn;
                 return true;
@@ -324,15 +323,14 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 
 uint64_t
 WalManager::Flush(const std::string table_id) {
-    std::unique_lock<std::mutex> lck(mutex_, std::defer_lock);
+    std::lock_guard<std::mutex> lck(mutex_);
     // At most one flush requirement is waiting at any time.
     // Otherwise, flush_info_ should be modified to a list.
-    __glibcxx_assert(flush_info_.second == 0);
+    __glibcxx_assert(!flush_info_.IsValid());
 
     uint64_t lsn = 0;
     if (table_id.empty()) {
         // flush all tables
-        lck.lock();
         for (auto& it : tables_) {
             if (it.second.wal_lsn > it.second.flush_lsn) {
                 lsn = last_applied_lsn_;
@@ -342,7 +340,6 @@ WalManager::Flush(const std::string table_id) {
 
     } else {
         // flush one table
-        lck.lock();
         auto it = tables_.find(table_id);
         if (it != tables_.end()) {
             if (it->second.wal_lsn > it->second.flush_lsn) {
@@ -352,10 +349,9 @@ WalManager::Flush(const std::string table_id) {
     }
 
     if (lsn != 0) {
-        flush_info_.first = table_id;
-        flush_info_.second = lsn;
+        flush_info_.table_id_ = table_id;
+        flush_info_.lsn_ = lsn;
     }
-    lck.unlock();
 
     WAL_LOG_INFO << table_id << " want to be flush, lsn " << lsn;
 

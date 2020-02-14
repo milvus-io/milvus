@@ -56,6 +56,9 @@ class MemTableFile {
     Status
     Serialize(uint64_t wal_lsn);
 
+    const std::string&
+    GetSegmentId() const;
+
  private:
     Status
     CreateTableFile();

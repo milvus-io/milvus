@@ -66,10 +66,13 @@ class GrpcClient {
     DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
 
     int64_t
-    CountTable(const std::string& table_name, Status& status);
+    CountTable(grpc::TableName& table_name, Status& status);
 
     Status
     ShowTables(milvus::grpc::TableNameList& table_name_list);
+
+    Status
+    ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info);
 
     Status
     Cmd(std::string& result, const std::string& cmd);

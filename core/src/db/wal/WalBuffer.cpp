@@ -295,10 +295,6 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
         MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath());
         mxlog_reader.SetFileName(ToFileName(mxlog_buffer_reader_.file_no));
         mxlog_reader.SetFileOpenMode("r");
-        if (!mxlog_reader.OpenFile()) {
-            WAL_LOG_ERROR << "read wal file error " << mxlog_buffer_reader_.file_no;
-            return WAL_FILE_ERROR;
-        }
         auto file_size = mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0);
         if (file_size <= 0) {
             WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.file_no;
