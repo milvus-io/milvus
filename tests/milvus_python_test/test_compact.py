@@ -371,7 +371,7 @@ class TestCompactJAC:
         '''
         nq = 100
         num_tables = 50
-        vectors = gen_binary_vectors(nq, dim)
+        tmp, vectors = gen_binary_vectors(nq, dim)
         table_list = []
         for i in range(num_tables):
             table_name = gen_unique_str("test_compact_multi_table_%d" % i)
