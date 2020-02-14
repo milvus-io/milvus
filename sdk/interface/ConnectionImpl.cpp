@@ -117,6 +117,11 @@ ConnectionImpl::ShowTables(std::vector<std::string>& table_array) {
     return client_proxy_->ShowTables(table_array);
 }
 
+Status
+ConnectionImpl::ShowTableInfo(const std::string& table_name, TableInfo& table_info) {
+    return client_proxy_->ShowTableInfo(table_name, table_info);
+}
+
 std::string
 ConnectionImpl::ServerVersion() const {
     return client_proxy_->ServerVersion();

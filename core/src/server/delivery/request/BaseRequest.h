@@ -113,6 +113,23 @@ struct PartitionParam {
     }
 };
 
+struct SegmentStat {
+    std::string name_;
+    int64_t row_num_ = 0;
+};
+
+struct TableStat {
+    std::string table_name_;
+    int64_t total_row_num_ = 0;
+    std::vector<SegmentStat> segments_stat_;
+};
+
+struct TableInfo {
+    int64_t total_row_num_ = 0;
+    TableStat native_stat_;
+    std::vector<TableStat> partitions_stat_;
+};
+
 class BaseRequest {
  protected:
     BaseRequest(const std::shared_ptr<Context>& context, const std::string& request_group, bool async = false);

@@ -41,6 +41,7 @@
 #include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
+#include "server/delivery/request/ShowTableInfoRequest.h"
 #include "server/delivery/request/ShowTablesRequest.h"
 
 namespace milvus {
@@ -93,6 +94,15 @@ RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::strin
 Status
 RequestHandler::ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables) {
     BaseRequestPtr request_ptr = ShowTablesRequest::Create(context, tables);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::ShowTableInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
+                              TableInfo& table_info) {
+    BaseRequestPtr request_ptr = ShowTableInfoRequest::Create(context, table_name, table_info);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

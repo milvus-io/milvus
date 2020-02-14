@@ -54,6 +54,9 @@ class RequestHandler {
     ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
 
     Status
+    ShowTableInfo(const std::shared_ptr<Context>& context, const std::string& table_name, TableInfo& table_info);
+
+    Status
     Search(const std::shared_ptr<Context>& context, const std::string& table_name, const engine::VectorsData& vectors,
            const std::vector<Range>& range_list, int64_t topk, int64_t nprobe,
            const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
