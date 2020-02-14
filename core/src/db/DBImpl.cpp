@@ -243,6 +243,59 @@ DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
 }
 
 Status
+DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // step1: get all partition ids
+    std::vector<std::string> table_names = {table_id};
+    std::vector<meta::TableSchema> partition_array;
+    auto status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
+        table_names.push_back(schema.table_id_);
+    }
+
+    // step2: get native table info
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::INDEX};
+
+    for (auto& name : table_names) {
+        meta::TableFilesSchema table_files;
+        status = meta_ptr_->FilesByType(table_id, file_types, table_files);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to get table info: " + status.ToString();
+            ENGINE_LOG_ERROR << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+
+        if (name == table_id) {
+            table_info.native_stat_.name_ = table_id;
+
+            for (auto& file : table_files) {
+                SegmentStat seg_stat;
+                seg_stat.name_ = file.segment_id_;
+                seg_stat.row_count_ = (int64_t)file.row_count_;
+                table_info.native_stat_.segments_stat_.emplace_back(seg_stat);
+            }
+        } else {
+            TableStat table_stat;
+            table_stat.name_ = name;
+
+            for (auto& file : table_files) {
+                SegmentStat seg_stat;
+                seg_stat.name_ = file.segment_id_;
+                seg_stat.row_count_ = (int64_t)file.row_count_;
+                table_stat.segments_stat_.emplace_back(seg_stat);
+            }
+            table_info.partitions_stat_.emplace_back(table_stat);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 DBImpl::PreloadTable(const std::string& table_id) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;

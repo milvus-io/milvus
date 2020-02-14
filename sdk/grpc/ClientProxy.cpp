@@ -46,6 +46,18 @@ CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
     }
 }
 
+void ConstructTableStat(const ::milvus::grpc::TableStat& grpc_table_stat, TableStat& table_stat) {
+    table_stat.table_name = grpc_table_stat.table_name();
+    table_stat.row_count = grpc_table_stat.total_row_count();
+    for (int i = 0; i < grpc_table_stat.segments_stat_size(); i++) {
+        auto& grpc_seg_stat = grpc_table_stat.segments_stat(i);
+        SegmentStat seg_stat;
+        seg_stat.row_count = grpc_seg_stat.row_count();
+        seg_stat.segment_name = grpc_seg_stat.segment_name();
+        table_stat.segments_stat.emplace_back(seg_stat);
+    }
+}
+
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -340,7 +352,9 @@ Status
 ClientProxy::CountTable(const std::string& table_name, int64_t& row_count) {
     try {
         Status status;
-        row_count = client_ptr_->CountTable(table_name, status);
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        row_count = client_ptr_->CountTable(grpc_table_name, status);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to show tables: " + std::string(ex.what()));
@@ -361,6 +375,33 @@ ClientProxy::ShowTables(std::vector<std::string>& table_array) {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to show tables: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::ShowTableInfo(const std::string& table_name, TableInfo& table_info) {
+    try {
+        Status status;
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        milvus::grpc::TableInfo grpc_table_info;
+        status = client_ptr_->ShowTableInfo(grpc_table_name, grpc_table_info);
+
+        // get native info
+        table_info.total_row_count = grpc_table_info.total_row_count();
+        ConstructTableStat(grpc_table_info.native_stat(), table_info.native_stat);
+
+        // get partitions info
+        for (int i = 0; i < grpc_table_info.partitions_stat_size(); i++) {
+            auto& grpc_table_stat = grpc_table_info.partitions_stat(i);
+            TableStat partition_stat;
+            ConstructTableStat(grpc_table_stat, partition_stat);
+            table_info.partitions_stat.emplace_back(partition_stat);
+        }
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to show table info: " + std::string(ex.what()));
     }
 }
 

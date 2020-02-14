@@ -195,12 +195,10 @@ GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema, const std::s
 }
 
 int64_t
-GrpcClient::CountTable(const std::string& table_name, Status& status) {
+GrpcClient::CountTable(grpc::TableName& table_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::TableRowCount response;
-    ::milvus::grpc::TableName grpc_tablename;
-    grpc_tablename.set_table_name(table_name);
-    ::grpc::Status grpc_status = stub_->CountTable(&context, grpc_tablename, &response);
+    ::grpc::Status grpc_status = stub_->CountTable(&context, table_name, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "CountTable rpc failed!" << std::endl;
@@ -233,6 +231,26 @@ GrpcClient::ShowTables(milvus::grpc::TableNameList& table_name_list) {
     if (table_name_list.status().error_code() != grpc::SUCCESS) {
         std::cerr << table_name_list.status().reason() << std::endl;
         return Status(StatusCode::ServerFailed, table_name_list.status().reason());
+    }
+
+    return Status::OK();
+}
+
+Status
+GrpcClient::ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info) {
+    ClientContext context;
+    ::milvus::grpc::Command command;
+    ::grpc::Status grpc_status = stub_->ShowTableInfo(&context, table_name, &table_info);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "ShowTableInfo gRPC failed!" << std::endl;
+        std::cerr << grpc_status.error_message() << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (table_info.status().error_code() != grpc::SUCCESS) {
+        std::cerr << table_info.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, table_info.status().reason());
     }
 
     return Status::OK();
