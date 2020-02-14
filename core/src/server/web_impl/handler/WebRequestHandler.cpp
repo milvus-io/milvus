@@ -746,15 +746,40 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
+WebRequestHandler::Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto) {
     std::string info = cmd->std_str();
+    auto status = Status::OK();
+
+    // TODO: (yhz) now only support load table into memory, may remove in the future
+    if ("task" == info) {
+        auto action = query_params.get("action");
+        if (nullptr == action.get()) {
+            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'action\' is required in url \'/system/task\'");
+        }
+        std::string action_str = action->std_str();
+
+        auto target = query_params.get("target");
+        if (nullptr == target.get()) {
+            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'target\' is required in url \'/system/task\'");
+        }
+        std::string target_str = target->std_str();
+
+        if ("load" == action_str) {
+            status = request_handler_.PreloadTable(context_ptr_, target_str);
+        } else {
+            std::string error_msg = std::string("Unknown action value \'") + action_str + "\'";
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, error_msg.c_str());
+        }
+
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
     if ("info" == info) {
         info = "get_system_info";
     }
 
     std::string reply_str;
-    auto status = CommandLine(info, reply_str);
+    status = CommandLine(info, reply_str);
 
     if (status.ok()) {
         cmd_dto->reply = reply_str.c_str();
