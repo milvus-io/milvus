@@ -26,18 +26,6 @@ namespace web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class RowRecordDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(RowRecordDto, Object)
-
-    DTO_FIELD(List<Float32>::ObjectWrapper, record);
-};
-
-class RecordsDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(RecordsDto, Object)
-
-    DTO_FIELD(List<RowRecordDto::ObjectWrapper>::ObjectWrapper, records);
-};
-
 class SearchRequestDto : public OObject {
     DTO_INIT(SearchRequestDto, Object)
 
