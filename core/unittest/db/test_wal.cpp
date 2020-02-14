@@ -95,6 +95,7 @@ TEST(WalTest, FILE_HANDLER_TEST) {
 
     std::string file_name = "1.wal";
     milvus::engine::wal::MXLogFileHandler file_handler(WAL_GTEST_PATH);
+    file_handler.SetFilePath(WAL_GTEST_PATH);
     file_handler.SetFileName(file_name);
     file_handler.SetFileOpenMode("w");
     ASSERT_FALSE(file_handler.FileExists());
@@ -153,7 +154,7 @@ TEST(WalTest, META_HANDLER_TEST) {
     ASSERT_EQ(wal_lsn, new_lsn);
     delete meta_handler;
 
-    // read error
+    // read error and nullptr point
     std::string file_full_path = WAL_GTEST_PATH;
     file_full_path += milvus::engine::wal::WAL_META_FILE_NAME;
     FILE *fi = fopen(file_full_path.c_str(), "w");
@@ -164,6 +165,12 @@ TEST(WalTest, META_HANDLER_TEST) {
     meta_handler = new milvus::engine::wal::MXLogMetaHandler(WAL_GTEST_PATH);
     ASSERT_TRUE(meta_handler->GetMXLogInternalMeta(wal_lsn));
     ASSERT_EQ(wal_lsn, 3);
+
+    if (meta_handler->wal_meta_fp_ != nullptr) {
+        fclose(meta_handler->wal_meta_fp_);
+        meta_handler->wal_meta_fp_ = nullptr;
+    }
+    meta_handler->SetMXLogInternalMeta(4);
     delete meta_handler;
 }
 
@@ -451,7 +458,7 @@ TEST(WalTest, MANAGER_RECOVERY_TEST) {
     manager->p_buffer_->mxlog_buffer_writer_.file_no = write_file_no;
     manager->p_buffer_->mxlog_buffer_writer_.buf_offset = 0;
     manager->p_buffer_->mxlog_buffer_writer_.buf_idx = 1 - manager->p_buffer_->mxlog_buffer_reader_.buf_idx;
-    manager->p_buffer_->mxlog_buffer_reader_.max_offset == manager->p_buffer_->mxlog_buffer_reader_.buf_offset;
+    manager->p_buffer_->mxlog_buffer_reader_.max_offset = manager->p_buffer_->mxlog_buffer_reader_.buf_offset;
     manager->last_applied_lsn_ = (uint64_t) write_file_no << 32;
     // error happen and reset
     ASSERT_EQ(manager->GetNextRecovery(record), milvus::WAL_SUCCESS);
