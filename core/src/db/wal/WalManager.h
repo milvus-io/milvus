@@ -136,7 +136,18 @@ class WalManager {
     std::atomic<uint64_t> last_applied_lsn_;
 
     // if multi-thread call Flush(), use list
-    std::pair<std::string, uint64_t> flush_info_;
+    struct FlushInfo {
+        std::string table_id_;
+        uint64_t lsn_ = 0;
+
+        bool IsValid() {
+            return (lsn_ != 0);
+        }
+        void Clear() {
+            lsn_ = 0;
+        }
+    };
+    FlushInfo flush_info_;
 };
 
 extern template bool
