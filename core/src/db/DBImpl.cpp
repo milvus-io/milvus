@@ -763,7 +763,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         }
 
         if (files_array.empty()) {
-            return Status(DB_EMPTY_TABLE, "Table is empty");
+            return Status::OK();
         }
     } else {
         // get files from specified partitions
@@ -775,7 +775,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         }
 
         if (files_array.empty()) {
-            return Status(DB_EMPTY_TABLE, "Partition is empty");
+            return Status::OK();
         }
     }
 
