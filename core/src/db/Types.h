@@ -55,5 +55,20 @@ struct VectorsData {
 using File2RefCount = std::map<std::string, int64_t>;
 using Table2Files = std::map<std::string, File2RefCount>;
 
+struct SegmentStat {
+    std::string name_;
+    int64_t row_count_ = 0;
+};
+
+struct TableStat {
+    std::string name_;
+    std::vector<SegmentStat> segments_stat_;
+};
+
+struct TableInfo {
+    TableStat native_stat_;
+    std::vector<TableStat> partitions_stat_;
+};
+
 }  // namespace engine
 }  // namespace milvus

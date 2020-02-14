@@ -32,6 +32,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#815 - Support MinIO storage
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#910 - Change Milvus c++ standard to c++17
+- \#1204 - Add api to get table data information
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install

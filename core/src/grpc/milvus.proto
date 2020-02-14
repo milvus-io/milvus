@@ -202,6 +202,34 @@ message DeleteByDateParam {
     string table_name = 2;
 }
 
+/**
+ * @brief segment statistics
+ */
+message SegmentStat {
+    string segment_name = 1;
+    int64 row_count = 2;
+}
+
+/**
+ * @brief table statistics
+ */
+message TableStat {
+    string table_name = 1;
+    int64 total_row_count = 2;
+    repeated SegmentStat segments_stat = 3;
+}
+
+/**
+ * @brief table information
+ */
+message TableInfo {
+    Status status = 1;
+    int64 total_row_count = 2;
+    TableStat native_stat = 3;
+    repeated TableStat partitions_stat = 4;
+}
+
+
 service MilvusService {
     /**
      * @brief This method is used to create table
@@ -247,6 +275,15 @@ service MilvusService {
      * @return TableNameList
      */
     rpc ShowTables(Command) returns (TableNameList) {}
+
+    /**
+     * @brief This method is used to get table detail information.
+     *
+     * @param TableName, target table name.
+     *
+     * @return TableInfo
+     */
+    rpc ShowTableInfo(TableName) returns (TableInfo) {}
 
     /**
      * @brief This method is used to delete table.

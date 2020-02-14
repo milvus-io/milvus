@@ -430,6 +430,18 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::g
 }
 
 ::grpc::Status
+GrpcRequestHandler::ShowTableInfo(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                                  ::milvus::grpc::TableInfo* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    TableInfo table_info;
+    Status status = request_handler_.ShowTableInfo(context_map_[context], request->table_name(), table_info);
+    SET_RESPONSE(response->mutable_status(), status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                         ::milvus::grpc::StringReply* response) {
     CHECK_NULLPTR_RETURN(request);

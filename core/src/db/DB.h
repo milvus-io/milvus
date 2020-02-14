@@ -62,6 +62,9 @@ class DB {
     AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
 
     virtual Status
+    GetTableInfo(const std::string& table_id, TableInfo& table_info) = 0;
+
+    virtual Status
     GetTableRowCount(const std::string& table_id, uint64_t& row_count) = 0;
 
     virtual Status
