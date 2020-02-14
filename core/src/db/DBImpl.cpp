@@ -534,7 +534,108 @@ DBImpl::Flush() {
 
 Status
 DBImpl::Compact(const std::string& table_id) {
-    return Status::OK();
+    // TODO: WAL???
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // Drop all index
+    auto status = DropIndex(table_id);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to drop index in compact: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    // Get files to compact from meta.
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX};
+    meta::TableFilesSchema files_to_compact;
+    status = meta_ptr_->FilesByType(table_id, file_types, files_to_compact);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get files to compact: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    ongoing_files_checker_.MarkOngoingFiles(files_to_compact);
+    for (auto& file : files_to_compact) {
+        status = CompactFile(table_id, file);
+    }
+    ongoing_files_checker_.UnmarkOngoingFiles(files_to_compact);
+
+    return status;
+}
+
+Status
+DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file) {
+    ENGINE_LOG_DEBUG << "Compact file " << file.file_id_ << "for table: " << table_id;
+
+    // Create new table file
+    meta::TableFileSchema table_file;
+    table_file.table_id_ = table_id;
+    // table_file.date_ = date;
+    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
+    Status status = meta_ptr_->CreateTableFile(table_file);
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
+        return status;
+    }
+
+    // Compact (merge) file to the newly created table file
+    meta::TableFilesSchema updated;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(table_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
+
+    std::string segment_dir_to_merge;
+    utils::GetParentPath(file.location_, segment_dir_to_merge);
+    segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
+
+    auto file_schema = file;
+    file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
+    updated.emplace_back(file_schema);
+
+    // Serialize
+    status = segment_writer_ptr->Serialize();
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
+        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        status = meta_ptr_->UpdateTableFile(table_file);
+        if (status.ok()) {
+            ENGINE_LOG_DEBUG << "Mark file: " << table_file.file_id_ << " to to_delete";
+        }
+        return status;
+    }
+
+    // Drop index again, in case some files were in the index building process during compaction
+    // TODO: might be too frequent?
+    DropIndex(table_id);
+
+    // Update table files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
+                                    ? meta::TableFileSchema::TO_INDEX
+                                    : meta::TableFileSchema::RAW;
+    } else {
+        table_file.file_type_ = meta::TableFileSchema::RAW;
+    }
+    table_file.file_size_ = segment_writer_ptr->Size();
+    table_file.row_count_ = segment_writer_ptr->VectorCount();
+
+    updated.emplace_back(table_file);
+    status = meta_ptr_->UpdateTableFiles(updated);
+    ENGINE_LOG_DEBUG << "New compacted segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
+                     << " bytes";
+
+    if (options_.insert_cache_immediately_) {
+        segment_writer_ptr->Cache();
+    }
+
+    return status;
 }
 
 Status
@@ -662,7 +763,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         }
 
         if (files_array.empty()) {
-            return Status(DB_EMPTY_TABLE, "Table is empty");
+            return Status::OK();
         }
     } else {
         // get files from specified partitions
@@ -674,7 +775,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         }
 
         if (files_array.empty()) {
-            return Status(DB_EMPTY_TABLE, "Partition is empty");
+            return Status::OK();
         }
     }
 

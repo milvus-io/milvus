@@ -25,6 +25,7 @@
 #include <sstream>
 #include <thread>
 
+#include "db/meta/SqliteMetaImpl.h"
 #include "db/wal/WalBuffer.h"
 #include "db/wal/WalFileHandler.h"
 #include "db/wal/WalManager.h"
@@ -45,6 +46,49 @@ MakeEmptyTestPath() {
 }
 
 } // namespace
+
+namespace milvus {
+namespace engine {
+namespace meta {
+
+class TestWalMeta : public SqliteMetaImpl {
+ public:
+    explicit TestWalMeta(const DBMetaOptions& options) : SqliteMetaImpl(options) {
+    }
+
+    Status
+    CreateTable(TableSchema& table_schema) override {
+        tables_.push_back(table_schema);
+        return Status::OK();
+    }
+
+    Status
+    AllTables(std::vector<TableSchema>& table_schema_array) override {
+        table_schema_array = tables_;
+        return Status::OK();
+    }
+
+    Status
+    SetGlobalLastLSN(uint64_t lsn) override {
+        global_lsn_ = lsn;
+        return Status::OK();
+    }
+
+    Status
+    GetGlobalLastLSN(uint64_t& lsn) override {
+        lsn = global_lsn_;
+        return Status::OK();
+    }
+
+ private:
+    std::vector<TableSchema> tables_;
+    uint64_t global_lsn_ = 0;
+};
+
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus
+
 
 TEST(WalTest, FILE_HANDLER_TEST) {
     MakeEmptyTestPath();
@@ -319,37 +363,94 @@ TEST(WalTest, BUFFER_TEST) {
     }
 }
 
-#if 0
 TEST(WalTest, MANAGER_TEST) {
+    MakeEmptyTestPath();
+
+    milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
+    milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
+
     milvus::engine::wal::MXLogConfiguration wal_config;
-    wal_config.mxlog_path = "/tmp/milvus/wal/";
-    wal_config.record_size = 2 * 1024 * 1024;
-    wal_config.buffer_size = 32 * 1024 * 1024;
+    wal_config.mxlog_path = WAL_GTEST_PATH;
+    wal_config.record_size = 2;
+    wal_config.buffer_size = 64;
     wal_config.recovery_error_ignore = true;
 
-    milvus::engine::wal::WalManager manager(wal_config);
-    manager.Init(nullptr);
-    std::string table_id = "manager_test";
-    std::string partition_tag = "parti2";
-    milvus::engine::IDNumbers vec_ids;
-    std::vector<float> vecs;
-    vec_ids.emplace_back(1);
-    vec_ids.emplace_back(2);
-    vecs.emplace_back(1.2);
-    vecs.emplace_back(3.4);
-    vecs.emplace_back(5.6);
-    vecs.emplace_back(7.8);
+    // first run
+    std::shared_ptr<milvus::engine::wal::WalManager> manager =
+        std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_reader_.file_no, 0);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_reader_.buf_offset, 0);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_writer_.file_no, 0);
+    ASSERT_EQ(manager->p_buffer_->mxlog_buffer_writer_.buf_offset, 0);
 
-    manager.CreateTable(table_id);
-    auto ins_res = manager.Insert(table_id, partition_tag, vec_ids, vecs);
-    ASSERT_TRUE(ins_res);
-    milvus::engine::IDNumbers del_ids;
-    del_ids.emplace_back(2);
-    auto del_ret = manager.DeleteById(table_id, del_ids);
-    ASSERT_TRUE(del_ret);
-    manager.Flush(table_id);
+    std::vector<int64_t> ids(1024, 0);
+    std::vector<float> data_float(1024 * 512, 0);
+    std::vector<uint8_t> data_byte(1024 * 512, 0);
+
+    // table1 create and insert
+    std::string table_id_1 = "table1";
+    manager->CreateTable(table_id_1);
+    ASSERT_TRUE(manager->Insert(table_id_1, "", ids, data_float));
+
+    // table2 create and insert
+    std::string table_id_2 = "table2";
+    manager->CreateTable(table_id_2);
+    ASSERT_TRUE(manager->Insert(table_id_2, "", ids, data_byte));
+
+    // table1 delete
+    ASSERT_TRUE(manager->DeleteById(table_id_1, ids));
+
+    // table3 create and insert
+    std::string table_id_3 = "table3";
+    manager->CreateTable(table_id_3);
+    ASSERT_TRUE(manager->Insert(table_id_3, "", ids, data_float));
+
+    // flush table1
+    auto flush_lsn = manager->Flush(table_id_1);
+    ASSERT_NE(flush_lsn, 0);
+
+    milvus::engine::wal::MXLogRecord record;
+    uint64_t new_lsn = 0;
+
+    while (1) {
+        ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
+        if (record.type == milvus::engine::wal::MXLogType::Flush) {
+            ASSERT_EQ(record.table_id, table_id_1);
+            ASSERT_EQ(new_lsn, flush_lsn);
+            manager->TableFlushed(table_id_1, new_lsn);
+            break;
+
+        } else {
+            ASSERT_TRUE((record.type == milvus::engine::wal::MXLogType::InsertVector &&
+                             record.table_id == table_id_1) ||
+                        (record.type == milvus::engine::wal::MXLogType::Delete &&
+                             record.table_id == table_id_1) ||
+                        (record.type == milvus::engine::wal::MXLogType::InsertBinary &&
+                             record.table_id == table_id_2));
+            new_lsn = record.lsn;
+        }
+    }
+
+    flush_lsn = manager->Flush(table_id_2);
+    ASSERT_NE(flush_lsn, 0);
+
+    ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
+    ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
+    ASSERT_EQ(record.table_id, table_id_2);
+    manager->TableFlushed(table_id_2, flush_lsn);
+    ASSERT_EQ(manager->Flush(table_id_2), 0);
+
+    flush_lsn = manager->Flush();
+    ASSERT_NE(flush_lsn, 0);
+    manager->DropTable(table_id_3);
+
+    ASSERT_EQ(manager->GetNextRecord(record), milvus::WAL_SUCCESS);
+    ASSERT_EQ(record.type, milvus::engine::wal::MXLogType::Flush);
+    ASSERT_TRUE(record.table_id.empty());
 }
 
+#if 0
 TEST(WalTest, LargeScaleRecords) {
     std::string data_path = "/home/zilliz/workspace/data/";
     milvus::engine::wal::MXLogConfiguration wal_config;
