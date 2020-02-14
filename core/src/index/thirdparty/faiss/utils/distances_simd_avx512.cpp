@@ -32,7 +32,7 @@ static inline __m128 masked_read (int d, const float *x) {
 }
 #endif
 
-#ifdef USE_AVX_512
+#if (defined(__AVX512F__) && defined(__AVX512DQ__))
 
 float fvec_inner_product_avx512 (const float * x,
                           const float * y,
