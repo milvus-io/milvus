@@ -426,9 +426,9 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         vector_id = get_vector_id
-        ids = [vector_id for i in range(nq)]
-        with pytest.raises(Exception) as e:
-            status, ids = connect.add_vectors(table, vectors, ids)
+        ids = [vector_id for _ in range(nq)]
+        with pytest.raises(Exception):
+            connect.add_vectors(table, vectors, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_add_vectors(self, connect, table):
@@ -591,7 +591,7 @@ class TestAddBase:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vector = gen_single_vector(dim)
@@ -599,7 +599,7 @@ class TestAddBase:
         loop_num = 5
         processes = []
         def add():
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
