@@ -140,10 +140,12 @@ class WalManager {
         std::string table_id_;
         uint64_t lsn_ = 0;
 
-        bool IsValid() {
+        bool
+        IsValid() {
             return (lsn_ != 0);
         }
-        void Clear() {
+        void
+        Clear() {
             lsn_ = 0;
         }
     };

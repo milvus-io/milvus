@@ -512,7 +512,7 @@ DBImpl::Flush() {
         return SHUTDOWN_ERROR;
     }
 
-    ENGINE_LOG_DEBUG << "Flushing all tables";
+    // ENGINE_LOG_DEBUG << "Flushing all tables";
 
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
@@ -562,6 +562,8 @@ DBImpl::Compact(const std::string& table_id) {
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
+    ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
 
     ongoing_files_checker_.MarkOngoingFiles(files_to_compact);
     for (auto& file : files_to_compact) {

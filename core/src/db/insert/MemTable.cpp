@@ -115,11 +115,13 @@ MemTable::Serialize(uint64_t wal_lsn) {
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
+
+        ENGINE_LOG_DEBUG << "Flushed segment " << (*mem_table_file)->GetSegmentId();
+
         {
             std::lock_guard<std::mutex> lock(mutex_);
             mem_table_file = mem_table_file_list_.erase(mem_table_file);
         }
-        ENGINE_LOG_DEBUG << "Flushed segment " << (*mem_table_file)->GetSegmentId();
     }
 
     // Update flush lsn

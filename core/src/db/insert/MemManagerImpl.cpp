@@ -165,7 +165,6 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids) {
     }
 
     meta_->SetGlobalLastLSN(max_lsn);
-    ENGINE_LOG_DEBUG << "Flushed all " << temp_immutable_list.size() << " tables";
 
     return Status::OK();
 }
