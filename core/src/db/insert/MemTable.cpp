@@ -119,6 +119,7 @@ MemTable::Serialize(uint64_t wal_lsn) {
             std::lock_guard<std::mutex> lock(mutex_);
             mem_table_file = mem_table_file_list_.erase(mem_table_file);
         }
+        ENGINE_LOG_DEBUG << "Flushed segment " << (*mem_table_file)->GetSegmentId();
     }
 
     // Update flush lsn
@@ -169,6 +170,8 @@ MemTable::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
+    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
+
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
     meta::TableFilesSchema table_files;
@@ -196,10 +199,14 @@ MemTable::ApplyDeletes() {
         }
     }
 
+    ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes";
+
     meta::TableFilesSchema table_files_to_update;
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
+
+        ENGINE_LOG_DEBUG << "Applying deletes in segment: " << table_file.segment_id_;
 
         std::string segment_dir;
         utils::GetParentPath(table_file.location_, segment_dir);
@@ -253,10 +260,14 @@ MemTable::ApplyDeletes() {
         if (!status.ok()) {
             break;
         }
+        ENGINE_LOG_DEBUG << "Appended " << deleted_docs->GetSize()
+                         << " deleted docs in segment: " << table_file.segment_id_;
+
         status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
             break;
         }
+        ENGINE_LOG_DEBUG << "Updated bloom filter in segment: " << table_file.segment_id_;
 
         // Update table file row count
         auto& segment_id = table_file.segment_id_;
@@ -275,6 +286,7 @@ MemTable::ApplyDeletes() {
     }
 
     status = meta_->UpdateTableFiles(table_files_to_update);
+    ENGINE_LOG_DEBUG << "Updated meta in table: " << table_id_;
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();

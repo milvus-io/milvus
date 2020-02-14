@@ -139,6 +139,8 @@ MemManagerImpl::Flush(const std::string& table_id) {
         mem->Serialize(max_lsn);
     }
 
+    ENGINE_LOG_DEBUG << "Flushed table " << table_id;
+
     return Status::OK();
 }
 
@@ -156,10 +158,14 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids) {
     table_ids.clear();
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
+        ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
         mem->Serialize(max_lsn);
         table_ids.insert(mem->GetTableId());
+        ENGINE_LOG_DEBUG << "Flushed table " << mem->GetTableId();
     }
+
     meta_->SetGlobalLastLSN(max_lsn);
+    ENGINE_LOG_DEBUG << "Flushed all " << temp_immutable_list.size() << " tables";
 
     return Status::OK();
 }

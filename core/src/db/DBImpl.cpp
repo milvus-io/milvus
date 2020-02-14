@@ -484,6 +484,8 @@ DBImpl::Flush(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
+    ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
+
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
@@ -509,6 +511,8 @@ DBImpl::Flush() {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
+
+    ENGINE_LOG_DEBUG << "Flushing all tables";
 
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
@@ -539,6 +543,8 @@ DBImpl::Compact(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
+    ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+
     // Drop all index
     auto status = DropIndex(table_id);
     if (!status.ok()) {
@@ -563,19 +569,21 @@ DBImpl::Compact(const std::string& table_id) {
     }
     ongoing_files_checker_.UnmarkOngoingFiles(files_to_compact);
 
+    ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
+
     return status;
 }
 
 Status
 DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file) {
-    ENGINE_LOG_DEBUG << "Compact file " << file.file_id_ << "for table: " << table_id;
+    ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for table: " << table_id;
 
     // Create new table file
-    meta::TableFileSchema table_file;
-    table_file.table_id_ = table_id;
-    // table_file.date_ = date;
-    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
-    Status status = meta_ptr_->CreateTableFile(table_file);
+    meta::TableFileSchema compacted_file;
+    compacted_file.table_id_ = table_id;
+    // compacted_file.date_ = date;
+    compacted_file.file_type_ = meta::TableFileSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
+    Status status = meta_ptr_->CreateTableFile(compacted_file);
 
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
@@ -586,25 +594,25 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     meta::TableFilesSchema updated;
 
     std::string new_segment_dir;
-    utils::GetParentPath(table_file.location_, new_segment_dir);
+    utils::GetParentPath(compacted_file.location_, new_segment_dir);
     auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
 
     std::string segment_dir_to_merge;
     utils::GetParentPath(file.location_, segment_dir_to_merge);
-    segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
+    segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
 
-    auto file_schema = file;
-    file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
-    updated.emplace_back(file_schema);
+    auto file_to_compact = file;
+    file_to_compact.file_type_ = meta::TableFileSchema::TO_DELETE;
+    updated.emplace_back(file_to_compact);
 
     // Serialize
     status = segment_writer_ptr->Serialize();
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
-        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
-        status = meta_ptr_->UpdateTableFile(table_file);
+        compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        status = meta_ptr_->UpdateTableFile(compacted_file);
         if (status.ok()) {
-            ENGINE_LOG_DEBUG << "Mark file: " << table_file.file_id_ << " to to_delete";
+            ENGINE_LOG_DEBUG << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
         return status;
     }
@@ -616,20 +624,27 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     // Update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
-    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
-        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
-                                    ? meta::TableFileSchema::TO_INDEX
-                                    : meta::TableFileSchema::RAW;
+    if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
+                                        ? meta::TableFileSchema::TO_INDEX
+                                        : meta::TableFileSchema::RAW;
     } else {
-        table_file.file_type_ = meta::TableFileSchema::RAW;
+        compacted_file.file_type_ = meta::TableFileSchema::RAW;
     }
-    table_file.file_size_ = segment_writer_ptr->Size();
-    table_file.row_count_ = segment_writer_ptr->VectorCount();
+    compacted_file.file_size_ = segment_writer_ptr->Size();
+    compacted_file.row_count_ = segment_writer_ptr->VectorCount();
 
-    updated.emplace_back(table_file);
+    if (compacted_file.row_count_ == 0) {
+        ENGINE_LOG_DEBUG << "Compacted segment is empty. Mark it as TO_DELETE";
+        compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+    }
+
+    updated.emplace_back(compacted_file);
     status = meta_ptr_->UpdateTableFiles(updated);
-    ENGINE_LOG_DEBUG << "New compacted segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
-                     << " bytes";
+
+    ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
+                     << std::to_string(file_to_compact.file_size_) << " bytes to "
+                     << std::to_string(compacted_file.file_size_) << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
