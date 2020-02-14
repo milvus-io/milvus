@@ -123,7 +123,8 @@ int bitmap_increment(bitmap_t *bitmap, unsigned int index, long offset)
     }
 
     if (temp == 0x0f) {
-        fprintf(stderr, "Error, 4 bit int Overflow\n");
+//        fprintf(stderr, "Error, 4 bit int Overflow\n");
+        fprintf(stderr, "Bloom filter Error: you have added the same id more than 15 times!\n");
         return -1;
     }
 
@@ -147,7 +148,8 @@ int bitmap_decrement(bitmap_t *bitmap, unsigned int index, long offset)
     }
 
     if (temp == 0x00) {
-        fprintf(stderr, "Error, Decrementing zero\n");
+//        fprintf(stderr, "Error, Decrementing zero\n");
+        fprintf(stderr, "Bloom filter Error: you have deleted the same id more than 15 times!\n");
         return -1;
     }
 
