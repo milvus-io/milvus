@@ -25,17 +25,6 @@ class TestCompactBase:
       The following cases are used to test `compact` function
     ******************************************************************
     """
-
-    def test_compact_table_name_empty(self, connect, table):
-        '''
-        target: compact table with empty name
-        method: compact with the table_name: ""
-        expected: status not ok
-        '''
-        table_name = ""
-        with pytest.raises(Exception) as e:
-            status = connect.compact(table_name)
-
     def test_compact_table_name_None(self, connect, table):
         '''
         target: compact table whose table name is None
@@ -53,8 +42,8 @@ class TestCompactBase:
         expected: status not ok
         '''
         table_name = gen_unique_str("not_existed_table")
-        with pytest.raises(Exception) as e:
-            status = connect.compact(table_name)
+        status = connect.compact(table_name)
+        assert not status.OK()
     
     @pytest.fixture(
         scope="function",
@@ -194,7 +183,7 @@ class TestCompactBase:
         vectors = gen_vectors(nq, dim)
         table_list = []
         for i in range(num_tables):
-            table_name = gen_unique_str("test_add_multi_table_%d" % i)
+            table_name = gen_unique_str("test_compact_multi_table_%d" % i)
             table_list.append(table_name)
             param = {'table_name': table_name,
                      'dimension': dim,
@@ -374,6 +363,32 @@ class TestCompactJAC:
         assert status.OK()
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_compact_multi_tables(self, connect):
+        '''
+        target: test compact works or not with multiple tables
+        method: create 50 tables, add vectors into them and compact in turn
+        expected: status ok
+        '''
+        nq = 100
+        num_tables = 50
+        vectors = gen_binary_vectors(nq, dim)
+        table_list = []
+        for i in range(num_tables):
+            table_name = gen_unique_str("test_compact_multi_table_%d" % i)
+            table_list.append(table_name)
+            param = {'table_name': table_name,
+                     'dimension': dim,
+                     'index_file_size': index_file_size,
+                     'metric_type': MetricType.JACCARD}
+            connect.create_table(param)
+        time.sleep(6)
+        for i in range(num_tables):
+            status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
+            assert status.OK()
+            status = connect.compact(table_list[i])
+            assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_after_compact(self, connect, jac_table):
         '''
         target: test add vector after compact 
@@ -517,6 +532,32 @@ class TestCompactIP:
         assert status.OK()
         status = connect.compact(ip_table)
         assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_compact_multi_tables(self, connect):
+        '''
+        target: test compact works or not with multiple tables
+        method: create 50 tables, add vectors into them and compact in turn
+        expected: status ok
+        '''
+        nq = 100
+        num_tables = 50
+        vectors = gen_vectors(nq, dim)
+        table_list = []
+        for i in range(num_tables):
+            table_name = gen_unique_str("test_compact_multi_table_%d" % i)
+            table_list.append(table_name)
+            param = {'table_name': table_name,
+                     'dimension': dim,
+                     'index_file_size': index_file_size,
+                     'metric_type': MetricType.IP}
+            connect.create_table(param)
+        time.sleep(6)
+        for i in range(num_tables):
+            status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
+            assert status.OK()
+            status = connect.compact(table_list[i])
+            assert status.OK()
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_after_compact(self, connect, ip_table):
