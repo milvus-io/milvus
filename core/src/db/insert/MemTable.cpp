@@ -21,6 +21,7 @@
 #include <segment/SegmentReader.h>
 #include <wrapper/VecIndex.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -101,6 +102,8 @@ MemTable::GetTableFileCount() {
 
 Status
 MemTable::Serialize(uint64_t wal_lsn) {
+    auto start = std::chrono::high_resolution_clock::now();
+
     if (!doc_ids_to_delete_.empty()) {
         auto status = ApplyDeletes();
         if (!status.ok()) {
@@ -131,6 +134,10 @@ MemTable::Serialize(uint64_t wal_lsn) {
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Finished flushing for table " << table_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }
@@ -173,6 +180,8 @@ MemTable::ApplyDeletes() {
     //     Serialize bloom filter
 
     ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
+
+    auto start = std::chrono::high_resolution_clock::now();
 
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
@@ -297,6 +306,10 @@ MemTable::ApplyDeletes() {
     }
 
     doc_ids_to_delete_.clear();
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Finished applying deletes in table " << table_id_ << " in " << diff.count() << " s";
 
     return Status::OK();
 }
