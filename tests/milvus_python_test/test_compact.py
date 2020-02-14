@@ -8,10 +8,10 @@ import pytest
 from milvus import IndexType, MetricType
 from utils import *
 
-dim = 10000
+dim = 128
 index_file_size = 10
 table_id = "test_compact"
-COMPACT_TIMEOUT = 60
+COMPACT_TIMEOUT = 30
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
@@ -33,8 +33,8 @@ class TestCompactBase:
         expected: status not ok
         '''
         table_name = ""
-        status = connect.compact(table_name)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status = connect.compact(table_name)
 
     def test_compact_table_name_None(self, connect, table):
         '''
@@ -43,8 +43,8 @@ class TestCompactBase:
         expected: status not ok
         '''
         table_name = None
-        status = connect.compact(table_name)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status = connect.compact(table_name)
 
     def test_compact_table_name_not_existed(self, connect, table):
         '''
@@ -53,8 +53,8 @@ class TestCompactBase:
         expected: status not ok
         '''
         table_name = gen_unique_str("not_existed_table")
-        status = connect.compact(table_name)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status = connect.compact(table_name)
     
     @pytest.fixture(
         scope="function",
