@@ -783,14 +783,14 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(SystemMsg)
 
-    ENDPOINT("GET", "/system/{msg}", SystemMsg, PATH(String, msg)) {
+    ENDPOINT("GET", "/system/{msg}", SystemMsg, PATH(String, msg), QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/system/" + msg->std_str() + "\'");
         tr.RecordSection("Received request.");
 
         auto cmd_dto = CommandDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
-        auto status_dto = handler.Cmd(msg, cmd_dto);
+        auto status_dto = handler.Cmd(msg, query_params, cmd_dto);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:

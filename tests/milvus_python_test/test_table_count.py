@@ -206,7 +206,7 @@ class TestTableCount:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=rows_count, args=(milvus, ))
             processes.append(p)
@@ -351,7 +351,7 @@ class TestTableCountIP:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=rows_count, args=(milvus,))
             processes.append(p)
