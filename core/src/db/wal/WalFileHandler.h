@@ -30,8 +30,6 @@ class MXLogFileHandler {
     explicit MXLogFileHandler(const std::string& mxlog_path);
     ~MXLogFileHandler();
 
-    bool
-    IsOpen();
     std::string
     GetFilePath();
     std::string
@@ -40,14 +38,14 @@ class MXLogFileHandler {
     OpenFile();
     bool
     CloseFile();
-    int64_t
+    uint32_t
     Load(char* buf, uint32_t data_offset);
     bool
     Load(char* buf, uint32_t data_offset, uint32_t data_size);
     bool
     Write(char* buf, uint32_t data_size, bool is_sync = false);
     bool
-    ReBorn(const std::string& file_name);
+    ReBorn(const std::string& file_name, const std::string& open_mode);
     uint32_t
     GetFileSize();
     void
