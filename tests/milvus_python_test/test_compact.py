@@ -289,3 +289,149 @@ class TestCompactBase:
         status, res = connect.search_vectors(table, top_k, nprobe, query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()
+
+
+class TestCompactBinary:
+    """
+    ******************************************************************
+      The following cases are used to test `compact` function
+    ******************************************************************
+    """
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_and_compact(self, connect, jac_table):
+        '''
+        target: test add vector and compact 
+        method: add vector and compact table
+        expected: status ok, vector added
+        '''
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_table, vector)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_delete_and_compact(self, connect, jac_table):
+        '''
+        target: test add vector, delete it and compact 
+        method: add vector, delete it and compact table
+        expected: status ok, vectors added and deleted
+        '''
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_table, vector)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.delete_by_id(jac_table, ids)
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+    
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_and_compact_twice(self, connect, jac_table):
+        '''
+        target: test add vector and compact twice
+        method: add vector and compact table twice
+        expected: status ok
+        '''
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_table, vector)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_delete_and_compact_twice(self, connect, jac_table):
+        '''
+        target: test add vector, delete it and compact twice
+        method: add vector, delete it and compact table twice
+        expected: status ok, vectors added and deleted
+        '''
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_table, vector)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.delete_by_id(jac_table, ids)
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_add_vector_after_compact(self, connect, jac_table):
+        '''
+        target: test add vector after compact 
+        method: after compact operation, add vector
+        expected: status ok, vector added
+        '''
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_table, vectors)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        tmp, vector = gen_binary_vectors(1, dim)
+        status, ids = connect.add_vectors(jac_table, vector)
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_delete_vectors_after_compact(self, connect, jac_table):
+        '''
+        target: test delete vectors after compact
+        method: after compact operation, delete vectors
+        expected: status ok, vectors deleted
+        '''
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_table, vectors)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.delete_by_id(jac_table, ids)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_search_after_compact(self, connect, jac_table):
+        '''
+        target: test search after compact
+        method: after compact operation, search vector
+        expected: status ok
+        '''
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(jac_table, vectors)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        status = connect.compact(jac_table)
+        assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        query_vecs = [vectors[0]]
+        status, res = connect.search_vectors(jac_table, top_k, nprobe, query_vecs) 
+        logging.getLogger().info(res)
+        assert status.OK()
+
