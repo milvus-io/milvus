@@ -43,7 +43,7 @@ class TestCompactBase:
         '''
         table_name = gen_unique_str("not_existed_table")
         status = connect.compact(table_name)
-        assert status.OK()
+        assert not status.OK()
     
     @pytest.fixture(
         scope="function",
