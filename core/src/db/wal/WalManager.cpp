@@ -119,34 +119,31 @@ WalManager::Init(const meta::MetaPtr& meta) {
 
 ErrorCode
 WalManager::GetNextRecovery(MXLogRecord& record) {
-    ErrorCode error_code = WAL_ERROR;
+    ErrorCode error_code = WAL_SUCCESS;
+    while (true) {
+        error_code = p_buffer_->Next(last_applied_lsn_, record);
+        if (error_code != WAL_SUCCESS) {
+            if (mxlog_config_.recovery_error_ignore) {
+                // reset and break recovery
+                p_buffer_->Reset(last_applied_lsn_);
 
-    if (p_buffer_ != nullptr) {
-        do {
-            error_code = p_buffer_->Next(last_applied_lsn_, record);
-            if (error_code != WAL_SUCCESS) {
-                if (mxlog_config_.recovery_error_ignore) {
-                    // reset and break recovery
-                    p_buffer_->Reset(last_applied_lsn_);
+                record.type = MXLogType::None;
+                error_code = WAL_SUCCESS;
+            }
+            break;
+        }
+        if (record.type == MXLogType::None) {
+            break;
+        }
 
-                    record.type = MXLogType::None;
-                    error_code = WAL_SUCCESS;
-                }
+        // background thread has not started.
+        // so, needn't lock here.
+        auto it = tables_.find(record.table_id);
+        if (it != tables_.end()) {
+            if (it->second.flush_lsn < record.lsn) {
                 break;
             }
-            if (record.type == MXLogType::None) {
-                break;
-            }
-
-            // background thread has not started.
-            // so, needn't lock here.
-            auto it = tables_.find(record.table_id);
-            if (it != tables_.end()) {
-                if (it->second.flush_lsn < record.lsn) {
-                    break;
-                }
-            }
-        } while (true);
+        }
     }
 
     WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
@@ -157,50 +154,51 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
 
 ErrorCode
 WalManager::GetNextRecord(MXLogRecord& record) {
-    ErrorCode error_code = WAL_ERROR;
-
-    if (p_buffer_ != nullptr) {
-        std::unique_lock<std::mutex> lck(mutex_);
-        if (flush_info_.second != 0) {
-            if (p_buffer_->GetReadLsn() >= flush_info_.second) {
+    auto check_flush = [&]() -> bool {
+        std::lock_guard<std::mutex> lck(mutex_);
+        if (flush_info_.IsValid()) {
+            if (p_buffer_->GetReadLsn() >= flush_info_.lsn_) {
                 // can exec flush requirement
                 record.type = MXLogType::Flush;
-                record.lsn = flush_info_.second;
-                record.table_id = flush_info_.first;
-                // clear flush_info_
-                flush_info_.second = 0;
+                record.table_id = flush_info_.table_id_;
+                record.lsn = flush_info_.lsn_;
+                flush_info_.Clear();
 
-                WAL_LOG_INFO << "flush lsn " << record.lsn << " flush table " << record.table_id;
-                return WAL_SUCCESS;
+                WAL_LOG_INFO << "record flush table " << record.table_id << " lsn " << record.lsn;
+                return true;
             }
         }
-        lck.unlock();
+        return false;
+    };
 
-        do {
-            error_code = p_buffer_->Next(last_applied_lsn_, record);
-            if (error_code != WAL_SUCCESS || record.type == MXLogType::None) {
-                break;
-            }
-
-            lck.lock();
-            auto it = tables_.find(record.table_id);
-            if (it != tables_.end()) {
-                break;
-            }
-            lck.unlock();
-        } while (true);
+    if (check_flush()) {
+        return WAL_SUCCESS;
     }
 
-    WAL_LOG_INFO << "record type " << (int32_t)record.type << " record lsn " << record.lsn << " error code  "
-                 << error_code;
+    ErrorCode error_code = WAL_SUCCESS;
+    while (WAL_SUCCESS == p_buffer_->Next(last_applied_lsn_, record)) {
+        if (record.type == MXLogType::None) {
+            if (check_flush()) {
+                return WAL_SUCCESS;
+            }
+            break;
+        }
 
+        std::lock_guard<std::mutex> lck(mutex_);
+        auto it = tables_.find(record.table_id);
+        if (it != tables_.end()) {
+            break;
+        }
+    }
+
+    WAL_LOG_INFO << "record type " << (int32_t)record.type << " table " << record.table_id << " lsn " << record.lsn;
     return error_code;
 }
 
 uint64_t
 WalManager::CreateTable(const std::string& table_id) {
-    WAL_LOG_INFO << "create table " << table_id;
-    std::unique_lock<std::mutex> lck(mutex_);
+    WAL_LOG_INFO << "create table " << table_id << " " << last_applied_lsn_;
+    std::lock_guard<std::mutex> lck(mutex_);
     uint64_t applied_lsn = last_applied_lsn_;
     tables_[table_id] = {applied_lsn, applied_lsn};
     return applied_lsn;
@@ -209,7 +207,7 @@ WalManager::CreateTable(const std::string& table_id) {
 void
 WalManager::DropTable(const std::string& table_id) {
     WAL_LOG_INFO << "drop table " << table_id;
-    std::unique_lock<std::mutex> lck(mutex_);
+    std::lock_guard<std::mutex> lck(mutex_);
     tables_.erase(table_id);
 }
 
@@ -325,15 +323,14 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 
 uint64_t
 WalManager::Flush(const std::string table_id) {
-    std::unique_lock<std::mutex> lck(mutex_, std::defer_lock);
+    std::lock_guard<std::mutex> lck(mutex_);
     // At most one flush requirement is waiting at any time.
     // Otherwise, flush_info_ should be modified to a list.
-    __glibcxx_assert(flush_info_.second == 0);
+    __glibcxx_assert(!flush_info_.IsValid());
 
     uint64_t lsn = 0;
     if (table_id.empty()) {
         // flush all tables
-        lck.lock();
         for (auto& it : tables_) {
             if (it.second.wal_lsn > it.second.flush_lsn) {
                 lsn = last_applied_lsn_;
@@ -343,7 +340,6 @@ WalManager::Flush(const std::string table_id) {
 
     } else {
         // flush one table
-        lck.lock();
         auto it = tables_.find(table_id);
         if (it != tables_.end()) {
             if (it->second.wal_lsn > it->second.flush_lsn) {
@@ -353,10 +349,9 @@ WalManager::Flush(const std::string table_id) {
     }
 
     if (lsn != 0) {
-        flush_info_.first = table_id;
-        flush_info_.second = lsn;
+        flush_info_.table_id_ = table_id;
+        flush_info_.lsn_ = lsn;
     }
-    lck.unlock();
 
     WAL_LOG_INFO << table_id << " want to be flush, lsn " << lsn;
 

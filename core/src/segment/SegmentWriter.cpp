@@ -169,8 +169,8 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     segment_reader_to_merge.GetSegment(segment_to_merge);
     auto& uids = segment_to_merge->vectors_ptr_->GetUids();
 
-    if (segment_ptr_->deleted_docs_ptr_ != nullptr) {
-        auto offsets_to_delete = segment_ptr_->deleted_docs_ptr_->GetDeletedDocs();
+    if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
+        auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
 
         for (size_t i = 0; i < uids.size(); ++i) {
             auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
