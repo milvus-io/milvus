@@ -99,10 +99,8 @@ TEST(WalTest, FILE_HANDLER_TEST) {
     file_handler.SetFileName(file_name);
     file_handler.SetFileOpenMode("w");
     ASSERT_FALSE(file_handler.FileExists());
-    ASSERT_FALSE(file_handler.IsOpen());
 
     ASSERT_TRUE(file_handler.OpenFile());
-    ASSERT_TRUE(file_handler.IsOpen());
     ASSERT_EQ(0, file_handler.GetFileSize());
 
     std::string write_content = "hello, world!\n";
@@ -114,12 +112,12 @@ TEST(WalTest, FILE_HANDLER_TEST) {
     memset(buf, 0, write_content.size() + 10);
     ASSERT_TRUE(file_handler.Load(buf, 0, write_content.size()));
     ASSERT_STREQ(buf, write_content.c_str());
+    ASSERT_FALSE(file_handler.Load(buf, write_content.size()));
     free(buf);
     ASSERT_TRUE(file_handler.CloseFile());
     file_handler.DeleteFile();
 
-    file_handler.SetFileOpenMode("w");
-    file_handler.ReBorn("2");
+    file_handler.ReBorn("2", "w");
     write_content += ", aaaaa";
     file_handler.Write(const_cast<char*>(write_content.data()), write_content.size());
     ASSERT_EQ("2", file_handler.GetFileName());
@@ -340,6 +338,15 @@ TEST(WalTest, BUFFER_TEST) {
     new_file_no = uint32_t(record[3].lsn >> 32);
     ASSERT_EQ(new_file_no, ++file_no);
 
+    // reset write lsn (record 2)
+    ASSERT_TRUE(buffer.ResetWriteLsn(record[3].lsn));
+    ASSERT_TRUE(buffer.ResetWriteLsn(record[2].lsn));
+    ASSERT_TRUE(buffer.ResetWriteLsn(record[1].lsn));
+
+    // write 2 and 3 again
+    ASSERT_EQ(buffer.Append(record[2]), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.Append(record[3]), milvus::WAL_SUCCESS);
+
     // read 2
     ASSERT_EQ(buffer.Next(record[3].lsn, read_rst), milvus::WAL_SUCCESS);
     ASSERT_EQ(read_rst.type, record[2].type);
@@ -359,6 +366,35 @@ TEST(WalTest, BUFFER_TEST) {
     ASSERT_EQ(memcmp(read_rst.ids, record[3].ids, read_rst.length * sizeof(milvus::engine::IDNumber)), 0);
     ASSERT_EQ(read_rst.data_size, record[3].data_size);
     ASSERT_EQ(memcmp(read_rst.data, record[3].data, read_rst.data_size), 0);
+
+    // test an empty record
+    milvus::engine::wal::MXLogRecord empty;
+    empty.type = milvus::engine::wal::MXLogType::None;
+    empty.length = 0;
+    empty.data_size = 0;
+    ASSERT_EQ(buffer.Append(empty), milvus::WAL_SUCCESS);
+    ASSERT_EQ(buffer.Next(empty.lsn, read_rst), milvus::WAL_SUCCESS);
+    ASSERT_EQ(read_rst.type, milvus::engine::wal::MXLogType::None);
+    ASSERT_TRUE(read_rst.table_id.empty());
+    ASSERT_TRUE(read_rst.partition_tag.empty());
+    ASSERT_EQ(read_rst.length, 0);
+    ASSERT_EQ(read_rst.data_size, 0);
+
+    // remove old files
+    buffer.RemoveOldFiles(record[3].lsn);
+    ASSERT_EQ(buffer.file_no_from_, file_no);
+
+    // clear writen lsn and reset failed
+    buffer.mxlog_buffer_writer_.file_no = 0;
+    buffer.mxlog_buffer_writer_.buf_offset = 0;
+    ASSERT_FALSE(buffer.ResetWriteLsn(record[1].lsn));
+
+    // clear writen lsn and reset failed
+    FILE *fi = fopen(WAL_GTEST_PATH "5.wal", "w");
+    fclose(fi);
+    buffer.mxlog_buffer_writer_.file_no = 0;
+    buffer.mxlog_buffer_writer_.buf_offset = 0;
+    ASSERT_FALSE(buffer.ResetWriteLsn(record[1].lsn));
 
     for (int i = 0; i < 3; i++) {
         if (record[i].ids != nullptr) {
@@ -536,6 +572,7 @@ TEST(WalTest, MANAGER_TEST) {
             new_lsn = record.lsn;
         }
     }
+    manager->RemoveOldFiles(new_lsn);
 
     flush_lsn = manager->Flush(table_id_2);
     ASSERT_NE(flush_lsn, 0);
