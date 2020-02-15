@@ -69,6 +69,12 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 
 See our [community](https://github.com/milvus-io/community) repository to learn about our governance and access more community resources.
 
+## Mailing lists
+
+- [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
+- [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
+- [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
+
 ## Contributors
 
 Below is a list of Milvus contributors. We greatly appreciate your contributions!
@@ -105,6 +111,8 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 - [Milvus Twitter](https://twitter.com/milvusio)
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+
+- [Milvus design docs](design.md)
 
 ## License
 
