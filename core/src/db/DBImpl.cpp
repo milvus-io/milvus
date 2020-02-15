@@ -262,7 +262,7 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
 
     for (auto& name : table_names) {
         meta::TableFilesSchema table_files;
-        status = meta_ptr_->FilesByType(table_id, file_types, table_files);
+        status = meta_ptr_->FilesByType(name, file_types, table_files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get table info: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;

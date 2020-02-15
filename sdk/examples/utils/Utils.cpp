@@ -307,4 +307,24 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
     BLOCK_SPLITER
 }
 
+void
+PrintTableStat(const milvus::TableStat& table_stat) {
+    std::cout << table_stat.table_name << " row count = " << table_stat.row_count << std::endl;
+    for (auto& seg_stat : table_stat.segments_stat) {
+        std::cout << "\tsegment " << seg_stat.segment_name << " row count = " << seg_stat.row_count << std::endl;
+    }
+}
+
+void
+Utils::PrintTableInfo(const milvus::TableInfo& info) {
+    BLOCK_SPLITER
+    std::cout << "Table " << info.native_stat.table_name << " total row count = " << info.total_row_count << std::endl;
+    PrintTableStat(info.native_stat);
+    for (const milvus::TableStat& partition_stat : info.partitions_stat) {
+        PrintTableStat(partition_stat);
+    }
+
+    BLOCK_SPLITER
+}
+
 }  // namespace milvus_sdk

@@ -135,7 +135,6 @@ struct TableStat {
  * @brief table info
  */
 struct TableInfo {
-    std::string table_name;                   ///< Table name
     int64_t total_row_count;                  ///< Table total row count
     TableStat native_stat;                    ///< Table native statistics
     std::vector<TableStat> partitions_stat;   ///< Table's partitions statistics

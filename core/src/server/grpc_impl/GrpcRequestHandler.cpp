@@ -130,6 +130,37 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
            result.distance_list_.size() * sizeof(float));
 }
 
+void
+ConstructTableStat(const TableStat& table_stat, ::milvus::grpc::TableStat* grpc_table_stat) {
+    if (!grpc_table_stat) {
+        return;
+    }
+
+    grpc_table_stat->set_total_row_count(table_stat.total_row_num_);
+    grpc_table_stat->set_table_name(table_stat.table_name_);
+
+    for (auto& seg_stat : table_stat.segments_stat_) {
+        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_table_stat->mutable_segments_stat()->Add();
+        grpc_seg_stat->set_row_count(seg_stat.row_num_);
+        grpc_seg_stat->set_segment_name(seg_stat.name_);
+    }
+}
+
+void
+ConstructTableInfo(const TableInfo& table_info, ::milvus::grpc::TableInfo* response) {
+    if (!response) {
+        return;
+    }
+
+    response->set_total_row_count(table_info.total_row_num_);
+    ConstructTableStat(table_info.native_stat_, response->mutable_native_stat());
+
+    for (auto& partition_stat : table_info.partitions_stat_) {
+        ::milvus::grpc::TableStat* grpc_table_stat = response->mutable_partitions_stat()->Add();
+        ConstructTableStat(partition_stat, grpc_table_stat);
+    }
+}
+
 }  // namespace
 
 GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
@@ -436,6 +467,7 @@ GrpcRequestHandler::ShowTableInfo(::grpc::ServerContext* context, const ::milvus
 
     TableInfo table_info;
     Status status = request_handler_.ShowTableInfo(context_map_[context], request->table_name(), table_info);
+    ConstructTableInfo(table_info, response);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;

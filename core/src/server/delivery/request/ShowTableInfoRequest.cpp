@@ -81,13 +81,13 @@ ShowTableInfoRequest::OnExecute() {
     }
 
     // construct partitions info
-    table_info_.partitions_stat_.resize(table_info.partitions_stat_.size());
+    table_info_.partitions_stat_.reserve(table_info.partitions_stat_.size());
     for (auto& partition : table_info.partitions_stat_) {
         TableStat table_stat;
         table_stat.table_name_ = partition.name_;
 
         int64_t partition_row_count = 0;
-        for (auto& seg : table_info.native_stat_.segments_stat_) {
+        for (auto& seg : partition.segments_stat_) {
             SegmentStat seg_stat;
             seg_stat.name_ = seg.name_;
             seg_stat.row_num_ = seg.row_count_;
