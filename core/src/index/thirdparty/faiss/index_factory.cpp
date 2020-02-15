@@ -197,6 +197,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             }
         } else if (!index && (stok == "SQ8" || stok == "SQ4" || stok == "SQ6" ||
                               stok == "SQfp16")) {
+            InstructionSet& instr_set_inst = InstructionSet::GetInstance();
             ScalarQuantizer::QuantizerType qt =
                 stok == "SQ8" ? ScalarQuantizer::QT_8bit :
                 stok == "SQ6" ? ScalarQuantizer::QT_6bit :
@@ -211,7 +212,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
                     ScalarQuantizer_avx512::QT_4bit;
             if (coarse_quantizer) {
                 FAISS_THROW_IF_NOT (!use_2layer);
-                if (InstructionSet::AVX512F() && InstructionSet::AVX512DQ() && InstructionSet::AVX512BW()) {
+                if (instr_set_inst.AVX512F() && instr_set_inst.AVX512DQ() && instr_set_inst.AVX512BW()) {
                     IndexIVFScalarQuantizer_avx512 *index_ivf =
                         new IndexIVFScalarQuantizer_avx512(coarse_quantizer, d, ncentroids, qt_avx512, metric);
                     printf("new IndexIVFScalarQuantizer_avx512\n");
@@ -229,7 +230,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
                     index_1 = index_ivf;
                 }
             } else {
-                if (InstructionSet::AVX512F() && InstructionSet::AVX512DQ() && InstructionSet::AVX512BW()) {
+                if (instr_set_inst.AVX512F() && instr_set_inst.AVX512DQ() && instr_set_inst.AVX512BW()) {
                     index_1 = new IndexScalarQuantizer_avx512(d, qt_avx512, metric);
                     printf("new IndexScalarQuantizer_avx512\n");
                 } else {
