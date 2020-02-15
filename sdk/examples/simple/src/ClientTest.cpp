@@ -145,6 +145,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "FlushTable function call status: " << stat.message() << std::endl;
     }
 
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+    }
+
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
@@ -171,6 +178,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         stat = conn->DescribeIndex(TABLE_NAME, index2);
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintIndexParam(index2);
+    }
+
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
     }
 
     {  // preload table
