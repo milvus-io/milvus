@@ -44,7 +44,7 @@ libfaiss.$(SHAREDEXT): $(OBJ)
 
 # support avx512
 %avx512.o: %avx512.cpp
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mavx512f -mavx512dq -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mavx512f -mavx512dq -mavx512bw -c $< -o $@
 
 %.o: %.cu
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@

@@ -18,6 +18,7 @@
 
 
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/utils/instruction_set.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/random.h>
 
@@ -33,6 +34,7 @@
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
+#include <faiss/IndexScalarQuantizer_avx512.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
 
@@ -201,18 +203,39 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
                 stok == "SQ4" ? ScalarQuantizer::QT_4bit :
                 stok == "SQfp16" ? ScalarQuantizer::QT_fp16 :
                 ScalarQuantizer::QT_4bit;
+            ScalarQuantizer_avx512::QuantizerType qt_avx512 =
+                    stok == "SQ8" ? ScalarQuantizer_avx512::QT_8bit :
+                    stok == "SQ6" ? ScalarQuantizer_avx512::QT_6bit :
+                    stok == "SQ4" ? ScalarQuantizer_avx512::QT_4bit :
+                    stok == "SQfp16" ? ScalarQuantizer_avx512::QT_fp16 :
+                    ScalarQuantizer_avx512::QT_4bit;
             if (coarse_quantizer) {
                 FAISS_THROW_IF_NOT (!use_2layer);
-                IndexIVFScalarQuantizer *index_ivf =
-                    new IndexIVFScalarQuantizer (
-                      coarse_quantizer, d, ncentroids, qt, metric);
-                index_ivf->quantizer_trains_alone =
-                    get_trains_alone (coarse_quantizer);
-                del_coarse_quantizer.release ();
-                index_ivf->own_fields = true;
-                index_1 = index_ivf;
+                if (InstructionSet::AVX512F() && InstructionSet::AVX512DQ() && InstructionSet::AVX512BW()) {
+                    IndexIVFScalarQuantizer_avx512 *index_ivf =
+                        new IndexIVFScalarQuantizer_avx512(coarse_quantizer, d, ncentroids, qt_avx512, metric);
+                    printf("new IndexIVFScalarQuantizer_avx512\n");
+                    index_ivf->quantizer_trains_alone = get_trains_alone (coarse_quantizer);
+                    del_coarse_quantizer.release ();
+                    index_ivf->own_fields = true;
+                    index_1 = index_ivf;
+                } else {
+                    IndexIVFScalarQuantizer *index_ivf =
+                            new IndexIVFScalarQuantizer(coarse_quantizer, d, ncentroids, qt, metric);
+                    printf("new IndexIVFScalarQuantizer\n");
+                    index_ivf->quantizer_trains_alone = get_trains_alone(coarse_quantizer);
+                    del_coarse_quantizer.release();
+                    index_ivf->own_fields = true;
+                    index_1 = index_ivf;
+                }
             } else {
-                index_1 = new IndexScalarQuantizer (d, qt, metric);
+                if (InstructionSet::AVX512F() && InstructionSet::AVX512DQ() && InstructionSet::AVX512BW()) {
+                    index_1 = new IndexScalarQuantizer_avx512(d, qt_avx512, metric);
+                    printf("new IndexScalarQuantizer_avx512\n");
+                } else {
+                    index_1 = new IndexScalarQuantizer(d, qt, metric);
+                    printf("new IndexScalarQuantizer\n");
+                }
             }
         } else if (!index && (stok == "SQ8Hybrid" || stok == "SQ4Hybrid" || stok == "SQ6Hybrid" ||
                               stok == "SQfp16Hybrid")) {
