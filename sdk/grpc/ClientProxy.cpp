@@ -54,6 +54,7 @@ void ConstructTableStat(const ::milvus::grpc::TableStat& grpc_table_stat, TableS
         SegmentStat seg_stat;
         seg_stat.row_count = grpc_seg_stat.row_count();
         seg_stat.segment_name = grpc_seg_stat.segment_name();
+        seg_stat.index_name = grpc_seg_stat.index_name();
         table_stat.segments_stat.emplace_back(seg_stat);
     }
 }

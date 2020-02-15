@@ -116,6 +116,7 @@ struct PartitionParam {
 struct SegmentStat {
     std::string name_;
     int64_t row_num_ = 0;
+    std::string index_name_;
 };
 
 struct TableStat {

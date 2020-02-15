@@ -3812,6 +3812,7 @@ class SegmentStat :
 
   enum : int {
     kSegmentNameFieldNumber = 1,
+    kIndexNameFieldNumber = 3,
     kRowCountFieldNumber = 2,
   };
   // string segment_name = 1;
@@ -3825,6 +3826,17 @@ class SegmentStat :
   std::string* release_segment_name();
   void set_allocated_segment_name(std::string* segment_name);
 
+  // string index_name = 3;
+  void clear_index_name();
+  const std::string& index_name() const;
+  void set_index_name(const std::string& value);
+  void set_index_name(std::string&& value);
+  void set_index_name(const char* value);
+  void set_index_name(const char* value, size_t size);
+  std::string* mutable_index_name();
+  std::string* release_index_name();
+  void set_allocated_index_name(std::string* index_name);
+
   // int64 row_count = 2;
   void clear_row_count();
   ::PROTOBUF_NAMESPACE_ID::int64 row_count() const;
@@ -3836,6 +3848,7 @@ class SegmentStat :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr segment_name_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_name_;
   ::PROTOBUF_NAMESPACE_ID::int64 row_count_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -6610,6 +6623,57 @@ inline void SegmentStat::set_row_count(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   row_count_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.SegmentStat.row_count)
+}
+
+// string index_name = 3;
+inline void SegmentStat::clear_index_name() {
+  index_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& SegmentStat::index_name() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.SegmentStat.index_name)
+  return index_name_.GetNoArena();
+}
+inline void SegmentStat::set_index_name(const std::string& value) {
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.SegmentStat.index_name)
+}
+inline void SegmentStat::set_index_name(std::string&& value) {
+  
+  index_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.SegmentStat.index_name)
+}
+inline void SegmentStat::set_index_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.SegmentStat.index_name)
+}
+inline void SegmentStat::set_index_name(const char* value, size_t size) {
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.SegmentStat.index_name)
+}
+inline std::string* SegmentStat::mutable_index_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.SegmentStat.index_name)
+  return index_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* SegmentStat::release_index_name() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.SegmentStat.index_name)
+  
+  return index_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void SegmentStat::set_allocated_index_name(std::string* index_name) {
+  if (index_name != nullptr) {
+    
+  } else {
+    
+  }
+  index_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), index_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.SegmentStat.index_name)
 }
 
 // -------------------------------------------------------------------

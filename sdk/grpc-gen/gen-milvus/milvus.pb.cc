@@ -699,6 +699,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::SegmentStat, segment_name_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::SegmentStat, row_count_),
+  PROTOBUF_FIELD_OFFSET(::milvus::grpc::SegmentStat, index_name_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::TableStat, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -742,8 +743,8 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 159, -1, sizeof(::milvus::grpc::DeleteByIDParam)},
   { 166, -1, sizeof(::milvus::grpc::DeleteByDateParam)},
   { 173, -1, sizeof(::milvus::grpc::SegmentStat)},
-  { 180, -1, sizeof(::milvus::grpc::TableStat)},
-  { 188, -1, sizeof(::milvus::grpc::TableInfo)},
+  { 181, -1, sizeof(::milvus::grpc::TableStat)},
+  { 189, -1, sizeof(::milvus::grpc::TableInfo)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -823,54 +824,54 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "7\n\017DeleteByIDParam\022\022\n\ntable_name\030\001 \001(\t\022\020"
   "\n\010id_array\030\002 \003(\003\"J\n\021DeleteByDateParam\022!\n"
   "\005range\030\001 \001(\0132\022.milvus.grpc.Range\022\022\n\ntabl"
-  "e_name\030\002 \001(\t\"6\n\013SegmentStat\022\024\n\014segment_n"
-  "ame\030\001 \001(\t\022\021\n\trow_count\030\002 \001(\003\"i\n\tTableSta"
-  "t\022\022\n\ntable_name\030\001 \001(\t\022\027\n\017total_row_count"
-  "\030\002 \001(\003\022/\n\rsegments_stat\030\003 \003(\0132\030.milvus.g"
-  "rpc.SegmentStat\"\247\001\n\tTableInfo\022#\n\006status\030"
-  "\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017total_row_"
-  "count\030\002 \001(\003\022+\n\013native_stat\030\003 \001(\0132\026.milvu"
-  "s.grpc.TableStat\022/\n\017partitions_stat\030\004 \003("
-  "\0132\026.milvus.grpc.TableStat2\377\013\n\rMilvusServ"
-  "ice\022>\n\013CreateTable\022\030.milvus.grpc.TableSc"
-  "hema\032\023.milvus.grpc.Status\"\000\022<\n\010HasTable\022"
-  "\026.milvus.grpc.TableName\032\026.milvus.grpc.Bo"
-  "olReply\"\000\022C\n\rDescribeTable\022\026.milvus.grpc"
-  ".TableName\032\030.milvus.grpc.TableSchema\"\000\022B"
-  "\n\nCountTable\022\026.milvus.grpc.TableName\032\032.m"
-  "ilvus.grpc.TableRowCount\"\000\022@\n\nShowTables"
-  "\022\024.milvus.grpc.Command\032\032.milvus.grpc.Tab"
-  "leNameList\"\000\022A\n\rShowTableInfo\022\026.milvus.g"
-  "rpc.TableName\032\026.milvus.grpc.TableInfo\"\000\022"
-  ":\n\tDropTable\022\026.milvus.grpc.TableName\032\023.m"
-  "ilvus.grpc.Status\"\000\022=\n\013CreateIndex\022\027.mil"
-  "vus.grpc.IndexParam\032\023.milvus.grpc.Status"
-  "\"\000\022B\n\rDescribeIndex\022\026.milvus.grpc.TableN"
-  "ame\032\027.milvus.grpc.IndexParam\"\000\022:\n\tDropIn"
-  "dex\022\026.milvus.grpc.TableName\032\023.milvus.grp"
-  "c.Status\"\000\022E\n\017CreatePartition\022\033.milvus.g"
-  "rpc.PartitionParam\032\023.milvus.grpc.Status\""
-  "\000\022F\n\016ShowPartitions\022\026.milvus.grpc.TableN"
-  "ame\032\032.milvus.grpc.PartitionList\"\000\022C\n\rDro"
-  "pPartition\022\033.milvus.grpc.PartitionParam\032"
-  "\023.milvus.grpc.Status\"\000\022<\n\006Insert\022\030.milvu"
-  "s.grpc.InsertParam\032\026.milvus.grpc.VectorI"
-  "ds\"\000\022B\n\006Search\022\030.milvus.grpc.SearchParam"
-  "\032\034.milvus.grpc.TopKQueryResult\"\000\022J\n\nSear"
-  "chByID\022\034.milvus.grpc.SearchByIDParam\032\034.m"
-  "ilvus.grpc.TopKQueryResult\"\000\022P\n\rSearchIn"
-  "Files\022\037.milvus.grpc.SearchInFilesParam\032\034"
-  ".milvus.grpc.TopKQueryResult\"\000\0227\n\003Cmd\022\024."
-  "milvus.grpc.Command\032\030.milvus.grpc.String"
-  "Reply\"\000\022A\n\nDeleteByID\022\034.milvus.grpc.Dele"
-  "teByIDParam\032\023.milvus.grpc.Status\"\000\022E\n\014De"
-  "leteByDate\022\036.milvus.grpc.DeleteByDatePar"
-  "am\032\023.milvus.grpc.Status\"\000\022=\n\014PreloadTabl"
-  "e\022\026.milvus.grpc.TableName\032\023.milvus.grpc."
-  "Status\"\000\0227\n\005Flush\022\027.milvus.grpc.FlushPar"
-  "am\032\023.milvus.grpc.Status\"\000\0228\n\007Compact\022\026.m"
-  "ilvus.grpc.TableName\032\023.milvus.grpc.Statu"
-  "s\"\000b\006proto3"
+  "e_name\030\002 \001(\t\"J\n\013SegmentStat\022\024\n\014segment_n"
+  "ame\030\001 \001(\t\022\021\n\trow_count\030\002 \001(\003\022\022\n\nindex_na"
+  "me\030\003 \001(\t\"i\n\tTableStat\022\022\n\ntable_name\030\001 \001("
+  "\t\022\027\n\017total_row_count\030\002 \001(\003\022/\n\rsegments_s"
+  "tat\030\003 \003(\0132\030.milvus.grpc.SegmentStat\"\247\001\n\t"
+  "TableInfo\022#\n\006status\030\001 \001(\0132\023.milvus.grpc."
+  "Status\022\027\n\017total_row_count\030\002 \001(\003\022+\n\013nativ"
+  "e_stat\030\003 \001(\0132\026.milvus.grpc.TableStat\022/\n\017"
+  "partitions_stat\030\004 \003(\0132\026.milvus.grpc.Tabl"
+  "eStat2\377\013\n\rMilvusService\022>\n\013CreateTable\022\030"
+  ".milvus.grpc.TableSchema\032\023.milvus.grpc.S"
+  "tatus\"\000\022<\n\010HasTable\022\026.milvus.grpc.TableN"
+  "ame\032\026.milvus.grpc.BoolReply\"\000\022C\n\rDescrib"
+  "eTable\022\026.milvus.grpc.TableName\032\030.milvus."
+  "grpc.TableSchema\"\000\022B\n\nCountTable\022\026.milvu"
+  "s.grpc.TableName\032\032.milvus.grpc.TableRowC"
+  "ount\"\000\022@\n\nShowTables\022\024.milvus.grpc.Comma"
+  "nd\032\032.milvus.grpc.TableNameList\"\000\022A\n\rShow"
+  "TableInfo\022\026.milvus.grpc.TableName\032\026.milv"
+  "us.grpc.TableInfo\"\000\022:\n\tDropTable\022\026.milvu"
+  "s.grpc.TableName\032\023.milvus.grpc.Status\"\000\022"
+  "=\n\013CreateIndex\022\027.milvus.grpc.IndexParam\032"
+  "\023.milvus.grpc.Status\"\000\022B\n\rDescribeIndex\022"
+  "\026.milvus.grpc.TableName\032\027.milvus.grpc.In"
+  "dexParam\"\000\022:\n\tDropIndex\022\026.milvus.grpc.Ta"
+  "bleName\032\023.milvus.grpc.Status\"\000\022E\n\017Create"
+  "Partition\022\033.milvus.grpc.PartitionParam\032\023"
+  ".milvus.grpc.Status\"\000\022F\n\016ShowPartitions\022"
+  "\026.milvus.grpc.TableName\032\032.milvus.grpc.Pa"
+  "rtitionList\"\000\022C\n\rDropPartition\022\033.milvus."
+  "grpc.PartitionParam\032\023.milvus.grpc.Status"
+  "\"\000\022<\n\006Insert\022\030.milvus.grpc.InsertParam\032\026"
+  ".milvus.grpc.VectorIds\"\000\022B\n\006Search\022\030.mil"
+  "vus.grpc.SearchParam\032\034.milvus.grpc.TopKQ"
+  "ueryResult\"\000\022J\n\nSearchByID\022\034.milvus.grpc"
+  ".SearchByIDParam\032\034.milvus.grpc.TopKQuery"
+  "Result\"\000\022P\n\rSearchInFiles\022\037.milvus.grpc."
+  "SearchInFilesParam\032\034.milvus.grpc.TopKQue"
+  "ryResult\"\000\0227\n\003Cmd\022\024.milvus.grpc.Command\032"
+  "\030.milvus.grpc.StringReply\"\000\022A\n\nDeleteByI"
+  "D\022\034.milvus.grpc.DeleteByIDParam\032\023.milvus"
+  ".grpc.Status\"\000\022E\n\014DeleteByDate\022\036.milvus."
+  "grpc.DeleteByDateParam\032\023.milvus.grpc.Sta"
+  "tus\"\000\022=\n\014PreloadTable\022\026.milvus.grpc.Tabl"
+  "eName\032\023.milvus.grpc.Status\"\000\0227\n\005Flush\022\027."
+  "milvus.grpc.FlushParam\032\023.milvus.grpc.Sta"
+  "tus\"\000\0228\n\007Compact\022\026.milvus.grpc.TableName"
+  "\032\023.milvus.grpc.Status\"\000b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[1] = {
   &::descriptor_table_status_2eproto,
@@ -906,7 +907,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 3771,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 3791,
   &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 26, 1,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
   file_level_metadata_milvus_2eproto, 26, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
@@ -9080,6 +9081,10 @@ SegmentStat::SegmentStat(const SegmentStat& from)
   if (!from.segment_name().empty()) {
     segment_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.segment_name_);
   }
+  index_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.index_name().empty()) {
+    index_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.index_name_);
+  }
   row_count_ = from.row_count_;
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.SegmentStat)
 }
@@ -9087,6 +9092,7 @@ SegmentStat::SegmentStat(const SegmentStat& from)
 void SegmentStat::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_SegmentStat_milvus_2eproto.base);
   segment_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  index_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   row_count_ = PROTOBUF_LONGLONG(0);
 }
 
@@ -9097,6 +9103,7 @@ SegmentStat::~SegmentStat() {
 
 void SegmentStat::SharedDtor() {
   segment_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  index_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 void SegmentStat::SetCachedSize(int size) const {
@@ -9115,6 +9122,7 @@ void SegmentStat::Clear() {
   (void) cached_has_bits;
 
   segment_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  index_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   row_count_ = PROTOBUF_LONGLONG(0);
   _internal_metadata_.Clear();
 }
@@ -9138,6 +9146,13 @@ const char* SegmentStat::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           row_count_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string index_name = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_index_name(), ptr, ctx, "milvus.grpc.SegmentStat.index_name");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -9199,6 +9214,21 @@ bool SegmentStat::MergePartialFromCodedStream(
         break;
       }
 
+      // string index_name = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_index_name()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->index_name().data(), static_cast<int>(this->index_name().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.grpc.SegmentStat.index_name"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -9241,6 +9271,16 @@ void SegmentStat::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->row_count(), output);
   }
 
+  // string index_name = 3;
+  if (this->index_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->index_name().data(), static_cast<int>(this->index_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.grpc.SegmentStat.index_name");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      3, this->index_name(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -9270,6 +9310,17 @@ void SegmentStat::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->row_count(), target);
   }
 
+  // string index_name = 3;
+  if (this->index_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->index_name().data(), static_cast<int>(this->index_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.grpc.SegmentStat.index_name");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        3, this->index_name(), target);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -9296,6 +9347,13 @@ size_t SegmentStat::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->segment_name());
+  }
+
+  // string index_name = 3;
+  if (this->index_name().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->index_name());
   }
 
   // int64 row_count = 2;
@@ -9336,6 +9394,10 @@ void SegmentStat::MergeFrom(const SegmentStat& from) {
 
     segment_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.segment_name_);
   }
+  if (from.index_name().size() > 0) {
+
+    index_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.index_name_);
+  }
   if (from.row_count() != 0) {
     set_row_count(from.row_count());
   }
@@ -9363,6 +9425,8 @@ void SegmentStat::InternalSwap(SegmentStat* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
   segment_name_.Swap(&other->segment_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  index_name_.Swap(&other->index_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(row_count_, other->row_count_);
 }

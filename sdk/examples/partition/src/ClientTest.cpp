@@ -183,6 +183,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+    }
+
     {  // drop partition
         milvus::PartitionParam param1 = {TABLE_NAME, "", std::to_string(TARGET_PARTITION)};
         milvus_sdk::Utils::PrintPartitionParam(param1);

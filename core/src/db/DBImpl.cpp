@@ -260,6 +260,19 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::INDEX};
 
+    static std::map<int32_t, std::string> index_type_name = {
+        {(int32_t)engine::EngineType::FAISS_IDMAP, "IDMAP"},
+        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
+        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
+        {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
+        {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
+        {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
+        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
+        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
+    };
+
     for (auto& name : table_names) {
         meta::TableFilesSchema table_files;
         status = meta_ptr_->FilesByType(name, file_types, table_files);
@@ -276,6 +289,7 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
                 SegmentStat seg_stat;
                 seg_stat.name_ = file.segment_id_;
                 seg_stat.row_count_ = (int64_t)file.row_count_;
+                seg_stat.index_name_ = index_type_name[file.engine_type_];
                 table_info.native_stat_.segments_stat_.emplace_back(seg_stat);
             }
         } else {
@@ -286,6 +300,7 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
                 SegmentStat seg_stat;
                 seg_stat.name_ = file.segment_id_;
                 seg_stat.row_count_ = (int64_t)file.row_count_;
+                seg_stat.index_name_ = index_type_name[file.engine_type_];
                 table_stat.segments_stat_.emplace_back(seg_stat);
             }
             table_info.partitions_stat_.emplace_back(table_stat);

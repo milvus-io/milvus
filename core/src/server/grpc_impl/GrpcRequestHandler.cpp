@@ -143,6 +143,7 @@ ConstructTableStat(const TableStat& table_stat, ::milvus::grpc::TableStat* grpc_
         ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_table_stat->mutable_segments_stat()->Add();
         grpc_seg_stat->set_row_count(seg_stat.row_num_);
         grpc_seg_stat->set_segment_name(seg_stat.name_);
+        grpc_seg_stat->set_index_name(seg_stat.index_name_);
     }
 }
 

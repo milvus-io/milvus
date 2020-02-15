@@ -208,6 +208,7 @@ message DeleteByDateParam {
 message SegmentStat {
     string segment_name = 1;
     int64 row_count = 2;
+    string index_name = 3;
 }
 
 /**
