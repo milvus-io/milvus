@@ -4,8 +4,6 @@
 - [Compile Milvus on Docker](#compile-milvus-on-docker)
 - [Troubleshooting](#troubleshooting)
 
-If you encounter any problems/issues compiling Milvus from source, please refer to [Troubleshooting](#troubleshooting).
-
 ## Build from source
 
 ### Requirements
@@ -163,7 +161,7 @@ If the `--system-curl` command doesn't work, you can also reinstall CMake in **U
 
 2. If you encounter the following error when compiling in a Docker image: `internal compiler error`. Try increasing the memory allocated to docker first.
 
-3. If you encounter the following error when compiling in a Docker image:
+3. If you encounter the following error during compilation:
 
     ```
     .../bin/milvus_server: error while loading shared libraries: libmysqlpp.so.3: cannot open shared object file: No such file or directory
