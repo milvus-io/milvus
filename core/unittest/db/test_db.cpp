@@ -848,3 +848,8 @@ TEST_F(DBTestWAL, DB_TEST) {
     stat = db_->DropTable(table_info.table_id_, dates);
     ASSERT_TRUE(stat.ok());
 }
+
+TEST_F(DBTest2, flush_non_existing_table) {
+    auto status = db_->Flush("non_existing_table");
+    ASSERT_FALSE(status.ok());
+}
