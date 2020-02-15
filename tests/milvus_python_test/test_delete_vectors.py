@@ -39,7 +39,6 @@ class TestDeleteBase:
             pytest.skip("Only support CPU mode")
         return request.param
 
-    # TODO: bug
     def test_delete_vector_search(self, connect, table):
         '''
         target: test delete vector
@@ -60,6 +59,25 @@ class TestDeleteBase:
         assert status.OK()
         assert len(res) == 0
 
+    def test_delete_vector_multi_same_ids(self, connect, table):
+        '''
+        target: test delete vector, with some same ids
+        method: add vector and delete
+        expected: status ok, vector deleted
+        '''
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.add_vectors(table, vectors, ids=[1 for i in range(nb)])
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.delete_by_id(table, [1])
+        assert status.OK()
+        status = connect.flush([table])
+        status, res = connect.search_vectors(table, top_k, nprobe, [vectors[0]])
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert len(res) == 0
+
     def test_delete_vector_table_count(self, connect, table):
         '''
         target: test delete vector
@@ -74,6 +92,24 @@ class TestDeleteBase:
         status = connect.delete_by_id(table, ids)
         assert status.OK()
         status = connect.flush([table])
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        assert res == 0 
+
+    def test_delete_vector_table_count_no_flush(self, connect, table):
+        '''
+        target: test delete vector
+        method: add vector and delete, no flush(using auto flush)
+        expected: status ok, vector deleted
+        '''
+        vector = gen_single_vector(dim)
+        status, ids = connect.add_vectors(table, vector)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.delete_by_id(table, ids)
+        assert status.OK()
+        time.sleep(2)
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 0 
@@ -299,7 +335,6 @@ class TestDeleteBinary:
       The following cases are used to test `delete_by_id` function
     ******************************************************************
     """
-    # TODO: bug
     def test_delete_vector_search(self, connect, jac_table):
         '''
         target: test delete vector

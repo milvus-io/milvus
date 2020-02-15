@@ -115,6 +115,33 @@ struct PartitionParam {
 using PartitionList = std::vector<PartitionParam>;
 
 /**
+ * @brief segment statistics
+ */
+struct SegmentStat {
+    std::string segment_name;    ///< Segment name
+    int64_t row_count;           ///< Segment row count
+};
+
+/**
+ * @brief table statistics
+ */
+struct TableStat {
+    std::string table_name;                   ///< Table name
+    int64_t row_count;                        ///< Table row count
+    std::vector<SegmentStat> segments_stat;   ///< Table's segments statistics
+};
+
+/**
+ * @brief table info
+ */
+struct TableInfo {
+    std::string table_name;                   ///< Table name
+    int64_t total_row_count;                  ///< Table total row count
+    TableStat native_stat;                    ///< Table native statistics
+    std::vector<TableStat> partitions_stat;   ///< Table's partitions statistics
+};
+
+/**
  * @brief SDK main class
  */
 class Connection {
@@ -336,6 +363,19 @@ class Connection {
      */
     virtual Status
     ShowTables(std::vector<std::string>& table_array) = 0;
+
+    /**
+     * @brief Show table information
+     *
+     * This method is used to get detail information of a table.
+     *
+     * @param table_name, target table's name.
+     * @param table_info, target table's information
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    ShowTableInfo(const std::string& table_name, TableInfo& table_info) = 0;
 
     /**
      * @brief Give the client version

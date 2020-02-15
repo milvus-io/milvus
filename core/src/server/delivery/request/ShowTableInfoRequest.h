@@ -15,42 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/FlushRequest.h"
-#include "server/DBWrapper.h"
-#include "utils/Log.h"
-#include "utils/TimeRecorder.h"
+#pragma once
+
+#include "server/delivery/request/BaseRequest.h"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
 
-FlushRequest::FlushRequest(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_names_(table_names) {
-}
+class ShowTableInfoRequest : public BaseRequest {
+ public:
+    static BaseRequestPtr
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, TableInfo& table_info);
 
-BaseRequestPtr
-FlushRequest::Create(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names) {
-    return std::shared_ptr<BaseRequest>(new FlushRequest(context, table_names));
-}
+ protected:
+    ShowTableInfoRequest(const std::shared_ptr<Context>& context, const std::string& table_name, TableInfo& table_info);
 
-Status
-FlushRequest::OnExecute() {
-    std::string hdr = "FlushRequest flush tables: ";
-    for (auto& name : table_names_) {
-        hdr += name;
-        hdr += ", ";
-    }
+    Status
+    OnExecute() override;
 
-    TimeRecorderAuto rc(hdr);
-    Status stat = Status::OK();
-
-    for (auto& name : table_names_) {
-        stat = DBWrapper::DB()->Flush(name);
-    }
-
-    return stat;
-}
+ private:
+    const std::string table_name_;
+    TableInfo& table_info_;
+};
 
 }  // namespace server
 }  // namespace milvus

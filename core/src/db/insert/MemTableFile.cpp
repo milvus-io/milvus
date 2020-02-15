@@ -183,5 +183,10 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     return status;
 }
 
+const std::string&
+MemTableFile::GetSegmentId() const {
+    return table_file_schema_.segment_id_;
+}
+
 }  // namespace engine
 }  // namespace milvus

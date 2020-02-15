@@ -76,6 +76,9 @@ class ClientProxy : public Connection {
     Status
     ShowTables(std::vector<std::string>& table_array) override;
 
+    Status
+    ShowTableInfo(const std::string& table_name, TableInfo& table_info) override;
+
     std::string
     ClientVersion() const override;
 

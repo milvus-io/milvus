@@ -129,6 +129,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                ::milvus::grpc::TableNameList* response) override;
     // *
+    // @brief This method is used to get table detail information.
+    //
+    // @param TableName, target table name.
+    //
+    // @return TableInfo
+    ::grpc::Status
+    ShowTableInfo(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                  ::milvus::grpc::TableInfo* response);
+
+    // *
     // @brief This method is used to delete table.
     //
     // @param TableName, table name is going to be deleted.

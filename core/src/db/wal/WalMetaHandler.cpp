@@ -58,17 +58,15 @@ MXLogMetaHandler::GetMXLogInternalMeta(uint64_t& wal_lsn) {
 
 bool
 MXLogMetaHandler::SetMXLogInternalMeta(uint64_t wal_lsn) {
-    if (wal_meta_fp_ == nullptr) {
-        return false;
-    }
-
-    uint64_t all_wal_lsn[3] = {latest_wal_lsn_, wal_lsn, wal_lsn};
-    fseek(wal_meta_fp_, 0, SEEK_SET);
-    auto rt_val = fwrite(&all_wal_lsn, sizeof(all_wal_lsn), 1, wal_meta_fp_);
-    if (rt_val == 1) {
-        fflush(wal_meta_fp_);
-        latest_wal_lsn_ = wal_lsn;
-        return true;
+    if (wal_meta_fp_ != nullptr) {
+        uint64_t all_wal_lsn[3] = {latest_wal_lsn_, wal_lsn, wal_lsn};
+        fseek(wal_meta_fp_, 0, SEEK_SET);
+        auto rt_val = fwrite(&all_wal_lsn, sizeof(all_wal_lsn), 1, wal_meta_fp_);
+        if (rt_val == 1) {
+            fflush(wal_meta_fp_);
+            latest_wal_lsn_ = wal_lsn;
+            return true;
+        }
     }
     return false;
 }

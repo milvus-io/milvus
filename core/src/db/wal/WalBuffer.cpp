@@ -213,7 +213,7 @@ MXLogBuffer::Append(MXLogRecord& record) {
         lck.unlock();
 
         // Reborn means close old wal file and open new wal file
-        if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no))) {
+        if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no), "w")) {
             WAL_LOG_ERROR << "ReBorn wal file error " << mxlog_buffer_writer_.file_no;
             return WAL_FILE_ERROR;
         }
@@ -295,12 +295,8 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
         MXLogFileHandler mxlog_reader(mxlog_writer_.GetFilePath());
         mxlog_reader.SetFileName(ToFileName(mxlog_buffer_reader_.file_no));
         mxlog_reader.SetFileOpenMode("r");
-        if (!mxlog_reader.OpenFile()) {
-            WAL_LOG_ERROR << "read wal file error " << mxlog_buffer_reader_.file_no;
-            return WAL_FILE_ERROR;
-        }
-        auto file_size = mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0);
-        if (file_size <= 0) {
+        uint32_t file_size = mxlog_reader.Load(buf_[mxlog_buffer_reader_.buf_idx].get(), 0);
+        if (file_size == 0) {
             WAL_LOG_ERROR << "load wal file error " << mxlog_buffer_reader_.file_no;
             return WAL_FILE_ERROR;
         }
@@ -358,20 +354,24 @@ MXLogBuffer::GetReadLsn() {
 
 bool
 MXLogBuffer::ResetWriteLsn(uint64_t lsn) {
+    WAL_LOG_INFO << "reset write lsn " << lsn;
+
     int32_t old_file_no = mxlog_buffer_writer_.file_no;
     ParserLsn(lsn, mxlog_buffer_writer_.file_no, mxlog_buffer_writer_.buf_offset);
     if (old_file_no == mxlog_buffer_writer_.file_no) {
+        WAL_LOG_DEBUG << "file No. is not changed";
         return true;
     }
 
     std::unique_lock<std::mutex> lck(mutex_);
     if (mxlog_buffer_writer_.file_no == mxlog_buffer_reader_.file_no) {
         mxlog_buffer_writer_.buf_idx = mxlog_buffer_reader_.buf_idx;
+        WAL_LOG_DEBUG << "file No. is the same as reader";
         return true;
     }
     lck.unlock();
 
-    if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no))) {
+    if (!mxlog_writer_.ReBorn(ToFileName(mxlog_buffer_writer_.file_no), "r+")) {
         WAL_LOG_ERROR << "reborn file error " << mxlog_buffer_writer_.file_no;
         return false;
     }
@@ -406,7 +406,6 @@ MXLogBuffer::RemoveOldFiles(uint64_t flushed_lsn) {
     uint32_t file_no;
     uint32_t offset;
     ParserLsn(flushed_lsn, file_no, offset);
-
     if (file_no_from_ < file_no) {
         MXLogFileHandler file_handler(mxlog_writer_.GetFilePath());
         do {

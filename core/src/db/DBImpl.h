@@ -71,6 +71,9 @@ class DBImpl : public DB {
     AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
 
     Status
+    GetTableInfo(const std::string& table_id, TableInfo& table_info) override;
+
+    Status
     PreloadTable(const std::string& table_id) override;
 
     Status
