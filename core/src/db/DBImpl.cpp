@@ -537,9 +537,18 @@ DBImpl::Flush(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
+    bool has_table;
+    auto status = HasTable(table_id, has_table);
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table to flush does not exist: " << table_id;
+        return Status(DB_NOT_FOUND, "Table to flush does not exist");
+    }
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
+
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
-    Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
