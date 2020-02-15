@@ -2,8 +2,7 @@
 
 - [Build from source](#build-from-source)
 - [Compile Milvus on Docker](#compile-milvus-on-docker)
-
-If you encounter any problems/issues compiling Milvus from source, please refer to [Troubleshooting](#troubleshooting).
+- [Troubleshooting](#troubleshooting)
 
 ## Build from source
 
@@ -147,6 +146,7 @@ $ ./start_server.sh
 ```
 
 ## Troubleshooting
+
 1. If you encounter the following error when compiling: 
 `protocol https not supported or disabled in libcurl`.
 First, make sure you have `libcurl4-openssl-dev` installed in your system.
@@ -159,4 +159,17 @@ Then try reinstalling the latest CMake from source with `--system-curl` option:
    ```
 If the `--system-curl` command doesn't work, you can also reinstall CMake in **Ubuntu Software** on your local computer.
 
-2. If you encounter the following error when compiling in a Docker image: `internal compiler error`. Try increasing the memory allocated to docker.
+2. If you encounter the following error when compiling in a Docker image: `internal compiler error`. Try increasing the memory allocated to docker first.
+
+3. If you encounter the following error during compilation:
+
+    ```
+    .../bin/milvus_server: error while loading shared libraries: libmysqlpp.so.3: cannot open shared object file: No such file or directory
+    ```
+    
+    Try the following solutions:
+    
+    1. Check whether `libmysqlpp.so.3` is correctly installed;
+    2. If `libmysqlpp.so.3` is installed, check whether it is added to `LD_LIBRARY_PATH`.
+
+
