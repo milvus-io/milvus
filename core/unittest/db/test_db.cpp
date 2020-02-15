@@ -454,6 +454,13 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DeleteVector(table_info.table_id_, 0);
     ASSERT_FALSE(stat.ok());
 
+    milvus::engine::IDNumbers ids_to_delete {0};
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->Compact(table_info.table_id_);
+    ASSERT_FALSE(stat.ok());
+
     stat = db_->PreloadTable(table_info.table_id_);
     ASSERT_FALSE(stat.ok());
 
