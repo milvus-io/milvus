@@ -194,7 +194,7 @@ tracing_config:
 #                      | files.                                                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 wal_config:
-  enable: true
+  enable: false
   recovery_error_ignore: true
   buffer_size: 128   # MB
   record_size: 2     # MB
