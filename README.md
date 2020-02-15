@@ -112,6 +112,8 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
+- [Milvus design docs](design.md)
+
 ## License
 
 [Apache License 2.0](LICENSE)
