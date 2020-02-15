@@ -748,6 +748,82 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     ASSERT_EQ(row_count, 0UL);
 }
 
+TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
+    std::string table_name = TABLE_NAME;
+    milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
+    auto stat = db_->CreateTable(table_schema);
+
+    uint64_t nb = VECTOR_COUNT;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, 0, xb);
+
+    milvus::engine::IDNumbers vector_ids;
+    stat = db_->InsertVectors(table_name, "", xb);
+
+    // create partition and insert data
+    const int64_t PARTITION_COUNT = 2;
+    const int64_t INSERT_BATCH = 2000;
+    for (int64_t i = 0; i < PARTITION_COUNT; i++) {
+        std::string partition_tag = std::to_string(i);
+        std::string partition_name = table_name + "_" + partition_tag;
+        stat = db_->CreatePartition(table_name, partition_name, partition_tag);
+        ASSERT_TRUE(stat.ok());
+
+        milvus::engine::VectorsData xb;
+        BuildVectors(INSERT_BATCH, i, xb);
+
+        db_->InsertVectors(table_name, partition_tag, xb);
+    }
+
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    {
+        milvus::engine::TableInfo table_info;
+        stat = db_->GetTableInfo(table_name, table_info);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_TRUE(table_info.native_stat_.name_ == table_name);
+        ASSERT_FALSE(table_info.native_stat_.segments_stat_.empty());
+        int64_t row_count = 0;
+        for (auto& stat : table_info.native_stat_.segments_stat_) {
+            row_count += stat.row_count_;
+        }
+        ASSERT_EQ(row_count, VECTOR_COUNT);
+
+        for (auto& part : table_info.partitions_stat_) {
+            row_count = 0;
+            for (auto& stat : part.segments_stat_) {
+                row_count += stat.row_count_;
+            }
+            ASSERT_EQ(row_count, INSERT_BATCH);
+        }
+    }
+
+    milvus::engine::TableIndex index;
+    stat = db_->CreateIndex(table_name, index);
+
+    {
+        milvus::engine::TableInfo table_info;
+        stat = db_->GetTableInfo(table_name, table_info);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_TRUE(table_info.native_stat_.name_ == table_name);
+        ASSERT_FALSE(table_info.native_stat_.segments_stat_.empty());
+        int64_t row_count = 0;
+        for (auto& stat : table_info.native_stat_.segments_stat_) {
+            row_count += stat.row_count_;
+        }
+        ASSERT_EQ(row_count, VECTOR_COUNT);
+
+        for (auto& part : table_info.partitions_stat_) {
+            row_count = 0;
+            for (auto& stat : part.segments_stat_) {
+                row_count += stat.row_count_;
+            }
+            ASSERT_EQ(row_count, INSERT_BATCH);
+        }
+    }
+}
+
 TEST_F(DBTestWAL, DB_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);

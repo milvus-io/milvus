@@ -380,6 +380,11 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->ShowTables(&context, &cmd, &table_name_list);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
+    // show table info
+    ::milvus::grpc::TableInfo table_info;
+    status = handler->ShowTableInfo(&context, &table_name, &table_info);
+    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+
     // Count Table
     ::milvus::grpc::TableRowCount count;
     table_name.Clear();
