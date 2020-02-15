@@ -58,6 +58,7 @@ using Table2Files = std::map<std::string, File2RefCount>;
 struct SegmentStat {
     std::string name_;
     int64_t row_count_ = 0;
+    std::string index_name_;
 };
 
 struct TableStat {
