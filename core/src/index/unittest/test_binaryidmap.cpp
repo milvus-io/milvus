@@ -68,8 +68,8 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<knowhere::BinaryIDMAP>();
     new_index->Load(binaryset);
-    auto re_result = index_->Search(query_dataset, conf);
-    AssertAnns(re_result, nq, k);
+    auto result2 = index_->Search(query_dataset, conf);
+    AssertAnns(result2, nq, k);
     // PrintResult(re_result, nq, k);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
@@ -78,8 +78,11 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto re_re_result = index_->Search(query_dataset, conf);
-    AssertAneq(re_re_result, nq, k);
+    auto result3 = index_->Search(query_dataset, conf);
+    AssertAneq(result3, nq, k);
+
+//    auto result4 = index_->SearchById(id_dataset, conf);
+//    AssertAneq(result4, nq, k);
 }
 
 TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
