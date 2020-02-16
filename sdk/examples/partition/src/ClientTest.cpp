@@ -119,6 +119,24 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
     }
 
+    {  // flush buffer
+        stat = conn->FlushTable(TABLE_NAME);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    }
+
+    {  // table row count
+        int64_t row_count = 0;
+        stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+    }
+
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+    }
+
     std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
     {  // build search vectors
         std::vector<milvus::RowRecord> record_array;
@@ -126,14 +144,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t index = TARGET_PARTITION * BATCH_ROW_COUNT + SEARCH_TARGET;
         milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, TABLE_DIMENSION);
         search_record_array.push_back(std::make_pair(record_ids[0], record_array[0]));
-    }
-
-    milvus_sdk::Utils::Sleep(3);
-
-    {  // table row count
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
     {  // search vectors
@@ -171,6 +181,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+    }
+
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
     }
 
     {  // drop partition

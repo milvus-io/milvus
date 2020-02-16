@@ -27,6 +27,21 @@
 namespace milvus {
 namespace server {
 
+void
+ConstructTableStat(const engine::TableStat& table_stat, TableStat& req_table_stat) {
+    req_table_stat.table_name_ = table_stat.name_;
+    int64_t row_count = 0;
+    for (auto& seg : table_stat.segments_stat_) {
+        SegmentStat seg_stat;
+        seg_stat.name_ = seg.name_;
+        seg_stat.row_num_ = seg.row_count_;
+        seg_stat.index_name_ = seg.index_name_;
+        req_table_stat.segments_stat_.emplace_back(seg_stat);
+        row_count += seg.row_count_;
+    }
+    req_table_stat.total_row_num_ = row_count;
+}
+
 ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                            TableInfo& table_info)
     : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), table_info_(table_info) {
@@ -67,35 +82,16 @@ ShowTableInfoRequest::OnExecute() {
     int64_t total_row_count = 0;
     // contruct native info
     {
-        table_info_.native_stat_.table_name_ = table_info.native_stat_.name_;
-        int64_t native_row_count = 0;
-        for (auto& seg : table_info.native_stat_.segments_stat_) {
-            SegmentStat seg_stat;
-            seg_stat.name_ = seg.name_;
-            seg_stat.row_num_ = seg.row_count_;
-            table_info_.native_stat_.segments_stat_.emplace_back(seg_stat);
-            native_row_count += seg.row_count_;
-        }
-        table_info_.native_stat_.total_row_num_ = native_row_count;
-        total_row_count += native_row_count;
+        ConstructTableStat(table_info.native_stat_, table_info_.native_stat_);
+        total_row_count += table_info_.native_stat_.total_row_num_;
     }
 
     // construct partitions info
-    table_info_.partitions_stat_.resize(table_info.partitions_stat_.size());
+    table_info_.partitions_stat_.reserve(table_info.partitions_stat_.size());
     for (auto& partition : table_info.partitions_stat_) {
         TableStat table_stat;
-        table_stat.table_name_ = partition.name_;
-
-        int64_t partition_row_count = 0;
-        for (auto& seg : table_info.native_stat_.segments_stat_) {
-            SegmentStat seg_stat;
-            seg_stat.name_ = seg.name_;
-            seg_stat.row_num_ = seg.row_count_;
-            table_stat.segments_stat_.emplace_back(seg_stat);
-            partition_row_count += seg.row_count_;
-        }
-        total_row_count += partition_row_count;
-
+        ConstructTableStat(partition, table_stat);
+        total_row_count += table_stat.total_row_num_;
         table_info_.partitions_stat_.emplace_back(table_stat);
     }
 

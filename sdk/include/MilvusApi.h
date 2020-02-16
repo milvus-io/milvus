@@ -120,6 +120,7 @@ using PartitionList = std::vector<PartitionParam>;
 struct SegmentStat {
     std::string segment_name;    ///< Segment name
     int64_t row_count;           ///< Segment row count
+    std::string index_name;      ///< Segment index name
 };
 
 /**
@@ -135,7 +136,6 @@ struct TableStat {
  * @brief table info
  */
 struct TableInfo {
-    std::string table_name;                   ///< Table name
     int64_t total_row_count;                  ///< Table total row count
     TableStat native_stat;                    ///< Table native statistics
     std::vector<TableStat> partitions_stat;   ///< Table's partitions statistics

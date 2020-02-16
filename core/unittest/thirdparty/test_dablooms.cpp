@@ -15,27 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <cstdio>
-#include <string>
-#include <cstdlib>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
+#include <string>
 
 #include "dablooms/dablooms.h"
 #include "utils.h"
 
-TEST_F(DabloomsTest, CORRECTNESS_TEST){
-    FILE *fp;
-    counting_bloom_t *bloom;
+TEST_F(DabloomsTest, CORRECTNESS_TEST) {
+    FILE* fp;
+    scaling_bloom_t* bloom;
     int32_t i;
-    struct stats results = { 0 };
+    struct stats results = {0};
 
     if ((fp = fopen(bloom_file, "r"))) {
         fclose(fp);
         remove(bloom_file);
     }
 
-    bloom = new_counting_bloom(2 * CAPACITY, ERROR_RATE, bloom_file);
+    bloom = new_scaling_bloom(2 * CAPACITY, ERROR_RATE, bloom_file);
     ASSERT_NE(bloom, nullptr);
 
     auto start = std::chrono::system_clock::now();
@@ -46,105 +46,132 @@ TEST_F(DabloomsTest, CORRECTNESS_TEST){
         if (i % 2 == 0) {
             std::string tmp = std::to_string(i);
             lock.lock();
-            counting_bloom_add(bloom, tmp.c_str(), tmp.size());
+            scaling_bloom_add(bloom, tmp.c_str(), tmp.size(), i);
             lock.unlock();
         }
     }
 
     auto end = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Time costs for add: " << double(duration.count()) * std::chrono::microseconds::period::num / std::chrono::microseconds::period::den << " s" << std::endl;
+    std::cout << "Time costs for add: "
+              << double(duration.count()) * std::chrono::microseconds::period::num /
+                     std::chrono::microseconds::period::den
+              << " s" << std::endl;
     start = std::chrono::system_clock::now();
 
     for (i = 0; i < 2 * CAPACITY; i++) {
         if (i % 2 == 1) {
             std::string tmp = std::to_string(i);
             lock.lock();
-            bloom_score(counting_bloom_check(bloom, tmp.c_str(), tmp.size()), 0, &results);
+            bloom_score(scaling_bloom_check(bloom, tmp.c_str(), tmp.size()), 0, &results);
             lock.unlock();
         }
     }
 
     end = std::chrono::system_clock::now();
     duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Time costs for check: " << double(duration.count()) * std::chrono::microseconds::period::num / std::chrono::microseconds::period::den << " s" << std::endl;
+    std::cout << "Time costs for check: "
+              << double(duration.count()) * std::chrono::microseconds::period::num /
+                     std::chrono::microseconds::period::den
+              << " s" << std::endl;
 
-    fclose(fp);
+//    fclose(fp);
+    if ((fp = fopen(bloom_file, "r"))) {
+        fclose(fp);
+        remove(bloom_file);
+    }
 
-    printf("Elements added:   %6d" "\n"
-           "Elements checked: %6d" "\n"
-           "Total size: %d KiB"  "\n\n",
-           (i + 1) / 2, i / 2,
-           (int) bloom->num_bytes / 1024);
+    printf(
+        "Elements added:   %6d"
+        "\n"
+        "Elements checked: %6d"
+        "\n"
+        "Total size: %d KiB"
+        "\n\n",
+        (i + 1) / 2, i / 2, (int)bloom->num_bytes / 1024);
 
-    free_counting_bloom(bloom);
+    free_scaling_bloom(bloom);
 
     print_results(&results);
 }
 
-TEST_F(DabloomsTest, FILE_OPT_TEST){
-    FILE *fp;
-    counting_bloom_t *bloom;
+TEST_F(DabloomsTest, FILE_OPT_TEST) {
+    FILE* fp;
+    scaling_bloom_t* bloom;
     int i, key_removed;
-    struct stats results1 = { 0 };
-    struct stats results2 = { 0 };
+    struct stats results1 = {0};
+    struct stats results2 = {0};
 
     if ((fp = fopen(bloom_file, "r"))) {
         fclose(fp);
         remove(bloom_file);
     }
 
-    bloom = new_counting_bloom(CAPACITY, ERROR_RATE, bloom_file);
+    bloom = new_scaling_bloom(CAPACITY, ERROR_RATE, bloom_file);
     ASSERT_NE(bloom, nullptr);
 
     auto start = std::chrono::system_clock::now();
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
-        counting_bloom_add(bloom, tmp.c_str(), tmp.size());
+        scaling_bloom_add(bloom, tmp.c_str(), tmp.size(), i);
     }
 
     auto end = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << std::endl << "Time costs for add: " << double(duration.count()) * std::chrono::microseconds::period::num / std::chrono::microseconds::period::den << " s" << std::endl;
+    std::cout << std::endl
+              << "Time costs for add: "
+              << double(duration.count()) * std::chrono::microseconds::period::num /
+                     std::chrono::microseconds::period::den
+              << " s" << std::endl;
     start = std::chrono::system_clock::now();
 
     for (i = 0; i < CAPACITY; i++) {
         if (i % 5 == 0) {
             std::string tmp = std::to_string(i);
-            counting_bloom_remove(bloom, tmp.c_str(), tmp.size());
+            scaling_bloom_remove(bloom, tmp.c_str(), tmp.size(), i);
         }
     }
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         key_removed = (i % 5 == 0);
-        bloom_score(counting_bloom_check(bloom, tmp.c_str(), tmp.size()), !key_removed, &results1);
+        bloom_score(scaling_bloom_check(bloom, tmp.c_str(), tmp.size()), !key_removed, &results1);
     }
 
     end = std::chrono::system_clock::now();
     duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Time costs for remove: " << double(duration.count()) * std::chrono::microseconds::period::num / std::chrono::microseconds::period::den << " s" << std::endl;
+    std::cout << "Time costs for remove: "
+              << double(duration.count()) * std::chrono::microseconds::period::num /
+                     std::chrono::microseconds::period::den
+              << " s" << std::endl;
 
-    free_counting_bloom(bloom);
-    bloom = new_counting_bloom_from_file(CAPACITY, ERROR_RATE, bloom_file);
+    free_scaling_bloom(bloom);
+    bloom = new_scaling_bloom_from_file(CAPACITY, ERROR_RATE, bloom_file);
 
     ASSERT_NE(bloom, nullptr);
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         key_removed = (i % 5 == 0);
-        bloom_score(counting_bloom_check(bloom, tmp.c_str(), tmp.size()), !key_removed, &results2);
+        bloom_score(scaling_bloom_check(bloom, tmp.c_str(), tmp.size()), !key_removed, &results2);
     }
-    fclose(fp);
+    //fclose(fp);
+    if ((fp = fopen(bloom_file, "r"))) {
+        fclose(fp);
+        remove(bloom_file);
+    }
 
-    printf("Elements added:   %6d" "\n"
-           "Elements removed: %6d" "\n"
-           "Total size: %d KiB"  "\n\n",
-           i, i / 5,
-           (int) bloom->num_bytes / 1024);
+    printf(
+        "Elements added:   %6d"
+        "\n"
+        "Elements removed: %6d"
+        "\n"
+        "Total size: %d KiB"
+        "\n\n",
+        i, i / 5, (int)bloom->num_bytes / 1024);
 
-    free_counting_bloom(bloom);
+    free_scaling_bloom(bloom);
 
     print_results(&results1);
 
@@ -154,18 +181,18 @@ TEST_F(DabloomsTest, FILE_OPT_TEST){
     ASSERT_EQ(results1.true_positives, results2.true_positives);
 }
 
-TEST_F(DabloomsTest, xxx){
-    FILE *fp;
-    counting_bloom_t *bloom;
+TEST_F(DabloomsTest, xxx) {
+    FILE* fp;
+    scaling_bloom_t* bloom;
     int32_t i;
-    struct stats results = { 0 };
+    struct stats results = {0};
 
     if ((fp = fopen(bloom_file, "r"))) {
         fclose(fp);
         remove(bloom_file);
     }
 
-    bloom = new_counting_bloom(2 * CAPACITY, ERROR_RATE, bloom_file);
+    bloom = new_scaling_bloom(2 * CAPACITY, ERROR_RATE, bloom_file);
     ASSERT_NE(bloom, nullptr);
 
     std::mutex lock;
@@ -173,28 +200,28 @@ TEST_F(DabloomsTest, xxx){
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         lock.lock();
-        counting_bloom_add(bloom, tmp.c_str(), tmp.size());
+        scaling_bloom_add(bloom, tmp.c_str(), tmp.size(), i);
         lock.unlock();
     }
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         lock.lock();
-        counting_bloom_add(bloom, tmp.c_str(), tmp.size());
+        scaling_bloom_add(bloom, tmp.c_str(), tmp.size(), i);
         lock.unlock();
     }
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         lock.lock();
-        counting_bloom_remove(bloom, tmp.c_str(), tmp.size());
+        scaling_bloom_remove(bloom, tmp.c_str(), tmp.size(), i);
         lock.unlock();
     }
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         lock.lock();
-        bloom_score(counting_bloom_check(bloom, tmp.c_str(), tmp.size()), 1, &results);
+        bloom_score(scaling_bloom_check(bloom, tmp.c_str(), tmp.size()), 1, &results);
         lock.unlock();
     }
 
@@ -204,18 +231,23 @@ TEST_F(DabloomsTest, xxx){
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         lock.lock();
-        counting_bloom_remove(bloom, tmp.c_str(), tmp.size());
+        scaling_bloom_remove(bloom, tmp.c_str(), tmp.size(), i);
         lock.unlock();
     }
 
     for (i = 0; i < CAPACITY; i++) {
         std::string tmp = std::to_string(i);
         lock.lock();
-        bloom_score(counting_bloom_check(bloom, tmp.c_str(), tmp.size()), 0, &results);
+        bloom_score(scaling_bloom_check(bloom, tmp.c_str(), tmp.size()), 0, &results);
         lock.unlock();
     }
 
-    free_counting_bloom(bloom);
+    free_scaling_bloom(bloom);
+
+    if ((fp = fopen(bloom_file, "r"))) {
+        fclose(fp);
+        remove(bloom_file);
+    }
 
     print_results(&results);
 }
