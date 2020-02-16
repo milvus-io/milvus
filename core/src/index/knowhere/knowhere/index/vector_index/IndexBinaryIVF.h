@@ -62,7 +62,10 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
     Dimension() override;
 
     DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config);
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
+
+    DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config) override;
 
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr list);
