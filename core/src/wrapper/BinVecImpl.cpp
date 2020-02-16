@@ -144,37 +144,6 @@ BinVecImpl::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
 }
 
 Status
-BinVecImpl::GetVectorById(const int64_t n, const int64_t* ids, uint8_t* x, const Config& cfg) {
-    if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIVF>(index_)) {
-    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {
-    } else {
-        throw WrapperException("not support");
-    }
-    try {
-        auto ret_ds = std::make_shared<knowhere::Dataset>();
-        ret_ds->Set(knowhere::meta::ROWS, n);
-        ret_ds->Set(knowhere::meta::DIM, dim);
-        ret_ds->Set(knowhere::meta::IDS, ids);
-
-        Config search_cfg = cfg;
-
-        auto res = index_->GetVectorById(ret_ds, search_cfg);
-
-        // TODO(linxj): avoid copy here.
-        auto res_x = res->Get<uint8_t*>(knowhere::meta::TENSOR);
-        memcpy(x, res_x, sizeof(uint8_t) * n * dim);
-        free(res_x);
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_ERROR, e.what());
-    }
-    return Status::OK();
-}
-
-Status
 BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg) {
     if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIVF>(index_)) {
     } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {

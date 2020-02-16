@@ -277,39 +277,6 @@ IVF::Seal() {
 }
 
 DatasetPtr
-IVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (search_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("not support this kind of config");
-    }
-
-    auto rows = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
-
-    try {
-        auto elems = rows * search_cfg->d;
-
-        size_t p_x_size = sizeof(float) * elems;
-        auto p_x = (float*)malloc(p_x_size);
-
-        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->get_vector_by_id(rows, p_data, p_x);
-
-        auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::TENSOR, p_x);
-        return ret_ds;
-    } catch (faiss::FaissException& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-DatasetPtr
 IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
@@ -334,7 +301,7 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
         // todo: enable search by id (zhiru)
         //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
         auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->search_by_id(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
+        index_ivf->searchById(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {

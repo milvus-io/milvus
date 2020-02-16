@@ -43,11 +43,6 @@ class VectorIndex : public Index {
     }
 
     virtual DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) {
-        return nullptr;
-    }
-
-    virtual DatasetPtr
     SearchById(const DatasetPtr& dataset, const Config& config) {
         return nullptr;
     }

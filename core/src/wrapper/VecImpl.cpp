@@ -202,37 +202,6 @@ VecIndexImpl::GetDeviceId() {
 }
 
 Status
-VecIndexImpl::GetVectorById(const int64_t n, const int64_t* xid, float* x, const Config& cfg) {
-    if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
-    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
-    } else {
-        throw WrapperException("not support");
-    }
-
-    try {
-        auto dataset = std::make_shared<knowhere::Dataset>();
-        dataset->Set(knowhere::meta::ROWS, n);
-        dataset->Set(knowhere::meta::DIM, dim);
-        dataset->Set(knowhere::meta::IDS, xid);
-
-        Config search_cfg = cfg;
-        auto res = index_->GetVectorById(dataset, search_cfg);
-
-        // TODO(linxj): avoid copy here.
-        auto res_x = res->Get<float*>(knowhere::meta::TENSOR);
-        memcpy(x, res_x, sizeof(float) * n * dim);
-        free(res_x);
-    } catch (knowhere::KnowhereException& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (std::exception& e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_ERROR, e.what());
-    }
-    return Status::OK();
-}
-
-Status
 VecIndexImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg) {
     if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
     } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
