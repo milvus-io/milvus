@@ -38,16 +38,18 @@ class DataGen {
     GenQuery(const int& nq);
 
  protected:
-    int nb = 10000;
-    int nq = 10;
-    int dim = 64;
-    int k = 10;
+    int nb = 100;
+    int nq = 5;
+    int dim = 8;
+    int k = 4;
     std::vector<float> xb;
     std::vector<float> xq;
     std::vector<int64_t> ids;
+    std::vector<int64_t> xids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
     knowhere::DatasetPtr id_dataset = nullptr;
+    knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 class BinaryDataGen {
@@ -75,11 +77,11 @@ class BinaryDataGen {
 };
 
 extern void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
-       std::vector<float>& xq);
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq);
 
 extern void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq);
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq);
 
 extern void
 GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
@@ -117,6 +119,10 @@ AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
 
 void
 AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+
+void
+AssertVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+            const knowhere::DatasetPtr& id_dataset, const int n, const int dim);
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
