@@ -79,6 +79,9 @@ class IVF : public VectorIndex, public FaissBaseIndex {
     CopyCpuToGpu(const int64_t& device_id, const Config& config);
 
     DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
+
+    DatasetPtr
     SearchById(const DatasetPtr& dataset, const Config& config) override;
 
     void

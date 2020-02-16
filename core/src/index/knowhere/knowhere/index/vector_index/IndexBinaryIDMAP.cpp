@@ -162,6 +162,27 @@ BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
 }
 
 DatasetPtr
+BinaryIDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    //    GETBINARYTENSOR(dataset)
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t *>(meta::IDS);
+
+    auto elems = rows * config->d;
+    size_t p_x_size = sizeof(float) * elems;
+    auto p_x = (uint8_t*)malloc(p_x_size);
+
+    index_->get_vector_by_id(rows, p_data, p_x);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::TENSOR, p_x);
+    return ret_ds;
+}
+
+DatasetPtr
 BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
