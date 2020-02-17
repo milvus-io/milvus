@@ -17,10 +17,10 @@
 
 #pragma once
 
+#include <memory>
+
 #include "VecIndex.h"
 #include "knowhere/common/Config.h"
-
-#include <memory>
 
 namespace milvus {
 namespace engine {

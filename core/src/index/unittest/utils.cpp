@@ -102,7 +102,7 @@ GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* 
         xq[i] = xb[i];
     }
     for (int64_t i = 0; i < nq; ++i) {
-        xids[i] = i * i % nb;   // pseudo random
+        xids[i] = i * i % nb;  // pseudo random
     }
 }
 
@@ -124,7 +124,7 @@ GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, i
         xq[i] = xb[i];
     }
     for (int64_t i = 0; i < nq; ++i) {
-        xids[i] = i * i % nb;   // pseudo random
+        xids[i] = i * i % nb;  // pseudo random
     }
 }
 

@@ -16,9 +16,10 @@
 // under the License.
 
 #include "wrapper/DataTransfer.h"
-#include "knowhere/adapter/VectorAdapter.h"
 
 #include <memory>
+
+#include "knowhere/adapter/VectorAdapter.h"
 
 namespace milvus {
 namespace engine {
