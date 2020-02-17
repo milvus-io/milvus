@@ -146,8 +146,8 @@ void IndexBinaryIVF::make_direct_map(bool new_maintain_direct_map) {
   maintain_direct_map = new_maintain_direct_map;
 }
 
-void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
-                            int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const {
+void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k, int32_t *distances, idx_t *labels,
+                            ConcurrentBitsetPtr bitset) const {
   std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
   std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 
@@ -163,17 +163,20 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
   indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
-void IndexBinaryIVF::searchById (idx_t n, const idx_t *xid, idx_t k,
-                                 int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset){
-    if(!maintain_direct_map){
-        make_direct_map(true);
-    }
-
-    auto x = new unsigned char[n * d];
+void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x) const {
     for (idx_t i = 0; i < n; ++i) {
         reconstruct(xid[i], x + i * d);
     }
+}
 
+void IndexBinaryIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
+                                   ConcurrentBitsetPtr bitset) {
+    if (!maintain_direct_map) {
+        make_direct_map(true);
+    }
+
+    auto x = new uint8_t[n * d];
+    get_vector_by_id(n, xid, x);
     search(n, x, k, distances, labels, bitset);
     delete []x;
 }
