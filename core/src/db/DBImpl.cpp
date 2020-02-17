@@ -19,6 +19,7 @@
 
 #include <assert.h>
 #include <utils/ValidationUtil.h>
+#include <fiu-local.h>
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
@@ -107,12 +108,6 @@ DBImpl::Start() {
     // ENGINE_LOG_TRACE << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
-    // for distribute version, some nodes are read only
-    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        // ENGINE_LOG_TRACE << "StartTimerTasks";
-        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
-    }
-
     // wal
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto error_code = wal_mgr_->Init(meta_ptr_);
@@ -136,6 +131,12 @@ DBImpl::Start() {
 
         // background thread
         bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalTask, this);
+    }
+
+    // for distribute version, some nodes are read only
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        // ENGINE_LOG_TRACE << "StartTimerTasks";
+        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
 
     return Status::OK();
@@ -1681,6 +1682,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 
 Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    fiu_return_on("DBImpl.ExexWalRecord.return",Status(););
     auto wal_table_flushed = [&](const std::string& table_id) -> uint64_t {
         uint64_t lsn = 0;
         meta_ptr_->GetTableFlushLSN(table_id, lsn);

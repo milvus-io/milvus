@@ -228,11 +228,21 @@ DBTestWAL::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 milvus::engine::DBOptions
-DBTestWAL_Recovery_Error::GetOptions() {
+DBTestWALRecovery::GetOptions() {
+    auto options = DBTestWAL::GetOptions();
+    //disable auto flush
+    options.auto_flush_interval_ = 10000;
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWALRecovery_Error::GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = CONFIG_PATH;
     options.meta_.backend_uri_ = "sqlite://:@:/";
 
+    options.auto_flush_interval_ = 10000;
     options.wal_enable_ = true;
     options.recovery_error_ignore_ = false;
     options.buffer_size_ = 128;
@@ -241,6 +251,20 @@ DBTestWAL_Recovery_Error::GetOptions() {
 
     return options;
 }
+
+void
+DBTestWALRecovery_Error::TearDown(){
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+    BaseTest::TearDown();
+
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta_.path_);
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void

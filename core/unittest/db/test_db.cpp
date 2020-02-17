@@ -20,6 +20,8 @@
 #include <boost/filesystem.hpp>
 #include <random>
 #include <thread>
+#include <fiu-control.h>
+#include <fiu-local.h>
 
 #include "cache/CpuCacheMgr.h"
 #include "db/Constants.h"
@@ -838,6 +840,73 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     std::vector<milvus::engine::meta::DateT> dates;
     stat = db_->DropTable(table_info.table_id_, dates);
     ASSERT_TRUE(stat.ok());
+}
+
+TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR){
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    for (int i = 0; i < 5; i++) {
+        stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    const int64_t topk = 10;
+    const int64_t nprobe = 10;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_NE(result_ids.size() / topk, qb);
+
+    fiu_init(0);
+    fiu_enable("DBImpl.ExexWalRecord.return",1,nullptr,0);
+    db_ = nullptr;
+    fiu_disable("DBImpl.ExexWalRecord.return");
+    auto options = GetOptions();
+    db_ = milvus::engine::DBFactory::Build(options);
+
+    result_ids.clear();
+    result_distances.clear();
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids.size(), 0);
+
+    db_->Flush();
+    result_ids.clear();
+    result_distances.clear();
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids.size() / topk, qb);
+}
+
+TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE){
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+    ASSERT_TRUE(stat.ok());
+
+    fiu_init(0);
+    fiu_enable("DBImpl.ExexWalRecord.return",1,nullptr,0);
+    db_ = nullptr;
+    fiu_disable("DBImpl.ExexWalRecord.return");
+
+    auto options = GetOptions();
+    //delete wal log file so that recovery will failed when start db next time.
+    boost::filesystem::remove(options.mxlog_path_ + "0.wal");
+    ASSERT_ANY_THROW(db_ = milvus::engine::DBFactory::Build(options));
 }
 
 TEST_F(DBTest2, flush_non_existing_table) {
