@@ -22,6 +22,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1075 - improve error message when page size or offset is illegal
 - \#1082 - check page_size or offset value to avoid float
 - \#1115 - http server support load table into memory
+- \#1240 - Update license declaration
 
 ## Feature
 - \#216 - Add CLI to get server info
