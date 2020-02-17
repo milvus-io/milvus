@@ -170,7 +170,7 @@ BinaryIVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
     }
 
     //    GETBINARYTENSOR(dataset)
-    //auto rows = dataset->Get<int64_t>(meta::ROWS);
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     try {

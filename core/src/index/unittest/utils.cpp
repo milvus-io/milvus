@@ -19,10 +19,10 @@
 #include "knowhere/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
+#include <math.h>
 #include <memory>
 #include <string>
 #include <utility>
-#include <math.h>
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -102,7 +102,7 @@ GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* 
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
-    xids[0] = 3;    // pseudo random
+    xids[0] = 3;  // pseudo random
 }
 
 void
@@ -122,7 +122,7 @@ GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, i
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
-    xids[0] = 3;    // pseudo random
+    xids[0] = 3;  // pseudo random
 }
 
 void
@@ -230,10 +230,10 @@ AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const 
     for (auto i = 0; i < nq; i++) {
         switch (check_mode) {
             case CheckMode::CHECK_EQUAL:
-                ASSERT_EQ(i, *((int64_t *) (ids) + i * k));
+                ASSERT_EQ(i, *((int64_t*)(ids) + i * k));
                 break;
             case CheckMode::CHECK_NOT_EQUAL:
-                ASSERT_NE(i, *((int64_t *) (ids) + i * k));
+                ASSERT_NE(i, *((int64_t*)(ids) + i * k));
                 break;
             default:
                 ASSERT_TRUE(false);

@@ -287,7 +287,7 @@ IVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("not support this kind of config");
     }
 
-    //auto rows = dataset->Get<int64_t>(meta::ROWS);
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     try {

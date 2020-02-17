@@ -93,8 +93,7 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                             std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
 #endif
-                            std::make_tuple("IVF", ParameterType::ivf),
-                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("IVF", ParameterType::ivf), std::make_tuple("IVFPQ", ParameterType::ivfpq),
                             std::make_tuple("IVFSQ", ParameterType::ivfsq)));
 
 TEST_P(IVFTest, ivf_basic) {
@@ -115,7 +114,6 @@ TEST_P(IVFTest, ivf_basic) {
 
     if (index_type.find("GPU") == std::string::npos && index_type.find("Hybrid") == std::string::npos &&
         index_type.find("PQ") == std::string::npos) {
-
         auto result2 = index_->SearchById(id_dataset, conf);
         AssertAnns(result2, nq, k);
 
