@@ -106,10 +106,13 @@ TEST_F(DeleteTest, delete_in_mem) {
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
 
+    milvus::engine::IDNumbers ids_to_delete;
     for (auto& kv : search_vectors) {
-        stat = db_->DeleteVector(GetTableName(), kv.first);
-        ASSERT_TRUE(stat.ok());
+        ids_to_delete.emplace_back(kv.first);
     }
+
+    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    ASSERT_TRUE(stat.ok());
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
     stat = db_->Flush();

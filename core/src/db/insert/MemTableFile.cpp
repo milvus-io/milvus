@@ -114,6 +114,7 @@ MemTableFile::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
         if (found != uids.end()) {
             auto offset = std::distance(uids.begin(), found);
             segment_ptr->vectors_ptr_->Erase(offset);
+            uids = segment_ptr->vectors_ptr_->GetUids();
         }
     }
 
