@@ -113,6 +113,9 @@ class DBImpl : public DB {
     Status
     Compact(const std::string& table_id) override;
 
+    Status
+    GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) override;
+
     //    Status
     //    Merge(const std::set<std::string>& table_ids) override;
 
@@ -153,6 +156,9 @@ class DBImpl : public DB {
     QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
                const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
                ResultIds& result_ids, ResultDistances& result_distances);
+
+    Status
+    GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector, const meta::TableFilesSchema& files);
 
     void
     BackgroundTimerTask();
