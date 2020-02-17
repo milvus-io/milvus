@@ -316,6 +316,15 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
+GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context,
+                                  const ::milvus::grpc::VectorIdentity* request,
+                                  ::milvus::grpc::VectorData* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
