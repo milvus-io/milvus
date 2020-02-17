@@ -117,19 +117,25 @@ generate_id_dataset(int64_t nb, const int64_t* ids);
 knowhere::DatasetPtr
 generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb);
 
-void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+enum class CheckMode {
+    CHECK_EQUAL = 0,
+    CHECK_NOT_EQUAL = 1,
+    CHECK_APPROXIMATE_EQUAL = 2,
+};
 
 void
-AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k,
+           const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-AssertVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-            const knowhere::DatasetPtr& id_dataset, const int n, const int dim);
+AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+          const knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+          const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
 AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-               const knowhere::DatasetPtr& id_dataset, const int n, const int dim);
+               const knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+               const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
