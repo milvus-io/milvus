@@ -810,7 +810,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
     }
 }
 
-TEST_F(DBTestWAL, DB_TEST) {
+TEST_F(DBTestWAL, DB_STOP_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());
@@ -823,63 +823,21 @@ TEST_F(DBTestWAL, DB_TEST) {
         stat = db_->InsertVectors(table_info.table_id_, "", qxb);
         ASSERT_TRUE(stat.ok());
     }
-
-    stat = db_->Flush(table_info.table_id_);
-    ASSERT_TRUE(stat.ok());
-
-    const int64_t topk = 10;
-    const int64_t nprobe = 10;
-    milvus::engine::ResultIds result_ids;
-    milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(result_ids.size() / topk, qb);
-
-    stat = db_->Flush();
-    ASSERT_TRUE(stat.ok());
-
-    std::vector<milvus::engine::meta::DateT> dates;
-    stat = db_->DropTable(table_info.table_id_, dates);
-    ASSERT_TRUE(stat.ok());
-}
-
-TEST_F(DBTestWAL, RECOVERY_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
-    ASSERT_TRUE(stat.ok());
-
-    uint64_t qb = 100;
-    milvus::engine::VectorsData qxb;
-    BuildVectors(qb, 0, qxb);
-
-    for (int i = 0; i < 5; i++) {
-        stat = db_->InsertVectors(table_info.table_id_, "", qxb);
-        ASSERT_TRUE(stat.ok());
-    }
-
-
-    const int64_t topk = 10;
-    const int64_t nprobe = 10;
-    milvus::engine::ResultIds result_ids;
-    milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_NE(result_ids.size() / topk, qb);
 
     db_->Stop();
     db_->Start();
 
-
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
-    ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(result_ids.size() / topk, 0);
-
-    db_->Flush();
-    result_ids.clear();
-    result_distances.clear();
+    const int64_t topk = 10;
+    const int64_t nprobe = 10;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
     stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
+
+    std::vector<milvus::engine::meta::DateT> dates;
+    stat = db_->DropTable(table_info.table_id_, dates);
+    ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTest2, flush_non_existing_table) {
