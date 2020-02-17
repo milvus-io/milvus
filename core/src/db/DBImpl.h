@@ -158,7 +158,8 @@ class DBImpl : public DB {
                ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
-    GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector, const meta::TableFilesSchema& files);
+    GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,
+                        const meta::TableFilesSchema& files);
 
     void
     BackgroundTimerTask();

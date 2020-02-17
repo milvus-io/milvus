@@ -18,14 +18,12 @@
 #include "db/DBImpl.h"
 
 #include <assert.h>
-#include <utils/ValidationUtil.h>
-
-#include <src/segment/SegmentReader.h>
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <thread>
 #include <utility>
@@ -44,11 +42,13 @@
 #include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
+#include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
 
 namespace milvus {
