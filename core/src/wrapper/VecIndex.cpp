@@ -39,6 +39,7 @@
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
+
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"

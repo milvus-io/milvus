@@ -17,12 +17,12 @@
 
 #pragma once
 
-#include "ConfAdapter.h"
-#include "VecIndex.h"
-
 #include <functional>
 #include <map>
 #include <memory>
+
+#include "ConfAdapter.h"
+#include "VecIndex.h"
 
 namespace milvus {
 namespace engine {

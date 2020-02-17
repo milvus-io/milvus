@@ -16,6 +16,7 @@
 // under the License.
 
 #include "wrapper/gpu/GPUVecImpl.h"
+
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
