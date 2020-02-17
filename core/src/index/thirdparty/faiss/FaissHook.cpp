@@ -11,14 +11,17 @@
 
 namespace faiss {
 
-fvec_func_ptr fvec_inner_product = nullptr;
-fvec_func_ptr fvec_L2sqr = nullptr;
-fvec_func_ptr fvec_L1 = nullptr;
-fvec_func_ptr fvec_Linf = nullptr;
+bool faiss_use_avx512 = true;
+
+/* set default to AVX */
+fvec_func_ptr fvec_inner_product = fvec_inner_product_avx;
+fvec_func_ptr fvec_L2sqr = fvec_L2sqr_avx;
+fvec_func_ptr fvec_L1 = fvec_L1_avx;
+fvec_func_ptr fvec_Linf = fvec_Linf_avx;
 
 void hook_init() {
     InstructionSet& instruction_set_inst = InstructionSet::GetInstance();
-    if (instruction_set_inst.AVX512F() && instruction_set_inst.AVX512DQ()) {
+    if (faiss_use_avx512 && instruction_set_inst.AVX512F() && instruction_set_inst.AVX512DQ()) {
         fvec_inner_product = fvec_inner_product_avx512;
         fvec_L2sqr = fvec_L2sqr_avx512;
         fvec_L1 = fvec_L1_avx512;
