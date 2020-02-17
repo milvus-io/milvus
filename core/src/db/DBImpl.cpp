@@ -146,23 +146,29 @@ DBImpl::Stop() {
     if (!initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
-    initialized_.store(false, std::memory_order_release);
 
-    // make sure all memory data are serialized
-    //    std::set<std::string> sync_table_ids;
-    //    SyncMemData(sync_table_ids);
-    // TODO(zhiru): ?
-    auto status = Flush();
+    if (wal_enable_ && wal_mgr_ != nullptr) {
+        initialized_.store(false, std::memory_order_release);
+
+        wal_task_swn_.Notify();
+        bg_wal_thread_.join();
+
+        // flush all
+        wal::MXLogRecord record;
+        record.type = wal::MXLogType::Flush;
+        record.table_id.clear();
+        ExecWalRecord(record);
+
+    } else {
+        Flush();
+        initialized_.store(false, std::memory_order_release);
+    }
 
     // wait compaction/buildindex finish
     bg_timer_thread_.join();
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         meta_ptr_->CleanUpShadowFiles();
-    }
-
-    if (wal_enable_) {
-        bg_wal_thread_.join();
     }
 
     // ENGINE_LOG_TRACE << "DB service stop";
