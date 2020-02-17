@@ -192,6 +192,7 @@ class TestAddBase:
         logging.getLogger().info(index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
+        print(index_param)
         status = connect.create_index(table, index_param)
         assert status.OK()
 
