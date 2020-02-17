@@ -147,7 +147,9 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
         }
-        default: { return nullptr; }
+        default: {
+            return nullptr;
+        }
     }
     return std::make_shared<VecIndexImpl>(index, type);
 }
@@ -298,7 +300,9 @@ ConvertToCpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFPQ_MIX: {
             return IndexType::FAISS_IVFPQ_CPU;
         }
-        default: { return type; }
+        default: {
+            return type;
+        }
     }
 }
 
@@ -317,7 +321,9 @@ ConvertToGpuIndexType(const IndexType& type) {
         case IndexType::FAISS_IVFPQ_CPU: {
             return IndexType::FAISS_IVFPQ_GPU;
         }
-        default: { return type; }
+        default: {
+            return type;
+        }
     }
 }
 }  // namespace engine
