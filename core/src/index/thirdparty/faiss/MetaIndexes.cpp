@@ -102,7 +102,7 @@ void IndexIDMapTemplate<IndexT>::get_vector_by_id(idx_t n, const idx_t *xid, com
     if (!bitset || !bitset->test(xid[0])) {
         index->reconstruct(xid[0], x + 0 * IndexT::d);
     } else {
-        memset(x, UINT_MAX, IndexT::d);
+        memset(x, UINT8_MAX, IndexT::d * sizeof(component_t));
     }
 }
 

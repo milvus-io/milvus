@@ -169,7 +169,7 @@ void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, Con
     if (!bitset || !bitset->test(xid[0])) {
         reconstruct(xid[0], x + 0 * d);
     } else {
-        memset(x, UINT8_MAX, d);
+        memset(x, UINT8_MAX, d * sizeof(uint8_t));
     }
 }
 
