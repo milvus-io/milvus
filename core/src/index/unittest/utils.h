@@ -45,9 +45,11 @@ class DataGen {
     std::vector<float> xb;
     std::vector<float> xq;
     std::vector<int64_t> ids;
+    std::vector<int64_t> xids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
     knowhere::DatasetPtr id_dataset = nullptr;
+    knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 class BinaryDataGen {
@@ -69,24 +71,27 @@ class BinaryDataGen {
     std::vector<uint8_t> xb;
     std::vector<uint8_t> xq;
     std::vector<int64_t> ids;
+    std::vector<int64_t> xids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
     knowhere::DatasetPtr id_dataset = nullptr;
+    knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 extern void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
-       std::vector<float>& xq);
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq);
 
 extern void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq);
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq);
 
 extern void
 GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-             const int64_t& nq, std::vector<uint8_t>& xq);
+             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq);
 
 extern void
-GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, const int64_t& nq, uint8_t* xq);
+GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
+             uint8_t* xq);
 
 extern void
 GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids);
@@ -117,6 +122,14 @@ AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
 
 void
 AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+
+void
+AssertVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+            const knowhere::DatasetPtr& id_dataset, const int n, const int dim);
+
+void
+AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+               const knowhere::DatasetPtr& id_dataset, const int n, const int dim);
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
