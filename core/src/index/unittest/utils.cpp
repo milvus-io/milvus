@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <math.h>
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -91,7 +92,7 @@ GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    xids.resize(nb);
+    xids.resize(1);
     GenAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
 }
 
@@ -101,9 +102,7 @@ GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* 
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
-    for (int64_t i = 0; i < nq; ++i) {
-        xids[i] = i * i % nb;  // pseudo random
-    }
+    xids[0] = 3;    // pseudo random
 }
 
 void
@@ -112,7 +111,7 @@ GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    xids.resize(nb);
+    xids.resize(1);
     GenBinaryAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
 }
 
@@ -123,9 +122,7 @@ GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, i
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
-    for (int64_t i = 0; i < nq; ++i) {
-        xids[i] = i * i % nb;  // pseudo random
-    }
+    xids[0] = 3;    // pseudo random
 }
 
 void
@@ -228,32 +225,51 @@ generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
 }
 
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
     auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
     for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *((int64_t*)(ids) + i * k));
-        //        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
+        switch (check_mode) {
+            case CheckMode::CHECK_EQUAL:
+                ASSERT_EQ(i, *((int64_t *) (ids) + i * k));
+                break;
+            case CheckMode::CHECK_NOT_EQUAL:
+                ASSERT_NE(i, *((int64_t *) (ids) + i * k));
+                break;
+            default:
+                ASSERT_TRUE(false);
+                break;
+        }
     }
 }
 
 void
-AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    for (auto i = 0; i < nq; i++) {
-        EXPECT_NE(i, *((int64_t*)(ids) + i * k));
-    }
-}
-
-void
-AssertVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-            const knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
+AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+          const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
     auto base = base_dataset->Get<const float*>(knowhere::meta::TENSOR);
     auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
     auto x = result->Get<float*>(knowhere::meta::TENSOR);
     for (auto i = 0; i < n; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
-            EXPECT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+            switch (check_mode) {
+                case CheckMode::CHECK_EQUAL: {
+                    ASSERT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+                    break;
+                }
+                case CheckMode::CHECK_NOT_EQUAL: {
+                    ASSERT_NE(*(base + id * dim + j), *(x + i * dim + j));
+                    break;
+                }
+                case CheckMode::CHECK_APPROXIMATE_EQUAL: {
+                    float a = *(base + id * dim + j);
+                    float b = *(x + i * dim + j);
+                    ASSERT_TRUE((std::fabs(a - b) / std::fabs(a)) < 0.1);
+                    break;
+                }
+                default:
+                    ASSERT_TRUE(false);
+                    break;
+            }
         }
     }
 }
@@ -264,7 +280,7 @@ AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& b
     auto base = base_dataset->Get<const uint8_t*>(knowhere::meta::TENSOR);
     auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
     auto x = result->Get<uint8_t*>(knowhere::meta::TENSOR);
-    for (auto i = 0; i < n; i++) {
+    for (auto i = 0; i < 1; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
             EXPECT_EQ(*(base + id * dim + j), *(x + i * dim + j));
