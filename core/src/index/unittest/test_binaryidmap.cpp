@@ -81,8 +81,8 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     auto result3 = index_->Search(query_dataset, conf);
     AssertAneq(result3, nq, k);
 
-//    auto result4 = index_->SearchById(id_dataset, conf);
-//    AssertAneq(result4, nq, k);
+    //    auto result4 = index_->SearchById(id_dataset, conf);
+    //    AssertAneq(result4, nq, k);
 }
 
 TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
