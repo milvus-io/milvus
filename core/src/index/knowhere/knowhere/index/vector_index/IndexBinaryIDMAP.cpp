@@ -168,14 +168,14 @@ BinaryIDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
     }
 
     //    GETBINARYTENSOR(dataset)
-    auto rows = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<const int64_t *>(meta::IDS);
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
-    auto elems = rows * config->d;
+    auto elems = config->d;
     size_t p_x_size = sizeof(float) * elems;
     auto p_x = (uint8_t*)malloc(p_x_size);
 
-    index_->get_vector_by_id(rows, p_data, p_x);
+    index_->get_vector_by_id(1, p_data, p_x, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::TENSOR, p_x);

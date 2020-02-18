@@ -16,6 +16,7 @@
 // under the License.
 
 #include "wrapper/ConfAdapterMgr.h"
+
 #include "utils/Exception.h"
 
 namespace milvus {
