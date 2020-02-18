@@ -11,6 +11,7 @@
 
 #include "server/delivery/request/InsertRequest.h"
 #include "server/DBWrapper.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -19,6 +20,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#ifdef MILVUS_ENABLE_PROFILING
+#include <gperftools/profiler.h>
+#endif
 
 namespace milvus {
 namespace server {
@@ -101,8 +105,7 @@ InsertRequest::OnExecute() {
         rc.RecordSection("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname =
-            "/tmp/insert_" + std::to_string(this->insert_param_->row_record_array_size()) + ".profiling";
+        std::string fname = "/tmp/insert_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
         // step 4: some metric type doesn't support float vectors
