@@ -17,11 +17,12 @@
 
 #pragma once
 
-#include "codecs/VectorsFormat.h"
-#include "segment/Vectors.h"
-
+#include <mutex>
 #include <string>
 #include <vector>
+
+#include "codecs/VectorsFormat.h"
+#include "segment/Vectors.h"
 
 namespace milvus {
 namespace codec {
@@ -49,6 +50,8 @@ class DefaultVectorsFormat : public VectorsFormat {
     operator=(DefaultVectorsFormat&&) = delete;
 
  private:
+    std::mutex mutex_;
+
     const std::string raw_vector_extension_ = ".rv";
     const std::string user_id_extension_ = ".uid";
 };

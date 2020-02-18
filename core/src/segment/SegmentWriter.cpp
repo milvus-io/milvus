@@ -185,7 +185,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         }
     }
 
-    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), uids);
+    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), segment_to_merge->vectors_ptr_->GetUids());
 
     return Status::OK();
 }
