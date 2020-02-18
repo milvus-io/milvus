@@ -113,29 +113,43 @@ GrpcClient::CreateIndex(const ::milvus::grpc::IndexParam& index_param) {
     return Status::OK();
 }
 
-void
-GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids, const ::milvus::grpc::InsertParam& insert_param,
-                   Status& status) {
+Status
+GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids, const ::milvus::grpc::InsertParam& insert_param) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->Insert(&context, insert_param, &vector_ids);
 
     if (!grpc_status.ok()) {
         std::cerr << "Insert rpc failed!" << std::endl;
-        status = Status(StatusCode::RPCFailed, grpc_status.error_message());
-        return;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
     if (vector_ids.status().error_code() != grpc::SUCCESS) {
         std::cerr << vector_ids.status().reason() << std::endl;
-        status = Status(StatusCode::ServerFailed, vector_ids.status().reason());
-        return;
+        return Status(StatusCode::ServerFailed, vector_ids.status().reason());
     }
 
-    status = Status::OK();
+    return Status::OK();
 }
 
 Status
-GrpcClient::Search(::milvus::grpc::TopKQueryResult& topk_query_result,
-                   const ::milvus::grpc::SearchParam& search_param) {
+GrpcClient::GetVectorByID(const grpc::VectorIdentity& vector_identity, ::milvus::grpc::VectorData& vector_data) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->GetVectorByID(&context, vector_identity, &vector_data);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "GetVectorByID rpc failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+    if (vector_data.status().error_code() != grpc::SUCCESS) {
+        std::cerr << vector_data.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, vector_data.status().reason());
+    }
+
+    return Status::OK();
+}
+
+Status
+GrpcClient::Search(
+    const ::milvus::grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result) {
     ::milvus::grpc::TopKQueryResult query_result;
     ClientContext context;
     ::grpc::Status grpc_status = stub_->Search(&context, search_param, &topk_query_result);
@@ -154,8 +168,8 @@ GrpcClient::Search(::milvus::grpc::TopKQueryResult& topk_query_result,
 }
 
 Status
-GrpcClient::SearchByID(::milvus::grpc::TopKQueryResult& topk_query_result,
-                       const ::milvus::grpc::SearchByIDParam& search_param) {
+GrpcClient::SearchByID(const ::milvus::grpc::SearchByIDParam& search_param,
+                       ::milvus::grpc::TopKQueryResult& topk_query_result) {
     ::milvus::grpc::TopKQueryResult query_result;
     ClientContext context;
     ::grpc::Status grpc_status = stub_->SearchByID(&context, search_param, &topk_query_result);
@@ -174,7 +188,7 @@ GrpcClient::SearchByID(::milvus::grpc::TopKQueryResult& topk_query_result,
 }
 
 Status
-GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema, const std::string& table_name) {
+GrpcClient::DescribeTable(const std::string& table_name, ::milvus::grpc::TableSchema& grpc_schema) {
     ClientContext context;
     ::milvus::grpc::TableName grpc_tablename;
     grpc_tablename.set_table_name(table_name);
@@ -257,7 +271,7 @@ GrpcClient::ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_in
 }
 
 Status
-GrpcClient::Cmd(std::string& result, const std::string& cmd) {
+GrpcClient::Cmd(const std::string& cmd, std::string& result) {
     ClientContext context;
     ::milvus::grpc::StringReply response;
     ::milvus::grpc::Command command;

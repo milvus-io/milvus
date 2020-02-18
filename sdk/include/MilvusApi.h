@@ -121,6 +121,7 @@ struct SegmentStat {
     std::string segment_name;    ///< Segment name
     int64_t row_count;           ///< Segment row count
     std::string index_name;      ///< Segment index name
+    int64_t data_size;           ///< Segment data size
 };
 
 /**
@@ -287,6 +288,21 @@ class Connection {
     virtual Status
     Insert(const std::string& table_name, const std::string& partition_tag, const std::vector<RowRecord>& record_array,
            std::vector<int64_t>& id_array) = 0;
+
+    /**
+     * @brief Get vector data by id
+     *
+     * This method is used to get vector data by id from a table.
+     * Return the first found vector if there are vectors with duplicated id
+     *
+     * @param table_name, target table's name.
+     * @param vector_id, target vector id.
+     * @param vector_data, returned vector data.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) = 0;
 
     /**
      * @brief Search vector

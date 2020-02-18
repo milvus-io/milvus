@@ -289,27 +289,23 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
             return Status(DB_ERROR, err_msg);
         }
 
+        std::vector<SegmentStat> segments_stat;
+        for (auto& file : table_files) {
+            SegmentStat seg_stat;
+            seg_stat.name_ = file.segment_id_;
+            seg_stat.row_count_ = (int64_t)file.row_count_;
+            seg_stat.index_name_ = index_type_name[file.engine_type_];
+            seg_stat.data_size_ = (int64_t)file.file_size_;
+            segments_stat.emplace_back(seg_stat);
+        }
+
         if (name == table_id) {
             table_info.native_stat_.name_ = table_id;
-
-            for (auto& file : table_files) {
-                SegmentStat seg_stat;
-                seg_stat.name_ = file.segment_id_;
-                seg_stat.row_count_ = (int64_t)file.row_count_;
-                seg_stat.index_name_ = index_type_name[file.engine_type_];
-                table_info.native_stat_.segments_stat_.emplace_back(seg_stat);
-            }
+            table_info.native_stat_.segments_stat_.swap(segments_stat);
         } else {
             TableStat table_stat;
             table_stat.name_ = name;
-
-            for (auto& file : table_files) {
-                SegmentStat seg_stat;
-                seg_stat.name_ = file.segment_id_;
-                seg_stat.row_count_ = (int64_t)file.row_count_;
-                seg_stat.index_name_ = index_type_name[file.engine_type_];
-                table_stat.segments_stat_.emplace_back(seg_stat);
-            }
+            table_stat.segments_stat_.swap(segments_stat);
             table_info.partitions_stat_.emplace_back(table_stat);
         }
     }
@@ -570,8 +566,6 @@ DBImpl::Flush(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
@@ -580,7 +574,10 @@ DBImpl::Flush(const std::string& table_id) {
         }
 
     } else {
-        status = mem_mgr_->Flush(table_id);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_id);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             compact_table_ids_.insert(table_id);
@@ -599,8 +596,6 @@ DBImpl::Flush() {
 
     // ENGINE_LOG_DEBUG << "Flushing all tables";
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush();
@@ -610,7 +605,10 @@ DBImpl::Flush() {
         }
     } else {
         std::set<std::string> table_ids;
-        status = mem_mgr_->Flush(table_ids);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_ids);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             for (auto& table_id : table_ids) {
@@ -1827,7 +1825,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.table_id.empty()) {
                 // flush one table
-                status = mem_mgr_->Flush(record.table_id);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(record.table_id);
+                }
                 wal_table_flushed(record.table_id);
 
                 std::lock_guard<std::mutex> lck(compact_result_mutex_);
@@ -1836,7 +1837,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             } else {
                 // flush all tables
                 std::set<std::string> table_ids;
-                status = mem_mgr_->Flush(table_ids);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_ids);
+                }
 
                 uint64_t lsn = tables_flushed(table_ids);
                 wal_mgr_->RemoveOldFiles(lsn);
