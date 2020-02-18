@@ -93,7 +93,7 @@ Status
 ClientProxy::Connected() const {
     try {
         std::string info;
-        return client_ptr_->Cmd(info, "");
+        return client_ptr_->Cmd("", info);
     } catch (std::exception& ex) {
         return Status(StatusCode::NotConnected, "connection lost: " + std::string(ex.what()));
     }
@@ -226,9 +226,9 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
             auto row_ids = insert_param.mutable_row_id_array();
             row_ids->Resize(static_cast<int>(id_array.size()), -1);
             memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-            client_ptr_->Insert(vector_ids, insert_param, status);
+            status = client_ptr_->Insert(vector_ids, insert_param);
         } else {
-            client_ptr_->Insert(vector_ids, insert_param, status);
+            status = client_ptr_->Insert(vector_ids, insert_param);
             /* return Milvus generated ids back to user */
             id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
         }
@@ -238,6 +238,38 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
     }
 
     return status;
+}
+
+Status
+ClientProxy::GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) {
+    try {
+        ::milvus::grpc::VectorIdentity vector_identity;
+        vector_identity.set_table_name(table_name);
+        vector_identity.set_id(vector_id);
+
+        ::milvus::grpc::VectorData grpc_data;
+        Status status = client_ptr_->GetVectorByID(vector_identity, grpc_data);
+        if (!status.ok()) {
+            return status;
+        }
+
+        int float_size = grpc_data.vector_data().float_data_size();
+        if (float_size > 0) {
+            vector_data.float_data.resize(float_size);
+            memcpy(vector_data.float_data.data(), grpc_data.vector_data().float_data().data(),
+                   float_size * sizeof(float));
+        }
+
+        auto byte_size = grpc_data.vector_data().binary_data().length();
+        if (byte_size > 0) {
+            vector_data.binary_data.resize(byte_size);
+            memcpy(vector_data.binary_data.data(), grpc_data.vector_data().binary_data().data(), byte_size);
+        }
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to get vector by id: " + std::string(ex.what()));
+    }
 }
 
 Status
@@ -267,7 +299,7 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
 
         // step 3: search vectors
         ::milvus::grpc::TopKQueryResult result;
-        Status status = client_ptr_->Search(result, search_param);
+        Status status = client_ptr_->Search(search_param, result);
         if (result.row_num() == 0) {
             return status;
         }
@@ -307,7 +339,7 @@ ClientProxy::SearchByID(const std::string& table_name, const std::vector<std::st
 
         // step 2: search vectors
         ::milvus::grpc::TopKQueryResult result;
-        Status status = client_ptr_->SearchByID(result, search_param);
+        Status status = client_ptr_->SearchByID(search_param, result);
         if (result.row_num() == 0) {
             return status;
         }
@@ -336,7 +368,7 @@ ClientProxy::DescribeTable(const std::string& table_name, TableSchema& table_sch
     try {
         ::milvus::grpc::TableSchema grpc_schema;
 
-        Status status = client_ptr_->DescribeTable(grpc_schema, table_name);
+        Status status = client_ptr_->DescribeTable(table_name, grpc_schema);
 
         table_schema.table_name = grpc_schema.table_name();
         table_schema.dimension = grpc_schema.dimension();
@@ -411,7 +443,7 @@ ClientProxy::ServerVersion() const {
     Status status = Status::OK();
     try {
         std::string version;
-        Status status = client_ptr_->Cmd(version, "version");
+        Status status = client_ptr_->Cmd("version", version);
         return version;
     } catch (std::exception& ex) {
         return "";
@@ -426,7 +458,7 @@ ClientProxy::ServerStatus() const {
 
     try {
         std::string dummy;
-        Status status = client_ptr_->Cmd(dummy, "");
+        Status status = client_ptr_->Cmd("", dummy);
         return "server alive";
     } catch (std::exception& ex) {
         return "connection lost";
@@ -441,7 +473,7 @@ ClientProxy::DumpTaskTables() const {
 
     try {
         std::string dummy;
-        Status status = client_ptr_->Cmd(dummy, "tasktable");
+        Status status = client_ptr_->Cmd("tasktable", dummy);
         return dummy;
     } catch (std::exception& ex) {
         return "connection lost";
@@ -554,7 +586,7 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
 Status
 ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
     try {
-        return client_ptr_->Cmd(value, "get_config " + node_name);
+        return client_ptr_->Cmd("get_config " + node_name, value);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to get config: " + node_name);
     }
@@ -564,7 +596,7 @@ Status
 ClientProxy::SetConfig(const std::string& node_name, const std::string& value) const {
     try {
         std::string dummy;
-        return client_ptr_->Cmd(dummy, "set_config " + node_name + " " + value);
+        return client_ptr_->Cmd("set_config " + node_name + " " + value, dummy);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to set config: " + node_name);
     }

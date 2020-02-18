@@ -316,10 +316,15 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 }
 
 ::grpc::Status
-GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context,
-                                  const ::milvus::grpc::VectorIdentity* request,
+GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
                                   ::milvus::grpc::VectorData* response) {
     CHECK_NULLPTR_RETURN(request);
+
+    std::vector<int64_t> vector_ids = {request->id()};
+    engine::VectorsData vectors;
+    Status status = request_handler_.GetVectorByID(context_map_[context], request->table_name(), vector_ids, vectors);
+
+    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
 }

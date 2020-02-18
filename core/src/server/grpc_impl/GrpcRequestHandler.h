@@ -217,8 +217,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return VectorData
     ::grpc::Status
-    GetVectorByID(::grpc::ServerContext* context,
-                  const ::milvus::grpc::VectorIdentity* request,
+    GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
                   ::milvus::grpc::VectorData* response);
     // *
     // @brief This method is used to query vector in table.

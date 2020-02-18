@@ -22,6 +22,7 @@
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -49,7 +50,12 @@ GetVectorByIDRequest::OnExecute() {
             return status;
         }
 
+        if (ids_.empty()) {
+            return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
+        }
 
+        // step 2: get vector data, now only support get one id
+        return DBWrapper::DB()->GetVectorByID(table_name_, ids_[0], vectors_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

@@ -289,6 +289,21 @@ class Connection {
            std::vector<int64_t>& id_array) = 0;
 
     /**
+     * @brief Get vector data by id
+     *
+     * This method is used to get vector data by id from a table.
+     * Return the first found vector if there are vectors with duplicated id
+     *
+     * @param table_name, target table's name.
+     * @param vector_id, target vector id.
+     * @param vector_data, returned vector data.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) = 0;
+
+    /**
      * @brief Search vector
      *
      * This method is used to query vector in table.
