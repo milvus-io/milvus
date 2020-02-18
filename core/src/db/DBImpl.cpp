@@ -289,27 +289,23 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
             return Status(DB_ERROR, err_msg);
         }
 
+        std::vector<SegmentStat> segments_stat;
+        for (auto& file : table_files) {
+            SegmentStat seg_stat;
+            seg_stat.name_ = file.segment_id_;
+            seg_stat.row_count_ = (int64_t)file.row_count_;
+            seg_stat.index_name_ = index_type_name[file.engine_type_];
+            seg_stat.data_size_ = (int64_t)file.file_size_;
+            segments_stat.emplace_back(seg_stat);
+        }
+
         if (name == table_id) {
             table_info.native_stat_.name_ = table_id;
-
-            for (auto& file : table_files) {
-                SegmentStat seg_stat;
-                seg_stat.name_ = file.segment_id_;
-                seg_stat.row_count_ = (int64_t)file.row_count_;
-                seg_stat.index_name_ = index_type_name[file.engine_type_];
-                table_info.native_stat_.segments_stat_.emplace_back(seg_stat);
-            }
+            table_info.native_stat_.segments_stat_.swap(segments_stat);
         } else {
             TableStat table_stat;
             table_stat.name_ = name;
-
-            for (auto& file : table_files) {
-                SegmentStat seg_stat;
-                seg_stat.name_ = file.segment_id_;
-                seg_stat.row_count_ = (int64_t)file.row_count_;
-                seg_stat.index_name_ = index_type_name[file.engine_type_];
-                table_stat.segments_stat_.emplace_back(seg_stat);
-            }
+            table_stat.segments_stat_.swap(segments_stat);
             table_info.partitions_stat_.emplace_back(table_stat);
         }
     }

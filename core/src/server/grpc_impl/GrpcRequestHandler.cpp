@@ -144,6 +144,7 @@ ConstructTableStat(const TableStat& table_stat, ::milvus::grpc::TableStat* grpc_
         grpc_seg_stat->set_row_count(seg_stat.row_num_);
         grpc_seg_stat->set_segment_name(seg_stat.name_);
         grpc_seg_stat->set_index_name(seg_stat.index_name_);
+        grpc_seg_stat->set_data_size(seg_stat.data_size_);
     }
 }
 
@@ -312,6 +313,20 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
            vectors.id_array_.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
+                                  ::milvus::grpc::VectorData* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    std::vector<int64_t> vector_ids = {request->id()};
+    engine::VectorsData vectors;
+    Status status = request_handler_.GetVectorByID(context_map_[context], request->table_name(), vector_ids, vectors);
+
+    SET_RESPONSE(response->mutable_status(), status, context);
+
     return ::grpc::Status::OK;
 }
 

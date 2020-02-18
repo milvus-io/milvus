@@ -796,6 +796,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
         for (auto& stat : table_info.native_stat_.segments_stat_) {
             row_count += stat.row_count_;
             ASSERT_EQ(stat.index_name_, "IDMAP");
+            ASSERT_GT(stat.data_size_, 0);
         }
         ASSERT_EQ(row_count, VECTOR_COUNT);
 
@@ -804,6 +805,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
             for (auto& stat : part.segments_stat_) {
                 row_count += stat.row_count_;
                 ASSERT_EQ(stat.index_name_, "IDMAP");
+                ASSERT_GT(stat.data_size_, 0);
             }
             ASSERT_EQ(row_count, INSERT_BATCH);
         }
@@ -871,7 +873,37 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     ASSERT_TRUE(stat.ok());
 }
 
-TEST_F(DBTest2, flush_non_existing_table) {
+TEST_F(DBTest2, FLUSH_NON_EXISTING_TABLE) {
     auto status = db_->Flush("non_existing_table");
     ASSERT_FALSE(status.ok());
+}
+
+TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 1000;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    std::string partition_name = "part_name";
+    std::string partition_tag = "part_tag";
+    stat = db_->CreatePartition(table_info.table_id_, partition_name, partition_tag);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, partition_tag, qxb);
+    ASSERT_TRUE(stat.ok());
+
+    db_->Flush(table_info.table_id_);
+
+//    milvus::engine::VectorsData vector_data;
+//    stat = db_->GetVectorByID(TABLE_NAME, qxb.id_array_[0], vector_data);
+//    ASSERT_TRUE(stat.ok());
+//    ASSERT_EQ(vector_data.vector_count_, 1);
+//    ASSERT_EQ(vector_data.float_data_.size(), TABLE_DIM);
+//
+//    for (int64_t i = 0; i < TABLE_DIM; i++) {
+//        ASSERT_EQ(vector_data.float_data_[i], qxb.float_data_[i]);
+//    }
 }
