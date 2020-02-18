@@ -566,8 +566,6 @@ DBImpl::Flush(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
@@ -576,7 +574,10 @@ DBImpl::Flush(const std::string& table_id) {
         }
 
     } else {
-        status = mem_mgr_->Flush(table_id);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_id);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             compact_table_ids_.insert(table_id);
@@ -595,8 +596,6 @@ DBImpl::Flush() {
 
     // ENGINE_LOG_DEBUG << "Flushing all tables";
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush();
@@ -606,7 +605,10 @@ DBImpl::Flush() {
         }
     } else {
         std::set<std::string> table_ids;
-        status = mem_mgr_->Flush(table_ids);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_ids);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             for (auto& table_id : table_ids) {
@@ -1807,7 +1809,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.table_id.empty()) {
                 // flush one table
-                status = mem_mgr_->Flush(record.table_id);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(record.table_id);
+                }
                 wal_table_flushed(record.table_id);
 
                 std::lock_guard<std::mutex> lck(compact_result_mutex_);
@@ -1816,7 +1821,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             } else {
                 // flush all tables
                 std::set<std::string> table_ids;
-                status = mem_mgr_->Flush(table_ids);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_ids);
+                }
 
                 uint64_t lsn = tables_flushed(table_ids);
                 wal_mgr_->RemoveOldFiles(lsn);
