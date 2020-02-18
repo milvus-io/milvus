@@ -465,7 +465,12 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    Status status;
+    std::string target_table_name;
+    Status status = GetPartitionByTag(table_id, partition_tag, target_table_name);
+    if (!status.ok()) {
+        return status;
+    }
+
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
 
     // insert vectors into target table
@@ -484,12 +489,6 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         wal_task_swn_.Notify();
 
     } else {
-        std::string target_table_name;
-        status = GetPartitionByTag(table_id, partition_tag, target_table_name);
-        if (!status.ok()) {
-            return status;
-        }
-
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
@@ -571,6 +570,8 @@ DBImpl::Flush(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
@@ -597,6 +598,8 @@ DBImpl::Flush() {
     }
 
     // ENGINE_LOG_DEBUG << "Flushing all tables";
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
@@ -638,6 +641,8 @@ DBImpl::Compact(const std::string& table_id) {
     }
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     // Drop all index
     status = DropIndex(table_id);
@@ -1379,6 +1384,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
