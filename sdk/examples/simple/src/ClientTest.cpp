@@ -152,6 +152,15 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
     }
 
+//    {
+//        // get vector data by id
+//        milvus::RowRecord vector_data;
+//        stat = conn->GetVectorByID(TABLE_NAME, search_id_array[0], vector_data);
+//        std::cout << "The vector " << search_id_array[0] << " has " << vector_data.float_data.size()
+//                                   << " float elements" << std::endl;
+//        std::cout << "GetVectorByID function call status: " << stat.message() << std::endl;
+//    }
+
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
@@ -231,6 +240,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::string status = conn->ServerStatus();
         std::cout << "Server status before disconnect: " << status << std::endl;
     }
+
     milvus::Connection::Destroy(conn);
     {  // server status
         std::string status = conn->ServerStatus();
