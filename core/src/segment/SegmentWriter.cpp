@@ -17,6 +17,7 @@
 
 #include "segment/SegmentWriter.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "SegmentReader.h"

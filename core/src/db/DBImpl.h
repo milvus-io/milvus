@@ -295,6 +295,8 @@ class DBImpl : public DB {
 
     IndexFailedChecker index_failed_checker_;
     OngoingFileChecker ongoing_files_checker_;
+
+    std::mutex flush_merge_compact_mutex_;
 };  // DBImpl
 
 }  // namespace engine

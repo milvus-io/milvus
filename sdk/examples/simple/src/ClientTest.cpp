@@ -165,7 +165,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_id_array,
                                     topk_query_result);
     }
-/*
+
     {  // wait unit build index finish
         milvus_sdk::TimeRecorder rc("Create index");
         std::cout << "Wait until create all index done" << std::endl;
@@ -179,7 +179,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintIndexParam(index2);
     }
-*/
+
     {  // get table information
         milvus::TableInfo table_info;
         stat = conn->ShowTableInfo(TABLE_NAME, table_info);
@@ -202,8 +202,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "FlushTable function call status: " << stat.message() << std::endl;
 
         // compact table
-        //stat = conn->CompactTable(TABLE_NAME);
-        //std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+        stat = conn->CompactTable(TABLE_NAME);
+        std::cout << "CompactTable function call status: " << stat.message() << std::endl;
     }
 
     {  // search vectors
