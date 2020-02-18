@@ -27,7 +27,7 @@ namespace milvus {
 namespace server {
 
 CompactRequest::CompactRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
-    : BaseRequest(context, DQL_REQUEST_GROUP), table_name_(table_name) {
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name) {
 }
 
 BaseRequestPtr
