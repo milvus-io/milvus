@@ -33,6 +33,7 @@
 #include <faiss/IndexIVFSpectralHash.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
+#include <faiss/IndexScalarQuantizer_avx512.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
@@ -358,6 +359,14 @@ static void read_ScalarQuantizer (ScalarQuantizer *ivsc, IOReader *f) {
     READVECTOR (ivsc->trained);
 }
 
+static void read_ScalarQuantizer_avx512 (ScalarQuantizer_avx512 *ivsc, IOReader *f) {
+    READ1 (ivsc->qtype);
+    READ1 (ivsc->rangestat);
+    READ1 (ivsc->rangestat_arg);
+    READ1 (ivsc->d);
+    READ1 (ivsc->code_size);
+    READVECTOR (ivsc->trained);
+}
 
 static void read_HNSW (HNSW *hnsw, IOReader *f) {
     READVECTOR (hnsw->assign_probas);
@@ -566,6 +575,13 @@ Index *read_index (IOReader *f, int io_flags) {
         READVECTOR (idxs->codes);
         idxs->code_size = idxs->sq.code_size;
         idx = idxs;
+    } else if (h == fourcc ("ISQX")) {
+        IndexScalarQuantizer_avx512 * idxs = new IndexScalarQuantizer_avx512 ();
+        read_index_header (idxs, f);
+        read_ScalarQuantizer_avx512 (&idxs->sq, f);
+        READVECTOR (idxs->codes);
+        idxs->code_size = idxs->sq.code_size;
+        idx = idxs;
     } else if (h == fourcc ("IxLa")) {
         int d, nsq, scale_nbit, r2;
         READ1 (d);
@@ -585,6 +601,14 @@ Index *read_index (IOReader *f, int io_flags) {
         ArrayInvertedLists *ail = set_array_invlist (ivsc, ids);
         for(int i = 0; i < ivsc->nlist; i++)
             READVECTOR (ail->codes[i]);
+        idx = ivsc;
+    } else if(h == fourcc ("ISqX")) {
+        IndexIVFScalarQuantizer_avx512 * ivsc = new IndexIVFScalarQuantizer_avx512();
+        read_ivf_header (ivsc, f);
+        read_ScalarQuantizer_avx512 (&ivsc->sq, f);
+        READ1 (ivsc->code_size);
+        READ1 (ivsc->by_residual);
+        read_InvertedLists (ivsc, f, io_flags);
         idx = ivsc;
     } else if(h == fourcc ("IwSQ") || h == fourcc ("IwSq")) {
         IndexIVFScalarQuantizer * ivsc = new IndexIVFScalarQuantizer();
