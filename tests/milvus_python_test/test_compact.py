@@ -19,6 +19,50 @@ tag = "1970-01-01"
 nb = 6000
 
 
+class TestTableInfo:
+    """
+    ******************************************************************
+      The following cases are used to test `table_info` function
+    ******************************************************************
+    """
+    def test_get_table_info_name_None(self, connect, table):
+        '''
+        target: get table info where table name is None
+        method: call table_info with the table_name: None
+        expected: exception raised
+        '''
+        table_name = None
+        with pytest.raises(Exception) as e:
+            status, info = connect.table_info(table_name)
+
+    def test_get_table_info_name_not_existed(self, connect, table):
+        '''
+        target: get table info where table name does not exist
+        method: call table_info with a random table_name, which is not in db
+        expected: exception raised
+        '''
+        table_name = gen_unique_str("not_existed_table")
+        with pytest.raises(Exception) as e:
+            status, info = connect.table_info(table_name)
+    
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_table_names()
+    )
+    def get_table_name(self, request):
+        yield request.param
+
+    def test_compact_table_name_invalid(self, connect, get_table_name):
+        '''
+        target: get table info where table name is invalid
+        method: call table_info with invalid table_name
+        expected: exception raised
+        '''
+        table_name = get_table_name
+        with pytest.raises(Exception) as e:
+            status, info = connect.table_info(table_name)
+
+
 class TestCompactBase:
     """
     ******************************************************************
@@ -27,9 +71,9 @@ class TestCompactBase:
     """
     def test_compact_table_name_None(self, connect, table):
         '''
-        target: compact table whose table name is None
+        target: compact table where table name is None
         method: compact with the table_name: None
-        expected: status not ok
+        expected: exception raised
         '''
         table_name = None
         with pytest.raises(Exception) as e:
@@ -74,10 +118,19 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_delete_and_compact(self, connect, table):
@@ -93,10 +146,21 @@ class TestCompactBase:
         assert status.OK()
         status = connect.delete_by_id(table, ids)
         assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
 
     @pytest.fixture(
         scope="function",
@@ -128,8 +192,17 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, table):
@@ -143,12 +216,29 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
         status = connect.compact(table)
         assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        # get table info after compact twice
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after_twice = info.native_stat.segment_stats[0].data_size
+        assert(size_after == size_after_twice)
+
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_delete_and_compact_twice(self, connect, table):
@@ -164,12 +254,30 @@ class TestCompactBase:
         assert status.OK()
         status = connect.delete_by_id(table, ids)
         assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
         status = connect.compact(table)
         assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        # get table info after compact twice
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after_twice = info.native_stat.segment_stats[0].data_size
+        assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_multi_tables(self, connect):
@@ -209,10 +317,19 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
@@ -298,10 +415,19 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_delete_and_compact(self, connect, jac_table):
@@ -317,10 +443,21 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.delete_by_id(jac_table, ids)
         assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, jac_table):
@@ -334,12 +471,28 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
         status = connect.compact(jac_table)
         assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        # get table info after compact twice
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after_twice = info.native_stat.segment_stats[0].data_size
+        assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_delete_and_compact_twice(self, connect, jac_table):
@@ -355,12 +508,30 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.delete_by_id(jac_table, ids)
         assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
         status = connect.compact(jac_table)
         assert status.OK()
+        status = connect.flush([jac_table])
+        assert status.OK()
+        # get table info after compact twice
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after_twice = info.native_stat.segment_stats[0].data_size
+        assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_multi_tables(self, connect):
@@ -400,10 +571,19 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(jac_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
         tmp, vector = gen_binary_vectors(1, dim)
         status, ids = connect.add_vectors(jac_table, vector)
         assert status.OK()
@@ -469,10 +649,19 @@ class TestCompactIP:
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_delete_and_compact(self, connect, ip_table):
@@ -488,10 +677,21 @@ class TestCompactIP:
         assert status.OK()
         status = connect.delete_by_id(ip_table, ids)
         assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, ip_table):
@@ -503,14 +703,30 @@ class TestCompactIP:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
-        status = connect.flush([ip_table])
+        status = connect.flush([table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
         status = connect.compact(ip_table)
         assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        # get table info after compact twice
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after_twice = info.native_stat.segment_stats[0].data_size
+        assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_delete_and_compact_twice(self, connect, ip_table):
@@ -526,12 +742,30 @@ class TestCompactIP:
         assert status.OK()
         status = connect.delete_by_id(ip_table, ids)
         assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before > size_after)
         status = connect.compact(ip_table)
         assert status.OK()
+        status = connect.flush([ip_table])
+        assert status.OK()
+        # get table info after compact twice
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after_twice = info.native_stat.segment_stats[0].data_size
+        assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_multi_tables(self, connect):
@@ -571,10 +805,19 @@ class TestCompactIP:
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info before compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(ip_table)
+        assert status.OK()
+        size_after = info.native_stat.segment_stats[0].data_size
+        assert(size_before == size_after)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
@@ -620,5 +863,3 @@ class TestCompactIP:
         status, res = connect.search_vectors(ip_table, top_k, nprobe, query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()
-
-    
