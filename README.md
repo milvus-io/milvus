@@ -45,6 +45,7 @@ See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for
 - [Java](https://github.com/milvus-io/milvus-sdk-java)
 - [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
 - [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Provided by [arkie](https://www.arkie.cn/))
 
 ## Get started
 
@@ -68,6 +69,12 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 :heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
 
 See our [community](https://github.com/milvus-io/community) repository to learn about our governance and access more community resources.
+
+## Mailing lists
+
+- [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
+- [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
+- [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
 
 ## Contributors
 
@@ -105,6 +112,8 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 - [Milvus Twitter](https://twitter.com/milvusio)
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+
+- [Milvus design docs](design.md)
 
 ## License
 
