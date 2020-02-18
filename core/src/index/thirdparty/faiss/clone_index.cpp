@@ -27,7 +27,7 @@
 #include <faiss/IndexIVFSpectralHash.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
-#include <faiss/IndexScalarQuantizer_avx512.h.h>
+#include <faiss/IndexScalarQuantizer_avx512.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
