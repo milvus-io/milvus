@@ -77,6 +77,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
     //    Merge(const std::string& location) override;
 
     Status
+    GetVectorByID(const int64_t& id, float* vector, bool hybrid) override;
+
+    Status
+    GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
+
+    Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
            bool hybrid = false) override;
 

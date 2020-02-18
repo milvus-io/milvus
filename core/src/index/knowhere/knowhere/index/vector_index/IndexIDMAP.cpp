@@ -192,6 +192,26 @@ IDMAP::Seal() {
 }
 
 DatasetPtr
+IDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    //    GETTENSOR(dataset)
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+
+    auto elems = config->d;
+    size_t p_x_size = sizeof(float) * elems;
+    auto p_x = (float*)malloc(p_x_size);
+
+    index_->get_vector_by_id(1, p_data, p_x, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::TENSOR, p_x);
+    return ret_ds;
+}
+
+DatasetPtr
 IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
@@ -209,7 +229,7 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     // todo: enable search by id (zhiru)
     //    auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
     //    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, blacklist);
-    index_->searchById(rows, p_data, config->k, p_dist, p_id, bitset_);
+    index_->search_by_id(rows, p_data, config->k, p_dist, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

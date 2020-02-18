@@ -37,11 +37,13 @@ struct IndexIDMapTemplate : IndexT {
     /// this will fail. Use add_with_ids
     void add(idx_t n, const component_t* x) override;
 
-    void search (idx_t n, const component_t *x, idx_t k,
-                 distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
+    void search (idx_t n, const component_t *x, idx_t k, distance_t *distances, idx_t *labels,
+                 ConcurrentBitsetPtr bitset = nullptr) const override;
 
-    void searchById (idx_t n, const idx_t *xid, idx_t k,
-                     distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) override;
+    void get_vector_by_id(idx_t n, const idx_t *xid, component_t *x, ConcurrentBitsetPtr bitset = nullptr) const override;
+
+    void search_by_id (idx_t n, const idx_t *xid, idx_t k, distance_t *distances, idx_t *labels,
+                       ConcurrentBitsetPtr bitset = nullptr) override;
 
     void train(idx_t n, const component_t* x) override;
 

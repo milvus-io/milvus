@@ -116,11 +116,14 @@ struct IndexBinaryIVF : IndexBinary {
                                          bool store_pairs=false) const;
 
     /** assign the vectors, then call search_preassign */
-    virtual void search(idx_t n, const uint8_t *x, idx_t k,
-                        int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
+    void search(idx_t n, const uint8_t *x, idx_t k, int32_t *distances, idx_t *labels,
+                ConcurrentBitsetPtr bitset = nullptr) const override;
 
-    void searchById (idx_t n, const idx_t *xid, idx_t k,
-                     int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) override;
+    /** get raw vectors by ids */
+    void get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr) const override;
+
+    void search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
+                       ConcurrentBitsetPtr bitset = nullptr) override;
 
     void reconstruct(idx_t key, uint8_t *recons) const override;
 

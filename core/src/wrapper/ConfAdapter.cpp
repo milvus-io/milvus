@@ -16,14 +16,15 @@
 // under the License.
 
 #include "wrapper/ConfAdapter.h"
-#include "WrapperException.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "server/Config.h"
-#include "utils/Log.h"
 
 #include <cmath>
 #include <memory>
 #include <vector>
+
+#include "WrapperException.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "server/Config.h"
+#include "utils/Log.h"
 
 // TODO(lxj): add conf checker
 

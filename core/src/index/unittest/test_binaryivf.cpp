@@ -90,11 +90,14 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto re_re_result = index_->Search(query_dataset, conf);
-    AssertAneq(re_re_result, nq, k);
+    auto result2 = index_->Search(query_dataset, conf);
+    AssertAneq(result2, nq, k);
 
-    auto re_re_re_result = index_->SearchById(id_dataset, conf);
-    AssertAneq(re_re_re_result, nq, k);
+    auto result3 = index_->SearchById(id_dataset, conf);
+    AssertAneq(result3, nq, k);
+
+    //    auto result4 = index_->GetVectorById(xid_dataset, conf);
+    //    AssertBinVeceq(result4, base_dataset, xid_dataset, nq, dim/8);
 }
 
 TEST_P(BinaryIVFTest, binaryivf_serialize) {

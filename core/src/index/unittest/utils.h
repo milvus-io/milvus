@@ -45,9 +45,11 @@ class DataGen {
     std::vector<float> xb;
     std::vector<float> xq;
     std::vector<int64_t> ids;
+    std::vector<int64_t> xids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
     knowhere::DatasetPtr id_dataset = nullptr;
+    knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 class BinaryDataGen {
@@ -69,24 +71,27 @@ class BinaryDataGen {
     std::vector<uint8_t> xb;
     std::vector<uint8_t> xq;
     std::vector<int64_t> ids;
+    std::vector<int64_t> xids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
     knowhere::DatasetPtr id_dataset = nullptr;
+    knowhere::DatasetPtr xid_dataset = nullptr;
 };
 
 extern void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
-       std::vector<float>& xq);
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq);
 
 extern void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq);
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq);
 
 extern void
 GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-             const int64_t& nq, std::vector<uint8_t>& xq);
+             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq);
 
 extern void
-GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, const int64_t& nq, uint8_t* xq);
+GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
+             uint8_t* xq);
 
 extern void
 GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids);
@@ -112,11 +117,25 @@ generate_id_dataset(int64_t nb, const int64_t* ids);
 knowhere::DatasetPtr
 generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb);
 
-void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+enum class CheckMode {
+    CHECK_EQUAL = 0,
+    CHECK_NOT_EQUAL = 1,
+    CHECK_APPROXIMATE_EQUAL = 2,
+};
 
 void
-AssertAneq(const knowhere::DatasetPtr& result, const int& nq, const int& k);
+AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k,
+           const CheckMode check_mode = CheckMode::CHECK_EQUAL);
+
+void
+AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+          const knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+          const CheckMode check_mode = CheckMode::CHECK_EQUAL);
+
+void
+AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+               const knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+               const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);

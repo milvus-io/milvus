@@ -73,6 +73,9 @@ class IDMAP : public VectorIndex, public FaissBaseIndex {
     GetRawIds();
 
     DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config);
+
+    DatasetPtr
     SearchById(const DatasetPtr& dataset, const Config& config);
 
     void

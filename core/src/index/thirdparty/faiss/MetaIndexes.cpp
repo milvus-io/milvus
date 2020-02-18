@@ -94,8 +94,21 @@ void IndexIDMapTemplate<IndexT>::search
 }
 
 template <typename IndexT>
-void IndexIDMapTemplate<IndexT>::searchById (idx_t n, const idx_t *xid, idx_t k,
-                                             typename IndexT::distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset)
+void IndexIDMapTemplate<IndexT>::get_vector_by_id(idx_t n, const idx_t *xid, component_t *x,
+                                                  ConcurrentBitsetPtr bitset) const
+{
+    /* only get vector by 1 id */
+    FAISS_ASSERT(n == 1);
+    if (!bitset || !bitset->test(xid[0])) {
+        index->reconstruct(xid[0], x + 0 * IndexT::d);
+    } else {
+        memset(x, UINT8_MAX, IndexT::d * sizeof(component_t));
+    }
+}
+
+template <typename IndexT>
+void IndexIDMapTemplate<IndexT>::search_by_id (idx_t n, const idx_t *xid, idx_t k,
+        typename IndexT::distance_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset)
 {
     auto x = new typename IndexT::component_t[n * IndexT::d];
     for (idx_t i = 0; i < n; i++) {

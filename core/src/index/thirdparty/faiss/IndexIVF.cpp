@@ -297,8 +297,8 @@ void IndexIVF::make_direct_map (bool new_maintain_direct_map)
     maintain_direct_map = new_maintain_direct_map;
 }
 
-void IndexIVF::search (idx_t n, const float *x, idx_t k,
-                       float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const{
+void IndexIVF::search (idx_t n, const float *x, idx_t k, float *distances, idx_t *labels,
+                       ConcurrentBitsetPtr bitset) const {
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
 
@@ -314,9 +314,19 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
-void IndexIVF::searchById (idx_t n, const idx_t *xid, idx_t k,
-                           float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) {
-    if(!maintain_direct_map){
+void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) const {
+    /* only get vector by 1 id */
+    FAISS_ASSERT(n == 1);
+    if (!bitset || !bitset->test(xid[0])) {
+        reconstruct(xid[0], x + 0 * d);
+    } else {
+        memset(x, UINT8_MAX, d * sizeof(float));
+    }
+}
+
+void IndexIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
+                             ConcurrentBitsetPtr bitset) {
+    if (!maintain_direct_map) {
         make_direct_map(true);
     }
 
