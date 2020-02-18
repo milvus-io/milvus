@@ -18,13 +18,12 @@
 #include "db/DBImpl.h"
 
 #include <assert.h>
-#include <utils/ValidationUtil.h>
-
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <thread>
 #include <utility>
@@ -43,11 +42,13 @@
 #include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
+#include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
 
 namespace milvus {
@@ -464,7 +465,12 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    Status status;
+    std::string target_table_name;
+    Status status = GetPartitionByTag(table_id, partition_tag, target_table_name);
+    if (!status.ok()) {
+        return status;
+    }
+
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
 
     // insert vectors into target table
@@ -483,12 +489,6 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         wal_task_swn_.Notify();
 
     } else {
-        std::string target_table_name;
-        status = GetPartitionByTag(table_id, partition_tag, target_table_name);
-        if (!status.ok()) {
-            return status;
-        }
-
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
@@ -749,6 +749,145 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
 }
 
 Status
+DBImpl::GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    bool has_table;
+    auto status = HasTable(table_id, has_table);
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table " << table_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Table does not exist");
+    }
+    if (!status.ok()) {
+        return Status(DB_ERROR, status.message());
+    }
+
+    meta::DatesT dates = {utils::GetDate()};
+
+    std::vector<size_t> ids;
+    meta::TableFilesSchema files_array;
+
+    status = GetFilesToSearch(table_id, ids, dates, files_array);
+    if (!status.ok()) {
+        return status;
+    }
+
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
+        status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
+    }
+
+    if (files_array.empty()) {
+        return Status::OK();
+    }
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();
+
+    status = GetVectorByIdHelper(table_id, vector_id, vector, files_array);
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();
+
+    return status;
+}
+
+Status
+DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,
+                            const meta::TableFilesSchema& files) {
+    ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files";
+
+    ongoing_files_checker_.MarkOngoingFiles(files);
+
+    for (auto& file : files) {
+        // Load bloom filter
+        std::string segment_dir;
+        engine::utils::GetParentPath(file.location_, segment_dir);
+        segment::SegmentReader segment_reader(segment_dir);
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+        // Check if the id is present in bloom filter.
+        if (id_bloom_filter_ptr->Check(vector_id)) {
+            // Load uids and check if the id is indeed present. If yes, find its offset.
+            std::vector<int64_t> offsets;
+            std::vector<segment::doc_id_t> uids;
+            auto status = segment_reader.LoadUids(uids);
+            if (!status.ok()) {
+                return status;
+            }
+
+            auto found = std::find(uids.begin(), uids.end(), vector_id);
+            if (found != uids.end()) {
+                auto offset = std::distance(uids.begin(), found);
+
+                // Build an execution engine for this table file
+                bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
+
+                EngineType engine_type;
+                if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
+                    file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
+                    file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
+                    engine_type = is_binary ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
+                } else {
+                    engine_type = (EngineType)file.engine_type_;
+                }
+
+                auto execution_engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                             (MetricType)file.metric_type_, file.nlist_);
+
+                bool hybrid = false;
+                if (execution_engine->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
+                    hybrid = true;
+                }
+
+                // Query
+                // If we were able to find the id's corresponding vector, break and don't bother checking the rest of
+                // files
+
+                ENGINE_LOG_DEBUG << "Getting vector by id = " << vector_id << ", offset = " << offset << " in segment "
+                                 << segment_dir;
+
+                if (is_binary) {
+                    std::vector<uint8_t> result_vector;
+                    result_vector.resize(file.dimension_);
+                    status = execution_engine->GetVectorByID(offset, result_vector.data(), hybrid);
+                    if (!status.ok()) {
+                        return status;
+                    }
+
+                    if (result_vector.front() != std::numeric_limits<uint8_t>::max()) {
+                        vector.binary_data_ = result_vector;
+                        vector.vector_count_ = 1;
+                        break;
+                    }
+                } else {
+                    std::vector<float> result_vector;
+                    result_vector.resize(file.dimension_);
+                    status = execution_engine->GetVectorByID(offset, result_vector.data(), hybrid);
+                    if (!status.ok()) {
+                        return status;
+                    }
+
+                    if (result_vector.front() != std::numeric_limits<float>::max()) {
+                        vector.float_data_ = result_vector;
+                        vector.vector_count_ = 1;
+                        break;
+                    }
+                }
+            }
+        } else {
+            continue;
+        }
+    }
+
+    ongoing_files_checker_.UnmarkOngoingFiles(files);
+
+    return Status::OK();
+}
+
+Status
 DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -757,7 +896,6 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     // serialize memory data
     //    std::set<std::string> sync_table_ids;
     //    auto status = SyncMemData(sync_table_ids);
-    // TODO(zhiru): ?
     auto status = Flush();
 
     {
@@ -1129,94 +1267,6 @@ DBImpl::StartCompactionTask() {
         }
     }
 }
-
-/*
-
-Status
-DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
-    ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
-
-    // step 1: create table file
-    meta::TableFileSchema table_file;
-    table_file.table_id_ = table_id;
-    table_file.date_ = date;
-    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
-    Status status = meta_ptr_->CreateTableFile(table_file);
-
-    if (!status.ok()) {
-        ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
-        return status;
-    }
-
-    // step 2: merge files
-    ExecutionEnginePtr index =
-        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
-                             (MetricType)table_file.metric_type_, table_file.nlist_);
-
-    meta::TableFilesSchema updated;
-    int64_t index_size = 0;
-
-    for (auto& file : files) {
-        server::CollectMergeFilesMetrics metrics;
-
-        index->Merge(file.location_);
-        auto file_schema = file;
-        file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
-        updated.push_back(file_schema);
-        index_size = index->Size();
-
-        if (index_size >= file_schema.index_file_size_) {
-            break;
-        }
-    }
-
-    // step 3: serialize to disk
-    try {
-        status = index->Serialize();
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
-        }
-    } catch (std::exception& ex) {
-        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
-        ENGINE_LOG_ERROR << msg;
-        status = Status(DB_ERROR, msg);
-    }
-
-    if (!status.ok()) {
-        // if failed to serialize merge file to disk
-        // typical error: out of disk space, out of memory or permition denied
-        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
-        status = meta_ptr_->UpdateTableFile(table_file);
-        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-        ENGINE_LOG_ERROR << "Failed to persist merged file: " << table_file.location_
-                         << ", possible out of disk space or memory";
-
-        return status;
-    }
-
-    // step 4: update table files state
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
-    // else set file type to RAW, no need to build index
-    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
-        table_file.file_type_ = (index->PhysicalSize() >= table_file.index_file_size_) ? meta::TableFileSchema::TO_INDEX
-                                                                                       : meta::TableFileSchema::RAW;
-    } else {
-        table_file.file_type_ = meta::TableFileSchema::RAW;
-    }
-    table_file.file_size_ = index->PhysicalSize();
-    table_file.row_count_ = index->Count();
-    updated.push_back(table_file);
-    status = meta_ptr_->UpdateTableFiles(updated);
-    ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ << " of size " << index->PhysicalSize() << " bytes";
-
-    if (options_.insert_cache_immediately_) {
-        index->Cache();
-    }
-
-    return status;
-}
-*/
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {

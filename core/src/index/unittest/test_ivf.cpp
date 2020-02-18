@@ -114,24 +114,34 @@ TEST_P(IVFTest, ivf_basic) {
 
     if (index_type.find("GPU") == std::string::npos && index_type.find("Hybrid") == std::string::npos &&
         index_type.find("PQ") == std::string::npos) {
+        auto result2 = index_->SearchById(id_dataset, conf);
+        AssertAnns(result2, nq, k);
+
+        if (index_type.find("IVFSQ") == std::string::npos) {
+            auto result3 = index_->GetVectorById(xid_dataset, conf);
+            AssertVec(result3, base_dataset, xid_dataset, 1, dim);
+        } else {
+            auto result3 = index_->GetVectorById(xid_dataset, conf);
+            /* for SQ8, sometimes the mean diff can bigger than 20% */
+            // AssertVec(result3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_APPROXIMATE_EQUAL);
+        }
+
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
         for (int64_t i = 0; i < nq; ++i) {
             concurrent_bitset_ptr->set(i);
         }
         index_->SetBlacklist(concurrent_bitset_ptr);
 
-        auto result2 = index_->Search(query_dataset, conf);
-        AssertAneq(result2, nq, k);
+        auto result_bs_1 = index_->Search(query_dataset, conf);
+        AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 
-        auto result3 = index_->SearchById(id_dataset, conf);
-        AssertAneq(result3, nq, k);
+        auto result_bs_2 = index_->SearchById(id_dataset, conf);
+        AssertAnns(result_bs_2, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 
-        if (index_type.find("IVFSQ") == std::string::npos) {
-            auto result4 = index_->GetVectorById(xid_dataset, conf);
-            AssertVeceq(result4, base_dataset, xid_dataset, nq, dim);
-        }
+        auto result_bs_3 = index_->GetVectorById(xid_dataset, conf);
+        AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
     }
 }
 

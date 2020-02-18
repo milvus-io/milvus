@@ -72,20 +72,26 @@ TEST_F(IDMAPTest, idmap_basic) {
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
 
+    auto result3 = index_->SearchById(id_dataset, conf);
+    AssertAnns(result3, nq, k);
+
+    auto result4 = index_->GetVectorById(xid_dataset, conf);
+    AssertVec(result4, base_dataset, xid_dataset, 1, dim);
+
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result3 = index_->Search(query_dataset, conf);
-    AssertAneq(result3, nq, k);
+    auto result_bs_1 = index_->Search(query_dataset, conf);
+    AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-    auto result4 = index_->SearchById(id_dataset, conf);
-    AssertAneq(result4, nq, k);
+    auto result_bs_2 = index_->SearchById(id_dataset, conf);
+    AssertAnns(result_bs_2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
-    auto result5 = index_->GetVectorById(xid_dataset, conf);
-    AssertVeceq(result5, base_dataset, xid_dataset, nq, dim);
+    auto result_bs_3 = index_->GetVectorById(xid_dataset, conf);
+    AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
 }
 
 TEST_F(IDMAPTest, idmap_serialize) {

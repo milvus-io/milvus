@@ -287,17 +287,17 @@ IVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("not support this kind of config");
     }
 
-    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     try {
-        auto elems = rows * search_cfg->d;
+        auto elems = search_cfg->d;
 
         size_t p_x_size = sizeof(float) * elems;
         auto p_x = (float*)malloc(p_x_size);
 
         auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->get_vector_by_id(rows, p_data, p_x);
+        index_ivf->get_vector_by_id(1, p_data, p_x, bitset_);
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::TENSOR, p_x);

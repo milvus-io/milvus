@@ -810,6 +810,37 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
     }
 }
 
+TEST_F(DBTestWAL, DB_INSERT_TEST) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+
+    std::string partition_name = "part_name";
+    std::string partition_tag = "part_tag";
+    stat = db_->CreatePartition(table_info.table_id_, partition_name, partition_tag);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, partition_tag, qxb);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, "not exist", qxb);
+    ASSERT_FALSE(stat.ok());
+
+    db_->Flush(table_info.table_id_);
+
+    std::vector<milvus::engine::meta::DateT> dates;
+    stat = db_->DropTable(table_info.table_id_, dates);
+    ASSERT_TRUE(stat.ok());
+}
+
 TEST_F(DBTestWAL, DB_STOP_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);

@@ -883,7 +883,12 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     // Check if the id is present. If so, find its offset
     std::vector<int64_t> offsets;
     std::vector<segment::doc_id_t> uids;
-    segment_reader.LoadUids(uids);
+    auto status = segment_reader.LoadUids(uids);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // There is only one id in ids
     for (auto& id : ids) {
         //        if (id_bloom_filter_ptr->Check(id)) {
         //            if (uids.empty()) {
@@ -902,10 +907,74 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         }
     }
 
-    Status status = Status::OK();
+    status = Status::OK();
     if (!offsets.empty()) {
         status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
     }
+
+    if (hybrid) {
+        HybridUnset();
+    }
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
+    }
+    return status;
+}
+
+Status
+ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid) {
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+    }
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    if (hybrid) {
+        HybridLoad();
+    }
+
+    // Only one id for now
+    std::vector<int64_t> ids{id};
+    auto status = index_->GetVectorById(1, ids.data(), vector, conf);
+
+    if (hybrid) {
+        HybridUnset();
+    }
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Search error:" << status.message();
+    }
+    return status;
+}
+
+Status
+ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) {
+    if (index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+    }
+
+    ENGINE_LOG_DEBUG << "Get binary vector by id:  " << id;
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    if (hybrid) {
+        HybridLoad();
+    }
+
+    // Only one id for now
+    std::vector<int64_t> ids{id};
+    auto status = index_->GetVectorById(1, ids.data(), vector, conf);
 
     if (hybrid) {
         HybridUnset();
