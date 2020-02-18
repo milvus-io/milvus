@@ -53,17 +53,20 @@ class GrpcClient {
     Status
     CreateIndex(const grpc::IndexParam& index_param);
 
-    void
-    Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param, Status& status);
+    Status
+    Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param);
 
     Status
-    Search(::milvus::grpc::TopKQueryResult& topk_query_result, const grpc::SearchParam& search_param);
+    GetVectorByID(const grpc::VectorIdentity& vector_identity, ::milvus::grpc::VectorData& vector_data);
 
     Status
-    SearchByID(::milvus::grpc::TopKQueryResult& topk_query_result, const grpc::SearchByIDParam& search_param);
+    Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
 
     Status
-    DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
+    SearchByID(const grpc::SearchByIDParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
+
+    Status
+    DescribeTable(const std::string& table_name, grpc::TableSchema& grpc_schema);
 
     int64_t
     CountTable(grpc::TableName& table_name, Status& status);
@@ -75,7 +78,7 @@ class GrpcClient {
     ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info);
 
     Status
-    Cmd(std::string& result, const std::string& cmd);
+    Cmd(const std::string& cmd, std::string& result);
 
     Status
     DeleteByID(grpc::DeleteByIDParam& delete_by_id_param);

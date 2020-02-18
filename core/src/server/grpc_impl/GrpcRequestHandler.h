@@ -211,6 +211,15 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
            ::milvus::grpc::VectorIds* response) override;
     // *
+    // @brief This method is used to get vector data by id.
+    //
+    // @param VectorIdentity, target vector id.
+    //
+    // @return VectorData
+    ::grpc::Status
+    GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
+                  ::milvus::grpc::VectorData* response);
+    // *
     // @brief This method is used to query vector in table.
     //
     // @param SearchParam, search parameters.

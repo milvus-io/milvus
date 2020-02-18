@@ -163,9 +163,13 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k, int32_t *distanc
   indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
-void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x) const {
-    for (idx_t i = 0; i < n; ++i) {
-        reconstruct(xid[i], x + i * d);
+void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset) const {
+    /* only get vector by 1 id */
+    FAISS_ASSERT(n == 1);
+    if (!bitset || !bitset->test(xid[0])) {
+        reconstruct(xid[0], x + 0 * d);
+    } else {
+        memset(x, UINT8_MAX, d * sizeof(uint8_t));
     }
 }
 
@@ -176,7 +180,10 @@ void IndexBinaryIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *
     }
 
     auto x = new uint8_t[n * d];
-    get_vector_by_id(n, xid, x);
+    for (idx_t i = 0; i < n; ++i) {
+        reconstruct(xid[i], x + i * d);
+    }
+
     search(n, x, k, distances, labels, bitset);
     delete []x;
 }
@@ -401,7 +408,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
 
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
-            if(!bitset || !bitset->test(ids[j])){
+            if (!bitset || !bitset->test(ids[j])) {
                 uint32_t dis = hc.hamming (codes);
 
                 if (dis < simi[0]) {

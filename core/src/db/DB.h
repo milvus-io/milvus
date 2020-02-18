@@ -104,6 +104,9 @@ class DB {
     virtual Status
     Compact(const std::string& table_id) = 0;
 
+    virtual Status
+    GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) = 0;
+
     //    virtual Status
     //    Merge(const std::set<std::string>& table_ids) = 0;
 

@@ -105,8 +105,9 @@ struct IndexBinary {
    * @param n           input num of xid
    * @param xid         input labels of the NNs, size n
    * @param x           output raw vectors, size n * d
+   * @param bitset      flags to check the validity of vectors
    */
-  virtual void get_vector_by_id (idx_t n, const idx_t *xid, uint8_t *x) const;
+  virtual void get_vector_by_id (idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr) const;
 
   /** query n vectors of dimension d to the index by ids.
    *

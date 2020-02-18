@@ -314,9 +314,13 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k, float *distances, idx_t
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
-void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x) const {
-    for (idx_t i = 0; i < n; ++i) {
-        reconstruct(xid[i], x + i * d);
+void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) const {
+    /* only get vector by 1 id */
+    FAISS_ASSERT(n == 1);
+    if (!bitset || !bitset->test(xid[0])) {
+        reconstruct(xid[0], x + 0 * d);
+    } else {
+        memset(x, UINT8_MAX, d * sizeof(float));
     }
 }
 
@@ -327,7 +331,9 @@ void IndexIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distance
     }
 
     auto x = new float[n * d];
-    get_vector_by_id(n, xid, x);
+    for (idx_t i = 0; i < n; ++i) {
+        reconstruct(xid[i], x + i * d);
+    }
 
     search(n, x, k, distances, labels, bitset);
     delete []x;

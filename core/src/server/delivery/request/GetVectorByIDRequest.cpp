@@ -15,30 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/CompactRequest.h"
+#include "server/delivery/request/GetVectorByIDRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
 #include <memory>
+#include <vector>
 
 namespace milvus {
 namespace server {
 
-CompactRequest::CompactRequest(const std::shared_ptr<Context>& context, const std::string& table_name)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name) {
+GetVectorByIDRequest::GetVectorByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                           const std::vector<int64_t>& ids, engine::VectorsData& vectors)
+    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), ids_(ids), vectors_(vectors) {
 }
 
 BaseRequestPtr
-CompactRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name) {
-    return std::shared_ptr<BaseRequest>(new CompactRequest(context, table_name));
+GetVectorByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             const std::vector<int64_t>& ids, engine::VectorsData& vectors) {
+    return std::shared_ptr<BaseRequest>(new GetVectorByIDRequest(context, table_name, ids, vectors));
 }
 
 Status
-CompactRequest::OnExecute() {
+GetVectorByIDRequest::OnExecute() {
     try {
-        std::string hdr = "CompactRequest(table=" + table_name_ + ")";
+        std::string hdr = "GetVectorByIDRequest(table=" + table_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -47,11 +50,12 @@ CompactRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check table existence
-        status = DBWrapper::DB()->Compact(table_name_);
-        if (!status.ok()) {
-            return status;
+        if (ids_.empty()) {
+            return Status(SERVER_INVALID_ARGUMENT, "No vector id specified");
         }
+
+        // step 2: get vector data, now only support get one id
+        return DBWrapper::DB()->GetVectorByID(table_name_, ids_[0], vectors_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

@@ -51,6 +51,10 @@ class RequestHandler {
            const std::string& partition_tag);
 
     Status
+    GetVectorByID(const std::shared_ptr<Context>& context, const std::string& table_name,
+                  const std::vector<int64_t>& ids, engine::VectorsData& vectors);
+
+    Status
     ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
 
     Status

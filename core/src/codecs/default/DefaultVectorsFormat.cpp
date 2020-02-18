@@ -30,6 +30,8 @@ namespace codec {
 
 void
 DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -74,6 +76,8 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
 
 void
 DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
 
     const std::string rv_file_path = dir_path + "/" + vectors->GetName() + raw_vector_extension_;
@@ -128,6 +132,8 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
 
 void
 DefaultVectorsFormat::readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";

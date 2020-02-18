@@ -17,38 +17,33 @@
 
 #pragma once
 
-#include <mutex>
-#include <string>
+#include "server/delivery/request/BaseRequest.h"
 
-#include "codecs/DeletedDocsFormat.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
-namespace codec {
+namespace server {
 
-class DefaultDeletedDocsFormat : public DeletedDocsFormat {
+class GetVectorByIDRequest : public BaseRequest {
  public:
-    DefaultDeletedDocsFormat() = default;
+    static BaseRequestPtr
+    Create(const std::shared_ptr<Context>& context, const std::string& table_name, const std::vector<int64_t>& ids,
+           engine::VectorsData& vectors);
 
-    void
-    read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) override;
+ protected:
+    GetVectorByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                         const std::vector<int64_t>& ids, engine::VectorsData& vectors);
 
-    void
-    write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) override;
-
-    // No copy and move
-    DefaultDeletedDocsFormat(const DefaultDeletedDocsFormat&) = delete;
-    DefaultDeletedDocsFormat(DefaultDeletedDocsFormat&&) = delete;
-
-    DefaultDeletedDocsFormat&
-    operator=(const DefaultDeletedDocsFormat&) = delete;
-    DefaultDeletedDocsFormat&
-    operator=(DefaultDeletedDocsFormat&&) = delete;
+    Status
+    OnExecute() override;
 
  private:
-    std::mutex mutex_;
-
-    const std::string deleted_docs_filename_ = "deleted_docs";
+    std::string table_name_;
+    std::vector<int64_t> ids_;
+    engine::VectorsData& vectors_;
 };
 
-}  // namespace codec
+}  // namespace server
 }  // namespace milvus
