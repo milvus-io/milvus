@@ -465,7 +465,12 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    Status status;
+    std::string target_table_name;
+    Status status = GetPartitionByTag(table_id, partition_tag, target_table_name);
+    if (!status.ok()) {
+        return status;
+    }
+
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
 
     // insert vectors into target table
@@ -484,12 +489,6 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         wal_task_swn_.Notify();
 
     } else {
-        std::string target_table_name;
-        status = GetPartitionByTag(table_id, partition_tag, target_table_name);
-        if (!status.ok()) {
-            return status;
-        }
-
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
