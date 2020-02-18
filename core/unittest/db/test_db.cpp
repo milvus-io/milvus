@@ -796,6 +796,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
         for (auto& stat : table_info.native_stat_.segments_stat_) {
             row_count += stat.row_count_;
             ASSERT_EQ(stat.index_name_, "IDMAP");
+            ASSERT_GT(stat.data_size_, 0);
         }
         ASSERT_EQ(row_count, VECTOR_COUNT);
 
@@ -804,6 +805,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
             for (auto& stat : part.segments_stat_) {
                 row_count += stat.row_count_;
                 ASSERT_EQ(stat.index_name_, "IDMAP");
+                ASSERT_GT(stat.data_size_, 0);
             }
             ASSERT_EQ(row_count, INSERT_BATCH);
         }
@@ -876,7 +878,7 @@ TEST_F(DBTest2, FLUSH_NON_EXISTING_TABLE) {
     ASSERT_FALSE(status.ok());
 }
 
-TEST_F(DBTestWAL, GET_VECTOR_BY_ID_TEST) {
+TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
     ASSERT_TRUE(stat.ok());

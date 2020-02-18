@@ -121,6 +121,7 @@ struct SegmentStat {
     std::string segment_name;    ///< Segment name
     int64_t row_count;           ///< Segment row count
     std::string index_name;      ///< Segment index name
+    int64_t data_size;           ///< Segment data size
 };
 
 /**

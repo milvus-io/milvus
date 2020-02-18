@@ -36,6 +36,7 @@ ConstructTableStat(const engine::TableStat& table_stat, TableStat& req_table_sta
         seg_stat.name_ = seg.name_;
         seg_stat.row_num_ = seg.row_count_;
         seg_stat.index_name_ = seg.index_name_;
+        seg_stat.data_size_ = seg.data_size_;
         req_table_stat.segments_stat_.emplace_back(seg_stat);
         row_count += seg.row_count_;
     }

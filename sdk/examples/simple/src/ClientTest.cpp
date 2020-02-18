@@ -240,6 +240,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::string status = conn->ServerStatus();
         std::cout << "Server status before disconnect: " << status << std::endl;
     }
+
     milvus::Connection::Destroy(conn);
     {  // server status
         std::string status = conn->ServerStatus();
