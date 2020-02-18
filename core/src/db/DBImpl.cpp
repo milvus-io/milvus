@@ -570,6 +570,8 @@ DBImpl::Flush(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
@@ -596,6 +598,8 @@ DBImpl::Flush() {
     }
 
     // ENGINE_LOG_DEBUG << "Flushing all tables";
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
@@ -637,6 +641,8 @@ DBImpl::Compact(const std::string& table_id) {
     }
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     // Drop all index
     status = DropIndex(table_id);
@@ -1362,6 +1368,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {

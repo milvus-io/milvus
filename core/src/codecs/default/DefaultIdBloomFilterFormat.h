@@ -17,11 +17,12 @@
 
 #pragma once
 
+#include <mutex>
+#include <string>
+
 #include "codecs/IdBloomFilterFormat.h"
 #include "segment/IdBloomFilter.h"
 #include "store/Directory.h"
-
-#include <string>
 
 namespace milvus {
 namespace codec {
@@ -49,6 +50,8 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     operator=(DefaultIdBloomFilterFormat&&) = delete;
 
  private:
+    std::mutex mutex_;
+
     const std::string bloom_filter_filename_ = "bloom_filter";
 };
 

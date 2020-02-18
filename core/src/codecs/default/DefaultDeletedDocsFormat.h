@@ -17,9 +17,10 @@
 
 #pragma once
 
-#include "codecs/DeletedDocsFormat.h"
-
+#include <mutex>
 #include <string>
+
+#include "codecs/DeletedDocsFormat.h"
 
 namespace milvus {
 namespace codec {
@@ -44,6 +45,8 @@ class DefaultDeletedDocsFormat : public DeletedDocsFormat {
     operator=(DefaultDeletedDocsFormat&&) = delete;
 
  private:
+    std::mutex mutex_;
+
     const std::string deleted_docs_filename_ = "deleted_docs";
 };
 

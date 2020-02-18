@@ -17,20 +17,22 @@
 
 #include "codecs/default/DefaultDeletedDocsFormat.h"
 
-#include "segment/Types.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
-
 #include <boost/filesystem.hpp>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "segment/Types.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace codec {
 
 void
 DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
     FILE* del_file = fopen(del_file_path.c_str(), "rb");
@@ -51,6 +53,8 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
 
 void
 DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
     FILE* del_file = fopen(del_file_path.c_str(), "ab");  // TODO(zhiru): append mode
