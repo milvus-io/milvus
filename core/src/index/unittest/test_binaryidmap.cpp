@@ -79,7 +79,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     index_->SetBlacklist(concurrent_bitset_ptr);
 
     auto result3 = index_->Search(query_dataset, conf);
-    AssertAneq(result3, nq, k);
+    AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     //    auto result4 = index_->SearchById(id_dataset, conf);
     //    AssertAneq(result4, nq, k);
