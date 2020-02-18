@@ -41,10 +41,12 @@ Vectors::AddUids(const std::vector<doc_id_t>& uids) {
 
 void
 Vectors::Erase(size_t offset) {
-    auto dim = GetCodeLength();
-    auto step = offset * dim;
-    data_.erase(data_.begin() + step, data_.begin() + step + dim);
-    uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
+    auto code_length = GetCodeLength();
+    if (code_length != 0) {
+        auto step = offset * code_length;
+        data_.erase(data_.begin() + step, data_.begin() + step + code_length);
+        uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
+    }
 }
 
 const std::vector<uint8_t>&
@@ -64,7 +66,7 @@ Vectors::GetCount() const {
 
 size_t
 Vectors::GetCodeLength() const {
-    return data_.size() / uids_.size();
+    return uids_.empty() ? 0 : data_.size() / uids_.size();
 }
 
 size_t
