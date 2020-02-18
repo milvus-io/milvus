@@ -312,7 +312,7 @@ PrintTableStat(const milvus::TableStat& table_stat) {
     std::cout << table_stat.table_name << " row count: " << table_stat.row_count << std::endl;
     for (auto& seg_stat : table_stat.segments_stat) {
         std::cout << "\tsegment " << seg_stat.segment_name << " row count: " << seg_stat.row_count
-                  << " index: " << seg_stat.index_name << std::endl;
+                  << " index: " << seg_stat.index_name << " data size: " << seg_stat.data_size << std::endl;
     }
 }
 

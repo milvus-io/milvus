@@ -89,6 +89,11 @@ ConnectionImpl::Insert(const std::string& table_name, const std::string& partiti
 }
 
 Status
+ConnectionImpl::GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) {
+    return client_proxy_->GetVectorByID(table_name, vector_id, vector_data);
+}
+
+Status
 ConnectionImpl::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
                        const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
                        int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
