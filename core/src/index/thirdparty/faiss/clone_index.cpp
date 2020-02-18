@@ -27,6 +27,7 @@
 #include <faiss/IndexIVFSpectralHash.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
+#include <faiss/IndexScalarQuantizer_avx512.h.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
@@ -74,6 +75,7 @@ IndexIVF * Cloner::clone_IndexIVF (const IndexIVF *ivf)
     TRYCLONE (IndexIVFPQ, ivf)
     TRYCLONE (IndexIVFFlat, ivf)
     TRYCLONE (IndexIVFScalarQuantizer, ivf)
+    TRYCLONE (IndexIVFScalarQuantizer_avx512, ivf)
     TRYCLONE (IndexIVFSQHybrid, ivf)
     {
       FAISS_THROW_MSG("clone not supported for this type of IndexIVF");
