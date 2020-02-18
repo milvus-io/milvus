@@ -45,6 +45,7 @@ See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for
 - [Java](https://github.com/milvus-io/milvus-sdk-java)
 - [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
 - [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Provided by [arkie](https://www.arkie.cn/))
 
 ## Get started
 
