@@ -172,11 +172,16 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
         auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
 
-        for (size_t i = 0; i < uids.size(); ++i) {
-            auto found = std::find(offsets_to_delete.begin(), offsets_to_delete.end(), uids[i]);
-            if (found != offsets_to_delete.end()) {
-                segment_to_merge->vectors_ptr_->Erase(i);
-            }
+        // Sort and remove duplicates
+        std::sort(offsets_to_delete.begin(), offsets_to_delete.end());
+        offsets_to_delete.erase(std::unique(offsets_to_delete.begin(), offsets_to_delete.end()),
+                                offsets_to_delete.end());
+
+        // Erase from raw data
+        size_t deleted_count = 0;
+        for (auto& offset : offsets_to_delete) {
+            segment_to_merge->vectors_ptr_->Erase(offset - deleted_count);
+            deleted_count++;
         }
     }
 
