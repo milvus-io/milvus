@@ -17,11 +17,11 @@
 
 #include "codecs/default/DefaultIdBloomFilterFormat.h"
 
-#include "utils/Exception.h"
-#include "utils/Log.h"
-
 #include <memory>
 #include <string>
+
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace codec {
@@ -32,6 +32,8 @@ constexpr double bloom_filter_error_rate = 0.01;
 void
 DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
                                  segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     auto bloom_filter =
@@ -48,6 +50,8 @@ DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
 void
 DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
                                   const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
