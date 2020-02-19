@@ -4,10 +4,7 @@
 
 - [Build from source](#build-from-source)
     - [Requirements](#requirements)
-            - [For GPU-enabled version, you will also need:](#for-gpu-enabled-version-you-will-also-need)
     - [Compilation](#compilation)
-        - [Step 1 Install dependencies](#step-1-install-dependencies)
-        - [Step 2 Build](#step-2-build)
     - [Launch Milvus server](#launch-milvus-server)
 - [Compile Milvus on Docker](#compile-milvus-on-docker)
     - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
@@ -27,13 +24,14 @@
 ### Requirements
 
 - Ubuntu 18.04 or higher
+- CentOS 7
 
-  If your operating system is not Ubuntu 18.04 or higher, we recommend you to pull a [docker image of Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) as your compilation environment.
+If your operating system does not meet the requirements, we recommend that you pull a [docker image of Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) as your compilation environment.
   
 - GCC 7.0 or higher to support C++17
 - CMake 3.12 or higher
 
-##### For GPU-enabled version, you will also need:
+For GPU-enabled version, you will also need:
 
 - CUDA 10.0 or higher
 - NVIDIA driver 418 or higher
@@ -49,19 +47,34 @@ $ ./ubuntu_build_deps.sh
 
 #### Step 2 Build
 
+##### Build in Ubuntu
+
 ```shell
 $ cd [Milvus root path]/core
 $ ./build.sh -t Debug
+```
+
 or 
+
+```shell
 $ ./build.sh -t Release
 ```
 
-By default, it will build CPU-only version. To build GPU version, add `-g` option
+##### Build in CentOS
+
+```shell
+$ cd [Milvus root path]/core
+$ ./centos7_build_deps.sh
+```
+
+By default, it will build CPU-only version. To build GPU version, add `-g` option.
+
 ```shell
 $ ./build.sh -g
 ```
 
-If you want to know the complete build options, run
+If you want to know the complete build options, run the following command.
+
 ```shell
 $./build.sh -h
 ```
@@ -182,7 +195,7 @@ Follow the steps below to solve this problem:
 
 ### Error message: `internal compiler error`
 
-Different from what the message suggests, this error is likely to be caused by insufficient memory. Please try increasing the memory allocated to Docker.
+Try increasing the memory allocated to docker.
 
 ### Error message: `error while loading shared libraries: libmysqlpp.so.3`
 
