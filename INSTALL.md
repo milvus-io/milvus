@@ -182,7 +182,7 @@ Follow the steps below to solve this problem:
 
 ### Error message: `internal compiler error`
 
-Try increasing the memory allocated to docker.
+Different from what the message suggests, this error is likely to be caused by insufficient memory. Please try increasing the memory allocated to Docker.
 
 ### Error message: `error while loading shared libraries: libmysqlpp.so.3`
 
