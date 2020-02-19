@@ -16,6 +16,8 @@ extern fvec_func_ptr fvec_L2sqr;
 extern fvec_func_ptr fvec_L1;
 extern fvec_func_ptr fvec_Linf;
 
+extern bool support_avx512();
+
 extern void hook_init();
 
 } // namespace faiss

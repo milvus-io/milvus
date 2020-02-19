@@ -213,8 +213,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
                     ScalarQuantizer_avx512::QT_4bit;
             if (coarse_quantizer) {
                 FAISS_THROW_IF_NOT (!use_2layer);
-                if (faiss_use_avx512 &&
-                    instr_set_inst.AVX512F() && instr_set_inst.AVX512DQ() && instr_set_inst.AVX512BW()) {
+                if (support_avx512()) {
                     IndexIVFScalarQuantizer_avx512 *index_ivf =
                         new IndexIVFScalarQuantizer_avx512(coarse_quantizer, d, ncentroids, qt_avx512, metric);
                     printf("new IndexIVFScalarQuantizer_avx512\n");
@@ -232,8 +231,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
                     index_1 = index_ivf;
                 }
             } else {
-                if (faiss_use_avx512 &&
-                    instr_set_inst.AVX512F() && instr_set_inst.AVX512DQ() && instr_set_inst.AVX512BW()) {
+                if (support_avx512()) {
                     index_1 = new IndexScalarQuantizer_avx512(d, qt_avx512, metric);
                     printf("new IndexScalarQuantizer_avx512\n");
                 } else {

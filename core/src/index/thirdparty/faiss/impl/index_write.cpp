@@ -376,7 +376,7 @@ void write_index (const Index *idx, IOWriter *f) {
         WRITEVECTOR (idxs->codes);
     } else if(const IndexScalarQuantizer_avx512 * idxs =
             dynamic_cast<const IndexScalarQuantizer_avx512 *> (idx)) {
-        uint32_t h = fourcc ("ISQX");
+        uint32_t h = fourcc ("IxSQ");
         WRITE1 (h);
         write_index_header (idx, f);
         write_ScalarQuantizer_avx512 (&idxs->sq, f);
@@ -424,7 +424,7 @@ void write_index (const Index *idx, IOWriter *f) {
         write_InvertedLists (ivsc->invlists, f);
     } else if(const IndexIVFScalarQuantizer_avx512 * ivsc =
             dynamic_cast<const IndexIVFScalarQuantizer_avx512 *> (idx)) {
-        uint32_t h = fourcc ("ISqX");
+        uint32_t h = fourcc ("IwSq");
         WRITE1 (h);
         write_ivf_header (ivsc, f);
         write_ScalarQuantizer_avx512 (&ivsc->sq, f);
