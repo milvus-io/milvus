@@ -26,9 +26,9 @@
 - Ubuntu 18.04 or higher
 - CentOS 7
 
-If your operating system does not meet the requirements, we recommend that you pull a [docker image of Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) as your compilation environment.
+If your operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
   
-- GCC 7.0 or higher to support C++17
+- GCC 7.0 or higher to support C++ 17
 - CMake 3.12 or higher
 
 For GPU-enabled version, you will also need:
