@@ -120,7 +120,7 @@ struct IndexBinaryIVF : IndexBinary {
                 ConcurrentBitsetPtr bitset = nullptr) const override;
 
     /** get raw vectors by ids */
-    void get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr) const override;
+    void get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr) override;
 
     void search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
                        ConcurrentBitsetPtr bitset = nullptr) override;

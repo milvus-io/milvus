@@ -148,7 +148,7 @@ struct Index {
      * @param x           output raw vectors, size n * d
      * @param bitset      flags to check the validity of vectors
      */
-    virtual void get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset = nullptr) const;
+    virtual void get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset = nullptr);
 
     /** query n vectors of dimension d to the index by ids.
      *
