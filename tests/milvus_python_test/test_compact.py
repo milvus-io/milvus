@@ -211,7 +211,7 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.delete_by_id(table, vectors)
+        status = connect.delete_by_id(table, ids)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -573,7 +573,7 @@ class TestCompactJAC:
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
-        status = connect.delete_by_id(jac_table, vectors)
+        status = connect.delete_by_id(jac_table, ids)
         assert status.OK()
         status = connect.flush([jac_table])
         assert status.OK()
@@ -632,7 +632,7 @@ class TestCompactJAC:
         method: add vectors, delete part and compact table twice
         expected: status ok, data size smaller after first compact, no change after second
         '''
-        vectors = gen_vector(nb, dim)
+        tmp, vectors = gen_binary_vectors(nb, dim)
         status, ids = connect.add_vectors(jac_table, vectors)
         assert status.OK()
         status = connect.flush([jac_table])
@@ -868,7 +868,7 @@ class TestCompactIP:
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
-        status = connect.delete_by_id(ip_table, vectors)
+        status = connect.delete_by_id(ip_table, ids)
         assert status.OK()
         status = connect.flush([ip_table])
         assert status.OK()
