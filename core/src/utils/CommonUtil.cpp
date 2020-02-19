@@ -228,6 +228,7 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
+#ifdef MILVUS_ENABLE_PROFILING
 std::string
 CommonUtil::GetCurrentTimeStr() {
     time_t tt;
@@ -241,6 +242,7 @@ CommonUtil::GetCurrentTimeStr() {
                       "_" + std::to_string(t.tm_sec);
     return str;
 }
+#endif
 
 void
 CommonUtil::EraseFromCache(const std::string& item_key) {
