@@ -151,11 +151,12 @@ class TestCompactBase:
         method: add vector, delete it and compact table
         expected: status ok, vectors added and deleted
         '''
-        vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(table, vector)
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
+        logging.getLogger().info(ids)
         status = connect.delete_by_id(table, ids[0])
         assert status.OK()
         status = connect.flush([table])
