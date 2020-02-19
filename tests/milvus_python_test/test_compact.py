@@ -25,17 +25,19 @@ class TestTableInfo:
       The following cases are used to test `table_info` function
     ******************************************************************
     """
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_get_table_info_name_None(self, connect, table):
         '''
         target: get table info where table name is None
         method: call table_info with the table_name: None
-        expected: exception raised
+        expected: status not ok
         '''
         table_name = None
         status, info = connect.table_info(table_name)
         logging.getLogger().info(status)
         assert not status.OK()
 
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_get_table_info_name_not_existed(self, connect, table):
         '''
         target: get table info where table name does not exist
@@ -53,6 +55,7 @@ class TestTableInfo:
     def get_table_name(self, request):
         yield request.param
 
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_table_name_invalid(self, connect, get_table_name):
         '''
         target: get table info where table name is invalid
@@ -70,6 +73,7 @@ class TestCompactBase:
       The following cases are used to test `compact` function
     ******************************************************************
     """
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_table_name_None(self, connect, table):
         '''
         target: compact table where table name is None
@@ -80,6 +84,7 @@ class TestCompactBase:
         with pytest.raises(Exception) as e:
             status = connect.compact(table_name)
 
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_table_name_not_existed(self, connect, table):
         '''
         target: compact table not existed
@@ -97,6 +102,7 @@ class TestCompactBase:
     def get_table_name(self, request):
         yield request.param
 
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_table_name_invalid(self, connect, get_table_name):
         '''
         target: compact table with invalid name
