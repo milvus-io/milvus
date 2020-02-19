@@ -18,7 +18,6 @@
 
 
 #include <faiss/impl/FaissAssert.h>
-#include <faiss/utils/instruction_set.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/random.h>
 
@@ -198,7 +197,6 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             }
         } else if (!index && (stok == "SQ8" || stok == "SQ4" || stok == "SQ6" ||
                               stok == "SQfp16")) {
-            InstructionSet& instr_set_inst = InstructionSet::GetInstance();
             ScalarQuantizer::QuantizerType qt =
                 stok == "SQ8" ? ScalarQuantizer::QT_8bit :
                 stok == "SQ6" ? ScalarQuantizer::QT_6bit :
