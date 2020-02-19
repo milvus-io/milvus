@@ -18,6 +18,8 @@
 #include "db/DBImpl.h"
 
 #include <assert.h>
+#include <fiu-local.h>
+
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -108,12 +110,6 @@ DBImpl::Start() {
     // ENGINE_LOG_TRACE << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
-    // for distribute version, some nodes are read only
-    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        // ENGINE_LOG_TRACE << "StartTimerTasks";
-        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
-    }
-
     // wal
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto error_code = wal_mgr_->Init(meta_ptr_);
@@ -137,6 +133,12 @@ DBImpl::Start() {
 
         // background thread
         bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalTask, this);
+    }
+
+    // for distribute version, some nodes are read only
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        // ENGINE_LOG_TRACE << "StartTimerTasks";
+        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
 
     return Status::OK();
@@ -289,27 +291,23 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
             return Status(DB_ERROR, err_msg);
         }
 
+        std::vector<SegmentStat> segments_stat;
+        for (auto& file : table_files) {
+            SegmentStat seg_stat;
+            seg_stat.name_ = file.segment_id_;
+            seg_stat.row_count_ = (int64_t)file.row_count_;
+            seg_stat.index_name_ = index_type_name[file.engine_type_];
+            seg_stat.data_size_ = (int64_t)file.file_size_;
+            segments_stat.emplace_back(seg_stat);
+        }
+
         if (name == table_id) {
             table_info.native_stat_.name_ = table_id;
-
-            for (auto& file : table_files) {
-                SegmentStat seg_stat;
-                seg_stat.name_ = file.segment_id_;
-                seg_stat.row_count_ = (int64_t)file.row_count_;
-                seg_stat.index_name_ = index_type_name[file.engine_type_];
-                table_info.native_stat_.segments_stat_.emplace_back(seg_stat);
-            }
+            table_info.native_stat_.segments_stat_.swap(segments_stat);
         } else {
             TableStat table_stat;
             table_stat.name_ = name;
-
-            for (auto& file : table_files) {
-                SegmentStat seg_stat;
-                seg_stat.name_ = file.segment_id_;
-                seg_stat.row_count_ = (int64_t)file.row_count_;
-                seg_stat.index_name_ = index_type_name[file.engine_type_];
-                table_stat.segments_stat_.emplace_back(seg_stat);
-            }
+            table_stat.segments_stat_.swap(segments_stat);
             table_info.partitions_stat_.emplace_back(table_stat);
         }
     }
@@ -465,7 +463,12 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    Status status;
+    std::string target_table_name;
+    Status status = GetPartitionByTag(table_id, partition_tag, target_table_name);
+    if (!status.ok()) {
+        return status;
+    }
+
     milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
 
     // insert vectors into target table
@@ -484,12 +487,6 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         wal_task_swn_.Notify();
 
     } else {
-        std::string target_table_name;
-        status = GetPartitionByTag(table_id, partition_tag, target_table_name);
-        if (!status.ok()) {
-            return status;
-        }
-
         auto lsn = 0;
         std::set<std::string> flushed_tables;
         if (vectors.binary_data_.empty()) {
@@ -579,7 +576,10 @@ DBImpl::Flush(const std::string& table_id) {
         }
 
     } else {
-        status = mem_mgr_->Flush(table_id);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_id);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             compact_table_ids_.insert(table_id);
@@ -607,7 +607,10 @@ DBImpl::Flush() {
         }
     } else {
         std::set<std::string> table_ids;
-        status = mem_mgr_->Flush(table_ids);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_ids);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             for (auto& table_id : table_ids) {
@@ -638,6 +641,8 @@ DBImpl::Compact(const std::string& table_id) {
     }
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     // Drop all index
     status = DropIndex(table_id);
@@ -1363,6 +1368,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
@@ -1732,6 +1739,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 
 Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    fiu_return_on("DBImpl.ExexWalRecord.return", Status(););
     auto wal_table_flushed = [&](const std::string& table_id) -> uint64_t {
         uint64_t lsn = 0;
         meta_ptr_->GetTableFlushLSN(table_id, lsn);
@@ -1804,7 +1812,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.table_id.empty()) {
                 // flush one table
-                status = mem_mgr_->Flush(record.table_id);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(record.table_id);
+                }
                 wal_table_flushed(record.table_id);
 
                 std::lock_guard<std::mutex> lck(compact_result_mutex_);
@@ -1813,7 +1824,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             } else {
                 // flush all tables
                 std::set<std::string> table_ids;
-                status = mem_mgr_->Flush(table_ids);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_ids);
+                }
 
                 uint64_t lsn = tables_flushed(table_ids);
                 wal_mgr_->RemoveOldFiles(lsn);
