@@ -157,7 +157,7 @@ Then try reinstalling the latest CMake from source with `--system-curl` option:
    $ make 
    $ sudo make install
    ```
-If the `--system-curl` command doesn't work, you can also reinstall CMake in **Ubuntu Software** on your local computer.
+    If the `--system-curl` command doesn't work, you can also reinstall CMake in **Ubuntu Software** on your local computer.
 
 2. If you encounter the following error when compiling in a Docker image: `internal compiler error`. Try increasing the memory allocated to docker first.
 
