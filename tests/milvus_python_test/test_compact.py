@@ -156,7 +156,8 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.delete_by_id(table, ids[0])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_by_id(table, delete_ids)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
