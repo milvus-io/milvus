@@ -51,6 +51,9 @@ class CommonUtil {
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
 
+    static std::string
+    GetCurrentTimeStr();
+
     static void
     EraseFromCache(const std::string& item_key);
 };
