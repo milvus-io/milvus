@@ -45,8 +45,9 @@ class TestTableInfo:
         expected: exception raised
         '''
         table_name = gen_unique_str("not_existed_table")
-        with pytest.raises(Exception) as e:
-            status, info = connect.table_info(table_name)
+        status, info = connect.table_info(table_name)
+        logging.getLogger().info(status)
+        assert not status.OK()
     
     @pytest.fixture(
         scope="function",
@@ -129,8 +130,9 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info.native_stat.segment_stats[0])
+        logging.getLogger().info(info.native_stat.segment_stats)
         size_before = info.native_stat.segment_stats[0].data_size
+        logging.getLogger().info(size_before)
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -161,7 +163,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info.native_stat.segment_stats[0])
+        logging.getLogger().info(info.native_stat.segment_stats)
         size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
@@ -170,7 +172,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info.native_stat.segment_stats[0])
+        logging.getLogger().info(info.native_stat.segment_stats)
         size_after = info.native_stat.segment_stats[0].data_size
         assert(size_before > size_after)
 
