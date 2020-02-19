@@ -32,8 +32,9 @@ class TestTableInfo:
         expected: exception raised
         '''
         table_name = None
-        with pytest.raises(Exception) as e:
-            status, info = connect.table_info(table_name)
+        status, info = connect.table_info(table_name)
+        logging.getLogger().info(status)
+        assert not status.OK()
 
     def test_get_table_info_name_not_existed(self, connect, table):
         '''
@@ -121,6 +122,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
+        logging.getLogger().info(info)
         size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
@@ -129,6 +131,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
+        logging.getLogger().info(info)
         size_after = info.native_stat.segment_stats[0].data_size
         assert(size_before == size_after)
 
@@ -703,7 +706,7 @@ class TestCompactIP:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([ip_table])
         assert status.OK()
         # get table info before compact
         status, info = connect.table_info(ip_table)
