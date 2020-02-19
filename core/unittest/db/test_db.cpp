@@ -464,6 +464,10 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->Compact(table_info.table_id_);
     ASSERT_FALSE(stat.ok());
 
+    milvus::engine::VectorsData vector;
+    stat = db_->GetVectorByID(table_info.table_id_, 0, vector);
+    ASSERT_FALSE(stat.ok());
+
     stat = db_->PreloadTable(table_info.table_id_);
     ASSERT_FALSE(stat.ok());
 
@@ -964,15 +968,15 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     stat = db_->InsertVectors(table_info.table_id_, partition_tag, qxb);
     ASSERT_TRUE(stat.ok());
 
-    db_->Flush(table_info.table_id_);
+    db_->Flush();
 
-//    milvus::engine::VectorsData vector_data;
-//    stat = db_->GetVectorByID(TABLE_NAME, qxb.id_array_[0], vector_data);
-//    ASSERT_TRUE(stat.ok());
-//    ASSERT_EQ(vector_data.vector_count_, 1);
-//    ASSERT_EQ(vector_data.float_data_.size(), TABLE_DIM);
-//
-//    for (int64_t i = 0; i < TABLE_DIM; i++) {
-//        ASSERT_EQ(vector_data.float_data_[i], qxb.float_data_[i]);
-//    }
+    milvus::engine::VectorsData vector_data;
+    stat = db_->GetVectorByID(TABLE_NAME, qxb.id_array_[0], vector_data);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(vector_data.vector_count_, 1);
+    ASSERT_EQ(vector_data.float_data_.size(), TABLE_DIM);
+
+    for (int64_t i = 0; i < TABLE_DIM; i++) {
+        ASSERT_EQ(vector_data.float_data_[i], qxb.float_data_[i]);
+    }
 }

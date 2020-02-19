@@ -848,6 +848,16 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                     hybrid = true;
                 }
 
+                // Load
+                ENGINE_LOG_DEBUG << "Loading data from segment: " << file.segment_id_ << ", file: " << file.file_id_
+                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+                status = execution_engine->Load();
+                if (!status.ok()) {
+                    return status;
+                }
+                ENGINE_LOG_DEBUG << "Finished loading from segment: " << file.segment_id_ << ", file: " << file.file_id_
+                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+
                 // Query
                 // If we were able to find the id's corresponding vector, break and don't bother checking the rest of
                 // files
@@ -863,7 +873,13 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                         return status;
                     }
 
-                    if (result_vector.front() != std::numeric_limits<uint8_t>::max()) {
+                    bool valid = false;
+                    for (auto& num : result_vector) {
+                        if (num != UINT8_MAX) {
+                            valid = true;
+                        }
+                    }
+                    if (valid) {
                         vector.binary_data_ = result_vector;
                         vector.vector_count_ = 1;
                         break;
@@ -876,7 +892,17 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                         return status;
                     }
 
-                    if (result_vector.front() != std::numeric_limits<float>::max()) {
+                    std::vector<uint8_t> result_vector_in_byte;
+                    result_vector_in_byte.resize(file.dimension_ * sizeof(float));
+                    memcpy(result_vector_in_byte.data(), result_vector.data(), file.dimension_ * sizeof(float));
+
+                    bool valid = false;
+                    for (auto& num : result_vector_in_byte) {
+                        if (num != UINT8_MAX) {
+                            valid = true;
+                        }
+                    }
+                    if (valid) {
                         vector.float_data_ = result_vector;
                         vector.vector_count_ = 1;
                         break;
