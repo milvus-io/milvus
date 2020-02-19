@@ -232,3 +232,179 @@ TEST_F(SearchByIdTest, with_delete) {
         ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
     }
 }
+
+TEST_F(GetVectorByIdTest, basic) {
+
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 100000;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    for (int64_t i = 0; i < nb; i++) {
+        xb.id_array_.push_back(i);
+    }
+
+    stat = db_->InsertVectors(GetTableName(), "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int64_t> dis(0, nb - 1);
+
+    int64_t num_query = 10;
+    std::vector<int64_t> ids_to_search;
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = dis(gen);
+        ids_to_search.emplace_back(index);
+    }
+
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+
+    for (auto id : ids_to_search) {
+        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+
+        milvus::engine::VectorsData vector;
+        stat = db_->GetVectorByID(GetTableName(), id, vector);
+        ASSERT_TRUE(stat.ok());
+
+        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, vector, result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(result_ids[0], id);
+        ASSERT_LT(result_distances[0], 1e-4);
+    }
+}
+
+TEST_F(GetVectorByIdTest, with_index) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 100000;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    for (int64_t i = 0; i < nb; i++) {
+        xb.id_array_.push_back(i);
+    }
+
+    stat = db_->InsertVectors(GetTableName(), "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int64_t> dis(0, nb - 1);
+
+    int64_t num_query = 10;
+    std::vector<int64_t> ids_to_search;
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = dis(gen);
+        ids_to_search.emplace_back(index);
+    }
+
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    milvus::engine::TableIndex index;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    stat = db_->CreateIndex(GetTableName(), index);
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+
+    for (auto id : ids_to_search) {
+        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+
+        milvus::engine::VectorsData vector;
+        stat = db_->GetVectorByID(GetTableName(), id, vector);
+        ASSERT_TRUE(stat.ok());
+
+        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, vector, result_ids, result_distances);
+        ASSERT_EQ(result_ids[0], id);
+        ASSERT_LT(result_distances[0], 1e-4);
+    }
+}
+
+TEST_F(GetVectorByIdTest, with_delete) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 100000;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    for (int64_t i = 0; i < nb; i++) {
+        xb.id_array_.push_back(i);
+    }
+
+    stat = db_->InsertVectors(GetTableName(), "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int64_t> dis(0, nb - 1);
+
+    int64_t num_query = 10;
+    std::vector<int64_t> ids_to_search;
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = dis(gen);
+        ids_to_search.emplace_back(index);
+    }
+
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    milvus::engine::IDNumbers ids_to_delete;
+    for (auto& id : ids_to_search) {
+        ids_to_delete.emplace_back(id);
+    }
+    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+
+    for (auto id : ids_to_search) {
+        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+
+        milvus::engine::VectorsData vector;
+        stat = db_->GetVectorByID(GetTableName(), id, vector);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_TRUE(vector.float_data_.empty());
+        ASSERT_EQ(vector.vector_count_, 0);
+    }
+}

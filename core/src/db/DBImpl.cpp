@@ -848,6 +848,16 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                     hybrid = true;
                 }
 
+                // Load
+                ENGINE_LOG_DEBUG << "Loading data from segment: " << file.segment_id_ << ", file: " << file.file_id_
+                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+                status = execution_engine->Load();
+                if (!status.ok()) {
+                    return status;
+                }
+                ENGINE_LOG_DEBUG << "Finished loading from segment: " << file.segment_id_ << ", file: " << file.file_id_
+                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+
                 // Query
                 // If we were able to find the id's corresponding vector, break and don't bother checking the rest of
                 // files

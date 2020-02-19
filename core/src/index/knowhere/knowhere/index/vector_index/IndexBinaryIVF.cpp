@@ -172,11 +172,10 @@ BinaryIVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
     //    GETBINARYTENSOR(dataset)
     // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
 
     try {
-        auto elems = config->d;
-
-        size_t p_x_size = sizeof(float) * elems;
+        size_t p_x_size = sizeof(uint8_t) * elems;
         auto p_x = (uint8_t*)malloc(p_x_size);
 
         index_->get_vector_by_id(1, p_data, p_x, bitset_);

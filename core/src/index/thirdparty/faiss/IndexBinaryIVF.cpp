@@ -168,7 +168,7 @@ void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, Con
     if (!maintain_direct_map) {
         make_direct_map(true);
     }
-    
+
     /* only get vector by 1 id */
     FAISS_ASSERT(n == 1);
     if (!bitset || !bitset->test(xid[0])) {
