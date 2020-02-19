@@ -172,7 +172,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info.native_stat.segment_stats)
+        logging.getLogger().info(info.native_stat)
         size_after = info.native_stat.segment_stats[0].data_size
         assert(size_before > size_after)
 
