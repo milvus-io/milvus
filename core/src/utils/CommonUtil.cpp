@@ -228,6 +228,22 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
+#ifdef MILVUS_ENABLE_PROFILING
+std::string
+CommonUtil::GetCurrentTimeStr() {
+    time_t tt;
+    time(&tt);
+    tt = tt + 8 * 60;
+    tm t;
+    gmtime_r(&tt, &t);
+
+    std::string str = std::to_string(t.tm_year + 1900) + "_" + std::to_string(t.tm_mon + 1) + "_" +
+                      std::to_string(t.tm_mday) + "_" + std::to_string(t.tm_hour) + "_" + std::to_string(t.tm_min) +
+                      "_" + std::to_string(t.tm_sec);
+    return str;
+}
+#endif
+
 void
 CommonUtil::EraseFromCache(const std::string& item_key) {
     if (item_key.empty()) {
