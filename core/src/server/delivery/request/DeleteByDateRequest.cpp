@@ -75,10 +75,6 @@ DeleteByDateRequest::OnExecute() {
             return status;
         }
 
-#ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
-        ProfilerStart(fname.c_str());
-#endif
         status = DBWrapper::DB()->DropTable(table_name_, dates);
         fiu_do_on("DeleteByDateRequest.OnExecute.drop_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
