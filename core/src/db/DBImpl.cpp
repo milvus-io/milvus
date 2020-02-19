@@ -18,6 +18,8 @@
 #include "db/DBImpl.h"
 
 #include <assert.h>
+#include <fiu-local.h>
+
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -108,12 +110,6 @@ DBImpl::Start() {
     // ENGINE_LOG_TRACE << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
-    // for distribute version, some nodes are read only
-    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        // ENGINE_LOG_TRACE << "StartTimerTasks";
-        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
-    }
-
     // wal
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto error_code = wal_mgr_->Init(meta_ptr_);
@@ -137,6 +133,12 @@ DBImpl::Start() {
 
         // background thread
         bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalTask, this);
+    }
+
+    // for distribute version, some nodes are read only
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        // ENGINE_LOG_TRACE << "StartTimerTasks";
+        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
 
     return Status::OK();
@@ -566,8 +568,6 @@ DBImpl::Flush(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
@@ -576,7 +576,10 @@ DBImpl::Flush(const std::string& table_id) {
         }
 
     } else {
-        status = mem_mgr_->Flush(table_id);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_id);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             compact_table_ids_.insert(table_id);
@@ -595,8 +598,6 @@ DBImpl::Flush() {
 
     // ENGINE_LOG_DEBUG << "Flushing all tables";
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-
     Status status;
     if (wal_enable_ && wal_mgr_ != nullptr) {
         auto lsn = wal_mgr_->Flush();
@@ -606,7 +607,10 @@ DBImpl::Flush() {
         }
     } else {
         std::set<std::string> table_ids;
-        status = mem_mgr_->Flush(table_ids);
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(table_ids);
+        }
         {
             std::lock_guard<std::mutex> lck(compact_result_mutex_);
             for (auto& table_id : table_ids) {
@@ -1735,6 +1739,7 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
 
 Status
 DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    fiu_return_on("DBImpl.ExexWalRecord.return", Status(););
     auto wal_table_flushed = [&](const std::string& table_id) -> uint64_t {
         uint64_t lsn = 0;
         meta_ptr_->GetTableFlushLSN(table_id, lsn);
@@ -1807,7 +1812,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.table_id.empty()) {
                 // flush one table
-                status = mem_mgr_->Flush(record.table_id);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(record.table_id);
+                }
                 wal_table_flushed(record.table_id);
 
                 std::lock_guard<std::mutex> lck(compact_result_mutex_);
@@ -1816,7 +1824,10 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             } else {
                 // flush all tables
                 std::set<std::string> table_ids;
-                status = mem_mgr_->Flush(table_ids);
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_ids);
+                }
 
                 uint64_t lsn = tables_flushed(table_ids);
                 wal_mgr_->RemoveOldFiles(lsn);
