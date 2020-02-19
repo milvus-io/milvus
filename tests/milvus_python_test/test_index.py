@@ -62,9 +62,12 @@ class TestIndexBase:
         '''
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
-        status, ids = connect.add_vectors(table, vectors)
-        status = connect.create_index(table, index_params)
-        assert status.OK()
+        if index_param["index_type"] == IndexType.IVF_SQ8:
+            status, ids = connect.add_vectors(table, vectors)
+            status = connect.create_index(table, index_params)
+            assert status.OK()
+        else:
+            pytest.skip("skip other index types")
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, table, get_simple_index_params):
