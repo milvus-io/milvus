@@ -234,7 +234,6 @@ TEST_F(SearchByIdTest, with_delete) {
 }
 
 TEST_F(GetVectorByIdTest, basic) {
-
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -392,8 +391,6 @@ TEST_F(GetVectorByIdTest, with_delete) {
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
-
-    int topk = 10, nprobe = 10;
 
     for (auto id : ids_to_search) {
         //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
