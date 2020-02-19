@@ -156,7 +156,6 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        logging.getLogger().info(ids)
         status = connect.delete_by_id(table, ids[0])
         assert status.OK()
         status = connect.flush([table])
