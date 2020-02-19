@@ -156,7 +156,7 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.delete_by_id(table, ids)
+        status = connect.delete_by_id(table, ids[0])
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -165,6 +165,7 @@ class TestCompactBase:
         assert status.OK()
         logging.getLogger().info(info.native_stat)
         size_before = info.native_stat.segment_stats[0].data_size
+        logging.getLogger().info(size_before)
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -174,6 +175,7 @@ class TestCompactBase:
         assert status.OK()
         logging.getLogger().info(info.native_stat)
         size_after = info.native_stat.segment_stats[0].data_size
+        logging.getLogger().info(size_after)
         assert(size_before > size_after)
 
     @pytest.fixture(
