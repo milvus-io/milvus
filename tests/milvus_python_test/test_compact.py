@@ -56,15 +56,16 @@ class TestTableInfo:
         yield request.param
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    def test_compact_table_name_invalid(self, connect, get_table_name):
+    def test_get_table_info_name_invalid(self, connect, get_table_name):
         '''
         target: get table info where table name is invalid
         method: call table_info with invalid table_name
         expected: exception raised
         '''
         table_name = get_table_name
-        with pytest.raises(Exception) as e:
-            status, info = connect.table_info(table_name)
+        status, info = connect.table_info(table_name)
+        logging.getLogger().info(status)
+        assert not status.OK()
 
 
 class TestCompactBase:
@@ -128,7 +129,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info)
+        logging.getLogger().info(info.native_stat.segment_stats[0])
         size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
@@ -137,7 +138,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info)
+        logging.getLogger().info(info.native_stat.segment_stats[0])
         size_after = info.native_stat.segment_stats[0].data_size
         assert(size_before == size_after)
 
@@ -160,6 +161,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
+        logging.getLogger().info(info.native_stat.segment_stats[0])
         size_before = info.native_stat.segment_stats[0].data_size
         status = connect.compact(table)
         assert status.OK()
@@ -168,6 +170,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
+        logging.getLogger().info(info.native_stat.segment_stats[0])
         size_after = info.native_stat.segment_stats[0].data_size
         assert(size_before > size_after)
 
