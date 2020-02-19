@@ -204,13 +204,15 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             if (coarse_quantizer) {
                 FAISS_THROW_IF_NOT (!use_2layer);
                 IndexIVFScalarQuantizer *index_ivf =
-                        new IndexIVFScalarQuantizer(coarse_quantizer, d, ncentroids, qt, metric);
-                index_ivf->quantizer_trains_alone = get_trains_alone(coarse_quantizer);
-                del_coarse_quantizer.release();
+                    new IndexIVFScalarQuantizer (
+                      coarse_quantizer, d, ncentroids, qt, metric);
+                index_ivf->quantizer_trains_alone =
+                    get_trains_alone (coarse_quantizer);
+                del_coarse_quantizer.release ();
                 index_ivf->own_fields = true;
                 index_1 = index_ivf;
             } else {
-                index_1 = new IndexScalarQuantizer(d, qt, metric);
+                index_1 = new IndexScalarQuantizer (d, qt, metric);
             }
         } else if (!index && (stok == "SQ8Hybrid" || stok == "SQ4Hybrid" || stok == "SQ6Hybrid" ||
                               stok == "SQfp16Hybrid")) {

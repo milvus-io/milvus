@@ -358,6 +358,7 @@ static void read_ScalarQuantizer (ScalarQuantizer *ivsc, IOReader *f) {
     READVECTOR (ivsc->trained);
 }
 
+
 static void read_HNSW (HNSW *hnsw, IOReader *f) {
     READVECTOR (hnsw->assign_probas);
     READVECTOR (hnsw->cum_nneighbor_per_level);
@@ -559,9 +560,9 @@ Index *read_index (IOReader *f, int io_flags) {
         read_InvertedLists (ivfl, f, io_flags);
         idx = ivfl;
     } else if (h == fourcc ("IxSQ")) {
-        IndexScalarQuantizer *idxs = new IndexScalarQuantizer();
-        read_index_header(idxs, f);
-        read_ScalarQuantizer(&idxs->sq, f);
+        IndexScalarQuantizer * idxs = new IndexScalarQuantizer ();
+        read_index_header (idxs, f);
+        read_ScalarQuantizer (&idxs->sq, f);
         READVECTOR (idxs->codes);
         idxs->code_size = idxs->sq.code_size;
         idx = idxs;
@@ -576,25 +577,26 @@ Index *read_index (IOReader *f, int io_flags) {
         READVECTOR (idxl->trained);
         idx = idxl;
     } else if(h == fourcc ("IvSQ")) { // legacy
-        IndexIVFScalarQuantizer *ivsc = new IndexIVFScalarQuantizer();
+        IndexIVFScalarQuantizer * ivsc = new IndexIVFScalarQuantizer();
         std::vector<std::vector<Index::idx_t> > ids;
-        read_ivf_header(ivsc, f, &ids);
-        read_ScalarQuantizer(&ivsc->sq, f);
+        read_ivf_header (ivsc, f, &ids);
+        read_ScalarQuantizer (&ivsc->sq, f);
         READ1 (ivsc->code_size);
-        ArrayInvertedLists *ail = set_array_invlist(ivsc, ids);
-        for (int i = 0; i < ivsc->nlist; i++) READVECTOR (ail->codes[i]);
+        ArrayInvertedLists *ail = set_array_invlist (ivsc, ids);
+        for(int i = 0; i < ivsc->nlist; i++)
+            READVECTOR (ail->codes[i]);
         idx = ivsc;
     } else if(h == fourcc ("IwSQ") || h == fourcc ("IwSq")) {
-        IndexIVFScalarQuantizer *ivsc = new IndexIVFScalarQuantizer();
-        read_ivf_header(ivsc, f);
-        read_ScalarQuantizer(&ivsc->sq, f);
+        IndexIVFScalarQuantizer * ivsc = new IndexIVFScalarQuantizer();
+        read_ivf_header (ivsc, f);
+        read_ScalarQuantizer (&ivsc->sq, f);
         READ1 (ivsc->code_size);
-        if (h == fourcc("IwSQ")) {
+        if (h == fourcc ("IwSQ")) {
             ivsc->by_residual = true;
         } else {
             READ1 (ivsc->by_residual);
         }
-        read_InvertedLists(ivsc, f, io_flags);
+        read_InvertedLists (ivsc, f, io_flags);
         idx = ivsc;
     } else if (h == fourcc("ISqH")) {
         IndexIVFSQHybrid *ivfsqhbyrid = new IndexIVFSQHybrid();
