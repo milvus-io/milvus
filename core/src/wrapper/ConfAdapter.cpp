@@ -268,8 +268,8 @@ HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
 
-    conf->ef = 100;  // ef can be auto-configured by using sample data.
-    conf->M = 16;    // A reasonable range of M is from 5 to 48.
+    conf->ef = 200;  // ef can be auto-configured by using sample data.
+    conf->M = 32;    // A reasonable range of M is from 5 to 48.
     return conf;
 }
 

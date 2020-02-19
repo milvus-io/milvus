@@ -77,11 +77,14 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     auto p_dist = (float*)malloc(dist_size * rows);
 
     using P = std::pair<float, int64_t>;
-    auto compare = [](P v1, P v2) { return v1.first < v2.first; };
+    auto compare = [](P& v1, P& v2) { return v1.first < v2.first; };
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         const float* single_query = p_data + i * dim;
         std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(single_query, config->k, compare);
+        while (ret.size() < config->k) {
+            ret.push_back(std::make_pair(-1, -1));
+        }
         std::vector<float> dist;
         std::vector<int64_t> ids;
         std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
