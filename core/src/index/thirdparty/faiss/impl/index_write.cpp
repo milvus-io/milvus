@@ -33,7 +33,6 @@
 #include <faiss/IndexIVFSpectralHash.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
-#include <faiss/IndexScalarQuantizer_avx512.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
@@ -194,15 +193,6 @@ static void write_ScalarQuantizer (
     WRITEVECTOR (ivsc->trained);
 }
 
-static void write_ScalarQuantizer_avx512 (
-        const ScalarQuantizer_avx512 *ivsc, IOWriter *f) {
-    WRITE1 (ivsc->qtype);
-    WRITE1 (ivsc->rangestat);
-    WRITE1 (ivsc->rangestat_arg);
-    WRITE1 (ivsc->d);
-    WRITE1 (ivsc->code_size);
-    WRITEVECTOR (ivsc->trained);
-}
 
 void write_InvertedLists (const InvertedLists *ils, IOWriter *f) {
     if (ils == nullptr) {
@@ -374,13 +364,6 @@ void write_index (const Index *idx, IOWriter *f) {
         write_index_header (idx, f);
         write_ScalarQuantizer (&idxs->sq, f);
         WRITEVECTOR (idxs->codes);
-    } else if(const IndexScalarQuantizer_avx512 * idxs =
-            dynamic_cast<const IndexScalarQuantizer_avx512 *> (idx)) {
-        uint32_t h = fourcc ("IxSQ");
-        WRITE1 (h);
-        write_index_header (idx, f);
-        write_ScalarQuantizer_avx512 (&idxs->sq, f);
-        WRITEVECTOR (idxs->codes);
     } else if(const IndexLattice * idxl =
               dynamic_cast<const IndexLattice *> (idx)) {
         uint32_t h = fourcc ("IxLa");
@@ -419,15 +402,6 @@ void write_index (const Index *idx, IOWriter *f) {
         WRITE1 (h);
         write_ivf_header (ivsc, f);
         write_ScalarQuantizer (&ivsc->sq, f);
-        WRITE1 (ivsc->code_size);
-        WRITE1 (ivsc->by_residual);
-        write_InvertedLists (ivsc->invlists, f);
-    } else if(const IndexIVFScalarQuantizer_avx512 * ivsc =
-            dynamic_cast<const IndexIVFScalarQuantizer_avx512 *> (idx)) {
-        uint32_t h = fourcc ("IwSq");
-        WRITE1 (h);
-        write_ivf_header (ivsc, f);
-        write_ScalarQuantizer_avx512 (&ivsc->sq, f);
         WRITE1 (ivsc->code_size);
         WRITE1 (ivsc->by_residual);
         write_InvertedLists (ivsc->invlists, f);

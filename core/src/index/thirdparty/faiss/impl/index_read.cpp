@@ -20,7 +20,6 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/io.h>
 
-#include <faiss/FaissHook.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/VectorTransform.h>
 #include <faiss/IndexPreTransform.h>
@@ -34,7 +33,6 @@
 #include <faiss/IndexIVFSpectralHash.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexScalarQuantizer.h>
-#include <faiss/IndexScalarQuantizer_avx512.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>
@@ -360,15 +358,6 @@ static void read_ScalarQuantizer (ScalarQuantizer *ivsc, IOReader *f) {
     READVECTOR (ivsc->trained);
 }
 
-static void read_ScalarQuantizer_avx512 (ScalarQuantizer_avx512 *ivsc, IOReader *f) {
-    READ1 (ivsc->qtype);
-    READ1 (ivsc->rangestat);
-    READ1 (ivsc->rangestat_arg);
-    READ1 (ivsc->d);
-    READ1 (ivsc->code_size);
-    READVECTOR (ivsc->trained);
-}
-
 static void read_HNSW (HNSW *hnsw, IOReader *f) {
     READVECTOR (hnsw->assign_probas);
     READVECTOR (hnsw->cum_nneighbor_per_level);
@@ -570,21 +559,12 @@ Index *read_index (IOReader *f, int io_flags) {
         read_InvertedLists (ivfl, f, io_flags);
         idx = ivfl;
     } else if (h == fourcc ("IxSQ")) {
-        if (support_avx512()) {
-            IndexScalarQuantizer_avx512 *idxs = new IndexScalarQuantizer_avx512();
-            read_index_header(idxs, f);
-            read_ScalarQuantizer_avx512(&idxs->sq, f);
-            READVECTOR (idxs->codes);
-            idxs->code_size = idxs->sq.code_size;
-            idx = idxs;
-        } else {
-            IndexScalarQuantizer *idxs = new IndexScalarQuantizer();
-            read_index_header(idxs, f);
-            read_ScalarQuantizer(&idxs->sq, f);
-            READVECTOR (idxs->codes);
-            idxs->code_size = idxs->sq.code_size;
-            idx = idxs;
-        }
+        IndexScalarQuantizer *idxs = new IndexScalarQuantizer();
+        read_index_header(idxs, f);
+        read_ScalarQuantizer(&idxs->sq, f);
+        READVECTOR (idxs->codes);
+        idxs->code_size = idxs->sq.code_size;
+        idx = idxs;
     } else if (h == fourcc ("IxLa")) {
         int d, nsq, scale_nbit, r2;
         READ1 (d);
@@ -596,51 +576,26 @@ Index *read_index (IOReader *f, int io_flags) {
         READVECTOR (idxl->trained);
         idx = idxl;
     } else if(h == fourcc ("IvSQ")) { // legacy
-        if (support_avx512()) {
-            IndexIVFScalarQuantizer_avx512 *ivsc = new IndexIVFScalarQuantizer_avx512();
-            std::vector<std::vector<Index::idx_t> > ids;
-            read_ivf_header(ivsc, f, &ids);
-            read_ScalarQuantizer_avx512(&ivsc->sq, f);
-            READ1 (ivsc->code_size);
-            ArrayInvertedLists *ail = set_array_invlist(ivsc, ids);
-            for (int i = 0; i < ivsc->nlist; i++) READVECTOR (ail->codes[i]);
-            idx = ivsc;
-        } else {
-            IndexIVFScalarQuantizer *ivsc = new IndexIVFScalarQuantizer();
-            std::vector<std::vector<Index::idx_t> > ids;
-            read_ivf_header(ivsc, f, &ids);
-            read_ScalarQuantizer(&ivsc->sq, f);
-            READ1 (ivsc->code_size);
-            ArrayInvertedLists *ail = set_array_invlist(ivsc, ids);
-            for (int i = 0; i < ivsc->nlist; i++) READVECTOR (ail->codes[i]);
-            idx = ivsc;
-        }
+        IndexIVFScalarQuantizer *ivsc = new IndexIVFScalarQuantizer();
+        std::vector<std::vector<Index::idx_t> > ids;
+        read_ivf_header(ivsc, f, &ids);
+        read_ScalarQuantizer(&ivsc->sq, f);
+        READ1 (ivsc->code_size);
+        ArrayInvertedLists *ail = set_array_invlist(ivsc, ids);
+        for (int i = 0; i < ivsc->nlist; i++) READVECTOR (ail->codes[i]);
+        idx = ivsc;
     } else if(h == fourcc ("IwSQ") || h == fourcc ("IwSq")) {
-        if (support_avx512()) {
-            IndexIVFScalarQuantizer_avx512 *ivsc = new IndexIVFScalarQuantizer_avx512();
-            read_ivf_header(ivsc, f);
-            read_ScalarQuantizer_avx512(&ivsc->sq, f);
-            READ1 (ivsc->code_size);
-            if (h == fourcc("IwSQ")) {
-                ivsc->by_residual = true;
-            } else {
-                READ1 (ivsc->by_residual);
-            }
-            read_InvertedLists(ivsc, f, io_flags);
-            idx = ivsc;
+        IndexIVFScalarQuantizer *ivsc = new IndexIVFScalarQuantizer();
+        read_ivf_header(ivsc, f);
+        read_ScalarQuantizer(&ivsc->sq, f);
+        READ1 (ivsc->code_size);
+        if (h == fourcc("IwSQ")) {
+            ivsc->by_residual = true;
         } else {
-            IndexIVFScalarQuantizer *ivsc = new IndexIVFScalarQuantizer();
-            read_ivf_header(ivsc, f);
-            read_ScalarQuantizer(&ivsc->sq, f);
-            READ1 (ivsc->code_size);
-            if (h == fourcc("IwSQ")) {
-                ivsc->by_residual = true;
-            } else {
-                READ1 (ivsc->by_residual);
-            }
-            read_InvertedLists(ivsc, f, io_flags);
-            idx = ivsc;
+            READ1 (ivsc->by_residual);
         }
+        read_InvertedLists(ivsc, f, io_flags);
+        idx = ivsc;
     } else if (h == fourcc("ISqH")) {
         IndexIVFSQHybrid *ivfsqhbyrid = new IndexIVFSQHybrid();
         read_ivf_header(ivfsqhbyrid, f);
