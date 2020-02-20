@@ -33,7 +33,7 @@ class TestDeleteBase:
     )
     def get_simple_index_params(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
         else:
             pytest.skip("Only support CPU mode")
@@ -273,7 +273,7 @@ class TestDeleteIndexedVectors:
     )
     def get_simple_index_params(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
         else:
             pytest.skip("Only support CPU mode")
@@ -495,6 +495,5 @@ class TestTableNameInvalid(object):
     @pytest.mark.level(2)
     def test_delete_vectors_with_invalid_table_name(self, connect, get_table_name):
         table_name = get_table_name
-        vectors = gen_vectors(1, dim)
-        with pytest.raises(Exception) as e:
-            status, result = connect.delete_by_id(table_name, vectors)
+        status = connect.delete_by_id(table_name, [1])
+        assert not status.OK() 
