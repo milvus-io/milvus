@@ -1304,7 +1304,6 @@ DBImpl::StartCompactionTask() {
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
-
     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
