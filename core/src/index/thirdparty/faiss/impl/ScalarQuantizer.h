@@ -9,7 +9,10 @@
 
 #pragma once
 
+#include <faiss/IndexIVF.h>
+#include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/ScalarQuantizerCodec.h>
+
 
 namespace faiss {
 
@@ -59,15 +62,23 @@ struct ScalarQuantizer {
     /// decode a vector from a given code (or n vectors if third argument)
     void decode (const uint8_t *code, float *x, size_t n) const;
 
+
+    /*****************************************************
+     * Objects that provide methods for encoding/decoding, distance
+     * computation and inverted list scanning
+     *****************************************************/
+
     Quantizer * select_quantizer() const;
 
-    SQDistanceComputer *get_distance_computer (MetricType metric = METRIC_L2) const;
+    SQDistanceComputer *get_distance_computer (MetricType metric = METRIC_L2)
+        const;
 
     InvertedListScanner *select_InvertedListScanner
         (MetricType mt, const Index *quantizer, bool store_pairs,
          bool by_residual=false) const;
 
 };
+
 
 
 } // namespace faiss
