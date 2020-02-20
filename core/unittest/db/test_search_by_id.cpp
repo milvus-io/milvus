@@ -489,6 +489,7 @@ TEST_F(SearchByIdTest, BINARY) {
         result_distances.clear();
 
         stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, id, result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
         ASSERT_LT(result_distances[0], 1e-4);
     }
