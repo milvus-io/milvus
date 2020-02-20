@@ -175,6 +175,9 @@ class DBImpl : public DB {
     Status
     GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_count);
 
+    Status
+    SetBufferSize(int64_t size);
+
  private:
     const DBOptions options_;
 

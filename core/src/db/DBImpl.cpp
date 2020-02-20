@@ -35,6 +35,7 @@
 #include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
@@ -89,6 +90,19 @@ DBImpl::Start() {
         // ENGINE_LOG_TRACE << "StartTimerTasks";
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
+
+    // register callback funciton of insert_buffer_size
+    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        server::Config& config = server::Config::GetInstance();
+        int64_t buffer_size;
+        auto status = config.GetCacheConfigInsertBufferSize(buffer_size);
+        if (status.ok()) {
+            this->SetBufferSize(buffer_size);
+        }
+
+        return Status::OK();
+    };
+    server::Config::GetInstance().RegisterCallBack(server::CONFIG_CACHE_INSERT_BUFFER_SIZE, lambda);
 
     return Status::OK();
 }
@@ -1127,6 +1141,14 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
     }
 
     return Status::OK();
+}
+
+Status
+DBImpl::SetBufferSize(int64_t size) {
+    if (mem_mgr_ == nullptr || mem_mgr_.get() == nullptr) {
+        return Status(DB_ERROR, "Cache memory has been freed.");
+    }
+    return mem_mgr_->SetBufferSize(size);
 }
 
 }  // namespace engine

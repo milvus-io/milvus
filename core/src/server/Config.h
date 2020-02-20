@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -21,6 +22,8 @@
 
 namespace milvus {
 namespace server {
+
+using ConfigCallBackF = std::function<Status(const std::string&)>;
 
 #define CONFIG_CHECK(func) \
     do {                   \
@@ -129,6 +132,9 @@ static const char* CONFIG_TRACING = "tracing_config";
 static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 
 class Config {
+ private:
+    Config();
+
  public:
     static Config&
     GetInstance();
@@ -142,6 +148,9 @@ class Config {
     GetConfigJsonStr(std::string& result);
     Status
     ProcessConfigCli(std::string& result, const std::string& cmd);
+
+    Status
+    RegisterCallBack(const std::string& key, ConfigCallBackF& callback);
 
  private:
     ConfigNode&
@@ -158,6 +167,9 @@ class Config {
     GetConfigCli(std::string& value, const std::string& parent_key, const std::string& child_key);
     Status
     SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
+
+    Status
+    UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
     ///////////////////////////////////////////////////////////////////////////
     Status
@@ -250,6 +262,9 @@ class Config {
     Status
     GetConfigVersion(std::string& value);
 
+    Status
+    ExecCallBacks(const std::string& key);
+
  public:
     /* server config */
     Status
@@ -336,6 +351,9 @@ class Config {
     Status
     GetTracingConfigJsonConfigPath(std::string& value);
 
+    Status
+    GetServerRestartRequired(bool& required);
+
  public:
     /* server config */
     Status
@@ -417,7 +435,10 @@ class Config {
 #endif
 
  private:
+    bool restart_required_ = false;
+    std::string config_file_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
+    std::unordered_map<std::string, std::vector<ConfigCallBackF>> config_callback_;
     std::mutex mutex_;
 };
 

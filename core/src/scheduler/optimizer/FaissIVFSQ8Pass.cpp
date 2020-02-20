@@ -25,14 +25,44 @@ void
 FaissIVFSQ8Pass::Init() {
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
+    config.GetGpuResourceConfigEnable(gpu_enable_);
+    server::ConfigCallBackF lambda_gpu_enable = [this](const std::string& value) -> Status {
+        server::Config& config = server::Config::GetInstance();
+        return config.GetGpuResourceConfigEnable(this->gpu_enable_);
+    };
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, lambda_gpu_enable);
+
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
+    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        server::Config& config = server::Config::GetInstance();
+        int64_t threshold;
+        auto status = config.GetEngineConfigGpuSearchThreshold(threshold);
+        if (status.ok()) {
+            this->threshold_ = threshold;
+        }
+
+        return status;
+    };
+    config.RegisterCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, lambda);
+
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
         throw std::exception();
     }
+    server::ConfigCallBackF lambda_gpu_search_res = [this](const std::string& value) -> Status {
+        server::Config& config = server::Config::GetInstance();
+        std::vector<int64_t> gpu_ids;
+        auto status = config.GetGpuResourceConfigSearchResources(gpu_ids);
+        if (status.ok()) {
+            this->gpus = gpu_ids;
+        }
+
+        return status;
+    };
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, lambda_gpu_search_res);
 #endif
 }
 
@@ -49,7 +79,10 @@ FaissIVFSQ8Pass::Run(const TaskPtr& task) {
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
-    if (search_job->nq() < threshold_) {
+    if (!gpu_enable_) {
+        SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: gpu disable, specify cpu to search!";
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_job->nq() < threshold_) {
         SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: nq < gpu_search_threshold, specify cpu to search!";
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {

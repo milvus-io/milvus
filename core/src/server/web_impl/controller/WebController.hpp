@@ -766,7 +766,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT_INFO(SystemMsg) {
+    ENDPOINT_INFO(SystemInfo) {
         info->summary = "Command";
 
         info->pathParams.add<String>("cmd_str");
@@ -775,25 +775,51 @@ class WebController : public oatpp::web::server::api::ApiController {
         info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
-    ADD_CORS(SystemMsg)
+    ADD_CORS(SystemInfo)
 
-    ENDPOINT("GET", "/system/{msg}", SystemMsg, PATH(String, msg), QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/system/{msg}", SystemInfo, PATH(String, msg), QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/system/" + msg->std_str() + "\'");
         tr.RecordSection("Received request.");
 
-        auto cmd_dto = CommandDto::createShared();
+        auto info_dto = CommandDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
-        auto status_dto = handler.Cmd(msg, query_params, cmd_dto);
+        auto status_dto = handler.SystemInfo(msg, info_dto);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, cmd_dto);
+                response = createDtoResponse(Status::CODE_200, info_dto);
                 break;
             default:
-                return createDtoResponse(Status::CODE_400, status_dto);
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
+
+    ADD_CORS(SystemOp)
+
+    ENDPOINT("PUT", "/system/{Op}", SystemOp, PATH(String, Op), BODY_STRING(String, body_str)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + Op->std_str() + "\'");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        String response_str;
+        auto status_dto = handler.SystemOp(Op, body_str, response_str);
+
+        std::shared_ptr<OutgoingResponse> response;
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, response_str);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
         tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 

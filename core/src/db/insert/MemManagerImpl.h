@@ -14,6 +14,7 @@
 #include "MemManager.h"
 #include "MemTable.h"
 #include "db/meta/Meta.h"
+#include "server/Config.h"
 #include "utils/Status.h"
 
 #include <ctime>
@@ -51,6 +52,9 @@ class MemManagerImpl : public MemManager {
 
     size_t
     GetCurrentMem() override;
+
+    Status
+    SetBufferSize(size_t value);
 
  private:
     MemTablePtr

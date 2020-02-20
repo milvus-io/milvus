@@ -395,5 +395,17 @@ ValidationUtil::ValidateDbURI(const std::string& uri) {
     return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid db backend uri"));
 }
 
+Status
+ValidationUtil::ValidateStoragePath(const std::string& path) {
+    // Invalid path only contain character[a-zA-Z], number[0-9], '-', and '_',
+    // and path must start with '/'.
+    // examples below are invalid
+    // '/a//a', '/a--/a', '/-a/a', '/a@#/a', 'aaa/sfs'
+    std::string path_pattern = "^\\/(\\w+-?\\/?)+$";
+    std::regex regex(path_pattern);
+
+    return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");
+}
+
 }  // namespace server
 }  // namespace milvus

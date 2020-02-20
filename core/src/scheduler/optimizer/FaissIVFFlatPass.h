@@ -40,6 +40,7 @@ class FaissIVFFlatPass : public Pass {
     Run(const TaskPtr& task) override;
 
  private:
+    bool gpu_enable_;
     int64_t threshold_ = std::numeric_limits<int64_t>::max();
     int64_t count_ = 0;
     std::vector<int64_t> gpus;

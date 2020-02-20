@@ -132,5 +132,11 @@ MemManagerImpl::GetCurrentMem() {
     return GetCurrentMutableMem() + GetCurrentImmutableMem();
 }
 
+Status
+MemManagerImpl::SetBufferSize(size_t value) {
+    options_.insert_buffer_size_ = value;
+    return Status::OK();
+}
+
 }  // namespace engine
 }  // namespace milvus
