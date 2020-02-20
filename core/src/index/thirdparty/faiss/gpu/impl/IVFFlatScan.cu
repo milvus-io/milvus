@@ -20,7 +20,7 @@
 #include <faiss/gpu/utils/PtxUtils.cuh>
 #include <faiss/gpu/utils/Reductions.cuh>
 #include <faiss/gpu/utils/StaticUtils.h>
-#include <faiss/impl/ScalarQuantizerCodec.h>
+#include <faiss/impl/ScalarQuantizerOp.h>
 #include <thrust/host_vector.h>
 
 namespace faiss { namespace gpu {
