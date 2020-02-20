@@ -1017,6 +1017,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     status = config.SetCacheConfigInsertBufferSize("2");
     ASSERT_TRUE(status.ok()) << status.message();
 
+    // test numeric config value
     status = config.LoadConfigFile(conf_file);
     ASSERT_TRUE(status.ok()) << status.message();
     int64_t value;
@@ -1024,6 +1025,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     ASSERT_TRUE(status.ok()) << status.message();
     ASSERT_EQ(value, 2);
 
+    // test boolean config value
     status = config.SetMetricConfigEnableMonitor("True");
     ASSERT_TRUE(status.ok()) << status.message();
 
@@ -1033,6 +1035,19 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     status = config.GetMetricConfigEnableMonitor(enable);
     ASSERT_TRUE(status.ok()) << status.message();
     ASSERT_EQ(true, enable);
+    
+    // invalid path
+    status = config.SetStorageConfigPrimaryPath("/a--/a");
+    ASSERT_FALSE(status.ok());
+
+    // test path
+    status = config.SetStorageConfigPrimaryPath("/tmp/milvus_config_unittest");
+    ASSERT_TRUE(status.ok());
+    
+    std::string path_value;
+    status = config.GetStorageConfigPrimaryPath(path_value);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(path_value, "/tmp/milvus_config_unittest");
 
 #ifdef MILVUS_GPU_VERSION
     status = config.SetGpuResourceConfigBuildIndexResources("gpu0");

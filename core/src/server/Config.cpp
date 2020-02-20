@@ -291,14 +291,10 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetServerConfigTimeZone(value);
         } else if (child_key == CONFIG_SERVER_WEB_PORT) {
             status = SetServerConfigWebPort(value);
-        } else {
-            return Status(SERVER_UNSUPPORTED_ERROR, "Unknown config");
         }
     } else if (parent_key == CONFIG_DB) {
         if (child_key == CONFIG_DB_BACKEND_URL) {
             status = SetDBConfigBackendUrl(value);
-        } else {
-            return Status(SERVER_UNSUPPORTED_ERROR, "Unknown config in db_config");
         }
     } else if (parent_key == CONFIG_STORAGE) {
         if (child_key == CONFIG_STORAGE_PRIMARY_PATH) {
@@ -317,8 +313,6 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetStorageConfigS3SecretKey(value);
         } else if (child_key == CONFIG_STORAGE_S3_BUCKET) {
             status = SetStorageConfigS3Bucket(value);
-        } else {
-            return Status(SERVER_UNSUPPORTED_ERROR, "Unknown config in storage_config");
         }
     } else if (parent_key == CONFIG_METRIC) {
         if (child_key == CONFIG_METRIC_ENABLE_MONITOR) {
@@ -327,8 +321,6 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetMetricConfigAddress(value);
         } else if (child_key == CONFIG_METRIC_PORT) {
             status = SetMetricConfigPort(value);
-        } else {
-            return Status(SERVER_UNSUPPORTED_ERROR, "Unknown config in metric_config");
         }
     } else if (parent_key == CONFIG_CACHE) {
         if (child_key == CONFIG_CACHE_CPU_CACHE_CAPACITY) {
@@ -365,7 +357,7 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         }
 #endif
     } else if (parent_key == CONFIG_TRACING) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config");
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config currently");
     }
 
     if (status.ok()) {
