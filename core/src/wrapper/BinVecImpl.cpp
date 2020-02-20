@@ -186,7 +186,7 @@ BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nq);
         ret_ds->Set(knowhere::meta::DIM, dim);
-        ret_ds->Set(knowhere::meta::TENSOR, xq);
+        ret_ds->Set(knowhere::meta::IDS, xq);
 
         Config search_cfg = cfg;
 

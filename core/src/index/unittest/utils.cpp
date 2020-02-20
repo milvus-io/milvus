@@ -58,6 +58,7 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     query_dataset = generate_query_dataset(nq, dim, xq.data());
     id_dataset = generate_id_dataset(nq, ids.data());
     xid_dataset = generate_id_dataset(nq, xids.data());
+    xid_dataset->Set(knowhere::meta::DIM, (int64_t)dim);
 }
 
 void
