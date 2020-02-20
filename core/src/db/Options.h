@@ -82,8 +82,8 @@ struct DBOptions {
     // wal relative configurations
     bool wal_enable_ = false;
     bool recovery_error_ignore_ = true;
-    uint32_t buffer_size_ = 64 * 1024 * 1024;
-    uint32_t record_size_ = 2 * 1024 * 1024;
+    uint32_t buffer_size_ = 64;
+    uint32_t record_size_ = 2;
     std::string mxlog_path_ = "/tmp/milvus/wal/";
 };  // Options
 
