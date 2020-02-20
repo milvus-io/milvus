@@ -26,19 +26,6 @@ class TestGetBase:
       The following cases are used to test `get_vector_by_id` function
     ******************************************************************
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index_params()
-    )
-    def get_simple_index_params(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
-        else:
-            pytest.skip("Only support CPU mode")
-        return request.param
-
     def test_get_vector_A(self, connect, table):
         '''
         target: test get_vector_by_id
@@ -53,7 +40,7 @@ class TestGetBase:
         status, res = connect.get_vector_by_id(table, ids[0]) 
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vector
+        assert_equal_vector(res, vector[0])
 
     def test_get_vector_B(self, connect, table):
         '''
@@ -69,7 +56,7 @@ class TestGetBase:
         status, res = connect.get_vector_by_id(table, ids[0])
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vectors[0]
+        assert_equal_vector(res, vectors[0])
 
     def test_get_vector_multi_same_ids(self, connect, table):
         '''
@@ -85,7 +72,7 @@ class TestGetBase:
         status, res = connect.get_vector_by_id(table, 1) 
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vectors[0] 
+        assert_equal_vector(res, vectors[0])
 
     @pytest.fixture(
         scope="function",
@@ -112,14 +99,14 @@ class TestGetBase:
         status = connect.flush([table])
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(table, [ids[get_id]])
+        status = connect.delete_by_id(table, [ids[id]])
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[get_id])
+        status, res = connect.get_vector_by_id(table, ids[id])
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vectors[id]
+        assert not res 
 
     def test_get_vector_id_not_exised(self, connect, table):
         '''
@@ -164,7 +151,8 @@ class TestGetIndexedVectors:
     )
     def get_simple_index_params(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
+                logging.getLogger().info(request.param["index_type"])
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
         else:
             pytest.skip("Only support CPU mode")
@@ -201,20 +189,7 @@ class TestGetIndexedVectors:
         status, res = connect.get_vector_by_id(table, ids[id])
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vectors[id]
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            10,
-            100,
-            1000,
-            -1
-        ],
-    )
-    def get_id(self, request):
-        yield request.param
+        assert_equal_vector(res, vectors[id])
 
     def test_get_vector_after_delete(self, connect, table, get_simple_index_params, get_id):
         '''
@@ -222,6 +197,7 @@ class TestGetIndexedVectors:
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
+        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
@@ -230,14 +206,14 @@ class TestGetIndexedVectors:
         status = connect.create_index(table, index_params)
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(table, [ids[get_id]])
+        status = connect.delete_by_id(table, [ids[id]])
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[get_id])
+        status, res = connect.get_vector_by_id(table, ids[id])
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vectors[id]
+        assert not res
 
 
 class TestGetBinary:
@@ -260,7 +236,7 @@ class TestGetBinary:
         status, res = connect.get_vector_by_id(jac_table, ids[0]) 
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vector
+        assert res == vector[0]
 
     def test_get_vector_B(self, connect, jac_table):
         '''
@@ -360,5 +336,5 @@ class TestTableNameInvalid(object):
     def test_get_vectors_with_invalid_table_name(self, connect, get_table_name):
         table_name = get_table_name
         vectors = gen_vectors(1, dim)
-        with pytest.raises(Exception) as e:
-            status, result = connect.get_vector_by_id(table_name, 1)
+        status, result = connect.get_vector_by_id(table_name, 1)
+        assert not status.OK()
