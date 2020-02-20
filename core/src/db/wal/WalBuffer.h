@@ -87,6 +87,11 @@ class MXLogBuffer {
     void
     RemoveOldFiles(uint64_t flushed_lsn);
 
+    uint32_t
+    GetBufferSize() {
+        return mxlog_buffer_size_;
+    }
+
  private:
     uint32_t
     SurplusSpace();

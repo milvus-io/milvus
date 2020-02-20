@@ -33,7 +33,7 @@ namespace wal {
 WalManager::WalManager(const MXLogConfiguration& config) {
     mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
     mxlog_config_.buffer_size = config.buffer_size * 1024 * 1024;
-    mxlog_config_.record_size = config.record_size * 1024 * 1024;
+    mxlog_config_.record_size = std::max((uint32_t)1, config.record_size) * 1024 * 1024;
     mxlog_config_.mxlog_path = config.mxlog_path;
 
     // check the path end with '/'
@@ -99,6 +99,7 @@ WalManager::Init(const meta::MetaPtr& meta) {
 
     // globalFlushedLsn <= max_flused_lsn is always true,
     // so recovery_start <= applied_lsn is always true.
+    __glibcxx_assert(recovery_start <= applied_lsn);
 
     ErrorCode error_code = WAL_ERROR;
     p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
@@ -111,6 +112,13 @@ WalManager::Init(const meta::MetaPtr& meta) {
         } else {
             error_code = WAL_FILE_ERROR;
         }
+    }
+
+    // check record size
+    auto record_max_size = p_buffer_->GetBufferSize();
+    if (mxlog_config_.record_size > record_max_size) {
+        WAL_LOG_INFO << "the record is changed to " << record_max_size;
+        mxlog_config_.record_size = record_max_size;
     }
 
     last_applied_lsn_ = applied_lsn;
@@ -239,11 +247,19 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
     uint32_t max_record_data_size = mxlog_config_.record_size - SizeOfMXLogRecordHeader;
 
     size_t vector_num = vector_ids.size();
-    uint16_t dim = vectors.size() / vector_num;
+    if (vector_num == 0) {
+        WAL_LOG_ERROR << "The ids is empty.";
+        return false;
+    }
+    size_t dim = vectors.size() / vector_num;
+
     // split and insert into wal
     size_t vectors_per_record =
         (max_record_data_size - table_id.size() - partition_tag.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
-    __glibcxx_assert(vectors_per_record > 0);
+    if (vectors_per_record == 0) {
+        WAL_LOG_ERROR << "The record size is too small to save one row. " << mxlog_config_.record_size;
+        return false;
+    }
 
     MXLogRecord record;
     record.type = log_type;
