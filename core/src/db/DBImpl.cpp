@@ -877,6 +877,7 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                     for (auto& num : result_vector) {
                         if (num != UINT8_MAX) {
                             valid = true;
+                            break;
                         }
                     }
                     if (valid) {
@@ -900,6 +901,7 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                     for (auto& num : result_vector_in_byte) {
                         if (num != UINT8_MAX) {
                             valid = true;
+                            break;
                         }
                     }
                     if (valid) {
@@ -1302,6 +1304,9 @@ DBImpl::StartCompactionTask() {
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
     // step 1: create table file
@@ -1323,7 +1328,6 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
                              (MetricType)table_file.metric_type_, table_file.nlist_);
 */
     meta::TableFilesSchema updated;
-    int64_t index_size = 0;
 
     std::string new_segment_dir;
     utils::GetParentPath(table_file.location_, new_segment_dir);
@@ -1394,7 +1398,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
