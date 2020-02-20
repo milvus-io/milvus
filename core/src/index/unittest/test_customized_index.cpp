@@ -1,22 +1,19 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <thread>
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
@@ -55,6 +52,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
     auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
 
+    fiu_init(0);
     auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
     index_->Add(base_dataset, conf);
@@ -82,6 +80,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
+        ASSERT_ANY_THROW(cpu_idx->CopyCpuToGpuWithQuantizer(-1, conf));
         auto pair = cpu_idx->CopyCpuToGpuWithQuantizer(DEVICEID, conf);
         auto gpu_idx = pair.first;
         auto quantization = pair.second;
@@ -96,11 +95,20 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);
-
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
             auto result = new_idx->Search(query_dataset, conf);
             AssertAnns(result, nq, conf->k);
             //            PrintResult(result, nq, k);
+        }
+
+        {
+            // invalid quantizer config
+            quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+            auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
+            ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, nullptr));
+            ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, quantizer_conf));
+            quantizer_conf->mode = 2;  // only copy data
+            ASSERT_ANY_THROW(hybrid_idx->LoadData(quantization, quantizer_conf));
         }
     }
 

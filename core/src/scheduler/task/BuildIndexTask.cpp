@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/task/BuildIndexTask.h"
 #include "db/engine/EngineFactory.h"
@@ -23,6 +17,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 #include <thread>
@@ -60,12 +55,13 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
                 error_msg = "Wrong load type";
                 stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
             }
+            fiu_do_on("XBuildIndexTask.Load.throw_std_exception", throw std::exception());
         } catch (std::exception& ex) {
             // typical error: out of disk space or permition denied
             error_msg = "Failed to load to_index file: " + std::string(ex.what());
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-
+        fiu_do_on("XBuildIndexTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
         if (!stat.ok()) {
             Status s;
             if (stat.ToString().find("out of memory") != std::string::npos) {
@@ -117,7 +113,8 @@ XBuildIndexTask::Execute() {
         table_file.file_type_ = engine::meta::TableFileSchema::NEW_INDEX;
 
         engine::meta::MetaPtr meta_ptr = build_index_job->meta();
-        Status status = build_index_job->meta()->CreateTableFile(table_file);
+        Status status = meta_ptr->CreateTableFile(table_file);
+        fiu_do_on("XBuildIndexTask.Execute.create_table_success", status = Status::OK());
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
             build_index_job->BuildIndexDone(to_index_id_);
@@ -130,6 +127,7 @@ XBuildIndexTask::Execute() {
         try {
             ENGINE_LOG_DEBUG << "Begin build index for file:" + table_file.location_;
             index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
+            fiu_do_on("XBuildIndexTask.Execute.build_index_fail", index = nullptr);
             if (index == nullptr) {
                 throw Exception(DB_ERROR, "index NULL");
             }
@@ -150,6 +148,8 @@ XBuildIndexTask::Execute() {
         // step 4: if table has been deleted, dont save index file
         bool has_table = false;
         meta_ptr->HasTable(file_->table_id_, has_table);
+        fiu_do_on("XBuildIndexTask.Execute.has_table", has_table = true);
+
         if (!has_table) {
             meta_ptr->DeleteTableFiles(file_->table_id_);
 
@@ -161,6 +161,7 @@ XBuildIndexTask::Execute() {
 
         // step 5: save index file
         try {
+            fiu_do_on("XBuildIndexTask.Execute.throw_std_exception", throw std::exception());
             status = index->Serialize();
             if (!status.ok()) {
                 ENGINE_LOG_ERROR << status.message();
@@ -171,6 +172,7 @@ XBuildIndexTask::Execute() {
             status = Status(DB_ERROR, msg);
         }
 
+        fiu_do_on("XBuildIndexTask.Execute.save_index_file_success", status = Status::OK());
         if (!status.ok()) {
             // if failed to serialize index file to disk
             // typical error: out of disk space, out of memory or permition denied
@@ -201,6 +203,7 @@ XBuildIndexTask::Execute() {
             status = meta_ptr->UpdateTableFiles(update_files);
         }
 
+        fiu_do_on("XBuildIndexTask.Execute.update_table_file_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
         if (status.ok()) {
             ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << index->PhysicalSize()
                              << " bytes"

@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "unittest/utils.h"
 #include "knowhere/adapter/VectorAdapter.h"
@@ -72,6 +66,8 @@ BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
     query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
 }
 
+// not used
+#if 0
 knowhere::DatasetPtr
 DataGen::GenQuery(const int& nq) {
     xq.resize(nq * dim);
@@ -80,6 +76,7 @@ DataGen::GenQuery(const int& nq) {
     }
     return generate_query_dataset(nq, dim, xq.data());
 }
+#endif
 
 void
 GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
@@ -236,6 +233,8 @@ PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
+// not used
+#if 0
 void
 Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph, const char* filename) {
     std::vector<std::vector<unsigned>> knng;
@@ -304,3 +303,4 @@ int*  // not very clean, but works as long as sizeof(int) == sizeof(float)
 ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
     return (int*)fvecs_read(fname, d_out, n_out);
 }
+#endif

@@ -1,20 +1,16 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -53,6 +49,14 @@ TEST_F(IDMAPTest, idmap_basic) {
     conf->d = dim;
     conf->k = k;
     conf->metric_type = knowhere::METRICTYPE::L2;
+
+    // null faiss index
+    {
+        ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Search(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutId(nullptr, conf));
+    }
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);
@@ -145,6 +149,7 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // cpu to gpu
+        ASSERT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_, -1, conf));
         auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
@@ -152,6 +157,11 @@ TEST_F(IDMAPTest, copy_test) {
                      knowhere::KnowhereException);
         ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawIds(); },
                      knowhere::KnowhereException);
+
+        fiu_init(0);
+        fiu_enable("GPUIDMP.SerializeImpl.throw_exception", 1, nullptr, 0);
+        ASSERT_ANY_THROW(clone_index->Serialize());
+        fiu_disable("GPUIDMP.SerializeImpl.throw_exception");
 
         auto binary = clone_index->Serialize();
         clone_index->Load(binary);

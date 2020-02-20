@@ -1,22 +1,17 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/StringHelpFunctions.h"
 
+#include <fiu-local.h>
 #include <regex>
 #include <string>
 
@@ -104,6 +99,8 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
         last = index + 1;
         std::string postfix = process_str.substr(last);
         index = postfix.find_first_of(quote, 0);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.invalid_index", index = std::string::npos);
+
         if (index == std::string::npos) {
             return Status(SERVER_UNEXPECTED_ERROR, "");
         }
@@ -112,6 +109,9 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
 
         last = index + 1;
         index = postfix.find_first_of(delimeter, last);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.index_gt_last", last = 0);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.invalid_index2", index = std::string::npos);
+
         if (index != std::string::npos) {
             if (index > last) {
                 append_prefix += postfix.substr(last, index - last);
@@ -120,6 +120,7 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
             append_prefix += postfix.substr(last);
         }
         result.emplace_back(append_prefix);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.last_is_end", last = postfix.length());
 
         if (last == postfix.length()) {
             return Status::OK();

@@ -1,21 +1,21 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/engine/ExecutionEngineImpl.h"
+
+#include <fiu-local.h>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "knowhere/common/Config.h"
@@ -32,10 +32,6 @@
 #include "wrapper/ConfAdapterMgr.h"
 #include "wrapper/VecImpl.h"
 #include "wrapper/VecIndex.h"
-
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
 //#define ON_SEARCH
 namespace milvus {
@@ -138,7 +134,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     server::Config& config = server::Config::GetInstance();
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
+    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled", gpu_resource_enable = false);
 #endif
+
+    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.invalid_type", type = EngineType::INVALID);
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -194,6 +193,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::SPTAG_BKT: {
             index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
+            break;
+        }
+        case EngineType::HNSW: {
+            index = GetVecIndexFactory(IndexType::HNSW);
             break;
         }
         case EngineType::FAISS_BIN_IDMAP: {

@@ -278,7 +278,7 @@ class TestTable:
         process_num = 4
         processes = []
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=describetable, args=(milvus,))
             processes.append(p)
@@ -458,7 +458,7 @@ class TestTable:
             assert status.OK()
 
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=deletetable, args=(milvus,))
             processes.append(p)
@@ -711,7 +711,7 @@ class TestTable:
         processes = []
 
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=showtables, args=(milvus,))
             processes.append(p)

@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/Utils.h"
 #include "server/Config.h"
@@ -21,6 +15,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
+#include <fiu-local.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <mutex>
@@ -94,6 +89,7 @@ CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
     for (auto& path : options.slave_paths_) {
         table_path = path + TABLES_FOLDER + table_id;
         status = server::CommonUtil::CreateDirectory(table_path);
+        fiu_do_on("CreateTablePath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
         if (!status.ok()) {
             ENGINE_LOG_ERROR << status.message();
             return status;
@@ -141,6 +137,7 @@ CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_f
     std::string parent_path = GetTableFileParentFolder(options, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
+    fiu_do_on("CreateTableFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
     if (!status.ok()) {
         ENGINE_LOG_ERROR << status.message();
         return status;
@@ -159,6 +156,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
     bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
+    fiu_do_on("GetTableFilePath.enable_s3", s3_enable = true);
     if (s3_enable) {
         /* need not check file existence */
         table_file.location_ = file_path;

@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "wrapper/gpu/GPUVecImpl.h"
 #include "knowhere/common/Exception.h"
@@ -26,6 +20,7 @@
 #include "utils/Log.h"
 #include "wrapper/VecImpl.h"
 
+#include <fiu-local.h>
 /*
  * no parameter check in this layer.
  * only responible for index combination
@@ -39,9 +34,11 @@ Status
 IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                       const float* xt) {
     try {
+        fiu_do_on("IVFMixIndex.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFMixIndex.BuildAll.throw_std_exception", throw std::exception());
+
         dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
-
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
         index_->set_preprocessor(preprocessor);
         auto model = index_->Train(dataset, cfg);
@@ -81,12 +78,16 @@ IVFHybridIndex::LoadQuantizer(const Config& conf) {
         return new_idx->LoadQuantizer(conf);
     } else {
         WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+        return nullptr;
     }
 }
 
 Status
 IVFHybridIndex::SetQuantizer(const knowhere::QuantizerPtr& q) {
     try {
+        fiu_do_on("IVFHybridIndex.SetQuantizer.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFHybridIndex.SetQuantizer.throw_std_exception", throw std::exception());
+
         // TODO(linxj): Hardcode here
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             new_idx->SetQuantizer(q);
@@ -107,6 +108,9 @@ IVFHybridIndex::SetQuantizer(const knowhere::QuantizerPtr& q) {
 Status
 IVFHybridIndex::UnsetQuantizer() {
     try {
+        fiu_do_on("IVFHybridIndex.UnsetQuantizer.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFHybridIndex.UnsetQuantizer.throw_std_exception", throw std::exception());
+
         // TODO(linxj): Hardcode here
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             new_idx->UnsetQuantizer();
@@ -127,6 +131,9 @@ IVFHybridIndex::UnsetQuantizer() {
 VecIndexPtr
 IVFHybridIndex::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
     try {
+        fiu_do_on("IVFHybridIndex.LoadData.throw_knowhere_exception", throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFHybridIndex.LoadData.throw_std_exception", throw std::exception());
+
         // TODO(linxj): Hardcode here
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             return std::make_shared<IVFHybridIndex>(new_idx->LoadData(q, conf), type);
@@ -144,6 +151,10 @@ IVFHybridIndex::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
 std::pair<VecIndexPtr, knowhere::QuantizerPtr>
 IVFHybridIndex::CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) {
     try {
+        fiu_do_on("IVFHybridIndex.CopyToGpuWithQuantizer.throw_knowhere_exception",
+                  throw knowhere::KnowhereException(""));
+        fiu_do_on("IVFHybridIndex.CopyToGpuWithQuantizer.throw_std_exception", throw std::exception());
+
         // TODO(linxj): Hardcode here
         if (auto hybrid_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             auto pair = hybrid_idx->CopyCpuToGpuWithQuantizer(device_id, cfg);

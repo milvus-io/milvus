@@ -1,29 +1,25 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "wrapper/ConfAdapter.h"
+
+#include <fiu-local.h>
+#include <cmath>
+#include <memory>
+#include <vector>
+
 #include "WrapperException.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "server/Config.h"
 #include "utils/Log.h"
-
-#include <cmath>
-#include <memory>
-#include <vector>
 
 // TODO(lxj): add conf checker
 
@@ -159,7 +155,7 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
             }
         }
     }
-
+    fiu_do_on("IVFPQConfAdapter.Match.empty_resset", resset.clear());
     if (resset.empty()) {
         // todo(linxj): throw exception here.
         WRAPPER_LOG_ERROR << "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-"
@@ -263,6 +259,17 @@ knowhere::Config
 SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
     auto conf = std::make_shared<knowhere::BKTCfg>();
     conf->k = metaconf.k;
+    return conf;
+}
+
+knowhere::Config
+HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::HNSWCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+
+    conf->ef = 200;  // ef can be auto-configured by using sample data.
+    conf->M = 32;    // A reasonable range of M is from 5 to 48.
     return conf;
 }
 
