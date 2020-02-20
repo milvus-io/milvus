@@ -185,7 +185,7 @@ $ ./start_server.sh
 Follow the steps below to solve this problem:
 
 1. Make sure you have `libcurl4-openssl-dev` installed in your system.
-2. Try to reinstall the latest CMake from source with `--system-curl` option:
+2. Try reinstalling the latest CMake from source with `--system-curl` option:
 
    ```shell
    $ ./bootstrap --system-curl
