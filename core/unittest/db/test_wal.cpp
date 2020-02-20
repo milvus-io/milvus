@@ -430,7 +430,7 @@ TEST(WalTest, MANAGER_INIT_TEST) {
     milvus::engine::wal::MXLogConfiguration wal_config;
     wal_config.mxlog_path = WAL_GTEST_PATH;
     wal_config.mxlog_path.pop_back();
-    wal_config.record_size = 2;
+    wal_config.record_size = 100;
     wal_config.buffer_size = 64;
     wal_config.recovery_error_ignore = false;
 
@@ -446,6 +446,37 @@ TEST(WalTest, MANAGER_INIT_TEST) {
     manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
     ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
     ASSERT_EQ(manager->last_applied_lsn_, table_schema_3.flush_lsn_);
+}
+
+TEST(WalTest, MANAGER_INSERT_FAILED) {
+    MakeEmptyTestPath();
+
+    milvus::engine::DBMetaOptions opt = {WAL_GTEST_PATH};
+    milvus::engine::meta::MetaPtr meta = std::make_shared<milvus::engine::meta::TestWalMeta>(opt);
+
+    milvus::engine::meta::TableSchema schema;
+    schema.table_id_ = "table1";
+    schema.flush_lsn_ = 0;
+    meta->CreateTable(schema);
+
+    milvus::engine::wal::MXLogConfiguration wal_config;
+    wal_config.mxlog_path = WAL_GTEST_PATH;
+    wal_config.mxlog_path.pop_back();
+    wal_config.record_size = 0;
+    wal_config.buffer_size = 64;
+    wal_config.recovery_error_ignore = true;
+
+    std::shared_ptr<milvus::engine::wal::WalManager> manager;
+    manager = std::make_shared<milvus::engine::wal::WalManager>(wal_config);
+    ASSERT_EQ(manager->Init(meta), milvus::WAL_SUCCESS);
+
+    std::vector<int64_t> ids(1, 0);
+    std::vector<float> data_float(1024 * 1024, 0);
+    ASSERT_FALSE(manager->Insert(schema.table_id_, "", ids, data_float));
+
+    ids.clear();
+    data_float.clear();
+    ASSERT_FALSE(manager->Insert(schema.table_id_, "", ids, data_float));
 }
 
 TEST(WalTest, MANAGER_RECOVERY_TEST) {
