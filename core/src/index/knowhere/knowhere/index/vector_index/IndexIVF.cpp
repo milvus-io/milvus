@@ -289,10 +289,9 @@ IVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
 
     // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
 
     try {
-        auto elems = search_cfg->d;
-
         size_t p_x_size = sizeof(float) * elems;
         auto p_x = (float*)malloc(p_x_size);
 

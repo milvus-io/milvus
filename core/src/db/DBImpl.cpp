@@ -848,6 +848,16 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                     hybrid = true;
                 }
 
+                // Load
+                ENGINE_LOG_DEBUG << "Loading data from segment: " << file.segment_id_ << ", file: " << file.file_id_
+                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+                status = execution_engine->Load();
+                if (!status.ok()) {
+                    return status;
+                }
+                ENGINE_LOG_DEBUG << "Finished loading from segment: " << file.segment_id_ << ", file: " << file.file_id_
+                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+
                 // Query
                 // If we were able to find the id's corresponding vector, break and don't bother checking the rest of
                 // files
@@ -863,7 +873,14 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                         return status;
                     }
 
-                    if (result_vector.front() != std::numeric_limits<uint8_t>::max()) {
+                    bool valid = false;
+                    for (auto& num : result_vector) {
+                        if (num != UINT8_MAX) {
+                            valid = true;
+                            break;
+                        }
+                    }
+                    if (valid) {
                         vector.binary_data_ = result_vector;
                         vector.vector_count_ = 1;
                         break;
@@ -876,7 +893,18 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                         return status;
                     }
 
-                    if (result_vector.front() != std::numeric_limits<float>::max()) {
+                    std::vector<uint8_t> result_vector_in_byte;
+                    result_vector_in_byte.resize(file.dimension_ * sizeof(float));
+                    memcpy(result_vector_in_byte.data(), result_vector.data(), file.dimension_ * sizeof(float));
+
+                    bool valid = false;
+                    for (auto& num : result_vector_in_byte) {
+                        if (num != UINT8_MAX) {
+                            valid = true;
+                            break;
+                        }
+                    }
+                    if (valid) {
                         vector.float_data_ = result_vector;
                         vector.vector_count_ = 1;
                         break;
@@ -1276,6 +1304,8 @@ DBImpl::StartCompactionTask() {
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
     // step 1: create table file
@@ -1297,7 +1327,6 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
                              (MetricType)table_file.metric_type_, table_file.nlist_);
 */
     meta::TableFilesSchema updated;
-    int64_t index_size = 0;
 
     std::string new_segment_dir;
     utils::GetParentPath(table_file.location_, new_segment_dir);
@@ -1368,7 +1397,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);

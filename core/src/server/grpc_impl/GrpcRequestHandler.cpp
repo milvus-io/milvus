@@ -325,6 +325,15 @@ GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus
     engine::VectorsData vectors;
     Status status = request_handler_.GetVectorByID(context_map_[context], request->table_name(), vector_ids, vectors);
 
+    if (!vectors.float_data_.empty()) {
+        response->mutable_vector_data()->mutable_float_data()->Resize(vectors.float_data_.size(), 0);
+        memcpy(response->mutable_vector_data()->mutable_float_data()->mutable_data(), vectors.float_data_.data(),
+               vectors.float_data_.size() * sizeof(float));
+    } else if (!vectors.binary_data_.empty()) {
+        response->mutable_vector_data()->mutable_binary_data()->resize(vectors.binary_data_.size());
+        memcpy(response->mutable_vector_data()->mutable_binary_data()->data(), vectors.binary_data_.data(),
+               vectors.binary_data_.size() * sizeof(uint8_t));
+    }
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;

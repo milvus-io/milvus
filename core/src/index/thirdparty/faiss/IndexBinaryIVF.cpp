@@ -163,7 +163,12 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k, int32_t *distanc
   indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
-void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset) const {
+void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset) {
+
+    if (!maintain_direct_map) {
+        make_direct_map(true);
+    }
+
     /* only get vector by 1 id */
     FAISS_ASSERT(n == 1);
     if (!bitset || !bitset->test(xid[0])) {

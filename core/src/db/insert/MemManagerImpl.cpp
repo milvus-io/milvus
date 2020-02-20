@@ -42,6 +42,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
                               const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
+        ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
         Flush(flushed_tables);
     }
 
@@ -63,6 +64,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
                               const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
+        ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
         Flush(flushed_tables);
     }
 
