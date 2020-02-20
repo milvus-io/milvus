@@ -286,17 +286,17 @@ runIVFFlatInvertedListAppend(Tensor<int, 1, true>& listIds,
     RUN_APPEND;
   } else {
     switch (scalarQ->qtype) {
-      case ScalarQuantizer::QuantizerType::QT_8bit:
+      case QuantizerType::QT_8bit:
       {
         if (false) {
 //        if (dim % 4 == 0) {
-          Codec<ScalarQuantizer::QuantizerType::QT_8bit, 4>
+          Codec<(int)QuantizerType::QT_8bit, 4>
             codec(scalarQ->code_size,
                   scalarQ->gpuTrained.data(),
                   scalarQ->gpuTrained.data() + dim);
           RUN_APPEND;
         } else {
-          Codec<ScalarQuantizer::QuantizerType::QT_8bit, 1>
+          Codec<(int)QuantizerType::QT_8bit, 1>
             codec(scalarQ->code_size,
                   scalarQ->gpuTrained.data(),
                   scalarQ->gpuTrained.data() + dim);
@@ -304,53 +304,53 @@ runIVFFlatInvertedListAppend(Tensor<int, 1, true>& listIds,
         }
       }
       break;
-      case ScalarQuantizer::QuantizerType::QT_8bit_uniform:
+      case QuantizerType::QT_8bit_uniform:
       {
 //        if (dim % 4 == 0) {
         if (false) {
-          Codec<ScalarQuantizer::QuantizerType::QT_8bit_uniform, 4>
+          Codec<(int)QuantizerType::QT_8bit_uniform, 4>
             codec(scalarQ->code_size, scalarQ->trained[0], scalarQ->trained[1]);
           RUN_APPEND;
         } else {
-          Codec<ScalarQuantizer::QuantizerType::QT_8bit_uniform, 1>
+          Codec<(int)QuantizerType::QT_8bit_uniform, 1>
             codec(scalarQ->code_size, scalarQ->trained[0], scalarQ->trained[1]);
           RUN_APPEND;
         }
       }
       break;
-      case ScalarQuantizer::QuantizerType::QT_fp16:
+      case QuantizerType::QT_fp16:
       {
 //        if (dim % 2 == 0) {
         if (false) {
-          Codec<ScalarQuantizer::QuantizerType::QT_fp16, 2>
+          Codec<(int)QuantizerType::QT_fp16, 2>
             codec(scalarQ->code_size);
           RUN_APPEND;
         } else {
-          Codec<ScalarQuantizer::QuantizerType::QT_fp16, 1>
+          Codec<(int)QuantizerType::QT_fp16, 1>
             codec(scalarQ->code_size);
           RUN_APPEND;
         }
       }
       break;
-      case ScalarQuantizer::QuantizerType::QT_8bit_direct:
+      case QuantizerType::QT_8bit_direct:
       {
-        Codec<ScalarQuantizer::QuantizerType::QT_8bit_direct, 1>
+        Codec<(int)QuantizerType::QT_8bit_direct, 1>
           codec(scalarQ->code_size);
         RUN_APPEND;
       }
       break;
-      case ScalarQuantizer::QuantizerType::QT_4bit:
+      case QuantizerType::QT_4bit:
       {
-        Codec<ScalarQuantizer::QuantizerType::QT_4bit, 1>
+        Codec<(int)QuantizerType::QT_4bit, 1>
           codec(scalarQ->code_size,
                 scalarQ->gpuTrained.data(),
                 scalarQ->gpuTrained.data() + dim);
         RUN_APPEND;
       }
       break;
-      case ScalarQuantizer::QuantizerType::QT_4bit_uniform:
+      case QuantizerType::QT_4bit_uniform:
       {
-        Codec<ScalarQuantizer::QuantizerType::QT_4bit_uniform, 1>
+        Codec<(int)QuantizerType::QT_4bit_uniform, 1>
           codec(scalarQ->code_size, scalarQ->trained[0], scalarQ->trained[1]);
         RUN_APPEND;
       }

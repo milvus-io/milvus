@@ -15,6 +15,7 @@
 
 #include <faiss/IndexIVF.h>
 #include <faiss/impl/ScalarQuantizer.h>
+#include <faiss/impl/ScalarQuantizerCodec.h>
 
 
 namespace faiss {
@@ -44,7 +45,7 @@ struct IndexScalarQuantizer: Index {
      * @param nbits  number of bit per subvector index
      */
     IndexScalarQuantizer (int d,
-                          ScalarQuantizer::QuantizerType qtype,
+                          QuantizerType qtype,
                           MetricType metric = METRIC_L2);
 
     IndexScalarQuantizer ();
@@ -92,7 +93,7 @@ struct IndexIVFScalarQuantizer: IndexIVF {
     bool by_residual;
 
     IndexIVFScalarQuantizer(Index *quantizer, size_t d, size_t nlist,
-                            ScalarQuantizer::QuantizerType qtype,
+                            QuantizerType qtype,
                             MetricType metric = METRIC_L2,
                             bool encode_residual = true);
 

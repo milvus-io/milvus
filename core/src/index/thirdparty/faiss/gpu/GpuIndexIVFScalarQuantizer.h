@@ -37,7 +37,7 @@ class GpuIndexIVFScalarQuantizer : public GpuIndexIVF {
     GpuResources* resources,
     int dims,
     int nlist,
-    faiss::ScalarQuantizer::QuantizerType qtype,
+    faiss::QuantizerType qtype,
     faiss::MetricType metric = MetricType::METRIC_L2,
     bool encodeResidual = true,
     GpuIndexIVFScalarQuantizerConfig config =
