@@ -197,7 +197,7 @@ Follow the steps below to solve this problem:
 
 ### Error message: `internal compiler error`
 
-Try to increase the memory allocated to Docker. If this doesn't work, you can reduce the number of threads in CMake build in `[Milvus root path]/core/build.sh`.
+Try increasing the memory allocated to Docker. If this doesn't work, you can reduce the number of threads in CMake build in `[Milvus root path]/core/build.sh`.
 
 ```shell
 make -j 8 install || exit 1 # The default number of threads is 8.
