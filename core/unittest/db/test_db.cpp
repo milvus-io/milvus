@@ -12,8 +12,6 @@
 #include <fiu-control.h>
 #include <fiu-local.h>
 #include <gtest/gtest.h>
-#include <fiu-control.h>
-#include <fiu-local.h>
 
 #include <boost/filesystem.hpp>
 #include <random>
@@ -603,7 +601,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
         //insert some vector to create some tablefiles
         int64_t nb = VECTOR_COUNT;
         milvus::engine::VectorsData xb;
-        BuildVectors(nb, xb);
+        BuildVectors(nb, 0, xb);
 
         int loop = 10;
         for (auto i = 0; i < loop; ++i) {
@@ -635,7 +633,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
     //insert some vector to create some tablefiles
     int64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
+    BuildVectors(nb, 0, xb);
 
     int loop = 10;
     for (auto i = 0; i < loop; ++i) {
@@ -661,7 +659,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
     //insert some vector to create some tablefiles
     int64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
+    BuildVectors(nb, 0, xb);
 
     int loop = 10;
     for (auto i = 0; i < loop; ++i) {
@@ -687,7 +685,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_4) {
     //insert some vector to create some tablefiles
     int64_t nb = VECTOR_COUNT;
     milvus::engine::VectorsData xb;
-    BuildVectors(nb, xb);
+    BuildVectors(nb, 0, xb);
 
     int loop = 10;
     for (auto i = 0; i < loop; ++i) {
