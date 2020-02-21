@@ -118,7 +118,7 @@ DBWrapper::StartService() {
 
         return Status::OK();
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, lambda);
+    config.RegisterCallBack(server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, "DBWrapper", lambda);
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;

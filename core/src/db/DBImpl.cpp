@@ -102,13 +102,15 @@ DBImpl::Start() {
 
         return Status::OK();
     };
-    server::Config::GetInstance().RegisterCallBack(server::CONFIG_CACHE_INSERT_BUFFER_SIZE, "DBImpl", lambda);
+    // May bug here. The key may be not unique
+    server::Config::GetInstance().RegisterCallBack(server::CONFIG_CACHE_INSERT_BUFFER_SIZE, "DBImpl(this)", lambda);
 
     return Status::OK();
 }
 
 Status
 DBImpl::Stop() {
+    //
     if (!initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
