@@ -142,7 +142,13 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    segment_writer_ptr_->Serialize();
+    auto status = segment_writer_ptr_->Serialize();
+    if (!status.ok()) {
+        std::string directory;
+        utils::GetParentPath(table_file_schema_.location_, directory);
+        ENGINE_LOG_ERROR << "Failed to flush segment " << directory;
+        return status;
+    }
 
     //    execution_engine_->Serialize();
 
@@ -166,7 +172,7 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
     // GetTableFilesByFlushLSN() in meta.
     table_file_schema_.flush_lsn_ = wal_lsn;
 
-    auto status = meta_->UpdateTableFile(table_file_schema_);
+    status = meta_->UpdateTableFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;

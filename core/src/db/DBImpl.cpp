@@ -1319,9 +1319,6 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
     // step 3: serialize to disk
     try {
         status = segment_writer_ptr->Serialize();
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
-        }
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
@@ -1335,8 +1332,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
         status = meta_ptr_->UpdateTableFile(table_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
-        ENGINE_LOG_ERROR << "Failed to persist merged file: " << table_file.location_
-                         << ", possible out of disk space or memory";
+        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
 
         return status;
     }
