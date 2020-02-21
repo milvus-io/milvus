@@ -57,7 +57,7 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 
 ### 初めてのMilvusプログラムを試す
 
-[Python](https://www.milvus.io/docs/guides/get_started/example_code.md)、[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)、または[C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples)などのサンプルコードを使ってMilvusプログラムを試す。
+[Python](https://www.milvus.io/docs/guides/get_started/example_code.md)、[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)、[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)、または[C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples)などのサンプルコードを使ってMilvusプログラムを試す。
 
 ## 貢献規約
 
