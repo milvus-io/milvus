@@ -114,7 +114,7 @@ DBImpl::Stop() {
     }
     initialized_.store(false, std::memory_order_release);
 
-    // makesure all memory data serialized
+    // make sure all memory data serialized
     std::set<std::string> sync_table_ids;
     SyncMemData(sync_table_ids);
 
