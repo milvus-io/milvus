@@ -753,6 +753,7 @@ WebRequestHandler::SystemInfo(const OString& cmd, CommandDto::ObjectWrapper& cmd
         if (status.ok()) {
             try {
                 nlohmann::json j = nlohmann::json::parse(reply_str);
+#ifdef MILVUS_GPU_VERSION
                 auto gpu_search_res = j["gpu_resource_config"]["search_resources"].get<std::string>();
                 std::vector<std::string> gpus;
                 StringHelpFunctions::SplitStringByDelimeter(gpu_search_res, ",", gpus);
@@ -762,7 +763,7 @@ WebRequestHandler::SystemInfo(const OString& cmd, CommandDto::ObjectWrapper& cmd
                 gpus.clear();
                 StringHelpFunctions::SplitStringByDelimeter(gpu_build_res, ",", gpus);
                 j["gpu_resource_config"]["build_index_resources"] = gpus;
-
+#endif
                 // check if server require start
                 Config& config = Config::GetInstance();
                 bool required = false;
