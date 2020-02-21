@@ -1155,11 +1155,16 @@ Config::GetConfigVersion(std::string& value) {
 }
 
 Status
-Config::ExecCallBacks(const std::string& key) {
+Config::ExecCallBacks(const std::string& key, const std::string& value) {
     auto status = Status::OK();
-    auto cb_list = config_callback_.at(key);
-    for (auto& cb : cb_list) {
-        status = cb(key);
+    if (config_callback_.find(key) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Cannot find " + key + " in callback map");
+    }
+
+    auto cb_map = config_callback_.at(key);
+    for (auto& cb_kv : cb_map) {
+        auto& cd = cb_kv.second;
+        status = cd(value);
         if (!status.ok()) {
             break;
         }

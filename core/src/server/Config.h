@@ -263,7 +263,7 @@ class Config {
     GetConfigVersion(std::string& value);
 
     Status
-    ExecCallBacks(const std::string& key);
+    ExecCallBacks(const std::string& key, const std::string& value);
 
  public:
     /* server config */
@@ -438,7 +438,7 @@ class Config {
     bool restart_required_ = false;
     std::string config_file_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
-    std::unordered_map<std::string, std::vector<ConfigCallBackF>> config_callback_;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ConfigCallBackF>>> config_callback_;
     std::mutex mutex_;
 };
 
