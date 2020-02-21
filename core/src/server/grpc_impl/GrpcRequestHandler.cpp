@@ -144,6 +144,7 @@ ConstructTableStat(const TableStat& table_stat, ::milvus::grpc::TableStat* grpc_
         grpc_seg_stat->set_row_count(seg_stat.row_num_);
         grpc_seg_stat->set_segment_name(seg_stat.name_);
         grpc_seg_stat->set_index_name(seg_stat.index_name_);
+        grpc_seg_stat->set_data_size(seg_stat.data_size_);
     }
 }
 
@@ -312,6 +313,29 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
            vectors.id_array_.size() * sizeof(int64_t));
 
     SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
+                                  ::milvus::grpc::VectorData* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    std::vector<int64_t> vector_ids = {request->id()};
+    engine::VectorsData vectors;
+    Status status = request_handler_.GetVectorByID(context_map_[context], request->table_name(), vector_ids, vectors);
+
+    if (!vectors.float_data_.empty()) {
+        response->mutable_vector_data()->mutable_float_data()->Resize(vectors.float_data_.size(), 0);
+        memcpy(response->mutable_vector_data()->mutable_float_data()->mutable_data(), vectors.float_data_.data(),
+               vectors.float_data_.size() * sizeof(float));
+    } else if (!vectors.binary_data_.empty()) {
+        response->mutable_vector_data()->mutable_binary_data()->resize(vectors.binary_data_.size());
+        memcpy(response->mutable_vector_data()->mutable_binary_data()->data(), vectors.binary_data_.data(),
+               vectors.binary_data_.size() * sizeof(uint8_t));
+    }
+    SET_RESPONSE(response->mutable_status(), status, context);
+
     return ::grpc::Status::OK;
 }
 

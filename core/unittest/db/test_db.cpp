@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 
 #include <boost/filesystem.hpp>
@@ -32,10 +34,9 @@
 #include "server/Config.h"
 #include "utils/CommonUtil.h"
 
-
 namespace {
 
-static const char *TABLE_NAME = "test_group";
+static const char* TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
@@ -51,11 +52,11 @@ BuildTableSchema() {
 }
 
 void
-BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData &vectors) {
+BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vectors) {
     vectors.vector_count_ = n;
     vectors.float_data_.clear();
     vectors.float_data_.resize(n * TABLE_DIM);
-    float *data = vectors.float_data_.data();
+    float* data = vectors.float_data_.data();
     for (uint64_t i = 0; i < n; i++) {
         for (int64_t j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
         data[TABLE_DIM * i] += i / 2000.;
@@ -83,8 +84,8 @@ CurrentTmDate(int64_t offset_day = 0) {
 }
 
 void
-ConvertTimeRangeToDBDates(const std::string &start_value, const std::string &end_value,
-                          std::vector<milvus::engine::meta::DateT> &dates) {
+ConvertTimeRangeToDBDates(const std::string& start_value, const std::string& end_value,
+                          std::vector<milvus::engine::meta::DateT>& dates) {
     dates.clear();
 
     time_t tt_start, tt_end;
@@ -243,7 +244,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     milvus::scheduler::OptimizerInst::GetInstance()->Init();
     std::string config_path(CONFIG_PATH);
     config_path += CONFIG_FILE;
-    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s = config.LoadConfigFile(config_path);
 
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
@@ -290,7 +291,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::TableIndex index;
-    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IDMAP;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     {
@@ -301,7 +302,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFFLAT;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     {
@@ -312,7 +313,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     {
@@ -421,7 +422,7 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     }
 
     milvus::engine::TableIndex index;
-    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IDMAP;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
@@ -455,11 +456,15 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->DeleteVector(table_info.table_id_, 0);
     ASSERT_FALSE(stat.ok());
 
-    milvus::engine::IDNumbers ids_to_delete {0};
+    milvus::engine::IDNumbers ids_to_delete{0};
     stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->Compact(table_info.table_id_);
+    ASSERT_FALSE(stat.ok());
+
+    milvus::engine::VectorsData vector;
+    stat = db_->GetVectorByID(table_info.table_id_, 0, vector);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->PreloadTable(table_info.table_id_);
@@ -503,12 +508,12 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_EQ(xb.id_array_.size(), nb);
 
     milvus::engine::TableIndex index;
-    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFSQ8;
-    index.metric_type_ = (int) milvus::engine::MetricType::IP;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.metric_type_ = (int)milvus::engine::MetricType::IP;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFFLAT;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
@@ -581,8 +586,8 @@ TEST_F(DBTest, PARTITION_TEST) {
 
     {  // build index
         milvus::engine::TableIndex index;
-        index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFFLAT;
-        index.metric_type_ = (int) milvus::engine::MetricType::L2;
+        index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+        index.metric_type_ = (int)milvus::engine::MetricType::L2;
         stat = db_->CreateIndex(table_info.table_id_, index);
         ASSERT_TRUE(stat.ok());
 
@@ -646,7 +651,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     stat = db_->AllTables(table_schema_array);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
-    for (auto &schema : table_schema_array) {
+    for (auto& schema : table_schema_array) {
         if (schema.table_id_ == TABLE_NAME) {
             bfound = true;
             break;
@@ -796,6 +801,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
         for (auto& stat : table_info.native_stat_.segments_stat_) {
             row_count += stat.row_count_;
             ASSERT_EQ(stat.index_name_, "IDMAP");
+            ASSERT_GT(stat.data_size_, 0);
         }
         ASSERT_EQ(row_count, VECTOR_COUNT);
 
@@ -804,10 +810,41 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
             for (auto& stat : part.segments_stat_) {
                 row_count += stat.row_count_;
                 ASSERT_EQ(stat.index_name_, "IDMAP");
+                ASSERT_GT(stat.data_size_, 0);
             }
             ASSERT_EQ(row_count, INSERT_BATCH);
         }
     }
+}
+
+TEST_F(DBTestWAL, DB_INSERT_TEST) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    std::string partition_name = "part_name";
+    std::string partition_tag = "part_tag";
+    stat = db_->CreatePartition(table_info.table_id_, partition_name, partition_tag);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, partition_tag, qxb);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, "not exist", qxb);
+    ASSERT_FALSE(stat.ok());
+
+    db_->Flush(table_info.table_id_);
+
+    std::vector<milvus::engine::meta::DateT> dates;
+    stat = db_->DropTable(table_info.table_id_, dates);
+    ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(DBTestWAL, DB_STOP_TEST) {
@@ -840,7 +877,110 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     ASSERT_TRUE(stat.ok());
 }
 
-TEST_F(DBTest2, flush_non_existing_table) {
+TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    for (int i = 0; i < 5; i++) {
+        stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    const int64_t topk = 10;
+    const int64_t nprobe = 10;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_NE(result_ids.size() / topk, qb);
+
+    fiu_init(0);
+    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
+    db_ = nullptr;
+    fiu_disable("DBImpl.ExexWalRecord.return");
+    auto options = GetOptions();
+    db_ = milvus::engine::DBFactory::Build(options);
+
+    result_ids.clear();
+    result_distances.clear();
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids.size(), 0);
+
+    db_->Flush();
+    result_ids.clear();
+    result_distances.clear();
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids.size() / topk, qb);
+}
+
+TEST_F(DBTestWALRecovery_Error, RECOVERY_WITH_INVALID_LOG_FILE) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 100;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    stat = db_->InsertVectors(table_info.table_id_, "", qxb);
+    ASSERT_TRUE(stat.ok());
+
+    fiu_init(0);
+    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
+    db_ = nullptr;
+    fiu_disable("DBImpl.ExexWalRecord.return");
+
+    auto options = GetOptions();
+    // delete wal log file so that recovery will failed when start db next time.
+    boost::filesystem::remove(options.mxlog_path_ + "0.wal");
+    ASSERT_ANY_THROW(db_ = milvus::engine::DBFactory::Build(options));
+}
+
+TEST_F(DBTest2, FLUSH_NON_EXISTING_TABLE) {
     auto status = db_->Flush("non_existing_table");
     ASSERT_FALSE(status.ok());
+}
+
+TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_TABLE) {
+    milvus::engine::VectorsData vector;
+    auto status = db_->GetVectorByID("non_existing_table", 0, vector);
+    ASSERT_FALSE(status.ok());
+}
+
+TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 1000;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    std::string partition_name = "part_name";
+    std::string partition_tag = "part_tag";
+    stat = db_->CreatePartition(table_info.table_id_, partition_name, partition_tag);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->InsertVectors(table_info.table_id_, partition_tag, qxb);
+    ASSERT_TRUE(stat.ok());
+
+    db_->Flush();
+
+    milvus::engine::VectorsData vector_data;
+    stat = db_->GetVectorByID(TABLE_NAME, qxb.id_array_[0], vector_data);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(vector_data.vector_count_, 1);
+    ASSERT_EQ(vector_data.float_data_.size(), TABLE_DIM);
+
+    for (int64_t i = 0; i < TABLE_DIM; i++) {
+        ASSERT_FLOAT_EQ(vector_data.float_data_[i], qxb.float_data_[i]);
+    }
 }

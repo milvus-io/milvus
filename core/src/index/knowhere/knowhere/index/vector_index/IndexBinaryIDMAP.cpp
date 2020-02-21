@@ -19,7 +19,6 @@
 
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/MetaIndexes.h>
-
 #include <faiss/index_factory.h>
 
 #include "knowhere/adapter/VectorAdapter.h"
@@ -170,9 +169,9 @@ BinaryIDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
     //    GETBINARYTENSOR(dataset)
     // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
 
-    auto elems = config->d;
-    size_t p_x_size = sizeof(float) * elems;
+    size_t p_x_size = sizeof(uint8_t) * elems;
     auto p_x = (uint8_t*)malloc(p_x_size);
 
     index_->get_vector_by_id(1, p_data, p_x, bitset_);
@@ -210,8 +209,20 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     index_->search_by_id(rows, p_data, config->k, pdistances, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
+    if (index_->metric_type == faiss::METRIC_Hamming) {
+        auto pf_dist = (float*)malloc(p_dist_size);
+        int32_t* pi_dist = (int32_t*)p_dist;
+        for (int i = 0; i < elems; i++) {
+            *(pf_dist + i) = (float)(*(pi_dist + i));
+        }
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, pf_dist);
+        free(p_dist);
+    } else {
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+    }
+
     return ret_ds;
 }
 

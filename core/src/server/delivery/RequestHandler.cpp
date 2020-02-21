@@ -35,6 +35,7 @@
 #include "server/delivery/request/DropPartitionRequest.h"
 #include "server/delivery/request/DropTableRequest.h"
 #include "server/delivery/request/FlushRequest.h"
+#include "server/delivery/request/GetVectorByIDRequest.h"
 #include "server/delivery/request/HasTableRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadTableRequest.h"
@@ -86,6 +87,15 @@ Status
 RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
                        engine::VectorsData& vectors, const std::string& partition_tag) {
     BaseRequestPtr request_ptr = InsertRequest::Create(context, table_name, vectors, partition_tag);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::GetVectorByID(const std::shared_ptr<Context>& context, const std::string& table_name,
+                              const std::vector<int64_t>& ids, engine::VectorsData& vectors) {
+    BaseRequestPtr request_ptr = GetVectorByIDRequest::Create(context, table_name, ids, vectors);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

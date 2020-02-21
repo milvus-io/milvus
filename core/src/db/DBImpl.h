@@ -242,7 +242,6 @@ class DBImpl : public DB {
     MemManagerPtr mem_mgr_;
     std::mutex mem_serialize_mutex_;
 
-    bool wal_enable_ = false;
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
 
@@ -295,6 +294,8 @@ class DBImpl : public DB {
 
     IndexFailedChecker index_failed_checker_;
     OngoingFileChecker ongoing_files_checker_;
+
+    std::mutex flush_merge_compact_mutex_;
 };  // DBImpl
 
 }  // namespace engine

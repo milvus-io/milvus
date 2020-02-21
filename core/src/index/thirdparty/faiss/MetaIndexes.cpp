@@ -95,7 +95,7 @@ void IndexIDMapTemplate<IndexT>::search
 
 template <typename IndexT>
 void IndexIDMapTemplate<IndexT>::get_vector_by_id(idx_t n, const idx_t *xid, component_t *x,
-                                                  ConcurrentBitsetPtr bitset) const
+                                                  ConcurrentBitsetPtr bitset)
 {
     /* only get vector by 1 id */
     FAISS_ASSERT(n == 1);

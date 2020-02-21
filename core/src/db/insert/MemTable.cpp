@@ -114,9 +114,7 @@ MemTable::Serialize(uint64_t wal_lsn) {
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize(wal_lsn);
         if (!status.ok()) {
-            std::string err_msg = "Insert data serialize failed: " + status.ToString();
-            ENGINE_LOG_ERROR << err_msg;
-            return Status(DB_ERROR, err_msg);
+            return status;
         }
 
         ENGINE_LOG_DEBUG << "Flushed segment " << (*mem_table_file)->GetSegmentId();

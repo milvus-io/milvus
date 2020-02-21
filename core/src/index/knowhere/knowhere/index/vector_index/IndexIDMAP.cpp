@@ -199,8 +199,8 @@ IDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
     //    GETTENSOR(dataset)
     // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
 
-    auto elems = config->d;
     size_t p_x_size = sizeof(float) * elems;
     auto p_x = (float*)malloc(p_x_size);
 

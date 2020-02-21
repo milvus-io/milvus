@@ -42,6 +42,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
                               const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
+        ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
         Flush(flushed_tables);
     }
 
@@ -63,6 +64,7 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
                               const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
+        ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
         Flush(flushed_tables);
     }
 
@@ -136,7 +138,11 @@ MemManagerImpl::Flush(const std::string& table_id) {
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        mem->Serialize(max_lsn);
+        auto status = mem->Serialize(max_lsn);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
+            return status;
+        }
     }
 
     ENGINE_LOG_DEBUG << "Flushed table " << table_id;
@@ -159,7 +165,11 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids) {
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
-        mem->Serialize(max_lsn);
+        auto status = mem->Serialize(max_lsn);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
+            return status;
+        }
         table_ids.insert(mem->GetTableId());
         ENGINE_LOG_DEBUG << "Flushed table " << mem->GetTableId();
     }

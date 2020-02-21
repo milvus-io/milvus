@@ -481,8 +481,12 @@ TEST_F(DeleteTest, compact_basic) {
     stat = db_->InsertVectors(GetTableName(), "", xb);
     ASSERT_TRUE(stat.ok());
 
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
+    ids_to_delete.emplace_back(xb.id_array_.back());
     stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
@@ -492,7 +496,7 @@ TEST_F(DeleteTest, compact_basic) {
     uint64_t row_count;
     stat = db_->GetTableRowCount(GetTableName(), row_count);
     ASSERT_TRUE(stat.ok());
-    ASSERT_EQ(row_count, nb - 1);
+    ASSERT_EQ(row_count, nb - 2);
 
     stat = db_->Compact(GetTableName());
     ASSERT_TRUE(stat.ok());
@@ -504,10 +508,11 @@ TEST_F(DeleteTest, compact_basic) {
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qb = xb;
 
-    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_delete.front(), result_ids,
-                          result_distances);
-    ASSERT_EQ(result_ids[0], -1);
-    ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
+    for (auto& id : ids_to_delete) {
+        stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, id, result_ids, result_distances);
+        ASSERT_EQ(result_ids[0], -1);
+        ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
+    }
 }
 
 TEST_F(DeleteTest, compact_with_index) {
