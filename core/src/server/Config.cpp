@@ -12,10 +12,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -407,6 +409,31 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
 }
 
 Status
+Config::GenUniqueIdentityID(const std::string& identity, std::string uid) {
+    std::vector<std::string> ele_list;
+    ele_list.push_back(identity);
+
+    // get current process id
+    int64_t pid = getpid();
+    ele_list.push_back(std::to_string(pid));
+
+    // get current thread id
+    std::stringstream ss;
+    ss << std::this_thread::get_id();
+    ele_list.push_back(ss.str());
+
+    // get current timestamp
+    auto time_now = std::chrono::system_clock::now();
+	auto duration_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_now.time_since_epoch());
+	ele_list.push_back(std::to_string(duration_in_ms.count()));
+
+	StringHelpFunctions::MergeStringWithDelimeter(ele_list, "-", uid);
+
+	return Status::OK();
+
+}
+
+Status
 Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key, const std::string& value) {
     if (access(config_file_.c_str(), F_OK | R_OK) != 0) {
         return Status(SERVER_UNEXPECTED_ERROR, "Cannot find configure file: " + config_file_);
@@ -509,10 +536,22 @@ Status
 Config::RegisterCallBack(const std::string& node, const std::string& key, ConfigCallBackF& cb) {
     // TODO: Here need check if the key belongs to in-mem config
     if (config_callback_.find(key) == config_callback_.end()) {
-        return Status(SERVER_UNEXPECTED_ERROR, "The key is not supported changed in mem");
+        return Status(SERVER_UNEXPECTED_ERROR, node + " is not supported changed in mem");
     }
 
     (config_callback_.at(node))[key] = cb;
+
+    return Status::OK();
+}
+
+Status
+Config::CancelCallBack(const std::string& node, const std::string& key) {
+    if (config_callback_.find(node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "The key is not supported changed in mem");
+    }
+
+    auto& cb_map = config_callback_.at(node);
+    config_callback_.erase(key);
 
     return Status::OK();
 }

@@ -27,6 +27,8 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
  public:
     GpuCacheMgr();
 
+    ~GpuCacheMgr();
+
     static GpuCacheMgr*
     GetInstance(uint64_t gpu_id);
 
@@ -38,6 +40,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
 
  private:
     bool gpu_enable_;
+    std::string id_;
     static std::mutex mutex_;
     static std::unordered_map<uint64_t, GpuCacheMgrPtr> instance_;
 };

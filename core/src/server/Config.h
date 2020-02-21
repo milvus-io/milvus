@@ -150,7 +150,13 @@ class Config {
     ProcessConfigCli(std::string& result, const std::string& cmd);
 
     Status
+    GenUniqueIdentityID(const std::string& identity, std::string uid);
+
+    Status
     RegisterCallBack(const std::string& node, const std::string& key, ConfigCallBackF& callback);
+
+    Status
+    CancelCallBack(const std::string& node, const std::string& key);
 
  private:
     ConfigNode&

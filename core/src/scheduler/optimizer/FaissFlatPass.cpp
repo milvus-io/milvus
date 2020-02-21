@@ -26,12 +26,15 @@ namespace scheduler {
 void
 FaissFlatPass::Init() {
     server::Config& config = server::Config::GetInstance();
+
+    config.GenUniqueIdentityID("BuildIndexPass", id_);
+
     config.GetGpuResourceConfigEnable(gpu_enable_);
     server::ConfigCallBackF lambda_gpu_enable = [this](const std::string& value) -> Status {
         server::Config& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, lambda_gpu_enable);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, id_, lambda_gpu_enable);
 
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -47,7 +50,7 @@ FaissFlatPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, lambda_gpu_threshold);
+    config.RegisterCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, id_, lambda_gpu_threshold);
 
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
