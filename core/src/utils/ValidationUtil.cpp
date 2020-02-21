@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/ValidationUtil.h"
 #include "Log.h"
@@ -28,6 +22,7 @@
 
 #endif
 
+#include <fiu-local.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -245,6 +240,8 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
+    fiu_do_on("ValidationUtil.ValidateGpuIndex.get_device_count_fail", cuda_err = cudaError::cudaErrorUnknown);
+
     if (cuda_err != cudaSuccess) {
         std::string msg = "Failed to get gpu card number, cuda error:" + std::to_string(cuda_err);
         SERVER_LOG_ERROR << msg;
@@ -265,6 +262,8 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 
 Status
 ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
+    fiu_return_on("ValidationUtil.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
+
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
@@ -285,6 +284,7 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
     struct in_addr address;
 
     int result = inet_pton(AF_INET, ip_address.c_str(), &address);
+    fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
         case 1:
@@ -308,7 +308,8 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
     try {
-        int32_t value = std::stoi(str);
+        int64_t value = std::stol(str);
+        fiu_do_on("ValidationUtil.ValidateStringIsNumber.throw_exception", throw std::exception());
         if (value < 0) {
             return Status(SERVER_INVALID_ARGUMENT, "Negative number");
         }
@@ -320,6 +321,7 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
 
 Status
 ValidationUtil::ValidateStringIsBool(const std::string& str) {
+    fiu_return_on("ValidateStringNotBool", Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str));
     std::string s = str;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     if (s == "true" || s == "on" || s == "yes" || s == "1" || s == "false" || s == "off" || s == "no" || s == "0" ||

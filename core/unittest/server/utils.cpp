@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/utils.h"
 #include "utils/CommonUtil.h"
@@ -58,7 +52,7 @@ static const char* VALID_CONFIG_STR =
     "engine_config:\n"
     "  use_blas_threshold: 20            \n"
     "\n"
-#ifdef MILVUS_GPU_VERSION
+    #ifdef MILVUS_GPU_VERSION
     "gpu_resource_config:\n"
     "  enable: true                      # whether to enable GPU resources\n"
     "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
@@ -66,7 +60,11 @@ static const char* VALID_CONFIG_STR =
     "    - gpu0\n"
     "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
     "    - gpu0\n"
-#endif
+    #endif
+    "\n"
+    "sequence_config:\n"
+    "  - seq1\n"
+    "  - seq2\n"
     "\n";
 
 static const char* INVALID_CONFIG_STR = "*INVALID*";

@@ -1,22 +1,17 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/meta/MySQLMetaImpl.h"
 
+#include <fiu-local.h>
 #include <mysql++/mysql++.h>
 #include <string.h>
 #include <unistd.h>
@@ -214,6 +209,7 @@ MySQLMetaImpl::ValidateMetaSchema() {
     }
 
     auto validate_func = [&](const MetaSchema& schema) {
+        fiu_return_on("MySQLMetaImpl.ValidateMetaSchema.fail_validate", false);
         mysqlpp::Query query_statement = connectionPtr->query();
         query_statement << "DESC " << schema.name() << ";";
 
@@ -256,6 +252,7 @@ MySQLMetaImpl::Initialize() {
     // step 1: create db root path
     if (!boost::filesystem::is_directory(options_.path_)) {
         auto ret = boost::filesystem::create_directory(options_.path_);
+        fiu_do_on("MySQLMetaImpl.Initialize.fail_create_directory", ret = false);
         if (!ret) {
             std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
@@ -309,7 +306,9 @@ MySQLMetaImpl::Initialize() {
         throw Exception(DB_INVALID_META_URI, msg);
     }
 
-    if (!connectionPtr->thread_aware()) {
+    bool is_thread_aware = connectionPtr->thread_aware();
+    fiu_do_on("MySQLMetaImpl.Initialize.is_thread_aware", is_thread_aware = false);
+    if (!is_thread_aware) {
         std::string msg =
             "Failed to initialize MySQL meta backend: MySQL client component wasn't built with thread awareness";
         ENGINE_LOG_ERROR << msg;
@@ -323,7 +322,9 @@ MySQLMetaImpl::Initialize() {
 
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-    if (!InitializeQuery.exec()) {
+    bool initialize_query_exec = InitializeQuery.exec();
+    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_scheme", initialize_query_exec = false);
+    if (!initialize_query_exec) {
         std::string msg = "Failed to create meta table 'Tables' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
@@ -335,7 +336,9 @@ MySQLMetaImpl::Initialize() {
 
     ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
-    if (!InitializeQuery.exec()) {
+    initialize_query_exec = InitializeQuery.exec();
+    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_table_files", initialize_query_exec = false);
+    if (!initialize_query_exec) {
         std::string msg = "Failed to create meta table 'TableFiles' in MySQL";
         ENGINE_LOG_ERROR << msg;
         throw Exception(DB_META_TRANSACTION_FAILED, msg);
@@ -351,7 +354,10 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.CreateTable.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CreateTable.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -369,6 +375,7 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
 
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
+                    fiu_do_on("MySQLMetaImpl.CreateTableTable.schema_TO_DELETE", state = TableSchema::TO_DELETE);
                     if (TableSchema::TO_DELETE == state) {
                         return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
                     } else {
@@ -427,7 +434,10 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DescribeTable.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DescribeTable.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -475,7 +485,10 @@ MySQLMetaImpl::HasTable(const std::string& table_id, bool& has_or_not) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.HasTable.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.HasTable.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -509,7 +522,10 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.AllTable.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.AllTable.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -553,7 +569,11 @@ MySQLMetaImpl::DropTable(const std::string& table_id) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DropTable.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DropTable.throw_exception", throw std::exception(););
+
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -570,7 +590,9 @@ MySQLMetaImpl::DropTable(const std::string& table_id) {
             }
         }  // Scoped Connection
 
-        if (mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
+        bool is_writable_mode{mode_ == DBOptions::MODE::CLUSTER_WRITABLE};
+        fiu_do_on("MySQLMetaImpl.DropTable.CLUSTER_WRITABLE_MODE", is_writable_mode = true);
+        if (is_writable_mode) {
             DeleteTableFiles(table_id);
         }
 
@@ -589,7 +611,11 @@ MySQLMetaImpl::DeleteTableFiles(const std::string& table_id) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DeleteTableFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DeleteTableFiles.throw_exception", throw std::exception(););
+
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -662,7 +688,10 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.CreateTableFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CreateTableFiles.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -717,7 +746,10 @@ MySQLMetaImpl::DropDataByDate(const std::string& table_id, const DatesT& dates) 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DropDataByDate.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DropDataByDate.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -763,7 +795,10 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.GetTableFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.GetTableFiles.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -877,7 +912,10 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& i
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.UpdateTableIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateTableIndex.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -931,7 +969,10 @@ MySQLMetaImpl::UpdateTableFlag(const std::string& table_id, int64_t flag) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.UpdateTableFlag.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateTableFlag.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1071,7 +1112,10 @@ MySQLMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.UpdateTableFile.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateTableFile.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1134,7 +1178,10 @@ MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-        if (connectionPtr == nullptr) {
+        bool is_null_connection = (connectionPtr == nullptr);
+        fiu_do_on("MySQLMetaImpl.UpdateTableFilesToIndex.null_connection", is_null_connection = true);
+        fiu_do_on("MySQLMetaImpl.UpdateTableFilesToIndex.throw_exception", throw std::exception(););
+        if (is_null_connection) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
@@ -1168,7 +1215,10 @@ MySQLMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.UpdateTableFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.UpdateTableFiles.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1243,7 +1293,10 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DescribeTableIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DescribeTableIndex.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1281,7 +1334,10 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DropTableIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DropTableIndex.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1378,6 +1434,7 @@ MySQLMetaImpl::CreatePartition(const std::string& table_id, const std::string& p
     table_schema.flush_lsn_ = lsn;
 
     status = CreateTable(table_schema);
+    fiu_do_on("MySQLMetaImpl.CreatePartition.aleady_exist", status = Status(DB_ALREADY_EXIST, ""));
     if (status.code() == DB_ALREADY_EXIST) {
         return Status(DB_ALREADY_EXIST, "Partition already exists");
     }
@@ -1398,7 +1455,10 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.ShowPartitions.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.ShowPartitions.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1438,7 +1498,10 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.GetPartitionName.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.GetPartitionName.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1476,7 +1539,10 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.FilesToSearch.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.FilesToSearch.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1582,7 +1648,10 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.FilesToMerge.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.FilesToMerge.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1654,7 +1723,10 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.FilesToIndex.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.FilesToIndex.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1732,7 +1804,10 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.FilesByType.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.FilesByType.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1803,7 +1878,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                         ++backup_count;
                         break;
                     default:
-                        return Status(DB_ERROR, "Unknown file type.");
+                        break;
                 }
             }
 
@@ -1832,7 +1907,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                         msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
                     default:
-                        return Status(DB_ERROR, "Unknown file type!");
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
@@ -1862,7 +1937,10 @@ MySQLMetaImpl::Archive() {
             try {
                 mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-                if (connectionPtr == nullptr) {
+                bool is_null_connection = (connectionPtr == nullptr);
+                fiu_do_on("MySQLMetaImpl.Archive.null_connection", is_null_connection = true);
+                fiu_do_on("MySQLMetaImpl.Archive.throw_exception", throw std::exception(););
+                if (is_null_connection) {
                     return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
                 }
 
@@ -1906,7 +1984,10 @@ MySQLMetaImpl::Size(uint64_t& result) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.Size.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.Size.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -1937,7 +2018,10 @@ MySQLMetaImpl::CleanUpShadowFiles() {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-        if (connectionPtr == nullptr) {
+        bool is_null_connection = (connectionPtr == nullptr);
+        fiu_do_on("MySQLMetaImpl.CleanUpShadowFiles.null_connection", is_null_connection = true);
+        fiu_do_on("MySQLMetaImpl.CleanUpShadowFiles.throw_exception", throw std::exception(););
+        if (is_null_connection) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
@@ -1986,7 +2070,11 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RomoveToDeleteFiles_NullConnection",
+                      is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RomoveToDeleteFiles_ThrowException", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -2071,7 +2159,11 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_NUllConnection",
+                      is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveToDeleteTables_ThrowException", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -2122,7 +2214,12 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_NUllConnection",
+                      is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedTableFolder_ThrowException",
+                      throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -2168,7 +2265,10 @@ MySQLMetaImpl::Count(const std::string& table_id, uint64_t& result) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.Count.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.Count.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 
@@ -2202,7 +2302,10 @@ MySQLMetaImpl::DropAll() {
         ENGINE_LOG_DEBUG << "Drop all mysql meta";
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-        if (connectionPtr == nullptr) {
+        bool is_null_connection = (connectionPtr == nullptr);
+        fiu_do_on("MySQLMetaImpl.DropAll.null_connection", is_null_connection = true);
+        fiu_do_on("MySQLMetaImpl.DropAll.throw_exception", throw std::exception(););
+        if (is_null_connection) {
             return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
         }
 
@@ -2233,7 +2336,10 @@ MySQLMetaImpl::DiscardFiles(int64_t to_discard_size) {
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
-            if (connectionPtr == nullptr) {
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.DiscardFiles.null_connection", is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.DiscardFiles.throw_exception", throw std::exception(););
+            if (is_null_connection) {
                 return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
             }
 

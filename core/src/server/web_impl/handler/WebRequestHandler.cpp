@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
@@ -31,6 +25,7 @@
 #include "server/web_impl/utils/Util.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -439,20 +434,21 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size,
     int64_t page_size_value = 10;
 
     if (nullptr != offset.get()) {
-        try {
-            offset_value = std::stol(offset->std_str());
-        } catch (const std::exception& e) {
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'offset\' is illegal, only type of \'int\' allowed");
+        std::string offset_str = offset->std_str();
+        if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'offset\' is illegal, only non-negative integer supported");
         }
+        offset_value = std::stol(offset_str);
     }
 
     if (nullptr != page_size.get()) {
-        try {
-            page_size_value = std::stol(page_size->std_str());
-        } catch (const std::exception& e) {
+        std::string page_size_str = page_size->std_str();
+        if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
-                              "Query param \'page_size\' is illegal, only type of \'int\' allowed");
+                              "Query param \'page_size\' is illegal, only non-negative integer supported");
         }
+        page_size_value = std::stol(page_size_str);
     }
 
     if (offset_value < 0 || page_size_value < 0) {
@@ -557,21 +553,21 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
     int64_t page_size_value = 10;
 
     if (nullptr != offset.get()) {
-        try {
-            offset_value = std::stol(offset->std_str());
-        } catch (const std::exception& e) {
-            std::string msg = "Query param \'offset\' is illegal. Reason: " + std::string(e.what());
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        std::string offset_str = offset->std_str();
+        if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'offset\' is illegal, only non-negative integer supported");
         }
+        offset_value = std::stol(offset_str);
     }
 
     if (nullptr != page_size.get()) {
-        try {
-            page_size_value = std::stol(page_size->std_str());
-        } catch (const std::exception& e) {
-            std::string msg = "Query param \'page_size\' is illegal. Reason: " + std::string(e.what());
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, msg.c_str());
+        std::string page_size_str = page_size->std_str();
+        if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                              "Query param \'page_size\' is illegal, only non-negative integer supported");
         }
+        page_size_value = std::stol(page_size_str);
     }
 
     if (offset_value < 0 || page_size_value < 0) {
@@ -744,15 +740,40 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Cmd(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
+WebRequestHandler::Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto) {
     std::string info = cmd->std_str();
+    auto status = Status::OK();
+
+    // TODO: (yhz) now only support load table into memory, may remove in the future
+    if ("task" == info) {
+        auto action = query_params.get("action");
+        if (nullptr == action.get()) {
+            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'action\' is required in url \'/system/task\'");
+        }
+        std::string action_str = action->std_str();
+
+        auto target = query_params.get("target");
+        if (nullptr == target.get()) {
+            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'target\' is required in url \'/system/task\'");
+        }
+        std::string target_str = target->std_str();
+
+        if ("load" == action_str) {
+            status = request_handler_.PreloadTable(context_ptr_, target_str);
+        } else {
+            std::string error_msg = std::string("Unknown action value \'") + action_str + "\'";
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, error_msg.c_str());
+        }
+
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
     if ("info" == info) {
         info = "get_system_info";
     }
 
     std::string reply_str;
-    auto status = CommandLine(info, reply_str);
+    status = CommandLine(info, reply_str);
 
     if (status.ok()) {
         cmd_dto->reply = reply_str.c_str();
