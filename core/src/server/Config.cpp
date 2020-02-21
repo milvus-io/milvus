@@ -41,17 +41,18 @@ static const std::unordered_map<std::string, std::string> milvus_config_version_
 /////////////////////////////////////////////////////////////
 Config::Config() {
     // cache config
-    config_callback_[CONFIG_CACHE_CPU_CACHE_CAPACITY] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_CACHE_INSERT_BUFFER_SIZE] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_CACHE_CACHE_INSERT_DATA] = std::vector<ConfigCallBackF>();
+    auto empty_map = std::unordered_map<std::string, std::vector<ConfigCallBackF>>();
+    config_callback_[CONFIG_CACHE_CPU_CACHE_CAPACITY] = empty_map;
+    config_callback_[CONFIG_CACHE_INSERT_BUFFER_SIZE] = empty_map;
+    config_callback_[CONFIG_CACHE_CACHE_INSERT_DATA] = empty_map;
     // engine config
-    config_callback_[CONFIG_ENGINE_USE_BLAS_THRESHOLD] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_ENGINE_GPU_SEARCH_THRESHOLD] = std::vector<ConfigCallBackF>();
+    config_callback_[CONFIG_ENGINE_USE_BLAS_THRESHOLD] = empty_map;
+    config_callback_[CONFIG_ENGINE_GPU_SEARCH_THRESHOLD] = empty_map;
     // gpu resources config
-    config_callback_[CONFIG_GPU_RESOURCE_ENABLE] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_GPU_RESOURCE_CACHE_CAPACITY] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_GPU_RESOURCE_SEARCH_RESOURCES] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES] = std::vector<ConfigCallBackF>();
+    config_callback_[CONFIG_GPU_RESOURCE_ENABLE] = empty_map;
+    config_callback_[CONFIG_GPU_RESOURCE_CACHE_CAPACITY] = empty_map;
+    config_callback_[CONFIG_GPU_RESOURCE_SEARCH_RESOURCES] = empty_map;
+    config_callback_[CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES] = empty_map;
 }
 
 Config&
@@ -505,13 +506,13 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
 }
 
 Status
-Config::RegisterCallBack(const std::string& key, ConfigCallBackF& cb) {
+Config::RegisterCallBack(const std::string& node, const std::string& key, ConfigCallBackF& cb) {
     // TODO: Here need check if the key belongs to in-mem config
     if (config_callback_.find(key) == config_callback_.end()) {
         return Status(SERVER_UNEXPECTED_ERROR, "The key is not supported changed in mem");
     }
 
-    config_callback_.at(key).push_back(cb);
+    (config_callback_.at(node))[key] = cb;
 
     return Status::OK();
 }

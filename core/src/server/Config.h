@@ -150,7 +150,7 @@ class Config {
     ProcessConfigCli(std::string& result, const std::string& cmd);
 
     Status
-    RegisterCallBack(const std::string& key, ConfigCallBackF& callback);
+    RegisterCallBack(const std::string& node, const std::string& key, ConfigCallBackF& callback);
 
  private:
     ConfigNode&
@@ -438,7 +438,7 @@ class Config {
     bool restart_required_ = false;
     std::string config_file_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
-    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ConfigCallBackF>>> config_callback_;
+    std::unordered_map<std::string, std::unordered_map<std::string, ConfigCallBackF>> config_callback_;
     std::mutex mutex_;
 };
 

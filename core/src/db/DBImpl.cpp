@@ -102,7 +102,7 @@ DBImpl::Start() {
 
         return Status::OK();
     };
-    server::Config::GetInstance().RegisterCallBack(server::CONFIG_CACHE_INSERT_BUFFER_SIZE, lambda);
+    server::Config::GetInstance().RegisterCallBack(server::CONFIG_CACHE_INSERT_BUFFER_SIZE, "DBImpl", lambda);
 
     return Status::OK();
 }
