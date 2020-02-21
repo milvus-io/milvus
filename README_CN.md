@@ -56,7 +56,7 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 ### 开始您的第一个 Milvus 程序
 
-您可以尝试用 [Python](https://www.milvus.io/cn/docs/guides/get_started/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
+您可以尝试用 [Python](https://www.milvus.io/cn/docs/guides/get_started/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
 
 
 ## 贡献者指南
