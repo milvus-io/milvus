@@ -18,6 +18,7 @@
 #include <immintrin.h>
 #endif
 
+#include <faiss/FaissHook.h>
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>
@@ -135,14 +136,8 @@ void ScalarQuantizer::train_residual(size_t n,
 
 Quantizer *ScalarQuantizer::select_quantizer () const
 {
-#ifdef USE_AVX
-    if (d % 8 == 0) {
-        return select_quantizer_1<8> (qtype, d, trained);
-    } else
-#endif
-    {
-        return select_quantizer_1<1> (qtype, d, trained);
-    }
+    /* use hook to decide use AVX512 or not */
+    sq_sel_quantizer(qtype, d, trained);
 }
 
 
@@ -172,25 +167,11 @@ SQDistanceComputer *
 ScalarQuantizer::get_distance_computer (MetricType metric) const
 {
     FAISS_THROW_IF_NOT(metric == METRIC_L2 || metric == METRIC_INNER_PRODUCT);
-#ifdef USE_AVX
-    if (d % 8 == 0) {
-        if (metric == METRIC_L2) {
-            return select_distance_computer<SimilarityL2<8> >
-                (qtype, d, trained);
-        } else {
-            return select_distance_computer<SimilarityIP<8> >
-                (qtype, d, trained);
-        }
-    } else
-#endif
-    {
-        if (metric == METRIC_L2) {
-            return select_distance_computer<SimilarityL2<1> >
-                (qtype, d, trained);
-        } else {
-            return select_distance_computer<SimilarityIP<1> >
-                (qtype, d, trained);
-        }
+    /* use hook to decide use AVX512 or not */
+    if (metric == METRIC_L2) {
+        return sq_get_distance_computer_L2(qtype, d, trained);
+    } else {
+        return sq_get_distance_computer_IP(qtype, d, trained);
     }
 }
 
@@ -456,6 +437,10 @@ InvertedListScanner* ScalarQuantizer::select_InvertedListScanner
         (MetricType mt, const Index *quantizer,
          bool store_pairs, bool by_residual) const
 {
+    if (d % 16 == 0 && support_avx512()) {
+        return sel0_InvertedListScanner<16>
+                (mt, this, quantizer, store_pairs, by_residual);
+    }
 #ifdef USE_AVX
     if (d % 8 == 0) {
         return sel0_InvertedListScanner<8>
