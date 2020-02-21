@@ -94,6 +94,8 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
+- [Milvus デザイン文書](design.md)
+
 
 ## ライセンス
 
