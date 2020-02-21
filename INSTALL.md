@@ -76,7 +76,7 @@ $ ./build.sh -g
 If you want to know the complete build options, run the following command.
 
 ```shell
-$./build.sh -h
+$ ./build.sh -h
 ```
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
