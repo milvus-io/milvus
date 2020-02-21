@@ -42,7 +42,7 @@ class BuildIndexPass : public Pass {
 
  private:
     bool gpu_enable_;
-    std::string id_;
+    std::string identity_;
     uint64_t specified_gpu_id_ = 0;
     std::vector<int64_t> build_gpu_ids_;
 };

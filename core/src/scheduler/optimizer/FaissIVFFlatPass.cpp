@@ -21,16 +21,27 @@
 namespace milvus {
 namespace scheduler {
 
+FaissIVFFlatPass::~FaissIVFFlatPass() {
+    server::Config& config = server::Config::GetInstance();
+
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+    config.CancelCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
+}
+
 void
 FaissIVFFlatPass::Init() {
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
+
+    config.GenUniqueIdentityID("FaissIVFFlatPass", identity_);
+
     config.GetGpuResourceConfigEnable(gpu_enable_);
     server::ConfigCallBackF lambda_gpu_enable = [this](const std::string& value) -> Status {
         server::Config& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, lambda_gpu_enable);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda_gpu_enable);
 
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -46,7 +57,7 @@ FaissIVFFlatPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, lambda);
+    config.RegisterCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_, lambda);
 
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
@@ -62,7 +73,7 @@ FaissIVFFlatPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, lambda_gpu_search_res);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_, lambda_gpu_search_res);
 #endif
 }
 

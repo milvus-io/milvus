@@ -22,22 +22,22 @@ namespace scheduler {
 
 BuildIndexPass::~BuildIndexPass() {
     server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, id_);
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, id_);
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
 }
 
 void
 BuildIndexPass::Init() {
     server::Config& config = server::Config::GetInstance();
 
-    config.GenUniqueIdentityID("BuildIndexPass", id_);
+    config.GenUniqueIdentityID("BuildIndexPass", identity_);
 
     config.GetGpuResourceConfigEnable(gpu_enable_);
     server::ConfigCallBackF lambda_gpu_enable = [this](const std::string& value) -> Status {
         auto& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, id_, lambda_gpu_enable);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda_gpu_enable);
 
     Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids_);
     fiu_do_on("BuildIndexPass.Init.get_config_fail", s = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -54,7 +54,7 @@ BuildIndexPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, id_, lambda);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_, lambda);
 }
 
 bool

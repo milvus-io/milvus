@@ -32,6 +32,8 @@ class FaissIVFSQ8Pass : public Pass {
  public:
     FaissIVFSQ8Pass() = default;
 
+    ~FaissIVFSQ8Pass();
+
  public:
     void
     Init() override;
@@ -41,6 +43,7 @@ class FaissIVFSQ8Pass : public Pass {
 
  private:
     bool gpu_enable_;
+    std::string identity_;
     int64_t threshold_ = std::numeric_limits<int64_t>::max();
     int64_t count_ = 0;
     std::vector<int64_t> gpus;
