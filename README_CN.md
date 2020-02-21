@@ -87,6 +87,8 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
+- [Milvus 设计文档](design.md)
+
 ## 许可协议
 
 [Apache 许可协议2.0版](https://github.com/milvus-io/milvus/blob/master/LICENSE)
