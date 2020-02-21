@@ -246,16 +246,14 @@ class TestCompactBase:
         method: add vectors, create index, delete part of vectors and compact
         expected: status ok, index description no change, data size smaller after compact
         '''
+        count = 10
         index_params = get_simple_index_params
-        vectors = gen_vector(nb, dim)
+        vectors = gen_vector(count, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
         status = connect.create_index(table, index_params) 
-        assert status.OK()
-        delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(table, delete_ids)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -264,6 +262,11 @@ class TestCompactBase:
         assert status.OK()
         size_before = info.native_stat.segment_stats[0].data_size
         logging.getLogger().info(info.native_stat)
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
