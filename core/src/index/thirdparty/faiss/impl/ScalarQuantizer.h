@@ -10,8 +10,6 @@
 #pragma once
 
 #include <faiss/IndexIVF.h>
-#include <faiss/impl/AuxIndexStructures.h>
-#include <faiss/impl/ScalarQuantizerCodec.h>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
 
