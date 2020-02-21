@@ -138,7 +138,11 @@ MemManagerImpl::Flush(const std::string& table_id) {
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        mem->Serialize(max_lsn);
+        auto status = mem->Serialize(max_lsn);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
+            return status;
+        }
     }
 
     ENGINE_LOG_DEBUG << "Flushed table " << table_id;
@@ -161,7 +165,11 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids) {
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
-        mem->Serialize(max_lsn);
+        auto status = mem->Serialize(max_lsn);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
+            return status;
+        }
         table_ids.insert(mem->GetTableId());
         ENGINE_LOG_DEBUG << "Flushed table " << mem->GetTableId();
     }
