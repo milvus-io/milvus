@@ -44,7 +44,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
         if (path.extension().string() == raw_vector_extension_) {
             int rv_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
             if (rv_fd == -1) {
-                std::string err_msg = "Failed to open file: " + path.string();
+                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
@@ -69,7 +69,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
         if (path.extension().string() == user_id_extension_) {
             int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
             if (uid_fd == -1) {
-                std::string err_msg = "Failed to open file: " + path.string();
+                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
@@ -163,7 +163,7 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
 }
 
 void
-DefaultVectorsFormat::readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
+DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     std::string dir_path = directory_ptr->GetDirPath();
@@ -191,6 +191,51 @@ DefaultVectorsFormat::readUids(const store::DirectoryPtr& directory_ptr, std::ve
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
             if (::close(uid_fd) == -1) {
+                std::string err_msg = "Failed to close file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+        }
+    }
+}
+
+void
+DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
+                                   std::vector<uint8_t>& raw_vectors) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string dir_path = directory_ptr->GetDirPath();
+    if (!boost::filesystem::is_directory(dir_path)) {
+        std::string err_msg = "Directory: " + dir_path + "does not exist";
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+        const auto& path = it.path();
+        if (path.extension().string() == raw_vector_extension_) {
+            int rv_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+            if (rv_fd == -1) {
+                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+            }
+            int off = lseek(rv_fd, offset, SEEK_SET);
+            if (off == -1) {
+                std::string err_msg = "Failed to seek file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
+            raw_vectors.resize(num_bytes);
+
+            if (::read(rv_fd, raw_vectors.data(), num_bytes) == -1) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
+            if (::close(rv_fd) == -1) {
                 std::string err_msg = "Failed to close file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);

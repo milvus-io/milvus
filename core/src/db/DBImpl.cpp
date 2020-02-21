@@ -738,32 +738,43 @@ DBImpl::GetVectorByID(const std::string& table_id, const IDNumber& vector_id, Ve
         return Status(DB_NOT_FOUND, "Table does not exist");
     }
     if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
+        return status;
     }
 
-    meta::DatesT dates = {utils::GetDate()};
+    meta::TableFilesSchema files_to_query;
 
-    std::vector<size_t> ids;
-    meta::TableFilesSchema files_array;
-
-    status = GetFilesToSearch(table_id, ids, dates, files_array);
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::BACKUP};
+    meta::TableFilesSchema table_files;
+    status = meta_ptr_->FilesByType(table_id, file_types, files_to_query);
     if (!status.ok()) {
+        std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
+        ENGINE_LOG_ERROR << err_msg;
         return status;
     }
 
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
+        meta::TableFilesSchema files;
+        status = meta_ptr_->FilesByType(schema.table_id_, file_types, files);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
+            ENGINE_LOG_ERROR << err_msg;
+            return status;
+        }
+        files_to_query.insert(files_to_query.end(), std::make_move_iterator(files.begin()),
+                              std::make_move_iterator(files.end()));
     }
 
-    if (files_array.empty()) {
+    if (files_to_query.empty()) {
+        ENGINE_LOG_DEBUG << "No files to get vector by id from";
         return Status::OK();
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
-    status = GetVectorByIdHelper(table_id, vector_id, vector, files_array);
+    status = GetVectorByIdHelper(table_id, vector_id, vector, files_to_query);
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
@@ -799,87 +810,36 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
             if (found != uids.end()) {
                 auto offset = std::distance(uids.begin(), found);
 
-                // Build an execution engine for this table file
-                bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
-
-                EngineType engine_type;
-                if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
-                    file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
-                    file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
-                    engine_type = is_binary ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
-                } else {
-                    engine_type = (EngineType)file.engine_type_;
-                }
-
-                auto execution_engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
-                                                             (MetricType)file.metric_type_, file.nlist_);
-
-                bool hybrid = false;
-                if (execution_engine->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
-                    hybrid = true;
-                }
-
-                // Load
-                ENGINE_LOG_DEBUG << "Loading data from segment: " << file.segment_id_ << ", file: " << file.file_id_
-                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
-                status = execution_engine->Load();
+                // Check whether the id has been deleted
+                segment::DeletedDocsPtr deleted_docs_ptr;
+                status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
                 if (!status.ok()) {
                     return status;
                 }
-                ENGINE_LOG_DEBUG << "Finished loading from segment: " << file.segment_id_ << ", file: " << file.file_id_
-                                 << ", file type: " << file.file_type_ << ", engine type: " << file.engine_type_;
+                auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
-                // Query
-                // If we were able to find the id's corresponding vector, break and don't bother checking the rest of
-                // files
-
-                ENGINE_LOG_DEBUG << "Getting vector by id = " << vector_id << ", offset = " << offset << " in segment "
-                                 << segment_dir;
-
-                if (is_binary) {
-                    std::vector<uint8_t> result_vector;
-                    result_vector.resize(file.dimension_);
-                    status = execution_engine->GetVectorByID(offset, result_vector.data(), hybrid);
+                auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+                if (deleted == deleted_docs.end()) {
+                    // Load raw vector
+                    bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
+                    size_t single_vector_bytes =
+                        is_binary ? offset * file.dimension_ / 8 : file.dimension_ * sizeof(float);
+                    std::vector<uint8_t> raw_vector;
+                    status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
                     if (!status.ok()) {
                         return status;
                     }
 
-                    bool valid = false;
-                    for (auto& num : result_vector) {
-                        if (num != UINT8_MAX) {
-                            valid = true;
-                            break;
-                        }
+                    vector.vector_count_ = 1;
+                    if (is_binary) {
+                        vector.binary_data_ = std::move(raw_vector);
+                    } else {
+                        std::vector<float> float_vector;
+                        float_vector.resize(file.dimension_);
+                        memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
+                        vector.float_data_ = std::move(float_vector);
                     }
-                    if (valid) {
-                        vector.binary_data_ = result_vector;
-                        vector.vector_count_ = 1;
-                        break;
-                    }
-                } else {
-                    std::vector<float> result_vector;
-                    result_vector.resize(file.dimension_);
-                    status = execution_engine->GetVectorByID(offset, result_vector.data(), hybrid);
-                    if (!status.ok()) {
-                        return status;
-                    }
-
-                    std::vector<uint8_t> result_vector_in_byte;
-                    result_vector_in_byte.resize(file.dimension_ * sizeof(float));
-                    memcpy(result_vector_in_byte.data(), result_vector.data(), file.dimension_ * sizeof(float));
-
-                    bool valid = false;
-                    for (auto& num : result_vector_in_byte) {
-                        if (num != UINT8_MAX) {
-                            valid = true;
-                            break;
-                        }
-                    }
-                    if (valid) {
-                        vector.float_data_ = result_vector;
-                        vector.vector_count_ = 1;
-                        break;
-                    }
+                    return Status::OK();
                 }
             }
         } else {

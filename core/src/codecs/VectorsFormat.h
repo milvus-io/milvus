@@ -34,9 +34,12 @@ class VectorsFormat {
     virtual void
     write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) = 0;
 
-    // TODO(zhiru): this is an ugly but convenient method
     virtual void
-    readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) = 0;
+    read_uids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) = 0;
+
+    virtual void
+    read_vectors(const store::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
+                 std::vector<uint8_t>& raw_vectors) = 0;
 };
 
 using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;
