@@ -822,8 +822,7 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                 if (deleted == deleted_docs.end()) {
                     // Load raw vector
                     bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
-                    size_t single_vector_bytes =
-                        is_binary ? offset * file.dimension_ / 8 : file.dimension_ * sizeof(float);
+                    size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
                     std::vector<uint8_t> raw_vector;
                     status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
                     if (!status.ok()) {
