@@ -86,9 +86,9 @@ void hook_init() {
         fvec_Linf = fvec_Linf_sse;
 
         /* for IVFSQ */
-        sq_get_distance_computer_L2 = sq_get_distance_computer_L2_avx;
-        sq_get_distance_computer_IP = sq_get_distance_computer_IP_avx;
-        sq_sel_quantizer = sq_select_quantizer_avx;
+        sq_get_distance_computer_L2 = sq_get_distance_computer_L2_sse;
+        sq_get_distance_computer_IP = sq_get_distance_computer_IP_sse;
+        sq_sel_quantizer = sq_select_quantizer_sse;
 
         std::cout << "FAISS hook SSE" << std::endl;
     } else {
