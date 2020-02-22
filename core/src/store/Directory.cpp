@@ -42,9 +42,13 @@ Directory::Create() {
 
 void
 Directory::ListAll(std::vector<std::string>& file_paths) {
+    boost::filesystem::path target_path(dir_path_);
+    typedef boost::filesystem::directory_iterator d_it;
+    d_it it_end;
+    d_it it(target_path);
     if (boost::filesystem::is_directory(dir_path_)) {
-        for (auto& it : boost::filesystem::directory_iterator(dir_path_)) {
-            file_paths.emplace_back(it.path().c_str());
+        for (; it != it_end; ++ it) {
+            file_paths.emplace_back(it->path().c_str());
         }
     }
 }
