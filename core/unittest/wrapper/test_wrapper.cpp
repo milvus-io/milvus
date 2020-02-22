@@ -107,7 +107,6 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
     //    conf->Dump();
 
     auto elems = nq * k;
-
     std::vector<int64_t> res_ids(elems);
     std::vector<float> res_dis(elems);
 
