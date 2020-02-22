@@ -773,9 +773,11 @@ DBImpl::GetVectorByID(const std::string& table_id, const IDNumber& vector_id, Ve
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
+    ongoing_files_checker_.MarkOngoingFiles(files_to_query);
 
     status = GetVectorByIdHelper(table_id, vector_id, vector, files_to_query);
 
+    ongoing_files_checker_.UnmarkOngoingFiles(files_to_query);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
     return status;
@@ -785,8 +787,6 @@ Status
 DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,
                             const meta::TableFilesSchema& files) {
     ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files";
-
-    ongoing_files_checker_.MarkOngoingFiles(files);
 
     for (auto& file : files) {
         // Load bloom filter
@@ -845,8 +845,6 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
             continue;
         }
     }
-
-    ongoing_files_checker_.UnmarkOngoingFiles(files);
 
     return Status::OK();
 }
