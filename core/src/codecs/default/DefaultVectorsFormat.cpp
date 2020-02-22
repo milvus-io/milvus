@@ -43,8 +43,8 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
     d_it it(target_path);
-//    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-    for (; it != it_end; ++ it) {
+    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+    for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
             int rv_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
@@ -182,8 +182,8 @@ DefaultVectorsFormat::readUids(const store::DirectoryPtr& directory_ptr, std::ve
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
     d_it it(target_path);
-//    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-    for (; it != it_end; ++ it) {
+    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+    for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
             int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);

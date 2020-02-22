@@ -47,7 +47,7 @@ Directory::ListAll(std::vector<std::string>& file_paths) {
     d_it it_end;
     d_it it(target_path);
     if (boost::filesystem::is_directory(dir_path_)) {
-        for (; it != it_end; ++ it) {
+        for (; it != it_end; ++it) {
             file_paths.emplace_back(it->path().c_str());
         }
     }
