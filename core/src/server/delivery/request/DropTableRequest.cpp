@@ -63,8 +63,7 @@ DropTableRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 3: Drop table
-        std::vector<DB_DATE> dates;
-        status = DBWrapper::DB()->DropTable(table_name_, dates);
+        status = DBWrapper::DB()->DropTable(table_name_);
         if (!status.ok()) {
             return status;
         }

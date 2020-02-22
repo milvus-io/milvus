@@ -28,30 +28,24 @@ namespace milvus {
 namespace server {
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                               const std::string& partition_name, const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), partition_name_(partition_name), tag_(tag) {
+                                               const std::string& tag)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), tag_(tag) {
 }
 
 BaseRequestPtr
 CreatePartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                               const std::string& partition_name, const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, partition_name, tag));
+                               const std::string& tag) {
+    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, tag));
 }
 
 Status
 CreatePartitionRequest::OnExecute() {
-    std::string hdr = "CreatePartitionRequest(table=" + table_name_ + ", partition_name=" + partition_name_ +
-                      ", partition_tag=" + tag_ + ")";
+    std::string hdr = "CreatePartitionRequest(table=" + table_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = ValidationUtil::ValidatePartitionName(partition_name_);
         if (!status.ok()) {
             return status;
         }
@@ -62,7 +56,7 @@ CreatePartitionRequest::OnExecute() {
         }
 
         // step 2: create partition
-        status = DBWrapper::DB()->CreatePartition(table_name_, partition_name_, tag_);
+        status = DBWrapper::DB()->CreatePartition(table_name_, "", tag_);
         if (!status.ok()) {
             // partition could exist
             if (status.code() == DB_ALREADY_EXIST) {

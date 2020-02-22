@@ -65,7 +65,7 @@ ShowPartitionsRequest::OnExecute() {
     }
 
     for (auto& schema : schema_array) {
-        partition_list_.emplace_back(schema.owner_table_, schema.table_id_, schema.partition_tag_);
+        partition_list_.emplace_back(schema.owner_table_, schema.partition_tag_);
     }
 
     return Status::OK();

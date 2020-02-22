@@ -131,7 +131,6 @@ void
 Utils::PrintPartitionParam(const milvus::PartitionParam& partition_param) {
     BLOCK_SPLITER
     std::cout << "Table name: " << partition_param.table_name << std::endl;
-    std::cout << "Partition name: " << partition_param.partition_name << std::endl;
     std::cout << "Partition tag: " << partition_param.partition_tag << std::endl;
     BLOCK_SPLITER
 }
@@ -223,12 +222,6 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
                 milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
 
-    std::vector<milvus::Range> query_range_array;
-    milvus::Range rg;
-    rg.start_value = CurrentTmDate();
-    rg.end_value = CurrentTmDate(1);
-    query_range_array.emplace_back(rg);
-
     std::vector<milvus::RowRecord> record_array;
     for (auto& pair : search_record_array) {
         record_array.push_back(pair.second);
@@ -238,7 +231,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
         BLOCK_SPLITER
         milvus_sdk::TimeRecorder rc("search");
         milvus::Status stat =
-            conn->Search(table_name, partition_tags, record_array, query_range_array, top_k, nprobe, topk_query_result);
+            conn->Search(table_name, partition_tags, record_array, top_k, nprobe, topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }

@@ -80,9 +80,6 @@ class Meta {
     CreateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status
-    DropDataByDate(const std::string& table_id, const DatesT& dates) = 0;
-
-    virtual Status
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) = 0;
 
     virtual Status
@@ -121,11 +118,11 @@ class Meta {
     GetPartitionName(const std::string& table_name, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
-                  DatePartionedTableFilesSchema& files) = 0;
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids,
+                  TableFilesSchema& files) = 0;
 
     virtual Status
-    FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) = 0;
+    FilesToMerge(const std::string& table_id, TableFilesSchema& files) = 0;
 
     virtual Status
     FilesToIndex(TableFilesSchema&) = 0;

@@ -27,13 +27,12 @@ namespace milvus {
 namespace server {
 
 SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const engine::VectorsData& vectors, const std::vector<Range>& range_list, int64_t topk,
+                             const engine::VectorsData& vectors, int64_t topk,
                              int64_t nprobe, const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
       vectors_data_(vectors),
-      range_list_(range_list),
       topk_(topk),
       nprobe_(nprobe),
       partition_list_(partition_list),
@@ -43,10 +42,10 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std:
 
 BaseRequestPtr
 SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const engine::VectorsData& vectors, const std::vector<Range>& range_list, int64_t topk,
+                      const engine::VectorsData& vectors, int64_t topk,
                       int64_t nprobe, const std::vector<std::string>& partition_list,
                       const std::vector<std::string>& file_id_list, TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, vectors, range_list, topk, nprobe,
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, vectors, topk, nprobe,
                                                           partition_list, file_id_list, result));
 }
 
@@ -95,15 +94,9 @@ SearchRequest::OnExecute() {
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
-        // step 4: check date range, and convert to db dates
-        std::vector<DB_DATE> dates;
-        status = ConvertTimeRangeToDBDates(range_list_, dates);
-        if (!status.ok()) {
-            return status;
-        }
-
         rc.RecordSection("check validation");
 
+        // step 4: check metric type
         if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
             // check prepared binary data
             if (vectors_data_.binary_data_.size() % vector_count != 0) {
@@ -130,7 +123,7 @@ SearchRequest::OnExecute() {
 
         rc.RecordSection("prepare vector data");
 
-        // step 6: search vectors
+        // step 5: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -149,10 +142,10 @@ SearchRequest::OnExecute() {
             }
 
             status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, nprobe_,
-                                            vectors_data_, dates, result_ids, result_distances);
+                                            vectors_data_, result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, nprobe_,
-                                                    vectors_data_, dates, result_ids, result_distances);
+                                                    vectors_data_, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING

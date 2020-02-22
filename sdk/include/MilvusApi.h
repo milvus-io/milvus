@@ -108,11 +108,10 @@ struct IndexParam {
  */
 struct PartitionParam {
     std::string table_name;
-    std::string partition_name;
     std::string partition_tag;
 };
 
-using PartitionList = std::vector<PartitionParam>;
+using PartitionTagList = std::vector<std::string>;
 
 /**
  * @brief segment statistics
@@ -321,7 +320,7 @@ class Connection {
      */
     virtual Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           const std::vector<RowRecord>& query_record_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
 
     /**
@@ -502,12 +501,12 @@ class Connection {
      * This method is used to create table
      *
      * @param table_name, table name is going to be tested.
-     * @param partition_array, partition array of the table.
+     * @param partition_array, partition tag array of the table.
      *
      * @return Indicate if this operation is successful
      */
     virtual Status
-    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const = 0;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const = 0;
 
     /**
      * @brief Delete partition method

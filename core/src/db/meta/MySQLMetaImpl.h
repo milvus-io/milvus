@@ -59,9 +59,6 @@ class MySQLMetaImpl : public Meta {
     CreateTableFile(TableFileSchema& file_schema) override;
 
     Status
-    DropDataByDate(const std::string& table_id, const DatesT& dates) override;
-
-    Status
     GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
 
     Status
@@ -112,11 +109,11 @@ class MySQLMetaImpl : public Meta {
     GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
-                  DatePartionedTableFilesSchema& files) override;
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids,
+                  TableFilesSchema& files) override;
 
     Status
-    FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) override;
+    FilesToMerge(const std::string& table_id, TableFilesSchema& files) override;
 
     Status
     FilesToIndex(TableFilesSchema&) override;

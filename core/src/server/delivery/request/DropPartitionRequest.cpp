@@ -28,24 +28,22 @@ namespace milvus {
 namespace server {
 
 DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                           const std::string& partition_name, const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), partition_name_(partition_name), tag_(tag) {
+                                           const std::string& tag)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), tag_(tag) {
 }
 
 BaseRequestPtr
 DropPartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const std::string& partition_name, const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, table_name, partition_name, tag));
+                             const std::string& tag) {
+    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, table_name, tag));
 }
 
 Status
 DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(table=" + table_name_ + ", partition_name=" + partition_name_ +
-                      ", partition_tag=" + tag_ + ")";
+    std::string hdr = "DropPartitionRequest(table=" + table_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     std::string table_name = table_name_;
-    std::string partition_name = partition_name_;
     std::string partition_tag = tag_;
 
     bool exists;
@@ -58,38 +56,16 @@ DropPartitionRequest::OnExecute() {
         return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
     }
 
-    if (!partition_name.empty()) {
-        status = ValidationUtil::ValidateTableName(partition_name);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // check partition existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = partition_name;
-        status = DBWrapper::DB()->DescribeTable(table_info);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST,
-                              "Table " + table_name + "'s partition " + partition_name + " not found");
-            } else {
-                return status;
-            }
-        }
-
-        return DBWrapper::DB()->DropPartition(partition_name);
-    } else {
-        status = ValidationUtil::ValidateTableName(table_name);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = ValidationUtil::ValidatePartitionTags({partition_tag});
-        if (!status.ok()) {
-            return status;
-        }
-        return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
+    status = ValidationUtil::ValidateTableName(table_name);
+    if (!status.ok()) {
+        return status;
     }
+
+    status = ValidationUtil::ValidatePartitionTags({partition_tag});
+    if (!status.ok()) {
+        return status;
+    }
+    return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
 }
 
 }  // namespace server

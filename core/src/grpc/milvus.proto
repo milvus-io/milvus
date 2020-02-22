@@ -12,13 +12,6 @@ message TableName {
 }
 
 /**
- * @brief Partition name
- */
-message PartitionName {
-    string partition_name = 1;
-}
-
-/**
  * @brief Table name list
  */
 message TableNameList {
@@ -42,8 +35,7 @@ message TableSchema {
  */
 message PartitionParam {
     string table_name = 1;
-    string partition_name = 2;
-    string tag = 3;
+    string tag = 2;
 }
 
 /**
@@ -51,15 +43,7 @@ message PartitionParam {
  */
 message PartitionList {
     Status status = 1;
-    repeated PartitionParam partition_array = 2;
-}
-
-/**
- * @brief Range schema
- */
-message Range {
-    string start_value = 1;
-    string end_value = 2;
+    repeated string partition_tag_array = 2;
 }
 
 /**
@@ -94,10 +78,9 @@ message VectorIds {
 message SearchParam {
     string table_name = 1;
     repeated RowRecord query_record_array = 2;
-    repeated Range query_range_array = 3;
-    int64 topk = 4;
-    int64 nprobe = 5;
-    repeated string partition_tag_array = 6;
+    int64 topk = 3;
+    int64 nprobe = 4;
+    repeated string partition_tag_array = 5;
 }
 
 /**
@@ -192,14 +175,6 @@ message FlushParam {
 message DeleteByIDParam {
     string table_name = 1;
     repeated int64 id_array = 2;
-}
-
-/**
- * @brief table name and range for DeleteByDate
- */
-message DeleteByDateParam {
-    Range range = 1;
-    string table_name = 2;
 }
 
 /**
@@ -427,15 +402,6 @@ service MilvusService {
      * @return status
      */
     rpc DeleteByID(DeleteByIDParam) returns (Status) {}
-
-    /**
-     * @brief This method is used to delete vector by date range
-     *
-     * @param DeleteByDateParam, delete parameters.
-     *
-     * @return status
-     */
-    rpc DeleteByDate(DeleteByDateParam) returns (Status) {}
 
     /**
      * @brief This method is used to preload table
