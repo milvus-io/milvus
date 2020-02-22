@@ -24,6 +24,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1115 - http server support load table into memory
 - \#1211 - Server down caused by searching with index_type: HNSW
 - \#1240 - Update license declaration
+- \#1298 - Unittest failed when on CPU2GPU case
 
 ## Feature
 - \#216 - Add CLI to get server info
@@ -52,6 +53,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1002 - Rename minio to s3 in Storage Config section
 - \#1078 - Move 'insert_buffer_size' to Cache Config section
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
+- \#741, #856, #879, #973, #1100, #1163, #1175, #1206, #1219, #1225, #1233, #1258, #1265, #1274, #1292, #1305 - Various fixes and improvements for Milvus documentation.
 - \#1263 - Allow system conf modifiable and some take effect directly
 
 ## Task
