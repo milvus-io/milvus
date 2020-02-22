@@ -24,6 +24,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1115 - http server support load table into memory
 - \#1211 - Server down caused by searching with index_type: HNSW
 - \#1240 - Update license declaration
+- \#1298 - Unittest failed when on CPU2GPU case
 
 ## Feature
 - \#216 - Add CLI to get server info

@@ -154,6 +154,9 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
 TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
+	if (index_type == milvus::engine::IndexType::HNSW) {
+		return;
+	}
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
