@@ -406,8 +406,6 @@ TEST_P(IVFTest, invalid_gpu_source) {
     ASSERT_ANY_THROW(index_->Train(base_dataset, invalid_conf));
 }
 
-<<<<<<< HEAD
-=======
 #ifdef CUSTOMIZATION
 TEST_P(IVFTest, IVFSQHybrid_test) {
     std::vector<std::string> support_idx_vec{"IVFSQHybrid"};
@@ -444,7 +442,6 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
     ASSERT_ANY_THROW(index->SetQuantizer(nullptr));
 }
 
->>>>>>> upstream/master
 #endif
 
 #endif

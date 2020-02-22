@@ -241,19 +241,19 @@ TEST_F(MetaTest, FALID_TEST) {
     {
         std::string partition = "part0";
         std::string partition_tag = "tag0";
-        status = impl_->CreatePartition("notexist", partition, partition_tag);
+        status = impl_->CreatePartition("notexist", partition, partition_tag, 0);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-        status = impl_->CreatePartition(table_id, partition, partition_tag);
+        status = impl_->CreatePartition(table_id, partition, partition_tag, 0);
         ASSERT_TRUE(status.ok());
 
         partition_tag = "tag1";
-        status = impl_->CreatePartition(table_id, partition, partition_tag);
+        status = impl_->CreatePartition(table_id, partition, partition_tag, 0);
         ASSERT_FALSE(status.ok());
 
         //create empty name partition
         partition = "";
-        status = impl_->CreatePartition(table_id, partition, partition_tag);
+        status = impl_->CreatePartition(table_id, partition, partition_tag, 0);
         ASSERT_TRUE(status.ok());
 
         std::vector<milvus::engine::meta::TableSchema> partions_schema;
