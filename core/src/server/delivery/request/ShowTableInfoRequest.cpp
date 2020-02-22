@@ -59,30 +59,38 @@ ShowTableInfoRequest::OnExecute() {
     std::string hdr = "ShowTableInfoRequest(table=" + table_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
+    // step 1: check table name
     auto status = ValidationUtil::ValidateTableName(table_name_);
     if (!status.ok()) {
         return status;
     }
 
-    bool exists = false;
-    status = DBWrapper::DB()->HasTable(table_name_, exists);
+    // step 2: check table existence
+    // only process root table, ignore partition table
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_name_;
+    status = DBWrapper::DB()->DescribeTable(table_schema);
     if (!status.ok()) {
-        return status;
+        if (status.code() == DB_NOT_FOUND) {
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+        } else {
+            return status;
+        }
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+        }
     }
 
-    if (!exists) {
-        return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
-    }
-
+    // step 3: get partitions
     engine::TableInfo table_info;
     status = DBWrapper::DB()->GetTableInfo(table_name_, table_info);
     if (!status.ok()) {
         return status;
     }
 
+    // step 4: construct partitions info
     int64_t total_row_count = 0;
-
-    // construct partitions info
     table_info_.partitions_stat_.reserve(table_info.partitions_stat_.size());
     for (auto& partition : table_info.partitions_stat_) {
         PartitionStat partition_stat;

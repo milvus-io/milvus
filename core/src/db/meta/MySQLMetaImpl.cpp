@@ -517,7 +517,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type"
                            << " ,owner_table, partition_tag, version"
                            << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(TableSchema::TO_DELETE)
-                           << ";";
+                           << " AND owner_table <> \"\";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
 

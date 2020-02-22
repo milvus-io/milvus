@@ -67,24 +67,29 @@ SearchRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         // step 3: check search parameter
-        status = ValidationUtil::ValidateSearchTopk(topk_, table_info);
+        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateSearchNprobe(nprobe_, table_info);
+        status = ValidationUtil::ValidateSearchNprobe(nprobe_, table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -97,14 +102,14 @@ SearchRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 4: check metric type
-        if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+        if (ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
             // check prepared binary data
             if (vectors_data_.binary_data_.size() % vector_count != 0) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                               "The vector dimension must be equal to the table dimension.");
             }
 
-            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_info.dimension_) {
+            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }
@@ -115,7 +120,7 @@ SearchRequest::OnExecute() {
                               "The vector dimension must be equal to the table dimension.");
             }
 
-            if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
+            if (vectors_data_.float_data_.size() / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }

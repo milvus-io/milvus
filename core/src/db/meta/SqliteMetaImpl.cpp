@@ -270,7 +270,7 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
                     &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
                     &TableSchema::partition_tag_, &TableSchema::version_),
-            where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+            where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE and c(&TableSchema::owner_table_) == ""));
         for (auto& table : selected) {
             TableSchema schema;
             schema.id_ = std::get<0>(table);
