@@ -67,7 +67,6 @@ constexpr ErrorCode SERVER_BUILD_INDEX_ERROR = ToServerErrorCode(12);
 constexpr ErrorCode SERVER_TABLE_NOT_EXIST = ToServerErrorCode(100);
 constexpr ErrorCode SERVER_INVALID_TABLE_NAME = ToServerErrorCode(101);
 constexpr ErrorCode SERVER_INVALID_TABLE_DIMENSION = ToServerErrorCode(102);
-constexpr ErrorCode SERVER_INVALID_TIME_RANGE = ToServerErrorCode(103);
 constexpr ErrorCode SERVER_INVALID_VECTOR_DIMENSION = ToServerErrorCode(104);
 constexpr ErrorCode SERVER_INVALID_INDEX_TYPE = ToServerErrorCode(105);
 constexpr ErrorCode SERVER_INVALID_ROWRECORD = ToServerErrorCode(106);

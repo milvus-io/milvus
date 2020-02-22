@@ -23,6 +23,7 @@
 #endif
 
 #include <fiu-local.h>
+#include <src/db/Types.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>

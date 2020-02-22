@@ -47,7 +47,6 @@ WebErrorMap(ErrorCode code) {
         {SERVER_TABLE_NOT_EXIST, StatusCode::TABLE_NOT_EXISTS},
         {SERVER_INVALID_TABLE_NAME, StatusCode::ILLEGAL_TABLE_NAME},
         {SERVER_INVALID_TABLE_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
-        {SERVER_INVALID_TIME_RANGE, StatusCode::ILLEGAL_RANGE},
         {SERVER_INVALID_VECTOR_DIMENSION, StatusCode::ILLEGAL_DIMENSION},
 
         {SERVER_INVALID_INDEX_TYPE, StatusCode::ILLEGAL_INDEX_TYPE},
@@ -540,8 +539,8 @@ WebRequestHandler::CreatePartition(const OString& table_name, const PartitionReq
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_tag\' is required")
     }
 
-    auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
-                                                   param->partition_name->std_str(), param->partition_tag->std_str());
+    auto status =
+        request_handler_.CreatePartition(context_ptr_, table_name->std_str(), param->partition_tag->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -588,7 +587,6 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
             offset_value + page_size_value > partitions.size() ? partitions.size() - offset_value : page_size_value;
         for (int64_t i = offset_value; i < size + offset_value; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
-            partition_dto->partition_name = partitions.at(i).partition_name_.c_str();
             partition_dto->partition_tag = partitions.at(i).tag_.c_str();
             partition_list_dto->partitions->pushBack(partition_dto);
         }
@@ -599,7 +597,7 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
 
 StatusDto::ObjectWrapper
 WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) {
-    auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), "", tag->std_str());
+    auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), tag->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -709,11 +707,10 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    std::vector<Range> range_list;
     TopKQueryResult result;
     auto context_ptr = GenContextPtr("Web Handler");
-    status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, range_list, topk_t, nprobe_t,
-                                     tag_list, file_id_list, result);
+    status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, topk_t, nprobe_t, tag_list,
+                                     file_id_list, result);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

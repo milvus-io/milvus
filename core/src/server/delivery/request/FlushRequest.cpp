@@ -43,13 +43,29 @@ FlushRequest::OnExecute() {
     }
 
     TimeRecorderAuto rc(hdr);
-    Status stat = Status::OK();
+    Status status = Status::OK();
 
     for (auto& name : table_names_) {
-        stat = DBWrapper::DB()->Flush(name);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = name;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(name));
+            } else {
+                return status;
+            }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(name));
+            }
+        }
+
+        status = DBWrapper::DB()->Flush(name);
     }
 
-    return stat;
+    return status;
 }
 
 }  // namespace server

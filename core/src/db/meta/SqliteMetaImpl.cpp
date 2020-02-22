@@ -271,7 +271,7 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
                     &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
                     &TableSchema::partition_tag_, &TableSchema::version_),
-            where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+            where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE and c(&TableSchema::owner_table_) == ""));
         for (auto& table : selected) {
             TableSchema schema;
             schema.id_ = std::get<0>(table);
@@ -383,58 +383,6 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         return utils::CreateTableFilePath(options_, file_schema);
     } catch (std::exception& e) {
         return HandleException("Encounter exception when create table file", e.what());
-    }
-
-    return Status::OK();
-}
-
-// TODO(myh): Delete single vecotor by id
-Status
-SqliteMetaImpl::DropDataByDate(const std::string& table_id, const DatesT& dates) {
-    if (dates.empty()) {
-        return Status::OK();
-    }
-
-    TableSchema table_schema;
-    table_schema.table_id_ = table_id;
-    auto status = DescribeTable(table_schema);
-    if (!status.ok()) {
-        return status;
-    }
-
-    try {
-        fiu_do_on("SqliteMetaImpl.DropDataByDate.throw_exception", throw std::exception());
-
-        // sqlite_orm has a bug, 'in' statement cannot handle too many elements
-        // so we split one query into multi-queries, this is a work-around!!
-        std::vector<DatesT> split_dates;
-        split_dates.push_back(DatesT());
-        const size_t batch_size = 30;
-        for (DateT date : dates) {
-            DatesT& last_batch = *split_dates.rbegin();
-            last_batch.push_back(date);
-            if (last_batch.size() > batch_size) {
-                split_dates.push_back(DatesT());
-            }
-        }
-
-        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-
-        for (auto& batch_dates : split_dates) {
-            if (batch_dates.empty()) {
-                continue;
-            }
-
-            ConnectorPtr->update_all(
-                set(c(&TableFileSchema::file_type_) = (int)TableFileSchema::TO_DELETE,
-                    c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
-                where(c(&TableFileSchema::table_id_) == table_id and in(&TableFileSchema::date_, batch_dates)));
-        }
-
-        ENGINE_LOG_DEBUG << "Successfully drop data by date, table id = " << table_schema.table_id_;
-    } catch (std::exception& e) {
-        return HandleException("Encounter exception when drop partition", e.what());
     }
 
     return Status::OK();
@@ -923,14 +871,36 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.ShowPartitions.throw_exception", throw std::exception());
 
-        auto partitions = ConnectorPtr->select(columns(&TableSchema::table_id_),
-                                               where(c(&TableSchema::owner_table_) == table_id and
-                                                     c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
-        for (size_t i = 0; i < partitions.size(); ++i) {
-            std::string partition_name = std::get<0>(partitions[i]);
+        auto partitions = ConnectorPtr->select(columns(&TableSchema::id_,
+                                                       &TableSchema::state_,
+                                                       &TableSchema::dimension_,
+                                                       &TableSchema::created_on_,
+                                                       &TableSchema::flag_,
+                                                       &TableSchema::index_file_size_,
+                                                       &TableSchema::engine_type_,
+                                                       &TableSchema::nlist_,
+                                                       &TableSchema::metric_type_,
+                                                       &TableSchema::owner_table_,
+                                                       &TableSchema::partition_tag_,
+                                                       &TableSchema::version_,
+                                                       &TableSchema::table_id_),
+                                               where(c(&TableSchema::owner_table_) == table_id
+                                                     and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+        for (size_t i = 0; i < partitions.size(); i++) {
             meta::TableSchema partition_schema;
-            partition_schema.table_id_ = partition_name;
-            DescribeTable(partition_schema);
+            partition_schema.id_ = std::get<0>(partitions[i]);
+            partition_schema.state_ = std::get<1>(partitions[i]);
+            partition_schema.dimension_ = std::get<2>(partitions[i]);
+            partition_schema.created_on_ = std::get<3>(partitions[i]);
+            partition_schema.flag_ = std::get<4>(partitions[i]);
+            partition_schema.index_file_size_ = std::get<5>(partitions[i]);
+            partition_schema.engine_type_ = std::get<6>(partitions[i]);
+            partition_schema.nlist_ = std::get<7>(partitions[i]);
+            partition_schema.metric_type_ = std::get<8>(partitions[i]);
+            partition_schema.owner_table_ = std::get<9>(partitions[i]);
+            partition_schema.partition_tag_ = std::get<10>(partitions[i]);
+            partition_schema.version_ = std::get<11>(partitions[i]);
+            partition_schema.table_id_ = std::get<12>(partitions[i]);
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
@@ -968,8 +938,7 @@ SqliteMetaImpl::GetPartitionName(const std::string& table_id, const std::string&
 }
 
 Status
-SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
-                              DatePartionedTableFilesSchema& files) {
+SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) {
     files.clear();
     server::MetricCollector metric;
 
@@ -994,59 +963,20 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
             return status;
         }
 
-        // sqlite_orm has a bug, 'in' statement cannot handle too many elements
-        // so we split one query into multi-queries, this is a work-around!!
-        std::vector<DatesT> split_dates;
-        split_dates.push_back(DatesT());
-        const size_t batch_size = 30;
-        for (DateT date : dates) {
-            DatesT& last_batch = *split_dates.rbegin();
-            last_batch.push_back(date);
-            if (last_batch.size() > batch_size) {
-                split_dates.push_back(DatesT());
-            }
-        }
-
         // perform query
         decltype(ConnectorPtr->select(select_columns)) selected;
-        if (dates.empty() && ids.empty()) {
+        if (ids.empty()) {
             auto filter = where(match_tableid and match_type);
             selected = ConnectorPtr->select(select_columns, filter);
-        } else if (dates.empty() && !ids.empty()) {
+        } else {
             auto match_fileid = in(&TableFileSchema::id_, ids);
             auto filter = where(match_tableid and match_fileid and match_type);
             selected = ConnectorPtr->select(select_columns, filter);
-        } else if (!dates.empty() && ids.empty()) {
-            for (auto& batch_dates : split_dates) {
-                if (batch_dates.empty()) {
-                    continue;
-                }
-                auto match_date = in(&TableFileSchema::date_, batch_dates);
-                auto filter = where(match_tableid and match_date and match_type);
-                auto batch_selected = ConnectorPtr->select(select_columns, filter);
-                for (auto& file : batch_selected) {
-                    selected.push_back(file);
-                }
-            }
-
-        } else if (!dates.empty() && !ids.empty()) {
-            for (auto& batch_dates : split_dates) {
-                if (batch_dates.empty()) {
-                    continue;
-                }
-                auto match_fileid = in(&TableFileSchema::id_, ids);
-                auto match_date = in(&TableFileSchema::date_, batch_dates);
-                auto filter = where(match_tableid and match_fileid and match_date and match_type);
-                auto batch_selected = ConnectorPtr->select(select_columns, filter);
-                for (auto& file : batch_selected) {
-                    selected.push_back(file);
-                }
-            }
         }
 
         Status ret;
-        TableFileSchema table_file;
         for (auto& file : selected) {
+            TableFileSchema table_file;
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
             table_file.segment_id_ = std::get<2>(file);
@@ -1066,11 +996,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
                 ret = status;
             }
 
-            auto dateItr = files.find(table_file.date_);
-            if (dateItr == files.end()) {
-                files[table_file.date_] = TableFilesSchema();
-            }
-            files[table_file.date_].push_back(table_file);
+            files.emplace_back(table_file);
         }
         if (files.empty()) {
             ENGINE_LOG_ERROR << "No file to search for table: " << table_id;
@@ -1086,7 +1012,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
 }
 
 Status
-SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) {
+SqliteMetaImpl::FilesToMerge(const std::string& table_id, TableFilesSchema& files) {
     files.clear();
 
     try {
@@ -1138,12 +1064,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFile
                 result = status;
             }
 
-            auto dateItr = files.find(table_file.date_);
-            if (dateItr == files.end()) {
-                files[table_file.date_] = TableFilesSchema();
-            }
-
-            files[table_file.date_].push_back(table_file);
+            files.emplace_back(table_file);
             ++to_merge_files;
         }
 
@@ -1229,6 +1150,13 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
 
     Status ret = Status::OK();
 
+    TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        return status;
+    }
+
     try {
         fiu_do_on("SqliteMetaImpl.FilesByType.throw_exception", throw std::exception());
 
@@ -1254,6 +1182,11 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                 file_schema.date_ = std::get<6>(file);
                 file_schema.engine_type_ = std::get<7>(file);
                 file_schema.created_on_ = std::get<8>(file);
+
+                file_schema.dimension_ = table_schema.dimension_;
+                file_schema.index_file_size_ = table_schema.index_file_size_;
+                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.metric_type_ = table_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
                     case (int)TableFileSchema::RAW:

@@ -44,7 +44,7 @@ class DB {
     CreateTable(meta::TableSchema& table_schema_) = 0;
 
     virtual Status
-    DropTable(const std::string& table_id, const meta::DatesT& dates) = 0;
+    DropTable(const std::string& table_id) = 0;
 
     virtual Status
     DescribeTable(meta::TableSchema& table_schema_) = 0;
@@ -115,14 +115,9 @@ class DB {
           ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
-    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
-
-    virtual Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
                   const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                  const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+                  ResultIds& result_ids, ResultDistances& result_distances) = 0;
 
     virtual Status
     Size(uint64_t& result) = 0;

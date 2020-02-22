@@ -58,15 +58,16 @@ struct SegmentStat {
     int64_t data_size_ = 0;
 };
 
-struct TableStat {
-    std::string name_;
+struct PartitionStat {
+    std::string tag_;
     std::vector<SegmentStat> segments_stat_;
 };
 
 struct TableInfo {
-    TableStat native_stat_;
-    std::vector<TableStat> partitions_stat_;
+    std::vector<PartitionStat> partitions_stat_;
 };
+
+static const char* DEFAULT_PARTITON_TAG = "_default";
 
 }  // namespace engine
 }  // namespace milvus

@@ -21,7 +21,6 @@
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
 #include "server/delivery/request/CreateTableRequest.h"
-#include "server/delivery/request/DeleteByDateRequest.h"
 #include "server/delivery/request/DeleteByIDRequest.h"
 #include "server/delivery/request/DescribeIndexRequest.h"
 #include "server/delivery/request/DescribeTableRequest.h"
@@ -114,12 +113,11 @@ RequestHandler::ShowTableInfo(const std::shared_ptr<Context>& context, const std
 
 Status
 RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& table_name,
-                       const engine::VectorsData& vectors,
-                       const std::vector<std::pair<std::string, std::string>>& range_list, int64_t topk, int64_t nprobe,
+                       const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
                        const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = SearchRequest::Create(context, table_name, vectors, range_list, topk, nprobe,
-                                                       partition_list, file_id_list, result);
+    BaseRequestPtr request_ptr =
+        SearchRequest::Create(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -171,15 +169,6 @@ RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::s
 }
 
 Status
-RequestHandler::DeleteByRange(const std::shared_ptr<Context>& context, const std::string& table_name,
-                              const Range& range) {
-    BaseRequestPtr request_ptr = DeleteByDateRequest::Create(context, table_name, range);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
 RequestHandler::PreloadTable(const std::shared_ptr<Context>& context, const std::string& table_name) {
     BaseRequestPtr request_ptr = PreloadTableRequest::Create(context, table_name);
     RequestScheduler::ExecRequest(request_ptr);
@@ -206,8 +195,8 @@ RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::st
 
 Status
 RequestHandler::CreatePartition(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                const std::string& partition_name, const std::string& tag) {
-    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, table_name, partition_name, tag);
+                                const std::string& tag) {
+    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, table_name, tag);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -224,8 +213,8 @@ RequestHandler::ShowPartitions(const std::shared_ptr<Context>& context, const st
 
 Status
 RequestHandler::DropPartition(const std::shared_ptr<Context>& context, const std::string& table_name,
-                              const std::string& partition_name, const std::string& tag) {
-    BaseRequestPtr request_ptr = DropPartitionRequest::Create(context, table_name, partition_name, tag);
+                              const std::string& tag) {
+    BaseRequestPtr request_ptr = DropPartitionRequest::Create(context, table_name, tag);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

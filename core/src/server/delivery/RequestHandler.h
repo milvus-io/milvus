@@ -56,9 +56,8 @@ class RequestHandler {
 
     Status
     Search(const std::shared_ptr<Context>& context, const std::string& table_name, const engine::VectorsData& vectors,
-           const std::vector<Range>& range_list, int64_t topk, int64_t nprobe,
-           const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
-           TopKQueryResult& result);
+           int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+           const std::vector<std::string>& file_id_list, TopKQueryResult& result);
 
     Status
     SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id, int64_t topk,
@@ -78,9 +77,6 @@ class RequestHandler {
                const std::vector<int64_t>& vector_ids);
 
     Status
-    DeleteByRange(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
-
-    Status
     PreloadTable(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
@@ -90,16 +86,14 @@ class RequestHandler {
     DropIndex(const std::shared_ptr<Context>& context, const std::string& table_name);
 
     Status
-    CreatePartition(const std::shared_ptr<Context>& context, const std::string& table_name,
-                    const std::string& partition_name, const std::string& tag);
+    CreatePartition(const std::shared_ptr<Context>& context, const std::string& table_name, const std::string& tag);
 
     Status
     ShowPartitions(const std::shared_ptr<Context>& context, const std::string& table_name,
                    std::vector<PartitionParam>& partitions);
 
     Status
-    DropPartition(const std::shared_ptr<Context>& context, const std::string& table_name,
-                  const std::string& partition_name, const std::string& tag);
+    DropPartition(const std::shared_ptr<Context>& context, const std::string& table_name, const std::string& tag);
 
     Status
     Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names);

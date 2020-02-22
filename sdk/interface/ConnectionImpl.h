@@ -58,7 +58,7 @@ class ConnectionImpl : public Connection {
 
     Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           const std::vector<RowRecord>& query_record_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
@@ -105,7 +105,7 @@ class ConnectionImpl : public Connection {
     CreatePartition(const PartitionParam& param) override;
 
     Status
-    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const override;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const override;
 
     Status
     DropPartition(const PartitionParam& param) override;

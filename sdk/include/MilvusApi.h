@@ -103,11 +103,10 @@ struct IndexParam {
  */
 struct PartitionParam {
     std::string table_name;
-    std::string partition_name;
     std::string partition_tag;
 };
 
-using PartitionList = std::vector<PartitionParam>;
+using PartitionTagList = std::vector<std::string>;
 
 /**
  * @brief segment statistics
@@ -120,12 +119,12 @@ struct SegmentStat {
 };
 
 /**
- * @brief table statistics
+ * @brief partition statistics
  */
-struct TableStat {
-    std::string table_name;                   ///< Table name
-    int64_t row_count;                        ///< Table row count
-    std::vector<SegmentStat> segments_stat;   ///< Table's segments statistics
+struct PartitionStat {
+    std::string tag;                          ///< Partition tag
+    int64_t row_count;                        ///< Partition row count
+    std::vector<SegmentStat> segments_stat;   ///< Partition's segments statistics
 };
 
 /**
@@ -133,8 +132,7 @@ struct TableStat {
  */
 struct TableInfo {
     int64_t total_row_count;                  ///< Table total row count
-    TableStat native_stat;                    ///< Table native statistics
-    std::vector<TableStat> partitions_stat;   ///< Table's partitions statistics
+    std::vector<PartitionStat> partitions_stat;   ///< Table's partitions statistics
 };
 
 /**
@@ -316,7 +314,7 @@ class Connection {
      */
     virtual Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           const std::vector<RowRecord>& query_record_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
 
     /**
@@ -497,12 +495,12 @@ class Connection {
      * This method is used to create table
      *
      * @param table_name, table name is going to be tested.
-     * @param partition_array, partition array of the table.
+     * @param partition_array, partition tag array of the table.
      *
      * @return Indicate if this operation is successful
      */
     virtual Status
-    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const = 0;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const = 0;
 
     /**
      * @brief Delete partition method

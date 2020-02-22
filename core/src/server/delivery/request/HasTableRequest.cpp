@@ -50,6 +50,16 @@ HasTableRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
+
+        // only process root table, ignore partition table
+        if (has_table_) {
+            engine::meta::TableSchema table_schema;
+            table_schema.table_id_ = table_name_;
+            status = DBWrapper::DB()->DescribeTable(table_schema);
+            if (!table_schema.owner_table_.empty()) {
+                has_table_ = false;
+            }
+        }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

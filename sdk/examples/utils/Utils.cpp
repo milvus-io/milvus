@@ -125,7 +125,6 @@ void
 Utils::PrintPartitionParam(const milvus::PartitionParam& partition_param) {
     BLOCK_SPLITER
     std::cout << "Table name: " << partition_param.table_name << std::endl;
-    std::cout << "Partition name: " << partition_param.partition_name << std::endl;
     std::cout << "Partition tag: " << partition_param.partition_tag << std::endl;
     BLOCK_SPLITER
 }
@@ -217,12 +216,6 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
                 milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
 
-    std::vector<milvus::Range> query_range_array;
-    milvus::Range rg;
-    rg.start_value = CurrentTmDate();
-    rg.end_value = CurrentTmDate(1);
-    query_range_array.emplace_back(rg);
-
     std::vector<milvus::RowRecord> record_array;
     for (auto& pair : search_record_array) {
         record_array.push_back(pair.second);
@@ -232,7 +225,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
         BLOCK_SPLITER
         milvus_sdk::TimeRecorder rc("search");
         milvus::Status stat =
-            conn->Search(table_name, partition_tags, record_array, query_range_array, top_k, nprobe, topk_query_result);
+            conn->Search(table_name, partition_tags, record_array, top_k, nprobe, topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }
@@ -302,10 +295,10 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
 }
 
 void
-PrintTableStat(const milvus::TableStat& table_stat) {
-    std::cout << table_stat.table_name << " row count: " << table_stat.row_count << std::endl;
-    for (auto& seg_stat : table_stat.segments_stat) {
-        std::cout << "\tsegment " << seg_stat.segment_name << " row count: " << seg_stat.row_count
+PrintPartitionStat(const milvus::PartitionStat& partition_stat) {
+    std::cout << "\tPartition " << partition_stat.tag << " row count: " << partition_stat.row_count << std::endl;
+    for (auto& seg_stat : partition_stat.segments_stat) {
+        std::cout << "\t\tsegment " << seg_stat.segment_name << " row count: " << seg_stat.row_count
                   << " index: " << seg_stat.index_name << " data size: " << seg_stat.data_size << std::endl;
     }
 }
@@ -313,10 +306,9 @@ PrintTableStat(const milvus::TableStat& table_stat) {
 void
 Utils::PrintTableInfo(const milvus::TableInfo& info) {
     BLOCK_SPLITER
-    std::cout << "Table " << info.native_stat.table_name << " total row count: " << info.total_row_count << std::endl;
-    PrintTableStat(info.native_stat);
-    for (const milvus::TableStat& partition_stat : info.partitions_stat) {
-        PrintTableStat(partition_stat);
+    std::cout << "Table " << " total row count: " << info.total_row_count << std::endl;
+    for (const milvus::PartitionStat& partition_stat : info.partitions_stat) {
+        PrintPartitionStat(partition_stat);
     }
 
     BLOCK_SPLITER

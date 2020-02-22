@@ -292,8 +292,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    std::vector<milvus::engine::meta::DateT> dates;
-    stat = db_->DropTable(TABLE_NAME, dates);
+    stat = db_->DropTable(TABLE_NAME);
     ////    std::cout << "5 sec start" << std::endl;
     //    std::this_thread::sleep_for(std::chrono::seconds(5));
     ////    std::cout << "5 sec finish" << std::endl;
