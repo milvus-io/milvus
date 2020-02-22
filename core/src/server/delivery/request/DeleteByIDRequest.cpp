@@ -52,25 +52,29 @@ DeleteByIDRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
-            if (status.code(), DB_NOT_FOUND) {
+            if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         // Check table's index type supports delete
-        if (table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_info.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
+        if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
+            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
             std::string err_msg =
-                "Index type " + std::to_string(table_info.engine_type_) + " does not support delete operation";
+                "Index type " + std::to_string(table_schema.engine_type_) + " does not support delete operation";
             SERVER_LOG_ERROR << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }

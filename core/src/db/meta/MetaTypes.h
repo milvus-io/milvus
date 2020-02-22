@@ -41,7 +41,6 @@ constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
 
 using DateT = int;
 const DateT EmptyDate = -1;
-using DatesT = std::vector<DateT>;
 
 struct EnvironmentSchema {
     uint64_t global_lsn_ = 0;
@@ -103,7 +102,6 @@ struct TableFileSchema {
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;
-using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 
 }  // namespace meta
 }  // namespace engine
