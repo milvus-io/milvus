@@ -150,7 +150,13 @@ class Config {
     ProcessConfigCli(std::string& result, const std::string& cmd);
 
     Status
-    RegisterCallBack(const std::string& key, ConfigCallBackF& callback);
+    GenUniqueIdentityID(const std::string& identity, std::string& uid);
+
+    Status
+    RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key, ConfigCallBackF& callback);
+
+    Status
+    CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key);
 
  private:
     ConfigNode&
@@ -263,7 +269,7 @@ class Config {
     GetConfigVersion(std::string& value);
 
     Status
-    ExecCallBacks(const std::string& key);
+    ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value);
 
  public:
     /* server config */
@@ -438,7 +444,7 @@ class Config {
     bool restart_required_ = false;
     std::string config_file_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
-    std::unordered_map<std::string, std::vector<ConfigCallBackF>> config_callback_;
+    std::unordered_map<std::string, std::unordered_map<std::string, ConfigCallBackF>> config_callback_;
     std::mutex mutex_;
 };
 

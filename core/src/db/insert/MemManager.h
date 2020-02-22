@@ -40,9 +40,6 @@ class MemManager {
 
     virtual size_t
     GetCurrentMem() = 0;
-
-    virtual Status
-    SetBufferSize(size_t value) = 0;
 };  // MemManagerAbstract
 
 using MemManagerPtr = std::shared_ptr<MemManager>;

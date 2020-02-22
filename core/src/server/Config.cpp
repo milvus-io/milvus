@@ -12,10 +12,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -40,18 +42,37 @@ static const std::unordered_map<std::string, std::string> milvus_config_version_
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
+    auto empty_map = std::unordered_map<std::string, ConfigCallBackF>();
+
     // cache config
-    config_callback_[CONFIG_CACHE_CPU_CACHE_CAPACITY] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_CACHE_INSERT_BUFFER_SIZE] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_CACHE_CACHE_INSERT_DATA] = std::vector<ConfigCallBackF>();
+    std::string node_cpu_cache_capacity = std::string(CONFIG_CACHE) + "." + CONFIG_CACHE_CPU_CACHE_CAPACITY;
+    config_callback_[node_cpu_cache_capacity] = empty_map;
+
+    std::string node_insert_buffer_size = std::string(CONFIG_CACHE) + "." + CONFIG_CACHE_INSERT_BUFFER_SIZE;
+    config_callback_[node_insert_buffer_size] = empty_map;
+
+    std::string node_cache_insert_data = std::string(CONFIG_CACHE) + "." + CONFIG_CACHE_CACHE_INSERT_DATA;
+    config_callback_[node_cache_insert_data] = empty_map;
+
     // engine config
-    config_callback_[CONFIG_ENGINE_USE_BLAS_THRESHOLD] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_ENGINE_GPU_SEARCH_THRESHOLD] = std::vector<ConfigCallBackF>();
+    std::string node_blas_threshold = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_USE_BLAS_THRESHOLD;
+    config_callback_[node_blas_threshold] = empty_map;
+
     // gpu resources config
-    config_callback_[CONFIG_GPU_RESOURCE_ENABLE] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_GPU_RESOURCE_CACHE_CAPACITY] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_GPU_RESOURCE_SEARCH_RESOURCES] = std::vector<ConfigCallBackF>();
-    config_callback_[CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES] = std::vector<ConfigCallBackF>();
+    std::string node_gpu_search_threshold = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
+    config_callback_[node_gpu_search_threshold] = empty_map;
+
+    std::string node_gpu_enable = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_ENABLE;
+    config_callback_[node_gpu_enable] = empty_map;
+
+    std::string node_gpu_cache_capacity = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
+    config_callback_[node_gpu_cache_capacity] = empty_map;
+
+    std::string node_gpu_search_res = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
+    config_callback_[node_gpu_search_res] = empty_map;
+
+    std::string node_gpu_build_res = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES;
+    config_callback_[node_gpu_build_res] = empty_map;
 }
 
 Config&
@@ -406,6 +427,31 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
 }
 
 Status
+Config::GenUniqueIdentityID(const std::string& identity, std::string& uid) {
+    std::vector<std::string> ele_list;
+    ele_list.push_back(identity);
+
+    // get current process id
+    int64_t pid = getpid();
+    ele_list.push_back(std::to_string(pid));
+
+    // get current thread id
+    std::stringstream ss;
+    ss << std::this_thread::get_id();
+    ele_list.push_back(ss.str());
+
+    // get current timestamp
+    auto time_now = std::chrono::system_clock::now();
+	auto duration_in_ms = std::chrono::duration_cast<std::chrono::microseconds>(time_now.time_since_epoch());
+	ele_list.push_back(std::to_string(duration_in_ms.count()));
+
+	StringHelpFunctions::MergeStringWithDelimeter(ele_list, "-", uid);
+
+	return Status::OK();
+
+}
+
+Status
 Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key, const std::string& value) {
     if (access(config_file_.c_str(), F_OK | R_OK) != 0) {
         return Status(SERVER_UNEXPECTED_ERROR, "Cannot find configure file: " + config_file_);
@@ -505,13 +551,37 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
 }
 
 Status
-Config::RegisterCallBack(const std::string& key, ConfigCallBackF& cb) {
-    // TODO: Here need check if the key belongs to in-mem config
-    if (config_callback_.find(key) == config_callback_.end()) {
-        return Status(SERVER_UNEXPECTED_ERROR, "The key is not supported changed in mem");
+Config::RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key, ConfigCallBackF& cb) {
+
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, cb_node + " is not supported changed in mem");
     }
 
-    config_callback_.at(key).push_back(cb);
+    SERVER_LOG_WARNING << " Config | Register Call back: " << cb_node << ", key " << key;
+
+    auto & callback_map = config_callback_.at(cb_node);
+
+    callback_map[key] = cb;
+
+    return Status::OK();
+}
+
+Status
+Config::CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key) {
+    if (config_callback_.empty()) {
+        return Status::OK();
+    }
+
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        SERVER_LOG_WARNING << " Config | Cancel Register Call back: " << cb_node << ", key " << key << "not found";
+        return Status(SERVER_UNEXPECTED_ERROR, cb_node + " cannot found in callback map");
+    }
+
+    auto& cb_map = config_callback_.at(cb_node);
+    cb_map.erase(key);
+    SERVER_LOG_WARNING << " Config | Cancel Register Call back: " << cb_node << ", key " << key << ", retain " << cb_map.size();
 
     return Status::OK();
 }
@@ -1155,11 +1225,18 @@ Config::GetConfigVersion(std::string& value) {
 }
 
 Status
-Config::ExecCallBacks(const std::string& key) {
+Config::ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value) {
     auto status = Status::OK();
-    auto cb_list = config_callback_.at(key);
-    for (auto& cb : cb_list) {
-        status = cb(key);
+
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Cannot find " + cb_node + " in callback map");
+    }
+
+    auto cb_map = config_callback_.at(cb_node);
+    for (auto& cb_kv : cb_map) {
+        auto& cd = cb_kv.second;
+        status = cd(value);
         if (!status.ok()) {
             break;
         }
@@ -1623,7 +1700,7 @@ Config::SetCacheConfigInsertBufferSize(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_CACHE_INSERT_BUFFER_SIZE);
+    return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
 }
 
 Status
@@ -1634,7 +1711,7 @@ Config::SetCacheConfigCacheInsertData(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_CACHE_CACHE_INSERT_DATA);
+    return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
 }
 
 /* engine config */
@@ -1647,7 +1724,7 @@ Config::SetEngineConfigUseBlasThreshold(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
+    return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
 }
 
 Status
@@ -1666,7 +1743,7 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD);
+    return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
 }
 
 #endif
@@ -1683,7 +1760,7 @@ Config::SetGpuResourceConfigEnable(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_GPU_RESOURCE_ENABLE);
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
 }
 
 Status
@@ -1720,7 +1797,7 @@ Config::SetGpuResourceConfigSearchResources(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
 }
 
 Status
@@ -1734,7 +1811,7 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
         return status;
     }
 
-    return ExecCallBacks(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
 }
 
 #endif

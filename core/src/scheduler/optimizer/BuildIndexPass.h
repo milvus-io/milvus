@@ -31,6 +31,8 @@ class BuildIndexPass : public Pass {
  public:
     BuildIndexPass() = default;
 
+    ~BuildIndexPass();
+
  public:
     void
     Init() override;
@@ -40,6 +42,7 @@ class BuildIndexPass : public Pass {
 
  private:
     bool gpu_enable_;
+    std::string identity_;
     uint64_t specified_gpu_id_ = 0;
     std::vector<int64_t> build_gpu_ids_;
 };

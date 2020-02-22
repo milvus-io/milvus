@@ -33,6 +33,26 @@ class MemManagerImpl : public MemManager {
     using Ptr = std::shared_ptr<MemManagerImpl>;
 
     MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
+        server::Config& config = server::Config::GetInstance();
+        config.GenUniqueIdentityID("MemManagerImpl", identity_);
+
+        server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+            server::Config& config = server::Config::GetInstance();
+            int64_t buffer_size;
+            auto status = config.GetCacheConfigInsertBufferSize(buffer_size);
+            if (status.ok()) {
+                options_.insert_buffer_size_ = buffer_size;
+            }
+
+            return status;
+        };
+
+        config.RegisterCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_, lambda);
+    }
+
+    ~MemManagerImpl() {
+        server::Config& config = server::Config::GetInstance();
+        config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_);
     }
 
     Status
@@ -53,9 +73,6 @@ class MemManagerImpl : public MemManager {
     size_t
     GetCurrentMem() override;
 
-    Status
-    SetBufferSize(size_t value);
-
  private:
     MemTablePtr
     GetMemByTable(const std::string& table_id);
@@ -67,6 +84,7 @@ class MemManagerImpl : public MemManager {
 
     using MemIdMap = std::map<std::string, MemTablePtr>;
     using MemList = std::vector<MemTablePtr>;
+    std::string identity_;
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
     meta::MetaPtr meta_;
