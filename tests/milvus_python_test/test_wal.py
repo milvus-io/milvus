@@ -58,6 +58,8 @@ class TestWalBase:
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         logging.getLogger().info(res)
+        status = connect.flush([table])
+        assert status.OK()
         status = connect.delete_by_id(table, ids)
         assert status.OK()
         status = connect.flush([table])
@@ -80,7 +82,7 @@ class TestWalBase:
         assert status.OK()
         logging.getLogger().info(res) # should be 0 because no auto flush
         logging.getLogger().info("Stop server and restart")
-        time.sleep(15)
+        time.sleep(20)
         # restarted
         status = connect.flush([table])
         assert status.OK()
