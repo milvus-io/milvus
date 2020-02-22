@@ -270,15 +270,6 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                ::milvus::grpc::Status* response);
 
     // *
-    // @brief This method is used to delete vector by date range
-    //
-    // @param DeleteByDateParam, delete parameters.
-    //
-    // @return status
-    ::grpc::Status
-    DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
-                 ::milvus::grpc::Status* response) override;
-    // *
     // @brief This method is used to preload table
     //
     // @param TableName, target table name.

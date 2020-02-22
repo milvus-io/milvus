@@ -53,7 +53,7 @@ milvus::PartitionParam
 BuildPartitionParam(int32_t index) {
     std::string tag = std::to_string(index);
     std::string partition_name = std::string(TABLE_NAME) + "_" + tag;
-    milvus::PartitionParam partition_param = {TABLE_NAME, partition_name, tag};
+    milvus::PartitionParam partition_param = {TABLE_NAME, tag};
     return partition_param;
 }
 
@@ -92,12 +92,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
 
         // show partitions
-        milvus::PartitionList partition_array;
+        milvus::PartitionTagList partition_array;
         stat = conn->ShowPartitions(TABLE_NAME, partition_array);
 
         std::cout << partition_array.size() << " partitions created:" << std::endl;
-        for (auto& partition : partition_array) {
-            std::cout << "\t" << partition.partition_name << "\t tag = " << partition.partition_tag << std::endl;
+        for (auto& partition_tag : partition_array) {
+            std::cout << "\t tag = " << partition_tag << std::endl;
         }
     }
 
@@ -191,7 +191,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // drop partition
-        milvus::PartitionParam param1 = {TABLE_NAME, "", std::to_string(TARGET_PARTITION)};
+        milvus::PartitionParam param1 = {TABLE_NAME, std::to_string(TARGET_PARTITION)};
         milvus_sdk::Utils::PrintPartitionParam(param1);
         stat = conn->DropPartition(param1);
         std::cout << "DropPartition function call status: " << stat.message() << std::endl;
