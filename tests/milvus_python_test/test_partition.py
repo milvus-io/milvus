@@ -11,10 +11,9 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-table_id = "test_add"
+table_id = "test_partition"
 ADD_TIMEOUT = 60
 nprobe = 1
-epsilon = 0.0001
 tag = "1970-01-01"
 
 
