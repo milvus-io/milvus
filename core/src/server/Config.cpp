@@ -575,13 +575,11 @@ Config::CancelCallBack(const std::string& node, const std::string& sub_node, con
 
     std::string cb_node = node + "." + sub_node;
     if (config_callback_.find(cb_node) == config_callback_.end()) {
-        SERVER_LOG_WARNING << " Config | Cancel Register Call back: " << cb_node << ", key " << key << "not found";
         return Status(SERVER_UNEXPECTED_ERROR, cb_node + " cannot found in callback map");
     }
 
     auto& cb_map = config_callback_.at(cb_node);
     cb_map.erase(key);
-    SERVER_LOG_WARNING << " Config | Cancel Register Call back: " << cb_node << ", key " << key << ", retain " << cb_map.size();
 
     return Status::OK();
 }

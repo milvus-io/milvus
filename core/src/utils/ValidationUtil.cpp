@@ -397,6 +397,7 @@ ValidationUtil::ValidateDbURI(const std::string& uri) {
 
 Status
 ValidationUtil::ValidateStoragePath(const std::string& path) {
+    // Validate storage path if is valid, only correct absolute path will be validated pass
     // Invalid path only contain character[a-zA-Z], number[0-9], '-', and '_',
     // and path must start with '/'.
     // examples below are invalid
