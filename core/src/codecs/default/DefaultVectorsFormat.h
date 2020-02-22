@@ -38,7 +38,11 @@ class DefaultVectorsFormat : public VectorsFormat {
     write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) override;
 
     void
-    readUids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) override;
+    read_uids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) override;
+
+    void
+    read_vectors(const store::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
+                 std::vector<uint8_t>& raw_vectors) override;
 
     // No copy and move
     DefaultVectorsFormat(const DefaultVectorsFormat&) = delete;

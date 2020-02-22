@@ -1124,6 +1124,13 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
 
     Status ret = Status::OK();
 
+    TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        return status;
+    }
+
     try {
         table_files.clear();
         auto selected = ConnectorPtr->select(
@@ -1147,6 +1154,11 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                 file_schema.date_ = std::get<6>(file);
                 file_schema.engine_type_ = std::get<7>(file);
                 file_schema.created_on_ = std::get<8>(file);
+
+                file_schema.dimension_ = table_schema.dimension_;
+                file_schema.index_file_size_ = table_schema.index_file_size_;
+                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.metric_type_ = table_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
                     case (int)TableFileSchema::RAW:

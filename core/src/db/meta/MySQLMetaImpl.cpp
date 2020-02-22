@@ -1696,6 +1696,13 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
             res = hasNonIndexFilesQuery.store();
         }  // Scoped Connection
 
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
         if (res.num_rows() > 0) {
             int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0;
             int to_index_count = 0, index_count = 0, backup_count = 0;
@@ -1711,6 +1718,11 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 file_schema.row_count_ = resRow["row_count"];
                 file_schema.date_ = resRow["date"];
                 file_schema.created_on_ = resRow["created_on"];
+
+                file_schema.index_file_size_ = table_schema.index_file_size_;
+                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.metric_type_ = table_schema.metric_type_;
+                file_schema.dimension_ = table_schema.dimension_;
 
                 auto status = utils::GetTableFilePath(options_, file_schema);
                 if (!status.ok()) {
