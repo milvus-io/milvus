@@ -43,7 +43,8 @@ FaissIVFPQPass::Init() {
         server::Config& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda_gpu_enable);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_,
+                            lambda_gpu_enable);
 
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -59,7 +60,8 @@ FaissIVFPQPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_, lambda_gpu_threshold);
+    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_,
+                            lambda_gpu_threshold);
 
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
@@ -75,7 +77,8 @@ FaissIVFPQPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_, lambda_gpu_search_res);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_,
+                            lambda_gpu_search_res);
 #endif
 }
 

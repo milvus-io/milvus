@@ -442,13 +442,12 @@ Config::GenUniqueIdentityID(const std::string& identity, std::string& uid) {
 
     // get current timestamp
     auto time_now = std::chrono::system_clock::now();
-	auto duration_in_ms = std::chrono::duration_cast<std::chrono::microseconds>(time_now.time_since_epoch());
-	ele_list.push_back(std::to_string(duration_in_ms.count()));
+    auto duration_in_ms = std::chrono::duration_cast<std::chrono::microseconds>(time_now.time_since_epoch());
+    ele_list.push_back(std::to_string(duration_in_ms.count()));
 
-	StringHelpFunctions::MergeStringWithDelimeter(ele_list, "-", uid);
+    StringHelpFunctions::MergeStringWithDelimeter(ele_list, "-", uid);
 
-	return Status::OK();
-
+    return Status::OK();
 }
 
 Status
@@ -551,16 +550,14 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
 }
 
 Status
-Config::RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key, ConfigCallBackF& cb) {
-
+Config::RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key,
+                         ConfigCallBackF& cb) {
     std::string cb_node = node + "." + sub_node;
     if (config_callback_.find(cb_node) == config_callback_.end()) {
         return Status(SERVER_UNEXPECTED_ERROR, cb_node + " is not supported changed in mem");
     }
 
-    SERVER_LOG_WARNING << " Config | Register Call back: " << cb_node << ", key " << key;
-
-    auto & callback_map = config_callback_.at(cb_node);
+    auto& callback_map = config_callback_.at(cb_node);
 
     callback_map[key] = cb;
 

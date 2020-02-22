@@ -153,7 +153,8 @@ class Config {
     GenUniqueIdentityID(const std::string& identity, std::string& uid);
 
     Status
-    RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key, ConfigCallBackF& callback);
+    RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key,
+                     ConfigCallBackF& callback);
 
     Status
     CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key);
