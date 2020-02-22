@@ -39,6 +39,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#853 - Support HNSW
 - \#910 - Change Milvus c++ standard to c++17
+- \#1122 - Support AVX-512 in FAISS
+- \#1250 - Support CPU profiling
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
