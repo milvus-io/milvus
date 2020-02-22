@@ -24,9 +24,9 @@ namespace scheduler {
 FaissIVFFlatPass::~FaissIVFFlatPass() {
     server::Config& config = server::Config::GetInstance();
 
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
-    config.CancelCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+    config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
 }
 
 void
@@ -41,7 +41,7 @@ FaissIVFFlatPass::Init() {
         server::Config& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda_gpu_enable);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda_gpu_enable);
 
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -57,7 +57,7 @@ FaissIVFFlatPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_, lambda);
+    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_, lambda);
 
     s = config.GetGpuResourceConfigSearchResources(gpus);
     if (!s.ok()) {
@@ -73,7 +73,7 @@ FaissIVFFlatPass::Init() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_, lambda_gpu_search_res);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_, lambda_gpu_search_res);
 #endif
 }
 

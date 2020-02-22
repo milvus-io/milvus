@@ -32,14 +32,15 @@ GpuCacheMgr::GpuCacheMgr() {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
 
-    config.GenUniqueIdentityID("GpuCacheMar", id_);
+    config.GenUniqueIdentityID("GpuCacheMar", identity_);
 
     config.GetGpuResourceConfigEnable(gpu_enable_);
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        SERVER_LOG_WARNING << "Gpu enable in GpuCacheMgr.cpp";
         auto& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, id_, lambda);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda);
 
     int64_t gpu_cache_cap;
     config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
@@ -53,7 +54,7 @@ GpuCacheMgr::GpuCacheMgr() {
 
 GpuCacheMgr::~GpuCacheMgr() {
     server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE_ENABLE, id_);
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
 }
 
 GpuCacheMgr*

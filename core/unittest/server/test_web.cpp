@@ -1231,7 +1231,7 @@ TEST_F(WebControllerTest, CMD) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     response = client_ptr->cmd("config", "", "", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 }
 
 TEST_F(WebControllerTest, SYSTEM_OP_TEST) {

@@ -113,12 +113,14 @@ DBWrapper::StartService() {
     server::ConfigCallBackF lambda = [](const std::string& value) -> Status {
         Config& config = Config::GetInstance();
         int64_t blas_threshold;
-        config.GetEngineConfigUseBlasThreshold(blas_threshold);
-        faiss::distance_compute_blas_threshold = blas_threshold;
+        auto status = config.GetEngineConfigUseBlasThreshold(blas_threshold);
+        if (status.ok()) {
+            faiss::distance_compute_blas_threshold = blas_threshold;
+        }
 
-        return Status::OK();
+        return status;
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, "DBWrapper", lambda);
+    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, "DBWrapper", lambda);
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;

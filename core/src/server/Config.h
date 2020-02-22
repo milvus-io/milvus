@@ -150,13 +150,13 @@ class Config {
     ProcessConfigCli(std::string& result, const std::string& cmd);
 
     Status
-    GenUniqueIdentityID(const std::string& identity, std::string uid);
+    GenUniqueIdentityID(const std::string& identity, std::string& uid);
 
     Status
-    RegisterCallBack(const std::string& node, const std::string& key, ConfigCallBackF& callback);
+    RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key, ConfigCallBackF& callback);
 
     Status
-    CancelCallBack(const std::string& node, const std::string& key);
+    CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key);
 
  private:
     ConfigNode&
@@ -269,7 +269,7 @@ class Config {
     GetConfigVersion(std::string& value);
 
     Status
-    ExecCallBacks(const std::string& key, const std::string& value);
+    ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value);
 
  public:
     /* server config */
