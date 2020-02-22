@@ -129,7 +129,7 @@ TEST_F(SearchByIdTest, with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -170,7 +170,7 @@ TEST_F(SearchByIdTest, with_index) {
 
         stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, i, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], i);
-        ASSERT_LT(result_distances[0], 1e-4);
+        ASSERT_LT(result_distances[0], 1e-3);
     }
 }
 
@@ -298,7 +298,7 @@ TEST_F(GetVectorByIdTest, with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
@@ -343,7 +343,7 @@ TEST_F(GetVectorByIdTest, with_index) {
 
         stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, vector, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], id);
-        ASSERT_LT(result_distances[0], 1e-4);
+        ASSERT_LT(result_distances[0], 1e-3);
     }
 }
 
