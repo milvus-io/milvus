@@ -48,24 +48,20 @@ HasTableRequest::OnExecute() {
             return status;
         }
 
-        // only process root table, ignore partition table
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_schema);
-        if (!status.ok()) {
-            has_table_ = false;
-            return status;
-        } else {
-            if (!table_schema.owner_table_.empty()) {
-                has_table_ = false;
-                return status;
-            }
-        }
-
         // step 2: check table existence
         status = DBWrapper::DB()->HasTable(table_name_, has_table_);
         if (!status.ok()) {
             return status;
+        }
+
+        // only process root table, ignore partition table
+        if (has_table_) {
+            engine::meta::TableSchema table_schema;
+            table_schema.table_id_ = table_name_;
+            status = DBWrapper::DB()->DescribeTable(table_schema);
+            if (!table_schema.owner_table_.empty()) {
+                has_table_ = false;
+            }
         }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
