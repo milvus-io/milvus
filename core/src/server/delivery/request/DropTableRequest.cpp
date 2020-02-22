@@ -49,22 +49,26 @@ DropTableRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         rc.RecordSection("check validation");
 
         // step 3: Drop table
-        std::vector<DB_DATE> dates;
-        status = DBWrapper::DB()->DropTable(table_name_, dates);
+        status = DBWrapper::DB()->DropTable(table_name_);
         if (!status.ok()) {
             return status;
         }

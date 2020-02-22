@@ -47,7 +47,6 @@ ErrorMap(ErrorCode code) {
         {SERVER_TABLE_NOT_EXIST, ::milvus::grpc::ErrorCode::TABLE_NOT_EXISTS},
         {SERVER_INVALID_TABLE_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_TABLE_NAME},
         {SERVER_INVALID_TABLE_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
-        {SERVER_INVALID_TIME_RANGE, ::milvus::grpc::ErrorCode::ILLEGAL_RANGE},
         {SERVER_INVALID_VECTOR_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
 
         {SERVER_INVALID_INDEX_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_INDEX_TYPE},
@@ -131,16 +130,16 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
 }
 
 void
-ConstructTableStat(const TableStat& table_stat, ::milvus::grpc::TableStat* grpc_table_stat) {
-    if (!grpc_table_stat) {
+ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::PartitionStat* grpc_partition_stat) {
+    if (!grpc_partition_stat) {
         return;
     }
 
-    grpc_table_stat->set_total_row_count(table_stat.total_row_num_);
-    grpc_table_stat->set_table_name(table_stat.table_name_);
+    grpc_partition_stat->set_total_row_count(partition_stat.total_row_num_);
+    grpc_partition_stat->set_tag(partition_stat.tag_);
 
-    for (auto& seg_stat : table_stat.segments_stat_) {
-        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_table_stat->mutable_segments_stat()->Add();
+    for (auto& seg_stat : partition_stat.segments_stat_) {
+        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_partition_stat->mutable_segments_stat()->Add();
         grpc_seg_stat->set_row_count(seg_stat.row_num_);
         grpc_seg_stat->set_segment_name(seg_stat.name_);
         grpc_seg_stat->set_index_name(seg_stat.index_name_);
@@ -155,11 +154,10 @@ ConstructTableInfo(const TableInfo& table_info, ::milvus::grpc::TableInfo* respo
     }
 
     response->set_total_row_count(table_info.total_row_num_);
-    ConstructTableStat(table_info.native_stat_, response->mutable_native_stat());
 
     for (auto& partition_stat : table_info.partitions_stat_) {
-        ::milvus::grpc::TableStat* grpc_table_stat = response->mutable_partitions_stat()->Add();
-        ConstructTableStat(partition_stat, grpc_table_stat);
+        ::milvus::grpc::PartitionStat* grpc_partiton_stat = response->mutable_partitions_stat()->Add();
+        ConstructPartitionStat(partition_stat, grpc_partiton_stat);
     }
 }
 
@@ -348,12 +346,6 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     engine::VectorsData vectors;
     CopyRowRecords(request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
 
-    // deprecated
-    std::vector<Range> ranges;
-    for (auto& range : request->query_range_array()) {
-        ranges.emplace_back(range.start_value(), range.end_value());
-    }
-
     // step 2: partition tags
     std::vector<std::string> partitions;
     for (auto& partition : request->partition_tag_array()) {
@@ -363,8 +355,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     // step 3: search vectors
     std::vector<std::string> file_ids;
     TopKQueryResult result;
-    Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors, ranges,
-                                            request->topk(), request->nprobe(), partitions, file_ids, result);
+    Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors, request->topk(),
+                                            request->nprobe(), partitions, file_ids, result);
 
     // step 4: construct and return result
     ConstructResults(result, response);
@@ -410,12 +402,6 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
     CopyRowRecords(search_request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(),
                    vectors);
 
-    // deprecated
-    std::vector<Range> ranges;
-    for (auto& range : search_request->query_range_array()) {
-        ranges.emplace_back(range.start_value(), range.end_value());
-    }
-
     // step 2: copy file id array
     std::vector<std::string> file_ids;
     for (auto& file_id : request->file_id_array()) {
@@ -431,8 +417,8 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
     // step 4: search vectors
     TopKQueryResult result;
     Status status =
-        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, ranges,
-                                search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
+        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, search_request->topk(),
+                                search_request->nprobe(), partitions, file_ids, result);
 
     // step 5: construct and return result
     ConstructResults(result, response);
@@ -530,18 +516,6 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
 }
 
 ::grpc::Status
-GrpcRequestHandler::DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
-                                 ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
-
-    Range range(request->range().start_value(), request->range().end_value());
-    Status status = request_handler_.DeleteByRange(context_map_[context], request->table_name(), range);
-    SET_RESPONSE(response, status, context);
-
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
 GrpcRequestHandler::PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                                  ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -583,8 +557,7 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
                                     ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreatePartition(context_map_[context], request->table_name(),
-                                                     request->partition_name(), request->tag());
+    Status status = request_handler_.CreatePartition(context_map_[context], request->table_name(), request->tag());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -598,10 +571,7 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
     std::vector<PartitionParam> partitions;
     Status status = request_handler_.ShowPartitions(context_map_[context], request->table_name(), partitions);
     for (auto& partition : partitions) {
-        milvus::grpc::PartitionParam* param = response->add_partition_array();
-        param->set_table_name(partition.table_name_);
-        param->set_partition_name(partition.partition_name_);
-        param->set_tag(partition.tag_);
+        response->add_partition_tag_array(partition.tag_);
     }
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -614,8 +584,7 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
                                   ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.DropPartition(context_map_[context], request->table_name(),
-                                                   request->partition_name(), request->tag());
+    Status status = request_handler_.DropPartition(context_map_[context], request->table_name(), request->tag());
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
