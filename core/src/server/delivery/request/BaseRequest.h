@@ -112,16 +112,15 @@ struct SegmentStat {
     int64_t data_size_ = 0;
 };
 
-struct TableStat {
-    std::string table_name_;
+struct PartitionStat {
+    std::string tag_;
     int64_t total_row_num_ = 0;
     std::vector<SegmentStat> segments_stat_;
 };
 
 struct TableInfo {
     int64_t total_row_num_ = 0;
-    TableStat native_stat_;
-    std::vector<TableStat> partitions_stat_;
+    std::vector<PartitionStat> partitions_stat_;
 };
 
 class BaseRequest {

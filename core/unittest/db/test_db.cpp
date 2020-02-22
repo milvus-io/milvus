@@ -748,16 +748,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
         milvus::engine::TableInfo table_info;
         stat = db_->GetTableInfo(table_name, table_info);
         ASSERT_TRUE(stat.ok());
-        ASSERT_TRUE(table_info.native_stat_.name_ == table_name);
-        ASSERT_FALSE(table_info.native_stat_.segments_stat_.empty());
         int64_t row_count = 0;
-        for (auto& stat : table_info.native_stat_.segments_stat_) {
-            row_count += stat.row_count_;
-            ASSERT_EQ(stat.index_name_, "IDMAP");
-            ASSERT_GT(stat.data_size_, 0);
-        }
-        ASSERT_EQ(row_count, VECTOR_COUNT);
-
         for (auto& part : table_info.partitions_stat_) {
             row_count = 0;
             for (auto& stat : part.segments_stat_) {
@@ -765,7 +756,11 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
                 ASSERT_EQ(stat.index_name_, "IDMAP");
                 ASSERT_GT(stat.data_size_, 0);
             }
-            ASSERT_EQ(row_count, INSERT_BATCH);
+            if (part.tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
+                ASSERT_EQ(row_count, VECTOR_COUNT);
+            } else {
+                ASSERT_EQ(row_count, INSERT_BATCH);
+            }
         }
     }
 }

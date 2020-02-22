@@ -197,8 +197,7 @@ class DBImpl : public DB {
     GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, meta::TableFilesSchema& files);
 
     Status
-    GetPartitionByTag(const std::string& table_id, const std::string& partition_tags,
-                      std::string& partition_name_array);
+    GetPartitionByTag(const std::string& table_id, const std::string& partition_tag, std::string& partition_name);
 
     Status
     GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,

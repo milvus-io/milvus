@@ -124,12 +124,12 @@ struct SegmentStat {
 };
 
 /**
- * @brief table statistics
+ * @brief partition statistics
  */
-struct TableStat {
-    std::string table_name;                   ///< Table name
-    int64_t row_count;                        ///< Table row count
-    std::vector<SegmentStat> segments_stat;   ///< Table's segments statistics
+struct PartitionStat {
+    std::string tag;                          ///< Partition tag
+    int64_t row_count;                        ///< Partition row count
+    std::vector<SegmentStat> segments_stat;   ///< Partition's segments statistics
 };
 
 /**
@@ -137,8 +137,7 @@ struct TableStat {
  */
 struct TableInfo {
     int64_t total_row_count;                  ///< Table total row count
-    TableStat native_stat;                    ///< Table native statistics
-    std::vector<TableStat> partitions_stat;   ///< Table's partitions statistics
+    std::vector<PartitionStat> partitions_stat;   ///< Table's partitions statistics
 };
 
 /**

@@ -1351,8 +1351,10 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             }
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
-            allPartitionsQuery << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
-                               << table_id << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+            allPartitionsQuery << "SELECT table_id id, state, dimension, created_on, flag, index_file_size,"
+                               << " engine_type, nlist, metric_type FROM " << META_TABLES
+                               << " WHERE owner_table = " << mysqlpp::quote << table_id << " AND state <> "
+                               << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
 
@@ -1362,7 +1364,19 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
         for (auto& resRow : res) {
             meta::TableSchema partition_schema;
             resRow["table_id"].to_string(partition_schema.table_id_);
-            DescribeTable(partition_schema);
+            partition_schema.id_ = resRow["id"];  // implicit conversion
+            partition_schema.state_ = resRow["state"];
+            partition_schema.dimension_ = resRow["dimension"];
+            partition_schema.created_on_ = resRow["created_on"];
+            partition_schema.flag_ = resRow["flag"];
+            partition_schema.index_file_size_ = resRow["index_file_size"];
+            partition_schema.engine_type_ = resRow["engine_type"];
+            partition_schema.nlist_ = resRow["nlist"];
+            partition_schema.metric_type_ = resRow["metric_type"];
+            resRow["owner_table"].to_string(partition_schema.owner_table_);
+            resRow["partition_tag"].to_string(partition_schema.partition_tag_);
+            resRow["version"].to_string(partition_schema.version_);
+
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {

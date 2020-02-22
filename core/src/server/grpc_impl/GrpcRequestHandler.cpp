@@ -130,16 +130,16 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::TopKQueryResult*
 }
 
 void
-ConstructTableStat(const TableStat& table_stat, ::milvus::grpc::TableStat* grpc_table_stat) {
-    if (!grpc_table_stat) {
+ConstructPartitionStat(const PartitionStat& partition_stat, ::milvus::grpc::PartitionStat* grpc_partition_stat) {
+    if (!grpc_partition_stat) {
         return;
     }
 
-    grpc_table_stat->set_total_row_count(table_stat.total_row_num_);
-    grpc_table_stat->set_table_name(table_stat.table_name_);
+    grpc_partition_stat->set_total_row_count(partition_stat.total_row_num_);
+    grpc_partition_stat->set_tag(partition_stat.tag_);
 
-    for (auto& seg_stat : table_stat.segments_stat_) {
-        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_table_stat->mutable_segments_stat()->Add();
+    for (auto& seg_stat : partition_stat.segments_stat_) {
+        ::milvus::grpc::SegmentStat* grpc_seg_stat = grpc_partition_stat->mutable_segments_stat()->Add();
         grpc_seg_stat->set_row_count(seg_stat.row_num_);
         grpc_seg_stat->set_segment_name(seg_stat.name_);
         grpc_seg_stat->set_index_name(seg_stat.index_name_);
@@ -154,11 +154,10 @@ ConstructTableInfo(const TableInfo& table_info, ::milvus::grpc::TableInfo* respo
     }
 
     response->set_total_row_count(table_info.total_row_num_);
-    ConstructTableStat(table_info.native_stat_, response->mutable_native_stat());
 
     for (auto& partition_stat : table_info.partitions_stat_) {
-        ::milvus::grpc::TableStat* grpc_table_stat = response->mutable_partitions_stat()->Add();
-        ConstructTableStat(partition_stat, grpc_table_stat);
+        ::milvus::grpc::PartitionStat* grpc_partiton_stat = response->mutable_partitions_stat()->Add();
+        ConstructPartitionStat(partition_stat, grpc_partiton_stat);
     }
 }
 
@@ -356,8 +355,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     // step 3: search vectors
     std::vector<std::string> file_ids;
     TopKQueryResult result;
-    Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors,
-                                            request->topk(), request->nprobe(), partitions, file_ids, result);
+    Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors, request->topk(),
+                                            request->nprobe(), partitions, file_ids, result);
 
     // step 4: construct and return result
     ConstructResults(result, response);
@@ -418,8 +417,8 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
     // step 4: search vectors
     TopKQueryResult result;
     Status status =
-        request_handler_.Search(context_map_[context], search_request->table_name(), vectors,
-                                search_request->topk(), search_request->nprobe(), partitions, file_ids, result);
+        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, search_request->topk(),
+                                search_request->nprobe(), partitions, file_ids, result);
 
     // step 5: construct and return result
     ConstructResults(result, response);

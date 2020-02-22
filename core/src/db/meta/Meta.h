@@ -118,8 +118,7 @@ class Meta {
     GetPartitionName(const std::string& table_name, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids,
-                  TableFilesSchema& files) = 0;
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) = 0;
 
     virtual Status
     FilesToMerge(const std::string& table_id, TableFilesSchema& files) = 0;

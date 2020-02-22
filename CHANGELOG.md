@@ -47,6 +47,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1002 - Rename minio to s3 in Storage Config section
 - \#1078 - Move 'insert_buffer_size' to Cache Config section
 - \#1297 - Hide partition_name parameter, avid user directly access partition table
+- \#1310 - Add default partition tag for a table
 
 ## Task
 

@@ -27,8 +27,7 @@ namespace server {
 class CreatePartitionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& partition_name,
-           const std::string& tag);
+    Create(const std::shared_ptr<Context>& context, const std::string& partition_name, const std::string& tag);
 
  protected:
     CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,

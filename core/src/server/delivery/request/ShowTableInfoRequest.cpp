@@ -28,19 +28,19 @@ namespace milvus {
 namespace server {
 
 void
-ConstructTableStat(const engine::TableStat& table_stat, TableStat& req_table_stat) {
-    req_table_stat.table_name_ = table_stat.name_;
+ConstructPartitionStat(const engine::PartitionStat& partition_stat, PartitionStat& req_partition_stat) {
     int64_t row_count = 0;
-    for (auto& seg : table_stat.segments_stat_) {
+    req_partition_stat.tag_ = partition_stat.tag_;
+    for (auto& seg : partition_stat.segments_stat_) {
         SegmentStat seg_stat;
         seg_stat.name_ = seg.name_;
         seg_stat.row_num_ = seg.row_count_;
         seg_stat.index_name_ = seg.index_name_;
         seg_stat.data_size_ = seg.data_size_;
-        req_table_stat.segments_stat_.emplace_back(seg_stat);
+        req_partition_stat.segments_stat_.emplace_back(seg_stat);
         row_count += seg.row_count_;
     }
-    req_table_stat.total_row_num_ = row_count;
+    req_partition_stat.total_row_num_ = row_count;
 }
 
 ShowTableInfoRequest::ShowTableInfoRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
@@ -81,19 +81,14 @@ ShowTableInfoRequest::OnExecute() {
     }
 
     int64_t total_row_count = 0;
-    // contruct native info
-    {
-        ConstructTableStat(table_info.native_stat_, table_info_.native_stat_);
-        total_row_count += table_info_.native_stat_.total_row_num_;
-    }
 
     // construct partitions info
     table_info_.partitions_stat_.reserve(table_info.partitions_stat_.size());
     for (auto& partition : table_info.partitions_stat_) {
-        TableStat table_stat;
-        ConstructTableStat(partition, table_stat);
-        total_row_count += table_stat.total_row_num_;
-        table_info_.partitions_stat_.emplace_back(table_stat);
+        PartitionStat partition_stat;
+        ConstructPartitionStat(partition, partition_stat);
+        total_row_count += partition_stat.total_row_num_;
+        table_info_.partitions_stat_.emplace_back(partition_stat);
     }
 
     table_info_.total_row_num_ = total_row_count;

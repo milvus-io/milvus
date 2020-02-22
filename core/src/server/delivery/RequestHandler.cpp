@@ -122,8 +122,8 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
                        const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
                        const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = SearchRequest::Create(context, table_name, vectors, topk, nprobe,
-                                                       partition_list, file_id_list, result);
+    BaseRequestPtr request_ptr =
+        SearchRequest::Create(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

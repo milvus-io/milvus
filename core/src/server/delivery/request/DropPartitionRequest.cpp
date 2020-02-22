@@ -46,8 +46,21 @@ DropPartitionRequest::OnExecute() {
     std::string table_name = table_name_;
     std::string partition_tag = tag_;
 
+    // step 1: check partition tag
+    if (partition_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+        std::string msg = "Default partition cannot be dropped.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
+    }
+
+    auto status = ValidationUtil::ValidatePartitionTags({partition_tag});
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 2: check table
     bool exists;
-    auto status = DBWrapper::DB()->HasTable(table_name, exists);
+    status = DBWrapper::DB()->HasTable(table_name, exists);
     if (!status.ok()) {
         return status;
     }
@@ -61,10 +74,7 @@ DropPartitionRequest::OnExecute() {
         return status;
     }
 
-    status = ValidationUtil::ValidatePartitionTags({partition_tag});
-    if (!status.ok()) {
-        return status;
-    }
+    // step 3: drop partition
     return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
 }
 

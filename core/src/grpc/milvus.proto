@@ -190,8 +190,8 @@ message SegmentStat {
 /**
  * @brief table statistics
  */
-message TableStat {
-    string table_name = 1;
+message PartitionStat {
+    string tag = 1;
     int64 total_row_count = 2;
     repeated SegmentStat segments_stat = 3;
 }
@@ -202,8 +202,7 @@ message TableStat {
 message TableInfo {
     Status status = 1;
     int64 total_row_count = 2;
-    TableStat native_stat = 3;
-    repeated TableStat partitions_stat = 4;
+    repeated PartitionStat partitions_stat = 3;
 }
 
 /**

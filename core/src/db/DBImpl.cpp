@@ -251,11 +251,11 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
     }
 
     // step1: get all partition ids
-    std::vector<std::string> table_names = {table_id};
+    std::vector<std::pair<std::string, std::string>> name2tag = {{table_id, milvus::engine::DEFAULT_PARTITON_TAG}};
     std::vector<meta::TableSchema> partition_array;
     auto status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        table_names.push_back(schema.table_id_);
+        name2tag.push_back(std::make_pair(schema.table_id_, schema.partition_tag_));
     }
 
     // step2: get native table info
@@ -275,9 +275,9 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
         {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
     };
 
-    for (auto& name : table_names) {
+    for (auto& name_tag : name2tag) {
         meta::TableFilesSchema table_files;
-        status = meta_ptr_->FilesByType(name, file_types, table_files);
+        status = meta_ptr_->FilesByType(name_tag.first, file_types, table_files);
         if (!status.ok()) {
             std::string err_msg = "Failed to get table info: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
@@ -294,15 +294,15 @@ DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
             segments_stat.emplace_back(seg_stat);
         }
 
-        if (name == table_id) {
-            table_info.native_stat_.name_ = table_id;
-            table_info.native_stat_.segments_stat_.swap(segments_stat);
+        PartitionStat partition_stat;
+        if (name_tag.first == table_id) {
+            partition_stat.tag_ = milvus::engine::DEFAULT_PARTITON_TAG;
         } else {
-            TableStat table_stat;
-            table_stat.name_ = name;
-            table_stat.segments_stat_.swap(segments_stat);
-            table_info.partitions_stat_.emplace_back(table_stat);
+            partition_stat.tag_ = name_tag.second;
         }
+
+        partition_stat.segments_stat_.swap(segments_stat);
+        table_info.partitions_stat_.emplace_back(partition_stat);
     }
 
     return Status::OK();
@@ -688,8 +688,8 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     // else set file type to RAW, no need to build index
     if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
-                                    ? meta::TableFileSchema::TO_INDEX
-                                    : meta::TableFileSchema::RAW;
+                                        ? meta::TableFileSchema::TO_INDEX
+                                        : meta::TableFileSchema::RAW;
     } else {
         compacted_file.file_type_ = meta::TableFileSchema::RAW;
     }
@@ -954,8 +954,7 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::st
     VectorsData vectors_data = VectorsData();
     vectors_data.id_array_.emplace_back(vector_id);
     vectors_data.vector_count_ = 1;
-    Status result =
-        Query(context, table_id, partition_tags, k, nprobe, vectors_data, result_ids, result_distances);
+    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors_data, result_ids, result_distances);
     return result;
 }
 
@@ -1311,8 +1310,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
     // else set file type to RAW, no need to build index
     if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
-                                ? meta::TableFileSchema::TO_INDEX
-                                : meta::TableFileSchema::RAW;
+                                    ? meta::TableFileSchema::TO_INDEX
+                                    : meta::TableFileSchema::RAW;
     } else {
         table_file.file_type_ = meta::TableFileSchema::RAW;
     }
@@ -1496,15 +1495,24 @@ DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>&
 }
 
 Status
-DBImpl::GetPartitionByTag(const std::string& table_id, const std::string& partition_tags,
-                          std::string& partition_name_array) {
+DBImpl::GetPartitionByTag(const std::string& table_id, const std::string& partition_tag, std::string& partition_name) {
     Status status;
 
-    if (partition_tags.empty()) {
-        partition_name_array = table_id;
+    if (partition_tag.empty()) {
+        partition_name = table_id;
 
     } else {
-        status = meta_ptr_->GetPartitionName(table_id, partition_tags, partition_name_array);
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = partition_tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+        if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+            partition_name = table_id;
+            return status;
+        }
+
+        status = meta_ptr_->GetPartitionName(table_id, partition_tag, partition_name);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << status.message();
         }
@@ -1524,6 +1532,12 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
         server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+        if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+            partition_name_array.insert(table_id);
+            return status;
+        }
+
         for (auto& schema : partition_array) {
             if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.table_id_);

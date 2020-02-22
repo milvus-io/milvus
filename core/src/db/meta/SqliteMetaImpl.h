@@ -108,8 +108,7 @@ class SqliteMetaImpl : public Meta {
     GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids,
-                  TableFilesSchema& files) override;
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) override;
 
     Status
     FilesToMerge(const std::string& table_id, TableFilesSchema& files) override;

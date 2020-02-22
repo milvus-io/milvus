@@ -27,8 +27,8 @@ namespace milvus {
 namespace server {
 
 SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const engine::VectorsData& vectors, int64_t topk,
-                             int64_t nprobe, const std::vector<std::string>& partition_list,
+                             const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                             const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
@@ -42,11 +42,11 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std:
 
 BaseRequestPtr
 SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const engine::VectorsData& vectors, int64_t topk,
-                      int64_t nprobe, const std::vector<std::string>& partition_list,
-                      const std::vector<std::string>& file_id_list, TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, vectors, topk, nprobe,
-                                                          partition_list, file_id_list, result));
+                      const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                      const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
+                      TopKQueryResult& result) {
+    return std::shared_ptr<BaseRequest>(
+        new SearchRequest(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result));
 }
 
 Status

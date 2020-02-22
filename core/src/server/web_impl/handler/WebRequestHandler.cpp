@@ -347,9 +347,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> search_resources;
     gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) {
-            search_resources.emplace_back(res->toLowerCase()->std_str());
-        });
+        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string search_resources_value;
     for (auto& res : search_resources) {
@@ -368,9 +366,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
 
     std::vector<std::string> build_resources;
     gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) {
-            build_resources.emplace_back(res->toLowerCase()->std_str());
-        });
+        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
 
     std::string build_resources_value;
     for (auto& res : build_resources) {
@@ -547,8 +543,8 @@ WebRequestHandler::CreatePartition(const OString& table_name, const PartitionReq
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_tag\' is required")
     }
 
-    auto status = request_handler_.CreatePartition(context_ptr_, table_name->std_str(),
-                                                   param->partition_tag->std_str());
+    auto status =
+        request_handler_.CreatePartition(context_ptr_, table_name->std_str(), param->partition_tag->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -648,9 +644,7 @@ WebRequestHandler::Insert(const OString& table_name, const InsertRequestDto::Obj
         id_array.resize(request->ids->count());
 
         size_t i = 0;
-        request->ids->forEach([&id_array, &i](const OInt64& item) {
-            id_array[i++] = item->getValue();
-        });
+        request->ids->forEach([&id_array, &i](const OInt64& item) { id_array[i++] = item->getValue(); });
     }
 
     status = request_handler_.Insert(context_ptr_, table_name->std_str(), vectors, request->tag->std_str());
@@ -680,16 +674,12 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     std::vector<std::string> tag_list;
     if (nullptr != request->tags.get()) {
-        request->tags->forEach([&tag_list](const OString& tag) {
-            tag_list.emplace_back(tag->std_str());
-        });
+        request->tags->forEach([&tag_list](const OString& tag) { tag_list.emplace_back(tag->std_str()); });
     }
 
     std::vector<std::string> file_id_list;
     if (nullptr != request->file_ids.get()) {
-        request->file_ids->forEach([&file_id_list](const OString& id) {
-            file_id_list.emplace_back(id->std_str());
-        });
+        request->file_ids->forEach([&file_id_list](const OString& id) { file_id_list.emplace_back(id->std_str()); });
     }
 
     TableSchema schema;
@@ -723,8 +713,8 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 
     TopKQueryResult result;
     auto context_ptr = GenContextPtr("Web Handler");
-    status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, topk_t, nprobe_t,
-                                     tag_list, file_id_list, result);
+    status = request_handler_.Search(context_ptr, table_name->std_str(), vectors, topk_t, nprobe_t, tag_list,
+                                     file_id_list, result);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }

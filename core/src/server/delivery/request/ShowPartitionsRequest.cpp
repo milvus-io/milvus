@@ -64,6 +64,8 @@ ShowPartitionsRequest::OnExecute() {
         return status;
     }
 
+    partition_list_.clear();
+    partition_list_.emplace_back(table_name_, milvus::engine::DEFAULT_PARTITON_TAG);
     for (auto& schema : schema_array) {
         partition_list_.emplace_back(schema.owner_table_, schema.partition_tag_);
     }
