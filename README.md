@@ -6,6 +6,8 @@
 ![Language](https://img.shields.io/github/languages/count/milvus-io/milvus)
 ![GitHub top language](https://img.shields.io/github/languages/top/milvus-io/milvus)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/milvus-io/milvus)
+![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
+
 
 [![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
