@@ -2,7 +2,7 @@
 
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 
-![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
+![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
 ![Language](https://img.shields.io/github/languages/count/milvus-io/milvus)
 ![GitHub top language](https://img.shields.io/github/languages/top/milvus-io/milvus)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/milvus-io/milvus)
