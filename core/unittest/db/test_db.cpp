@@ -340,7 +340,6 @@ TEST_F(DBTest, SEARCH_TEST) {
 #endif
 
     {  // search by specify index file
-        milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids;
         // sometimes this case run fast to merge file and build index, old file will be deleted immediately,
         // so the QueryByFileID cannot get files to search
@@ -350,7 +349,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids, result_distances);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -384,7 +383,6 @@ TEST_F(DBTest, SEARCH_TEST) {
     }
 
     {  // search by specify index file
-        milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids;
         // sometimes this case run fast to merge file and build index, old file will be deleted immediately,
         // so the QueryByFileID cannot get files to search
@@ -394,7 +392,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         result_ids.clear();
         result_dists.clear();
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, dates, result_ids, result_dists);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 #endif
@@ -482,17 +480,16 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     ASSERT_FALSE(stat.ok());
 
     std::vector<std::string> tags;
-    milvus::engine::meta::DatesT dates;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, xb, dates, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, xb, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
-    stat = db_->QueryByFileID(dummy_context_, table_info.table_id_, file_ids, 1, 1, xb, dates, result_ids,
+    stat = db_->QueryByFileID(dummy_context_, table_info.table_id_, file_ids, 1, 1, xb, result_ids,
                               result_distances);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->DropTable(table_info.table_id_, dates);
+    stat = db_->DropTable(table_info.table_id_);
     ASSERT_FALSE(stat.ok());
 }
 
@@ -638,8 +635,7 @@ TEST_F(DBTest, PARTITION_TEST) {
     stat = db_->DropIndex(table_name);
     ASSERT_TRUE(stat.ok());
 
-    milvus::engine::meta::DatesT dates;
-    stat = db_->DropTable(table_name, dates);
+    stat = db_->DropTable(table_name);
     ASSERT_TRUE(stat.ok());
 }
 
@@ -710,55 +706,12 @@ TEST_F(DBTest2, DELETE_TEST) {
     milvus::engine::TableIndex index;
     stat = db_->CreateIndex(TABLE_NAME, index);
 
-    std::vector<milvus::engine::meta::DateT> dates;
-    stat = db_->DropTable(TABLE_NAME, dates);
+    stat = db_->DropTable(TABLE_NAME);
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
 
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_FALSE(has_table);
-}
-
-TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
-    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
-    auto stat = db_->CreateTable(table_info);
-
-    milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
-    ASSERT_TRUE(stat.ok());
-
-    bool has_table = false;
-    db_->HasTable(TABLE_NAME, has_table);
-    ASSERT_TRUE(has_table);
-
-    uint64_t size;
-    db_->Size(size);
-    ASSERT_EQ(size, 0UL);
-
-    uint64_t nb = VECTOR_COUNT;
-    milvus::engine::VectorsData xb;
-    BuildVectors(nb, 0, xb);
-
-    milvus::engine::IDNumbers vector_ids;
-    stat = db_->InsertVectors(TABLE_NAME, "", xb);
-    milvus::engine::TableIndex index;
-    stat = db_->CreateIndex(TABLE_NAME, index);
-
-    db_->Size(size);
-    ASSERT_NE(size, 0UL);
-
-    std::vector<milvus::engine::meta::DateT> dates;
-    std::string start_value = CurrentTmDate(-5);
-    std::string end_value = CurrentTmDate(5);
-    ConvertTimeRangeToDBDates(start_value, end_value, dates);
-
-    stat = db_->DropTable(TABLE_NAME, dates);
-    ASSERT_TRUE(stat.ok());
-
-    uint64_t row_count = 0;
-    db_->GetTableRowCount(TABLE_NAME, row_count);
-    ASSERT_EQ(row_count, 0UL);
 }
 
 TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
@@ -795,16 +748,7 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
         milvus::engine::TableInfo table_info;
         stat = db_->GetTableInfo(table_name, table_info);
         ASSERT_TRUE(stat.ok());
-        ASSERT_TRUE(table_info.native_stat_.name_ == table_name);
-        ASSERT_FALSE(table_info.native_stat_.segments_stat_.empty());
         int64_t row_count = 0;
-        for (auto& stat : table_info.native_stat_.segments_stat_) {
-            row_count += stat.row_count_;
-            ASSERT_EQ(stat.index_name_, "IDMAP");
-            ASSERT_GT(stat.data_size_, 0);
-        }
-        ASSERT_EQ(row_count, VECTOR_COUNT);
-
         for (auto& part : table_info.partitions_stat_) {
             row_count = 0;
             for (auto& stat : part.segments_stat_) {
@@ -812,7 +756,11 @@ TEST_F(DBTest2, SHOW_TABLE_INFO_TEST) {
                 ASSERT_EQ(stat.index_name_, "IDMAP");
                 ASSERT_GT(stat.data_size_, 0);
             }
-            ASSERT_EQ(row_count, INSERT_BATCH);
+            if (part.tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
+                ASSERT_EQ(row_count, VECTOR_COUNT);
+            } else {
+                ASSERT_EQ(row_count, INSERT_BATCH);
+            }
         }
     }
 }
@@ -842,8 +790,7 @@ TEST_F(DBTestWAL, DB_INSERT_TEST) {
 
     db_->Flush(table_info.table_id_);
 
-    std::vector<milvus::engine::meta::DateT> dates;
-    stat = db_->DropTable(table_info.table_id_, dates);
+    stat = db_->DropTable(table_info.table_id_);
     ASSERT_TRUE(stat.ok());
 }
 
@@ -872,8 +819,7 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
 
-    std::vector<milvus::engine::meta::DateT> dates;
-    stat = db_->DropTable(table_info.table_id_, dates);
+    stat = db_->DropTable(table_info.table_id_);
     ASSERT_TRUE(stat.ok());
 }
 

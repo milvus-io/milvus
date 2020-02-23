@@ -54,11 +54,25 @@ SegmentReader::Load() {
 }
 
 Status
+SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        default_codec.GetVectorsFormat()->read_vectors(directory_ptr_, offset, num_bytes, raw_vectors);
+    } catch (Exception& e) {
+        std::string err_msg = "Failed to load raw vectors. " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(e.code(), err_msg);
+    }
+    return Status::OK();
+}
+
+Status
 SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
-        default_codec.GetVectorsFormat()->readUids(directory_ptr_, uids);
+        default_codec.GetVectorsFormat()->read_uids(directory_ptr_, uids);
     } catch (Exception& e) {
         std::string err_msg = "Failed to load uids. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;

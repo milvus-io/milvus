@@ -28,6 +28,7 @@
 
 #endif
 
+#include <src/db/Types.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>

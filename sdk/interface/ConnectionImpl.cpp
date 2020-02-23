@@ -95,10 +95,9 @@ ConnectionImpl::GetVectorByID(const std::string& table_name, int64_t vector_id, 
 
 Status
 ConnectionImpl::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                       const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
-                       int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(table_name, partition_tags, query_record_array, query_range_array, topk, nprobe,
-                                 topk_query_result);
+                       const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+                       TopKQueryResult& topk_query_result) {
+    return client_proxy_->Search(table_name, partition_tags, query_record_array, topk, nprobe, topk_query_result);
 }
 
 Status
@@ -168,7 +167,7 @@ ConnectionImpl::CreatePartition(const PartitionParam& param) {
 }
 
 Status
-ConnectionImpl::ShowPartitions(const std::string& table_name, PartitionList& partition_array) const {
+ConnectionImpl::ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const {
     return client_proxy_->ShowPartitions(table_name, partition_array);
 }
 

@@ -216,7 +216,7 @@ TEST_F(DeleteTest, delete_with_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    int64_t nb = 100000;
+    int64_t nb = 10000;
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
