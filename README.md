@@ -6,9 +6,10 @@
 ![Language](https://img.shields.io/github/languages/count/milvus-io/milvus)
 ![GitHub top language](https://img.shields.io/github/languages/top/milvus-io/milvus)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/milvus-io/milvus)
+![GitHub Release Date](https://img.shields.io/github/release-date/milvus-io/milvus)
 ![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/milvus-io/milvus/pulse/monthly)
-
+![OSS Lifecycle](https://img.shields.io/osslifecycle/milvus-io/milvus)
 
 [![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
@@ -64,7 +65,7 @@ To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/
 
 ### Try your first Milvus program
 
-Try running a program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples). 
+Try running a program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
 
 
 ## Contribution guidelines
@@ -75,7 +76,7 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 
 ## Join our community
 
-:heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
+:heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk).
 
 See our [community](https://github.com/milvus-io/community) repository to learn about our governance and access more community resources.
 
