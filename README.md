@@ -1,15 +1,17 @@
 ![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
+
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
-[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
+![Last Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
-[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
-[![All Contributors](https://img.shields.io/badge/all_contributors-7-orange.svg?style=flat-square)](#contributors-)
-[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
+
 [![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
+[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
+[![Scrutinizer Quality Score](https://scrutinizer-ci.com/g/milvus-io/milvus/badges/quality-score.png?b=master)](https://scrutinizer-ci.com/g/milvus-io/milvus/)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
 
