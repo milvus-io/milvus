@@ -3,7 +3,8 @@
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
-![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
+![Language](https://img.shields.io/github/languages/count/milvus-io/milvus)
+![GitHub top language](https://img.shields.io/github/languages/top/milvus-io/milvus)
 ![Last Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
 
