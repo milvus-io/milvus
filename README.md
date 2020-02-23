@@ -7,9 +7,11 @@
 ![GitHub top language](https://img.shields.io/github/languages/top/milvus-io/milvus)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/milvus-io/milvus)
 ![GitHub Release Date](https://img.shields.io/github/release-date/milvus-io/milvus)
-![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
+
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/milvus-io/milvus/pulse/monthly)
 ![OSS Lifecycle](https://img.shields.io/osslifecycle/milvus-io/milvus)
+[![HitCount](http://hits.dwyl.com/milvus-io/milvus.svg)](http://hits.dwyl.com/milvus-io/milvus)
+![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
 
 [![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
