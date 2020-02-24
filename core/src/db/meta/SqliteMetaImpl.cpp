@@ -31,6 +31,7 @@
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
+#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
@@ -854,21 +855,13 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
     try {
         server::MetricCollector metric;
 
-        auto partitions = ConnectorPtr->select(columns(&TableSchema::id_,
-                                                       &TableSchema::state_,
-                                                       &TableSchema::dimension_,
-                                                       &TableSchema::created_on_,
-                                                       &TableSchema::flag_,
-                                                       &TableSchema::index_file_size_,
-                                                       &TableSchema::engine_type_,
-                                                       &TableSchema::nlist_,
-                                                       &TableSchema::metric_type_,
-                                                       &TableSchema::owner_table_,
-                                                       &TableSchema::partition_tag_,
-                                                       &TableSchema::version_,
-                                                       &TableSchema::table_id_),
-                                               where(c(&TableSchema::owner_table_) == table_id
-                                                     and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+        auto partitions = ConnectorPtr->select(
+            columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
+                    &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
+                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
+                    &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::table_id_),
+            where(c(&TableSchema::owner_table_) == table_id and
+                  c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (size_t i = 0; i < partitions.size(); i++) {
             meta::TableSchema partition_schema;
             partition_schema.id_ = std::get<0>(partitions[i]);
@@ -1327,7 +1320,7 @@ SqliteMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
+SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1362,7 +1355,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 table_file.date_ = std::get<5>(file);
 
                 // check if the file can be deleted
-                if (filter && filter->IsIgnored(table_file)) {
+                if (OngoingFileChecker::GetInstance().IsIgnored(table_file)) {
                     ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
                                      << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it

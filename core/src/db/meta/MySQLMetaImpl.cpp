@@ -35,6 +35,7 @@
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
+#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
@@ -1927,7 +1928,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
+MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1965,7 +1966,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 table_file.file_type_ = resRow["file_type"];
 
                 // check if the file can be deleted
-                if (filter && filter->IsIgnored(table_file)) {
+                if (OngoingFileChecker::GetInstance().IsIgnored(table_file)) {
                     ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
                                      << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
