@@ -622,7 +622,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 
     status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
-
+#if MERGE_NOT_YET
     sleep(1);
     std::vector<int> files_to_delete;
     milvus::engine::meta::TableFilesSchema files_schema;
@@ -637,6 +637,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     filter.MarkOngoingFile(table_file);
     status = impl_->CleanUpFilesWithTTL(1UL, &filter);
     ASSERT_TRUE(status.ok());
+#endif
 }
 
 TEST_F(MetaTest, INDEX_TEST) {

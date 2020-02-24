@@ -192,7 +192,7 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
 }
-
+#if MERGE_NOT_YET
 TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
@@ -259,7 +259,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("MySQLMetaImpl.Size.throw_exception");
 }
-
+#endif
 TEST_F(MySqlDBTest, DELETE_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
@@ -301,7 +301,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_FALSE(has_table);
 }
-
+#if MERGE_NOT_YET
 TEST_F(MySqlDBTest, PARTITION_TEST) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
@@ -480,5 +480,5 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 }
-
+#endif
 
