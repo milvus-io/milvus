@@ -87,9 +87,6 @@ class TestWalBase:
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 1
-        status, res = connect.search_vectors(table, top_k, nprobe, vector)
-        assert status.OK()
-        assert res[0][0].id == ids[0]
 
     @pytest.mark.timeout(WAL_TIMEOUT)
     def test_wal_invalid_operation_B(self, connect, table):
