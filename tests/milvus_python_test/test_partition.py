@@ -75,7 +75,7 @@ class TestCreateBase:
         tag_name = gen_unique_str()
         status = connect.create_partition(table, tag_name)
         assert status.OK()
-        status, res = connect.show_partitions()
+        status, res = connect.show_partitions(table)
         assert status.OK()
         assert tag in res
         assert tag_name in res
@@ -138,7 +138,7 @@ class TestCreateBase:
         ids = [(i+100) for i in range(nq)]
         status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
         assert status.OK()
-        status = connect.flush(table)
+        status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert res == nq * 2
@@ -164,11 +164,11 @@ class TestCreateBase:
         ids = [i for i in range(nq)]
         status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
         assert status.OK()
-        status = connect.flush(table)
+        status = connect.flush([table])
         assert status.OK()
         ids = [(i+100) for i in range(nq)]
         status, ids = connect.insert(table_new, vectors, ids, partition_tag=tag)
-        status = connect.flush(table)
+        status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table_new)
         assert res == nq
