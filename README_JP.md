@@ -8,18 +8,46 @@
 ![Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
 ![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
 [![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
+[![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
 
 
 # Milvus へようこそ
 
 ## 概要
 
-Milvusは世界中一番早い特徴ベクトルにむかう類似性検索エンジンです。不均質な計算アーキテクチャーに基づいて効率を最大化出来ます。数十億のベクタの中に目標を検索できるまで数ミリ秒しかかからず、最低限の計算資源だけが必要です。
+Milvusは特徴ベクトルにむかうオーペンソース高性能類似性検索エンジンです。不均質な計算アーキテクチャーに基づいて効率を最大化出来ます。数十億のベクタの中に目標を検索できるまで数ミリ秒しかかからず、最低限の計算資源だけが必要です。
 
-Milvusは安定的な[Python](https://github.com/milvus-io/pymilvus)、[Java](https://github.com/milvus-io/milvus-sdk-java)又は [C++](https://github.com/milvus-io/milvus/tree/master/sdk) SDKを提供します。
+[基本紹介](https://www.milvus.io/docs/about_milvus/overview.md)を参考して詳しい情報を手に入れます。
 
 Milvus [リリースノート](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0.md)を読んで最新バージョンや更新情報を手に入れます。
 
+# ロードマップ
+
+[ロードマップ](https://github.com/milvus-io/milvus/milestones)を読んでMilvusの将来の特性をわかります。
+
+このロードマップはまだまだ進行中なので、合理的な調整は可能です。全てのコメントや要件や提案などを歓迎です。
+
+## アプリケーション
+
+様々な応用場合があります。MilvusとVGGで構築した画像検索のデモンストレーションです。
+
+[![image retrieval demo](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)
+
+ほかの解決方案を見たいと思うなら、[bootcamp](https://github.com/milvus-io/bootcamp)を参考してください。
+
+## テスト報告
+
+[テスト報告](https://github.com/milvus-io/milvus/tree/master/docs)を読んで性能基準をわかります。
+
+## サポートするクライアント
+
+- [Go](https://github.com/milvus-io/milvus-sdk-go)
+- [Python](https://github.com/milvus-io/pymilvus)
+- [Java](https://github.com/milvus-io/milvus-sdk-java)
+- [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+- [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) ([arkie](https://www.arkie.cn/)が提供した)
 
 ## はじめに
 
@@ -29,14 +57,19 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 
 ### 初めてのMilvusプログラムを試す
 
-[Python](https://www.milvus.io/docs/guides/get_started/example_code.md)、[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)、または[C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples)などのサンプルコードを使ってMilvusプログラムを試す。
-
+[Python](https://www.milvus.io/docs/guides/get_started/example_code.md)、[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)、[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)、または[C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples)などのサンプルコードを使ってMilvusプログラムを試す。
 
 ## 貢献規約
 
 本プロジェクトへの貢献に心より感謝いたします。 Milvusを貢献したいと思うなら、[貢献規約](CONTRIBUTING.md)を読んでください。 本プロジェクトはMilvusの[行動規範](CODE_OF_CONDUCT.md)に従います。プロジェクトに参加したい場合は、行動規範を従ってください。
 
 [GitHub issues](https://github.com/milvus-io/milvus/issues) を使って問題やバッグなとを報告しでください。 一般てきな問題なら, Milvusコミュニティに参加してください。
+
+## メーリングリスト
+
+- [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
+- [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
+- [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
 
 ## Milvusコミュニティを参加する
 
@@ -51,7 +84,7 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 
 - [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [Milvusのよくある質問](https://www.milvus.io/docs/faq/operational_faq.md)
+- [Milvus のよくある質問](https://www.milvus.io/docs/faq/operational_faq.md)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
@@ -60,6 +93,8 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 - [Milvus ツイッター](https://twitter.com/milvusio)
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+
+- [Milvus デザイン文書](design.md)
 
 
 ## ライセンス
