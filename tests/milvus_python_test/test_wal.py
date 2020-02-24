@@ -77,9 +77,9 @@ class TestWalBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
         status = connect.delete_by_id(table, [0])
+        assert status.OK()
+        status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 0
         status = connect.flush([table])
@@ -103,15 +103,15 @@ class TestWalBase:
         assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert status.OK()
+        assert res == 0
         table_new = gen_unique_str()
         status = connect.delete_by_id(table_new, ids)
         assert not status.OK()
-        assert res == 0
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert status.OK()
-        assert res == 0
+        assert res == nb
 
     @pytest.mark.timeout(WAL_TIMEOUT)
     def test_wal_server_crashed_recovery(self, connect, table):
