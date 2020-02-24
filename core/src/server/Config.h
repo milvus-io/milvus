@@ -176,7 +176,7 @@ class Config {
     SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
     Status
-    UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
+    UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key);
 
     ///////////////////////////////////////////////////////////////////////////
     Status

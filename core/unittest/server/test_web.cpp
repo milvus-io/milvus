@@ -610,7 +610,7 @@ class WebControllerTest : public testing::Test {
  protected:
     static void
     SetUpTestCase() {
-        int ok = mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
+        mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
         // Basic config
         std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
         std::fstream fs(config_path.c_str(), std::ios_base::out);
@@ -619,7 +619,7 @@ class WebControllerTest : public testing::Test {
         fs.close();
 
         milvus::server::Config& config = milvus::server::Config::GetInstance();
-        auto status = config.LoadConfigFile(config_path);
+        config.LoadConfigFile(config_path);
 
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
@@ -933,7 +933,6 @@ TEST_F(WebControllerTest, LOAD_TABLE) {
 
     std::string request_str = "{\"load\": {\"table_name\": \"" + table_name->std_str() + "\"}}";
     response = client_ptr->exec("task", request_str.c_str());
-    auto load_result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     //    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << load_result_dto->message->std_str();
 
     // test with non-exist table

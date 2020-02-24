@@ -382,7 +382,7 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
     }
 
     if (status.ok()) {
-        status = UpdateFileConfigFromMem(parent_key, child_key, value);
+        status = UpdateFileConfigFromMem(parent_key, child_key);
         if (status.ok() && (parent_key == CONFIG_SERVER || parent_key == CONFIG_DB || parent_key == CONFIG_STORAGE ||
                             parent_key == CONFIG_METRIC || parent_key == CONFIG_TRACING)) {
             restart_required_ = true;
@@ -451,14 +451,14 @@ Config::GenUniqueIdentityID(const std::string& identity, std::string& uid) {
 }
 
 Status
-Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key, const std::string& value) {
+Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key) {
     if (access(config_file_.c_str(), F_OK | R_OK) != 0) {
         return Status(SERVER_UNEXPECTED_ERROR, "Cannot find configure file: " + config_file_);
     }
 
     // Store original configure file
     std::string ori_file = config_file_ + ".ori";
-    if (access(ori_file.c_str(), F_OK | R_OK) != 0) {
+    if (access(ori_file.c_str(), F_OK) != 0) {
         std::fstream fin(config_file_, std::ios::in);
         std::ofstream fout(ori_file);
 
@@ -469,6 +469,12 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
         fout.flush();
         fout.close();
         fin.close();
+    }
+
+    std::string value;
+    auto status = GetConfigValueInMem(parent_key, child_key, value);
+    if (!status.ok()) {
+        return status;
     }
 
     // convert value string to standard string stored in yaml file
@@ -493,11 +499,8 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
         return Status(SERVER_UNEXPECTED_ERROR, "Cannot open conf file: " + config_file_);
     }
 
-    Status status = Status::OK();
-
     bool parent_key_read = false;
-    std::string conf_str;
-    std::string line;
+    std::string conf_str, line;
     while (getline(conf_fin, line)) {
         if (!parent_key_read) {
             conf_str += line + "\n";
@@ -1768,7 +1771,7 @@ Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
 
     int64_t cap = std::stol(value);
     std::vector<int64_t> gpus;
-    Status s = GetGpuResourceConfigSearchResources(gpus);
+    GetGpuResourceConfigSearchResources(gpus);
     for (auto& g : gpus) {
         cache::GpuCacheMgr::GetInstance(g)->SetCapacity(cap);
     }
