@@ -1746,10 +1746,32 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         }
 
         case wal::MXLogType::Delete: {
+            std::vector<meta::TableSchema> partition_array;
+            status = meta_ptr_->ShowPartitions(record.table_id, partition_array);
+            if (!status.ok()) {
+                return status;
+            }
+
+            std::vector<std::string> table_ids{record.table_id};
+            for (auto& partition : partition_array) {
+                auto& partition_table_id = partition.table_id_;
+                table_ids.emplace_back(partition_table_id);
+            }
+
             if (record.length == 1) {
-                status = mem_mgr_->DeleteVector(record.table_id, *record.ids, record.lsn);
+                for (auto& table_id : table_ids) {
+                    status = mem_mgr_->DeleteVector(table_id, *record.ids, record.lsn);
+                    if (!status.ok()) {
+                        return status;
+                    }
+                }
             } else {
-                status = mem_mgr_->DeleteVectors(record.table_id, record.length, record.ids, record.lsn);
+                for (auto& table_id : table_ids) {
+                    status = mem_mgr_->DeleteVectors(table_id, record.length, record.ids, record.lsn);
+                    if (!status.ok()) {
+                        return status;
+                    }
+                }
             }
             break;
         }
@@ -1758,22 +1780,37 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             if (!record.table_id.empty()) {
                 // flush one table
                 bool has_table;
-                auto status = HasTable(record.table_id, has_table);
+                status = HasTable(record.table_id, has_table);
                 if (!status.ok()) {
-                    return Status(DB_ERROR, status.message());
+                    return status;
                 }
                 if (!has_table) {
                     ENGINE_LOG_ERROR << "Table to flush does not exist: " << record.table_id;
                     return Status(DB_NOT_FOUND, "Table to flush does not exist");
                 }
 
-                {
-                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                    status = mem_mgr_->Flush(record.table_id);
+                std::vector<meta::TableSchema> partition_array;
+                status = meta_ptr_->ShowPartitions(record.table_id, partition_array);
+                if (!status.ok()) {
+                    return status;
+                }
+
+                std::vector<std::string> table_ids{record.table_id};
+                for (auto& partition : partition_array) {
+                    auto& partition_table_id = partition.table_id_;
+                    table_ids.emplace_back(partition_table_id);
                 }
 
                 std::set<std::string> flushed_tables;
-                flushed_tables.insert(record.table_id);
+                for (auto& table_id : table_ids) {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_id);
+                    if (!status.ok()) {
+                        break;
+                    }
+                    flushed_tables.insert(table_id);
+                }
+
                 tables_flushed(flushed_tables);
 
             } else {
