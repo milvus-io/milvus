@@ -58,6 +58,7 @@ class TestWalBase:
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         logging.getLogger().info(res)
+        assert res == 0
         status = connect.flush([table])
         assert status.OK()
         status = connect.delete_by_id(table, ids)
@@ -67,6 +68,49 @@ class TestWalBase:
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 0
+
+    @pytest.mark.timeout(WAL_TIMEOUT)
+    def test_wal_invalid_operation(self, connect, table):
+        '''
+        target: invalid operation in WAL
+        method: add vectors, delete with non-existent ids and flush when WAL is enabled
+        expected: after flush, status not ok
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        status = connect.delete_by_id(table, ids)
+        assert status.OK()
+        assert res == nb
+        status = connect.flush([table])
+        assert status.OK()
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        assert res == 0
+
+    @pytest.mark.timeout(WAL_TIMEOUT)
+    def test_wal_invalid_operation_B(self, connect, table):
+        '''
+        target: invalid operation in WAL
+        method: add vectors, delete with not existed table name when WAL is enabled
+        expected: status not ok
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        table_new = gen_unique_str()
+        status = connect.delete_by_id(table_new, [0])
+        assert not status.OK()
+        assert res == nb
+        status = connect.flush([table])
+        assert status.OK()
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        assert res == nb - 1
 
     @pytest.mark.timeout(WAL_TIMEOUT)
     def test_wal_server_crashed_recovery(self, connect, table):
@@ -82,8 +126,8 @@ class TestWalBase:
         assert status.OK()
         logging.getLogger().info(res) # should be 0 because no auto flush
         logging.getLogger().info("Stop server and restart")
-        time.sleep(20)
-        # restarted
+        # kill server and restart. auto flush should be set to 15 seconds.
+        time.sleep(15)
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
@@ -93,5 +137,3 @@ class TestWalBase:
         logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vector[0])
-
-    
