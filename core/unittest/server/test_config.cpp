@@ -415,6 +415,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(result == cache_insert_buffer_size);
 
     std::string cache_insert_data = "true";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CACHE_INSERT_DATA);
@@ -422,6 +423,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == cache_insert_data);
 
     /* engine config */
@@ -449,6 +451,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_use_avx512);
 
 #ifdef MILVUS_GPU_VERSION
@@ -488,6 +491,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == gpu_cache_threshold);
 
     std::string search_resources = "gpu0";

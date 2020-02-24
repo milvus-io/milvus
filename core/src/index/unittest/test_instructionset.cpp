@@ -23,7 +23,7 @@
 TEST(InstructionSetTest, INSTRUCTION_SET_TEST) {
     auto& outstream = std::cout;
 
-    auto support_message = [&outstream](std::string isa_feature, bool is_supported) {
+    auto support_message = [&outstream](const std::string& isa_feature, bool is_supported) {
         outstream << isa_feature << (is_supported ? " supported" : " not supported") << std::endl;
     };
 
