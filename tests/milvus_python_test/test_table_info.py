@@ -18,7 +18,7 @@ tag = "1970-01-01"
 nb = 6000
 
 
-class TestTableInfo:
+class TestTableInfoBase:
     """
     ******************************************************************
       The following cases are used to test `table_info` function
