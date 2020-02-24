@@ -451,9 +451,8 @@ class TestAddBase:
         expected: the table row count equals to nq
         '''
         nq = 5
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nq, dim)
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
         assert len(ids) == nq
@@ -466,10 +465,9 @@ class TestAddBase:
         expected: the table row count equals to nq
         '''
         nq = 5
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nq, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status, ids = connect.add_vectors(partition_name, vectors)
+        status = connect.create_partition(table, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
         assert len(ids) == nq
 
@@ -495,8 +493,7 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         new_tag = "new_tag"
-        partition_name = gen_unique_str()
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=new_tag)
         assert not status.OK()
 
@@ -508,9 +505,8 @@ class TestAddBase:
         expected: the table row count equals to nq
         '''
         nq = 5
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nq, dim)
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         for i in range(5):
             status, ids = connect.add_vectors(table, vectors, partition_tag=tag)

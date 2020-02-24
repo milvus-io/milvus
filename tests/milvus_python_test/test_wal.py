@@ -114,7 +114,7 @@ class TestWalBase:
     def test_wal_server_crashed_recovery(self, connect, table):
         '''
         target: test wal when server crashed unexpectedly and restarted
-        method: add vectors, server container killed before flush, restarted server and flush
+        method: add vectors, server killed before flush, restarted server and flush
         expected: status ok, add request is recovered and vectors added
         '''
         vector = gen_single_vector(dim)
