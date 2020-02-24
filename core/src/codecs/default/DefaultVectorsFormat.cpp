@@ -227,7 +227,7 @@ DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off
     d_it it(target_path);
     //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
     for (; it != it_end; ++it) {
-        const auto& path = it.path();
+        const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
             int rv_fd = open(path.c_str(), O_RDONLY, 00664);
             if (rv_fd == -1) {

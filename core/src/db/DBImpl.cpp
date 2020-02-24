@@ -1340,7 +1340,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
             ttl = meta::HOUR;
         }
 
-        meta_ptr_->CleanUpFilesWithTTL(ttl, &OngoingFileChecker::GetInstance());
+        meta_ptr_->CleanUpFilesWithTTL(ttl);
     }
 
     // ENGINE_LOG_TRACE << " Background compaction thread exit";
