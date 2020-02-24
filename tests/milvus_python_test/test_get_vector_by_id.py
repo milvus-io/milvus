@@ -14,11 +14,10 @@ index_file_size = 10
 table_id = "test_get_vector_by_id"
 DELETE_TIMEOUT = 60
 nprobe = 1
-epsilon = 0.0001
 tag = "1970-01-01"
 top_k = 1
 nb = 6000
-
+tag = "partition_tag"
 
 class TestGetBase:
     """
@@ -50,6 +49,23 @@ class TestGetBase:
         '''
         vectors = gen_vectors(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, res = connect.get_vector_by_id(table, ids[0])
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert_equal_vector(res, vectors[0])
+
+    def test_get_vector_partition(self, connect, table):
+        '''
+        target: test get_vector_by_id
+        method: add vector, and get
+        expected: status ok, vector returned
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(table, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -215,6 +231,27 @@ class TestGetIndexedVectors:
         assert status.OK()
         assert not res
 
+    def test_get_vector_partition(self, connect, table, get_simple_index_params, get_id):
+        '''
+        target: test get_vector_by_id
+        method: add vector, and get
+        expected: status ok, vector returned
+        '''
+        index_params = get_simple_index_params
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(table, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.create_index(table, index_params)
+        assert status.OK()
+        id = get_id
+        status, res = connect.get_vector_by_id(table, ids[id])
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert not res
+
 
 class TestGetBinary:
     """
@@ -299,6 +336,23 @@ class TestGetBinary:
         table_new = gen_unique_str()
         status, res = connect.get_vector_by_id(table_new, 1) 
         assert not status.OK()
+
+    def test_get_vector_partition(self, connect, table):
+        '''
+        target: test get_vector_by_id
+        method: add vector, and get
+        expected: status ok, vector returned
+        '''
+        tmp, vectors = gen_binary_vectors(nb, dim)
+        status = connect.create_partition(table, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, res = connect.get_vector_by_id(table, ids[0])
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert res == vectors[0] 
 
 
 class TestGetVectorIdIngalid(object):
