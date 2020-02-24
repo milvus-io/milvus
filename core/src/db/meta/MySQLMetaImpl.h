@@ -125,7 +125,7 @@ class MySQLMetaImpl : public Meta {
     CleanUpShadowFiles() override;
 
     Status
-    CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) override;
+    CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter = nullptr*/) override;
 
     Status
     DropAll() override;
