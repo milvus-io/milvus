@@ -43,6 +43,8 @@ DropPartitionRequest::OnExecute() {
 
     // step 1: check table name
     auto status = ValidationUtil::ValidateTableName(table_name);
+    fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
+               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }

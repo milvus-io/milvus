@@ -611,7 +611,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::milvus::grpc::PartitionList partition_list;
     handler->ShowPartitions(&context, &table_name, &partition_list);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-    ASSERT_EQ(partition_list.partition_tag_array_size(), 1);
+    ASSERT_EQ(partition_list.partition_tag_array_size(), 2);
 
     fiu_init(0);
     fiu_enable("ShowPartitionsRequest.OnExecute.invalid_table_name", 1, NULL, 0);

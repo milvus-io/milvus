@@ -531,10 +531,6 @@ WebRequestHandler::DropIndex(const OString& table_name) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param) {
-    if (nullptr == param->partition_name.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_name\' is required")
-    }
-
     if (nullptr == param->partition_tag.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_tag\' is required")
     }
