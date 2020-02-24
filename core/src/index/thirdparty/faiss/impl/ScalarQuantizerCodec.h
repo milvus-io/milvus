@@ -37,7 +37,6 @@ namespace faiss {
  */
 
 struct Codec8bit {
-
     static void encode_component (float x, uint8_t *code, int i) {
         code[i] = (int)(255 * x);
     }
@@ -65,7 +64,6 @@ struct Codec8bit {
 
 
 struct Codec4bit {
-
     static void encode_component (float x, uint8_t *code, int i) {
         code [i / 2] |= (int)(x * 15.0) << ((i & 1) << 2);
     }
@@ -73,7 +71,6 @@ struct Codec4bit {
     static float decode_component (const uint8_t *code, int i) {
         return (((code[i / 2] >> ((i & 1) << 2)) & 0xf) + 0.5f) / 15.0f;
     }
-
 
 #ifdef USE_AVX
     static __m256 decode_8_components (const uint8_t *code, int i) {
@@ -99,7 +96,6 @@ struct Codec4bit {
 };
 
 struct Codec6bit {
-
     static void encode_component (float x, uint8_t *code, int i) {
         int bits = (int)(x * 63.0);
         code += (i >> 2) * 3;
@@ -213,7 +209,6 @@ struct QuantizerTemplate<Codec, true, 1>: Quantizer {
 
 template<class Codec>
 struct QuantizerTemplate<Codec, true, 8>: QuantizerTemplate<Codec, true, 1> {
-
     QuantizerTemplate (size_t d, const std::vector<float> &trained):
         QuantizerTemplate<Codec, true, 1> (d, trained) {}
 
@@ -259,7 +254,6 @@ struct QuantizerTemplate<Codec, false, 1>: Quantizer {
         float xi = Codec::decode_component (code, i);
         return vmin[i] + xi * vdiff[i];
     }
-
 };
 
 
@@ -267,7 +261,6 @@ struct QuantizerTemplate<Codec, false, 1>: Quantizer {
 
 template<class Codec>
 struct QuantizerTemplate<Codec, false, 8>: QuantizerTemplate<Codec, false, 1> {
-
     QuantizerTemplate (size_t d, const std::vector<float> &trained):
         QuantizerTemplate<Codec, false, 1> (d, trained) {}
 
@@ -316,7 +309,6 @@ struct QuantizerFP16<1>: Quantizer {
 
 template<>
 struct QuantizerFP16<8>: QuantizerFP16<1> {
-
     QuantizerFP16 (size_t d, const std::vector<float> &trained):
         QuantizerFP16<1> (d, trained) {}
 
@@ -366,7 +358,6 @@ struct Quantizer8bitDirect<1>: Quantizer {
 
 template<>
 struct Quantizer8bitDirect<8>: Quantizer8bitDirect<1> {
-
     Quantizer8bitDirect (size_t d, const std::vector<float> &trained):
         Quantizer8bitDirect<1> (d, trained) {}
 
@@ -665,7 +656,6 @@ struct DCTemplate<Quantizer, Similarity, 1> : SQDistanceComputer
     {}
 
     float compute_distance(const float* x, const uint8_t* code) const {
-
         Similarity sim(x);
         sim.begin();
         for (size_t i = 0; i < quant.d; i++) {
@@ -720,7 +710,6 @@ struct DCTemplate<Quantizer, Similarity, 8> : SQDistanceComputer
     {}
 
     float compute_distance(const float* x, const uint8_t* code) const {
-
         Similarity sim(x);
         sim.begin_8();
         for (size_t i = 0; i < quant.d; i += 8) {
@@ -853,7 +842,6 @@ struct DistanceComputerByte<Similarity, 8> : SQDistanceComputer {
                 prod32 = _mm256_madd_epi16(diff, diff);
             }
             accu = _mm256_add_epi32 (accu, prod32);
-
         }
         __m128i sum = _mm256_extractf128_si256(accu, 0);
         sum = _mm_add_epi32 (sum, _mm256_extractf128_si256(accu, 1));

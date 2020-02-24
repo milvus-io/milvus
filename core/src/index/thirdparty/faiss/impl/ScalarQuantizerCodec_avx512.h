@@ -55,7 +55,6 @@ namespace faiss {
  */
 
 struct Codec8bit_avx512 {
-
     static void encode_component (float x, uint8_t *code, int i) {
         code[i] = (int)(255 * x);
     }
@@ -100,7 +99,6 @@ struct Codec8bit_avx512 {
 
 
 struct Codec4bit_avx512 {
-
     static void encode_component (float x, uint8_t *code, int i) {
         code [i / 2] |= (int)(x * 15.0) << ((i & 1) << 2);
     }
@@ -108,7 +106,6 @@ struct Codec4bit_avx512 {
     static float decode_component (const uint8_t *code, int i) {
         return (((code[i / 2] >> ((i & 1) << 2)) & 0xf) + 0.5f) / 15.0f;
     }
-
 
 #ifdef USE_AVX
     static __m256 decode_8_components (const uint8_t *code, int i) {
@@ -156,7 +153,6 @@ struct Codec4bit_avx512 {
 };
 
 struct Codec6bit_avx512 {
-
     static void encode_component (float x, uint8_t *code, int i) {
         int bits = (int)(x * 63.0);
         code += (i >> 2) * 3;
@@ -290,7 +286,6 @@ struct QuantizerTemplate_avx512<Codec, true, 1>: Quantizer {
 #ifdef USE_AVX
 template<class Codec>
 struct QuantizerTemplate_avx512<Codec, true, 8>: QuantizerTemplate_avx512<Codec, true, 1> {
-
     QuantizerTemplate_avx512 (size_t d, const std::vector<float> &trained):
         QuantizerTemplate_avx512<Codec, true, 1> (d, trained) {}
 
@@ -305,7 +300,6 @@ struct QuantizerTemplate_avx512<Codec, true, 8>: QuantizerTemplate_avx512<Codec,
 #ifdef USE_AVX_512
 template<class Codec>
 struct QuantizerTemplate_avx512<Codec, true, 16>: QuantizerTemplate_avx512<Codec, true, 1> {
-
     QuantizerTemplate_avx512 (size_t d, const std::vector<float> &trained):
         QuantizerTemplate_avx512<Codec, true, 1> (d, trained) {}
 
@@ -314,7 +308,6 @@ struct QuantizerTemplate_avx512<Codec, true, 16>: QuantizerTemplate_avx512<Codec
         __m512 xi = Codec::decode_16_components (code, i);
         return _mm512_set1_ps(this->vmin) + xi * _mm512_set1_ps (this->vdiff);
     }
-
 };
 #endif
 
@@ -350,14 +343,12 @@ struct QuantizerTemplate_avx512<Codec, false, 1>: Quantizer {
         float xi = Codec::decode_component (code, i);
         return vmin[i] + xi * vdiff[i];
     }
-
 };
 
 
 #ifdef USE_AVX
 template<class Codec>
 struct QuantizerTemplate_avx512<Codec, false, 8>: QuantizerTemplate_avx512<Codec, false, 1> {
-
     QuantizerTemplate_avx512 (size_t d, const std::vector<float> &trained):
         QuantizerTemplate_avx512<Codec, false, 1> (d, trained) {}
 
@@ -381,8 +372,6 @@ struct QuantizerTemplate_avx512<Codec, false, 16>: QuantizerTemplate_avx512<Code
         __m512 xi = Codec::decode_16_components (code, i);
         return _mm512_loadu_ps (this->vmin + i) + xi * _mm512_loadu_ps (this->vdiff + i);
     }
-
-
 };
 #endif
 
@@ -421,7 +410,6 @@ struct QuantizerFP16_avx512<1>: Quantizer {
 #ifdef USE_AVX
 template<>
 struct QuantizerFP16_avx512<8>: QuantizerFP16_avx512<1> {
-
     QuantizerFP16_avx512 (size_t d, const std::vector<float> &trained):
         QuantizerFP16_avx512<1> (d, trained) {}
 
@@ -436,7 +424,6 @@ struct QuantizerFP16_avx512<8>: QuantizerFP16_avx512<1> {
 #ifdef USE_AVX_512
 template<>
 struct QuantizerFP16_avx512<16>: QuantizerFP16_avx512<1> {
-
     QuantizerFP16_avx512 (size_t d, const std::vector<float> &trained):
         QuantizerFP16_avx512<1> (d, trained) {}
 
@@ -445,7 +432,6 @@ struct QuantizerFP16_avx512<16>: QuantizerFP16_avx512<1> {
         __m256i codei = _mm256_loadu_si256 ((const __m256i*)(code + 2 * i));
         return _mm512_cvtph_ps (codei);
     }
-
 };
 #endif
 
@@ -485,7 +471,6 @@ struct Quantizer8bitDirect_avx512<1>: Quantizer {
 #ifdef USE_AVX
 template<>
 struct Quantizer8bitDirect_avx512<8>: Quantizer8bitDirect_avx512<1> {
-
     Quantizer8bitDirect_avx512 (size_t d, const std::vector<float> &trained):
         Quantizer8bitDirect_avx512<1> (d, trained) {}
 
@@ -511,7 +496,6 @@ struct Quantizer8bitDirect_avx512<16>: Quantizer8bitDirect_avx512<1> {
         __m512i y8 = _mm512_cvtepu8_epi32 (x8);  // 16 * int32
         return _mm512_cvtepi32_ps (y8); // 16 * float32
     }
-
 };
 #endif
 
@@ -622,7 +606,6 @@ struct SimilarityL2_avx512<8> {
             _mm_cvtss_f32 (_mm256_castps256_ps128(sum2)) +
             _mm_cvtss_f32 (_mm256_extractf128_ps(sum2, 1));
     }
-
 };
 #endif
 
@@ -663,7 +646,6 @@ struct SimilarityL2_avx512<16> {
             _mm_cvtss_f32 (_mm256_castps256_ps128(sum2)) +
             _mm_cvtss_f32 (_mm256_extractf128_ps(sum2, 1));
     }
-
 };
 #endif
 
@@ -805,7 +787,6 @@ struct DCTemplate_avx512<Quantizer, Similarity, 1> : SQDistanceComputer
     {}
 
     float compute_distance(const float* x, const uint8_t* code) const {
-
         Similarity sim(x);
         sim.begin();
         for (size_t i = 0; i < quant.d; i++) {
@@ -914,7 +895,6 @@ struct DCTemplate_avx512<Quantizer, Similarity, 16> : SQDistanceComputer
     {}
 
     float compute_distance(const float* x, const uint8_t* code) const {
-
         Similarity sim(x);
         sim.begin_16();
         for (size_t i = 0; i < quant.d; i += 16) {
@@ -953,7 +933,6 @@ struct DCTemplate_avx512<Quantizer, Similarity, 16> : SQDistanceComputer
     float query_to_code (const uint8_t * code) const {
         return compute_distance (q, code);
     }
-
 };
 #endif
 
@@ -1044,7 +1023,6 @@ struct DistanceComputerByte_avx512<Similarity, 8> : SQDistanceComputer {
                 prod32 = _mm256_madd_epi16(diff, diff);
             }
             accu = _mm256_add_epi32 (accu, prod32);
-
         }
         __m128i sum = _mm256_extractf128_si256(accu, 0);
         sum = _mm_add_epi32 (sum, _mm256_extractf128_si256(accu, 1));
