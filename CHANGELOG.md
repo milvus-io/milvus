@@ -55,6 +55,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 - \#741, #856, #879, #973, #1100, #1163, #1175, #1206, #1219, #1225, #1233, #1258, #1265, #1274, #1292, #1305 - Various fixes and improvements for Milvus documentation.
 - \#1263 - Allow system conf modifiable and some take effect directly
+- \#1320 - Remove debug logging from faiss
 
 ## Task
 
