@@ -36,7 +36,7 @@ class TestSearchBase:
             status, ids = connect.add_vectors(table, add_vectors)
             assert status.OK()
         else:
-            status, ids = connect.add_vectors(table, add_vectors, partition_tags)
+            status, ids = connect.add_vectors(table, add_vectors, partition_tag=partition_tags)
             assert status.OK()
         sleep(add_interval_time)
         return add_vectors, ids
@@ -58,7 +58,7 @@ class TestSearchBase:
                 status, ids = connect.add_vectors(table, add_vectors)
                 assert status.OK()
             else:
-                status, ids = connect.add_vectors(table, add_vectors, partition_tags)
+                status, ids = connect.add_vectors(table, add_vectors, partition_tag=partition_tags)
                 assert status.OK()
             sleep(add_interval_time)
         return add_raw_vectors, add_vectors, ids
