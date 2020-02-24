@@ -47,7 +47,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            int rv_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+            int rv_fd = open(path.c_str(), O_RDONLY, 00664);
             if (rv_fd == -1) {
                 std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
@@ -72,7 +72,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
             }
         }
         if (path.extension().string() == user_id_extension_) {
-            int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+            int uid_fd = open(path.c_str(), O_RDONLY, 00664);
             if (uid_fd == -1) {
                 std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
@@ -131,13 +131,13 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
     fclose(rv_file);
     */
 
-    int rv_fd = open(rv_file_path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+    int rv_fd = open(rv_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
     if (rv_fd == -1) {
         std::string err_msg = "Failed to open file: " + rv_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
-    int uid_fd = open(uid_file_path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+    int uid_fd = open(uid_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
     if (uid_fd == -1) {
         std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
@@ -186,7 +186,7 @@ DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::v
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
-            int uid_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+            int uid_fd = open(path.c_str(), O_RDONLY, 00664);
             if (uid_fd == -1) {
                 std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
@@ -221,10 +221,15 @@ DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-        const auto& path = it.path();
+    boost::filesystem::path target_path(dir_path);
+    typedef boost::filesystem::directory_iterator d_it;
+    d_it it_end;
+    d_it it(target_path);
+    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
+    for (; it != it_end; ++it) {
+        const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            int rv_fd = open(path.c_str(), O_RDWR | O_APPEND | O_CREAT, 00664);
+            int rv_fd = open(path.c_str(), O_RDONLY, 00664);
             if (rv_fd == -1) {
                 std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;

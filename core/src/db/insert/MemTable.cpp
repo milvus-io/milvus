@@ -26,6 +26,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "utils/Log.h"
 
@@ -190,6 +191,9 @@ MemTable::ApplyDeletes() {
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(table_files);
+
     std::unordered_map<size_t, std::vector<segment::doc_id_t>> ids_to_check_map;
 
     for (size_t i = 0; i < table_files.size(); ++i) {
@@ -207,6 +211,15 @@ MemTable::ApplyDeletes() {
             }
         }
     }
+
+    meta::TableFilesSchema files_to_check;
+    for (auto& kv : ids_to_check_map) {
+        files_to_check.emplace_back(table_files[kv.first]);
+    }
+
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(table_files);
+
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_check);
 
     ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes";
 
@@ -311,6 +324,8 @@ MemTable::ApplyDeletes() {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
     ENGINE_LOG_DEBUG << "Finished applying deletes in table " << table_id_ << " in " << diff.count() << " s";
+
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 
     return Status::OK();
 }

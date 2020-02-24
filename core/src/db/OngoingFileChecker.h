@@ -29,8 +29,11 @@
 namespace milvus {
 namespace engine {
 
-class OngoingFileChecker : public meta::Meta::CleanUpFilter {
+class OngoingFileChecker {
  public:
+    static OngoingFileChecker&
+    GetInstance();
+
     Status
     MarkOngoingFile(const meta::TableFileSchema& table_file);
 
@@ -44,7 +47,7 @@ class OngoingFileChecker : public meta::Meta::CleanUpFilter {
     UnmarkOngoingFiles(const meta::TableFilesSchema& table_files);
 
     bool
-    IsIgnored(const meta::TableFileSchema& schema) override;
+    IsIgnored(const meta::TableFileSchema& schema);
 
  private:
     Status
