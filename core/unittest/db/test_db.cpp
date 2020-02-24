@@ -917,7 +917,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     stat = db_->InsertVectors(table_info.table_id_, partition_tag, qxb);
     ASSERT_TRUE(stat.ok());
 
-    db_->Flush();
+    db_->Flush(table_info.table_id_);
 
     milvus::engine::VectorsData vector_data;
     stat = db_->GetVectorByID(TABLE_NAME, qxb.id_array_[0], vector_data);
