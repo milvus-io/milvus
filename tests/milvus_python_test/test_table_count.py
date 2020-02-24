@@ -91,54 +91,6 @@ class TestTableCount:
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
-    '''
-    def test_table_rows_count_multi_partitions_B(self, connect, table, add_vectors_nb):
-        
-        target: test table rows_count is correct or not
-        method: create table, create partitions and add vectors in one of the partitions,
-            assert the value returned by get_table_row_count method is equal to length of vectors
-        expected: the count is equal to the length of vectors
-        
-        new_tag = "new_tag"
-        nb = add_vectors_nb
-        vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status = connect.create_partition(table, new_partition_name, new_tag)
-        assert status.OK()
-        res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
-        time.sleep(add_time_interval)
-        status, res = connect.get_table_row_count(partition_name)
-        assert res == nb
-        status, res = connect.get_table_row_count(new_partition_name)
-        assert res == 0
-
-    def test_table_rows_count_multi_partitions_C(self, connect, table, add_vectors_nb):
-        
-        target: test table rows_count is correct or not
-        method: create table, create partitions and add vectors in one of the partitions,
-            assert the value returned by get_table_row_count method is equal to length of vectors
-        expected: the table count is equal to the length of vectors
-        
-        new_tag = "new_tag"
-        nb = add_vectors_nb
-        partition_name = gen_unique_str()
-        new_partition_name = gen_unique_str()
-        vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status = connect.create_partition(table, new_partition_name, new_tag)
-        assert status.OK()
-        res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
-        res = connect.add_vectors(table_name=table, records=vectors, partition_tag=new_tag)
-        time.sleep(add_time_interval)
-        status, res = connect.get_table_row_count(partition_name)
-        assert res == nb
-        status, res = connect.get_table_row_count(new_partition_name)
-        assert res == nb
-        status, res = connect.get_table_row_count(table)
-        assert res == nb * 2
-
-    '''
-
     def test_table_rows_count_after_index_created(self, connect, table, get_simple_index_params):
         '''
         target: test get_table_row_count, after index have been created
