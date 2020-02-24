@@ -59,7 +59,7 @@ class DBImpl : public DB {
     CreateTable(meta::TableSchema& table_schema) override;
 
     Status
-    DropTable(const std::string& table_id, const meta::DatesT& dates) override;
+    DropTable(const std::string& table_id) override;
 
     Status
     DescribeTable(meta::TableSchema& table_schema) override;
@@ -139,14 +139,9 @@ class DBImpl : public DB {
           ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-          const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) override;
-
-    Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
                   const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                  const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) override;
+                  ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
@@ -175,7 +170,7 @@ class DBImpl : public DB {
     StartCompactionTask();
 
     Status
-    MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files);
+    MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files);
     Status
     BackgroundMergeFiles(const std::string& table_id);
     void
@@ -199,19 +194,17 @@ class DBImpl : public DB {
                          meta::TableFilesSchema& files);
 
     Status
-    GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
-                     meta::TableFilesSchema& files);
+    GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, meta::TableFilesSchema& files);
 
     Status
-    GetPartitionByTag(const std::string& table_id, const std::string& partition_tags,
-                      std::string& partition_name_array);
+    GetPartitionByTag(const std::string& table_id, const std::string& partition_tag, std::string& partition_name);
 
     Status
     GetPartitionsByTags(const std::string& table_id, const std::vector<std::string>& partition_tags,
                         std::set<std::string>& partition_name_array);
 
     Status
-    DropTableRecursively(const std::string& table_id, const meta::DatesT& dates);
+    DropTableRecursively(const std::string& table_id);
 
     Status
     UpdateTableIndexRecursively(const std::string& table_id, const TableIndex& index);

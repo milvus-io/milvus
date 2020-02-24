@@ -285,18 +285,6 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     }
     handler->Search(&context, &request, &response);
 
-    // test search with range
-    ::milvus::grpc::Range* range = request.mutable_query_range_array()->Add();
-    range->set_start_value(CurrentTmDate(-2));
-    range->set_end_value(CurrentTmDate(-3));
-    handler->Search(&context, &request, &response);
-    request.mutable_query_range_array()->Clear();
-
-    request.set_table_name("test2");
-    handler->Search(&context, &request, &response);
-    request.set_table_name(TABLE_NAME);
-    handler->Search(&context, &request, &response);
-
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string* file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
@@ -427,8 +415,6 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     ::milvus::grpc::PartitionParam partition_param;
     partition_param.set_table_name(str_table_name);
-    std::string partition_name = "tbl_partition_0";
-    partition_param.set_partition_name(partition_name);
     std::string partition_tag = "0";
     partition_param.set_tag(partition_tag);
     handler->CreatePartition(&context, &partition_param, &response);
@@ -439,17 +425,13 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::milvus::grpc::PartitionList partition_list;
     handler->ShowPartitions(&context, &table_name, &partition_list);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-    ASSERT_EQ(partition_list.partition_array_size(), 1);
+    ASSERT_EQ(partition_list.partition_tag_array_size(), 1);
 
     ::milvus::grpc::PartitionParam partition_parm;
     partition_parm.set_table_name(str_table_name);
     partition_parm.set_tag(partition_tag);
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-
-    partition_parm.set_partition_name(partition_name);
-    handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
@@ -466,32 +448,6 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
     command.set_cmd("test");
     handler->Cmd(&context, &command, &reply);
-}
-
-TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
-    ::grpc::ServerContext context;
-    handler->SetContext(&context, dummy_context);
-    handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    ::milvus::grpc::DeleteByDateParam request;
-    ::milvus::grpc::Status status;
-    handler->DeleteByDate(&context, nullptr, &status);
-    handler->DeleteByDate(&context, &request, &status);
-
-    request.set_table_name(TABLE_NAME);
-    request.mutable_range()->set_start_value(CurrentTmDate(-3));
-    request.mutable_range()->set_end_value(CurrentTmDate(-2));
-
-    ::grpc::Status grpc_status = handler->DeleteByDate(&context, &request, &status);
-    int error_code = status.error_code();
-    //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
-
-    request.mutable_range()->set_start_value("test6");
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-    request.mutable_range()->set_start_value(CurrentTmDate(-2));
-    request.mutable_range()->set_end_value("test6");
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-    request.mutable_range()->set_end_value(CurrentTmDate(-2));
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
 }
 
 //////////////////////////////////////////////////////////////////////

@@ -28,20 +28,19 @@ namespace milvus {
 namespace server {
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                               const std::string& partition_name, const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), partition_name_(partition_name), tag_(tag) {
+                                               const std::string& tag)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), tag_(tag) {
 }
 
 BaseRequestPtr
 CreatePartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                               const std::string& partition_name, const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, partition_name, tag));
+                               const std::string& tag) {
+    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, table_name, tag));
 }
 
 Status
 CreatePartitionRequest::OnExecute() {
-    std::string hdr = "CreatePartitionRequest(table=" + table_name_ + ", partition_name=" + partition_name_ +
-                      ", partition_tag=" + tag_ + ")";
+    std::string hdr = "CreatePartitionRequest(table=" + table_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
@@ -51,18 +50,31 @@ CreatePartitionRequest::OnExecute() {
             return status;
         }
 
-        status = ValidationUtil::ValidatePartitionName(partition_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
         status = ValidationUtil::ValidatePartitionTags({tag_});
         if (!status.ok()) {
             return status;
         }
 
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            } else {
+                return status;
+            }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
+        }
+
+        rc.RecordSection("check validation");
+
         // step 2: create partition
-        status = DBWrapper::DB()->CreatePartition(table_name_, partition_name_, tag_);
+        status = DBWrapper::DB()->CreatePartition(table_name_, "", tag_);
         if (!status.ok()) {
             // partition could exist
             if (status.code() == DB_ALREADY_EXIST) {

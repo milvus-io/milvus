@@ -517,7 +517,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type"
                            << " ,owner_table, partition_tag, version"
                            << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(TableSchema::TO_DELETE)
-                           << ";";
+                           << " AND owner_table <> \"\";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
 
@@ -690,58 +690,6 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
     }
-}
-
-// TODO(myh): Delete single vecotor by id
-Status
-MySQLMetaImpl::DropDataByDate(const std::string& table_id, const DatesT& dates) {
-    if (dates.empty()) {
-        return Status::OK();
-    }
-
-    TableSchema table_schema;
-    table_schema.table_id_ = table_id;
-    auto status = DescribeTable(table_schema);
-    if (!status.ok()) {
-        return status;
-    }
-
-    try {
-        std::stringstream dateListSS;
-        for (auto& date : dates) {
-            dateListSS << std::to_string(date) << ", ";
-        }
-        std::string dateListStr = dateListSS.str();
-        dateListStr = dateListStr.substr(0, dateListStr.size() - 2);  // remove the last ", "
-
-        {
-            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
-
-            if (connectionPtr == nullptr) {
-                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
-            }
-
-            mysqlpp::Query dropPartitionsByDatesQuery = connectionPtr->query();
-
-            dropPartitionsByDatesQuery << "UPDATE " << META_TABLEFILES
-                                       << " SET file_type = " << std::to_string(TableFileSchema::TO_DELETE)
-                                       << " ,updated_time = " << utils::GetMicroSecTimeStamp()
-                                       << " WHERE table_id = " << mysqlpp::quote << table_id << " AND date in ("
-                                       << dateListStr << ");";
-
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropDataByDate: " << dropPartitionsByDatesQuery.str();
-
-            if (!dropPartitionsByDatesQuery.exec()) {
-                return HandleException("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES",
-                                       dropPartitionsByDatesQuery.error());
-            }
-        }  // Scoped Connection
-
-        ENGINE_LOG_DEBUG << "Successfully drop data by date, table id = " << table_schema.table_id_;
-    } catch (std::exception& e) {
-        return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
-    }
-    return Status::OK();
 }
 
 Status
@@ -1403,8 +1351,10 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             }
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
-            allPartitionsQuery << "SELECT table_id FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
-                               << table_id << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+            allPartitionsQuery << "SELECT table_id id, state, dimension, created_on, flag, index_file_size,"
+                               << " engine_type, nlist, metric_type FROM " << META_TABLES
+                               << " WHERE owner_table = " << mysqlpp::quote << table_id << " AND state <> "
+                               << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allPartitionsQuery.str();
 
@@ -1414,7 +1364,19 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
         for (auto& resRow : res) {
             meta::TableSchema partition_schema;
             resRow["table_id"].to_string(partition_schema.table_id_);
-            DescribeTable(partition_schema);
+            partition_schema.id_ = resRow["id"];  // implicit conversion
+            partition_schema.state_ = resRow["state"];
+            partition_schema.dimension_ = resRow["dimension"];
+            partition_schema.created_on_ = resRow["created_on"];
+            partition_schema.flag_ = resRow["flag"];
+            partition_schema.index_file_size_ = resRow["index_file_size"];
+            partition_schema.engine_type_ = resRow["engine_type"];
+            partition_schema.nlist_ = resRow["nlist"];
+            partition_schema.metric_type_ = resRow["metric_type"];
+            resRow["owner_table"].to_string(partition_schema.owner_table_);
+            resRow["partition_tag"].to_string(partition_schema.partition_tag_);
+            resRow["version"].to_string(partition_schema.version_);
+
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
@@ -1466,8 +1428,7 @@ MySQLMetaImpl::GetPartitionName(const std::string& table_id, const std::string& 
 }
 
 Status
-MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
-                             DatePartionedTableFilesSchema& files) {
+MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) {
     files.clear();
 
     try {
@@ -1484,17 +1445,6 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
             filesToSearchQuery
                 << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date"
                 << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id;
-
-            if (!dates.empty()) {
-                std::stringstream partitionListSS;
-                for (auto& date : dates) {
-                    partitionListSS << std::to_string(date) << ", ";
-                }
-                std::string partitionListStr = partitionListSS.str();
-
-                partitionListStr = partitionListStr.substr(0, partitionListStr.size() - 2);  // remove the last ", "
-                filesToSearchQuery << " AND date IN (" << partitionListStr << ")";
-            }
 
             if (!ids.empty()) {
                 std::stringstream idSS;
@@ -1525,8 +1475,8 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
         }
 
         Status ret;
-        TableFileSchema table_file;
         for (auto& resRow : res) {
+            TableFileSchema table_file;
             table_file.id_ = resRow["id"];  // implicit conversion
             resRow["table_id"].to_string(table_file.table_id_);
             resRow["segment_id"].to_string(table_file.segment_id_);
@@ -1546,12 +1496,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
                 ret = status;
             }
 
-            auto dateItr = files.find(table_file.date_);
-            if (dateItr == files.end()) {
-                files[table_file.date_] = TableFilesSchema();
-            }
-
-            files[table_file.date_].push_back(table_file);
+            files.emplace_back(table_file);
         }
 
         if (res.size() > 0) {
@@ -1564,7 +1509,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
 }
 
 Status
-MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) {
+MySQLMetaImpl::FilesToMerge(const std::string& table_id, TableFilesSchema& files) {
     files.clear();
 
     try {
@@ -1626,13 +1571,8 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, DatePartionedTableFiles
                 ret = status;
             }
 
-            auto dateItr = files.find(table_file.date_);
-            if (dateItr == files.end()) {
-                files[table_file.date_] = TableFilesSchema();
-                ++to_merge_files;
-            }
-
-            files[table_file.date_].push_back(table_file);
+            files.emplace_back(table_file);
+            ++to_merge_files;
         }
 
         if (to_merge_files > 0) {
