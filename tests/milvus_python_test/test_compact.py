@@ -79,7 +79,7 @@ class TestCompactBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info)
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -87,7 +87,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -105,7 +105,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -113,7 +113,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -137,7 +137,7 @@ class TestCompactBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(size_before)
         status = connect.compact(table)
         assert status.OK()
@@ -147,7 +147,7 @@ class TestCompactBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(size_after)
         assert(size_before > size_after)
     
@@ -178,7 +178,7 @@ class TestCompactBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        assert(len(info.partitions_stat[0].segment_stats) == 0)
+        assert(len(info.partitions_stat[0].segments_stat) == 0)
 
     @pytest.fixture(
         scope="function",
@@ -212,7 +212,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(info.partitions_stat)
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_by_id(table, delete_ids)
@@ -227,7 +227,7 @@ class TestCompactBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before > size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -245,7 +245,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -253,7 +253,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
         status = connect.compact(table)
         assert status.OK()
@@ -262,7 +262,7 @@ class TestCompactBase:
         # get table info after compact twice
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after_twice = info.partitions_stat[0].segment_stats[0].data_size
+        size_after_twice = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -285,7 +285,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -293,7 +293,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before > size_after)
         status = connect.compact(table)
         assert status.OK()
@@ -302,7 +302,7 @@ class TestCompactBase:
         # get table info after compact twice
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after_twice = info.partitions_stat[0].segment_stats[0].data_size
+        size_after_twice = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -346,7 +346,7 @@ class TestCompactBase:
         # get table info before compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(table)
         assert status.OK()
         status = connect.flush([table])
@@ -354,7 +354,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
@@ -444,7 +444,7 @@ class TestCompactJAC:
         # get table info before compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
@@ -452,7 +452,7 @@ class TestCompactJAC:
         # get table info after compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -470,7 +470,7 @@ class TestCompactJAC:
         # get table info before compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
@@ -478,7 +478,7 @@ class TestCompactJAC:
         # get table info after compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -502,7 +502,7 @@ class TestCompactJAC:
         status, info = connect.table_info(jac_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(size_before)
         status = connect.compact(jac_table)
         assert status.OK()
@@ -512,7 +512,7 @@ class TestCompactJAC:
         status, info = connect.table_info(jac_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(size_after)
         assert(size_before > size_after)
     
@@ -543,7 +543,7 @@ class TestCompactJAC:
         status, info = connect.table_info(jac_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        assert(len(info.partitions_stat.segment_stats) == 0)
+        assert(len(info.partitions_stat.segments_stat) == 0)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, jac_table):
@@ -560,7 +560,7 @@ class TestCompactJAC:
         # get table info before compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
@@ -568,7 +568,7 @@ class TestCompactJAC:
         # get table info after compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
         status = connect.compact(jac_table)
         assert status.OK()
@@ -577,7 +577,7 @@ class TestCompactJAC:
         # get table info after compact twice
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after_twice = info.partitions_stat[0].segment_stats[0].data_size
+        size_after_twice = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -600,7 +600,7 @@ class TestCompactJAC:
         # get table info before compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
@@ -608,7 +608,7 @@ class TestCompactJAC:
         # get table info after compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before > size_after)
         status = connect.compact(jac_table)
         assert status.OK()
@@ -617,7 +617,7 @@ class TestCompactJAC:
         # get table info after compact twice
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after_twice = info.partitions_stat[0].segment_stats[0].data_size
+        size_after_twice = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -661,7 +661,7 @@ class TestCompactJAC:
         # get table info before compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(jac_table)
         assert status.OK()
         status = connect.flush([jac_table])
@@ -669,7 +669,7 @@ class TestCompactJAC:
         # get table info after compact
         status, info = connect.table_info(jac_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
         tmp, vector = gen_binary_vectors(1, dim)
         status, ids = connect.add_vectors(jac_table, vector)
@@ -739,7 +739,7 @@ class TestCompactIP:
         # get table info before compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
@@ -747,7 +747,7 @@ class TestCompactIP:
         # get table info after compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -765,7 +765,7 @@ class TestCompactIP:
         # get table info before compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
@@ -773,7 +773,7 @@ class TestCompactIP:
         # get table info after compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -797,7 +797,7 @@ class TestCompactIP:
         status, info = connect.table_info(ip_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(size_before)
         status = connect.compact(ip_table)
         assert status.OK()
@@ -807,7 +807,7 @@ class TestCompactIP:
         status, info = connect.table_info(ip_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         logging.getLogger().info(size_after)
         assert(size_before > size_after)
     
@@ -838,7 +838,7 @@ class TestCompactIP:
         status, info = connect.table_info(ip_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        assert(len(info.partitions_stat.segment_stats) == 0)
+        assert(len(info.partitions_stat.segments_stat) == 0)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, ip_table):
@@ -855,7 +855,7 @@ class TestCompactIP:
         # get table info before compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
@@ -863,7 +863,7 @@ class TestCompactIP:
         # get table info after compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
         status = connect.compact(ip_table)
         assert status.OK()
@@ -872,7 +872,7 @@ class TestCompactIP:
         # get table info after compact twice
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after_twice = info.partitions_stat[0].segment_stats[0].data_size
+        size_after_twice = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -895,7 +895,7 @@ class TestCompactIP:
         # get table info before compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
@@ -903,7 +903,7 @@ class TestCompactIP:
         # get table info after compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before > size_after)
         status = connect.compact(ip_table)
         assert status.OK()
@@ -912,7 +912,7 @@ class TestCompactIP:
         # get table info after compact twice
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after_twice = info.partitions_stat[0].segment_stats[0].data_size
+        size_after_twice = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
@@ -956,7 +956,7 @@ class TestCompactIP:
         # get table info before compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_before = info.partitions_stat[0].segment_stats[0].data_size
+        size_before = info.partitions_stat[0].segments_stat[0].data_size
         status = connect.compact(ip_table)
         assert status.OK()
         status = connect.flush([ip_table])
@@ -964,7 +964,7 @@ class TestCompactIP:
         # get table info after compact
         status, info = connect.table_info(ip_table)
         assert status.OK()
-        size_after = info.partitions_stat[0].segment_stats[0].data_size
+        size_after = info.partitions_stat[0].segments_stat[0].data_size
         assert(size_before == size_after)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
