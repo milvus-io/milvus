@@ -1016,6 +1016,10 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
+
+    // drop index which table is non-existent
+    response = client_ptr->dropIndex("Table_name_non_existant_000000000000000000", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 }
 
 TEST_F(WebControllerTest, PARTITION) {
