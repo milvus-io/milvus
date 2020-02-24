@@ -227,7 +227,7 @@ class TestTableInfoBase:
         return request.param
     
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_index_created(self, connect, table):
+    def test_get_table_info_after_index_created(self, connect, table, get_simple_index_params):
         '''
         target: test table info after index created
         method: create table, add vectors, create index and call table_info 

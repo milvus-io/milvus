@@ -543,7 +543,7 @@ class TestCompactJAC:
         status, info = connect.table_info(jac_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        assert(len(info.partitions_stat.segments_stat) == 0)
+        assert(len(info.partitions_stat[0].segments_stat) == 0)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, jac_table):
@@ -838,7 +838,7 @@ class TestCompactIP:
         status, info = connect.table_info(ip_table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat)
-        assert(len(info.partitions_stat.segments_stat) == 0)
+        assert(len(info.partitions_stat[0].segments_stat) == 0)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_vector_and_compact_twice(self, connect, ip_table):
