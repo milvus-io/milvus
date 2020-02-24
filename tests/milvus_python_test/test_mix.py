@@ -19,7 +19,7 @@ vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
 top_k = 1
 nprobe = 1
-epsilon = 0.0001
+epsilon = 0.001
 index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 

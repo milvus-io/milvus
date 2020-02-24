@@ -35,6 +35,7 @@
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
+#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
@@ -1927,7 +1928,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
+MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1943,7 +1944,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
             }
 
             mysqlpp::Query query = connectionPtr->query();
-            query << "SELECT id, table_id, segment_id, file_id, file_type, date"
+            query << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, date"
                   << " FROM " << META_TABLEFILES << " WHERE file_type IN ("
                   << std::to_string(TableFileSchema::TO_DELETE) << "," << std::to_string(TableFileSchema::BACKUP) << ")"
                   << " AND updated_time < " << std::to_string(now - seconds * US_PS) << ";";
@@ -1960,12 +1961,13 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 table_file.id_ = resRow["id"];  // implicit conversion
                 resRow["table_id"].to_string(table_file.table_id_);
                 resRow["segment_id"].to_string(table_file.segment_id_);
+                table_file.engine_type_ = resRow["engine_type"];
                 resRow["file_id"].to_string(table_file.file_id_);
                 table_file.date_ = resRow["date"];
                 table_file.file_type_ = resRow["file_type"];
 
                 // check if the file can be deleted
-                if (filter && filter->IsIgnored(table_file)) {
+                if (OngoingFileChecker::GetInstance().IsIgnored(table_file)) {
                     ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
                                      << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
@@ -1977,11 +1979,19 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
-                    // delete file from disk storage
-                    utils::DeleteSegment(options_, table_file);
-                    std::string segment_dir;
-                    utils::GetParentPath(table_file.location_, segment_dir);
-                    ENGINE_LOG_DEBUG << "Remove segment:" << table_file.segment_id_ << " directory:" << segment_dir;
+                    // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
+                    // Else, we can only delete the single file
+                    // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
+                    if (table_file.engine_type_ == (int32_t)EngineType::FAISS_IDMAP ||
+                        table_file.engine_type_ == (int32_t)EngineType::FAISS_BIN_IDMAP) {
+                        utils::DeleteSegment(options_, table_file);
+                        std::string segment_dir;
+                        utils::GetParentPath(table_file.location_, segment_dir);
+                        ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
+                    } else {
+                        utils::DeleteTableFilePath(options_, table_file);
+                        ENGINE_LOG_DEBUG << "Remove table file: " << table_file.location_;
+                    }
 
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);

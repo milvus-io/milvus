@@ -625,11 +625,11 @@ DBImpl::Compact(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
 
-    ongoing_files_checker_.MarkOngoingFiles(files_to_compact);
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
     for (auto& file : files_to_compact) {
         status = CompactFile(table_id, file);
     }
-    ongoing_files_checker_.UnmarkOngoingFiles(files_to_compact);
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
     ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
 
@@ -763,11 +763,11 @@ DBImpl::GetVectorByID(const std::string& table_id, const IDNumber& vector_id, Ve
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
-    ongoing_files_checker_.MarkOngoingFiles(files_to_query);
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_query);
 
     status = GetVectorByIdHelper(table_id, vector_id, vector, files_to_query);
 
-    ongoing_files_checker_.UnmarkOngoingFiles(files_to_query);
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_query);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
     return status;
@@ -1032,7 +1032,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     TimeRecorder rc("");
 
     // step 1: construct search job
-    auto status = ongoing_files_checker_.MarkOngoingFiles(files);
+    auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nprobe, vectors);
@@ -1045,7 +1045,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitResult();
 
-    status = ongoing_files_checker_.UnmarkOngoingFiles(files);
+    status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files);
     if (!job->GetStatus().ok()) {
         return job->GetStatus();
     }
@@ -1304,9 +1304,9 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
         return Status::OK();
     }
 
-    status = ongoing_files_checker_.MarkOngoingFiles(raw_files);
+    status = OngoingFileChecker::GetInstance().MarkOngoingFiles(raw_files);
     MergeFiles(table_id, raw_files);
-    status = ongoing_files_checker_.UnmarkOngoingFiles(raw_files);
+    status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(raw_files);
 
     if (!initialized_.load(std::memory_order_acquire)) {
         ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table: " << table_id;
@@ -1340,7 +1340,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
             ttl = meta::HOUR;
         }
 
-        meta_ptr_->CleanUpFilesWithTTL(ttl, &ongoing_files_checker_);
+        meta_ptr_->CleanUpFilesWithTTL(ttl);
     }
 
     // ENGINE_LOG_TRACE << " Background compaction thread exit";
@@ -1383,7 +1383,7 @@ DBImpl::BackgroundBuildIndex() {
 
     if (!to_index_files.empty()) {
         ENGINE_LOG_DEBUG << "Background build index thread begin";
-        status = ongoing_files_checker_.MarkOngoingFiles(to_index_files);
+        status = OngoingFileChecker::GetInstance().MarkOngoingFiles(to_index_files);
 
         // step 2: put build index task to scheduler
         std::vector<std::pair<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr>> job2file_map;
@@ -1410,7 +1410,7 @@ DBImpl::BackgroundBuildIndex() {
 
                 index_failed_checker_.MarkSucceedIndexFile(file_schema);
             }
-            status = ongoing_files_checker_.UnmarkOngoingFile(file_schema);
+            status = OngoingFileChecker::GetInstance().UnmarkOngoingFile(file_schema);
         }
 
         ENGINE_LOG_DEBUG << "Background build index thread finished";

@@ -286,7 +286,7 @@ class DBImpl : public DB {
     std::mutex build_index_mutex_;
 
     IndexFailedChecker index_failed_checker_;
-    OngoingFileChecker ongoing_files_checker_;
+    // OngoingFileChecker OngoingFileChecker::GetInstance();
 
     std::mutex flush_merge_compact_mutex_;
 };  // DBImpl

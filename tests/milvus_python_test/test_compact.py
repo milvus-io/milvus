@@ -13,7 +13,6 @@ index_file_size = 10
 COMPACT_TIMEOUT = 30
 nprobe = 1
 top_k = 1
-epsilon = 0.0001
 tag = "1970-01-01"
 nb = 6000
 

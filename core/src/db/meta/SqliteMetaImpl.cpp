@@ -31,6 +31,7 @@
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
+#include "db/OngoingFileChecker.h"
 #include "db/Utils.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
@@ -854,21 +855,13 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
     try {
         server::MetricCollector metric;
 
-        auto partitions = ConnectorPtr->select(columns(&TableSchema::id_,
-                                                       &TableSchema::state_,
-                                                       &TableSchema::dimension_,
-                                                       &TableSchema::created_on_,
-                                                       &TableSchema::flag_,
-                                                       &TableSchema::index_file_size_,
-                                                       &TableSchema::engine_type_,
-                                                       &TableSchema::nlist_,
-                                                       &TableSchema::metric_type_,
-                                                       &TableSchema::owner_table_,
-                                                       &TableSchema::partition_tag_,
-                                                       &TableSchema::version_,
-                                                       &TableSchema::table_id_),
-                                               where(c(&TableSchema::owner_table_) == table_id
-                                                     and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+        auto partitions = ConnectorPtr->select(
+            columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
+                    &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
+                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
+                    &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::table_id_),
+            where(c(&TableSchema::owner_table_) == table_id and
+                  c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (size_t i = 0; i < partitions.size(); i++) {
             meta::TableSchema partition_schema;
             partition_schema.id_ = std::get<0>(partitions[i]);
@@ -1327,7 +1320,7 @@ SqliteMetaImpl::CleanUpShadowFiles() {
 }
 
 Status
-SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
+SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
 
@@ -1346,7 +1339,8 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
         // collect files to be deleted
         auto files = ConnectorPtr->select(
             columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
-                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::date_),
+                    &TableFileSchema::engine_type_, &TableFileSchema::file_id_, &TableFileSchema::file_type_,
+                    &TableFileSchema::date_),
             where(in(&TableFileSchema::file_type_, file_types) and
                   c(&TableFileSchema::updated_time_) < now - seconds * US_PS));
 
@@ -1357,12 +1351,13 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 table_file.id_ = std::get<0>(file);
                 table_file.table_id_ = std::get<1>(file);
                 table_file.segment_id_ = std::get<2>(file);
-                table_file.file_id_ = std::get<3>(file);
-                table_file.file_type_ = std::get<4>(file);
-                table_file.date_ = std::get<5>(file);
+                table_file.engine_type_ = std::get<3>(file);
+                table_file.file_id_ = std::get<4>(file);
+                table_file.file_type_ = std::get<5>(file);
+                table_file.date_ = std::get<6>(file);
 
                 // check if the file can be deleted
-                if (filter && filter->IsIgnored(table_file)) {
+                if (OngoingFileChecker::GetInstance().IsIgnored(table_file)) {
                     ENGINE_LOG_DEBUG << "File:" << table_file.file_id_
                                      << " currently is in use, not able to delete now";
                     continue;  // ignore this file, don't delete it
@@ -1375,15 +1370,22 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter) {
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
+                    // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
+                    // Else, we can only delete the single file
+                    // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
+                    if (table_file.engine_type_ == (int32_t)EngineType::FAISS_IDMAP ||
+                        table_file.engine_type_ == (int32_t)EngineType::FAISS_BIN_IDMAP) {
+                        utils::DeleteSegment(options_, table_file);
+                        std::string segment_dir;
+                        utils::GetParentPath(table_file.location_, segment_dir);
+                        ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
+                    } else {
+                        utils::DeleteTableFilePath(options_, table_file);
+                        ENGINE_LOG_DEBUG << "Remove table file: " << table_file.location_;
+                    }
+
                     // delete file from meta
                     ConnectorPtr->remove<TableFileSchema>(table_file.id_);
-
-                    // delete file from disk storage
-                    utils::DeleteSegment(options_, table_file);
-
-                    std::string segment_dir;
-                    utils::GetParentPath(table_file.location_, segment_dir);
-                    ENGINE_LOG_DEBUG << "Remove segment:" << table_file.segment_id_ << " directory:" << segment_dir;
 
                     table_ids.insert(table_file.table_id_);
 
