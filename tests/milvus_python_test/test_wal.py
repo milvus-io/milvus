@@ -77,13 +77,14 @@ class TestWalBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
-        logging.getLogger().info(ids)
-        status = connect.delete_by_id(table, [1])
+        status = connect.delete_by_id(table, [0])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 0
         status = connect.flush([table])
+        assert status.OK()
+        status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 1
         status, res = connect.search_vectors(table, top_k, nprobe, vector)
