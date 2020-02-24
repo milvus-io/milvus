@@ -46,17 +46,17 @@ CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
     }
 }
 
-void ConstructTableStat(const ::milvus::grpc::TableStat& grpc_table_stat, TableStat& table_stat) {
-    table_stat.table_name = grpc_table_stat.table_name();
-    table_stat.row_count = grpc_table_stat.total_row_count();
-    for (int i = 0; i < grpc_table_stat.segments_stat_size(); i++) {
-        auto& grpc_seg_stat = grpc_table_stat.segments_stat(i);
+void ConstructPartitionStat(const ::milvus::grpc::PartitionStat& grpc_partition_stat, PartitionStat& partition_stat) {
+    partition_stat.tag = grpc_partition_stat.tag();
+    partition_stat.row_count = grpc_partition_stat.total_row_count();
+    for (int i = 0; i < grpc_partition_stat.segments_stat_size(); i++) {
+        auto& grpc_seg_stat = grpc_partition_stat.segments_stat(i);
         SegmentStat seg_stat;
         seg_stat.row_count = grpc_seg_stat.row_count();
         seg_stat.segment_name = grpc_seg_stat.segment_name();
         seg_stat.index_name = grpc_seg_stat.index_name();
         seg_stat.data_size = grpc_seg_stat.data_size();
-        table_stat.segments_stat.emplace_back(seg_stat);
+        partition_stat.segments_stat.emplace_back(seg_stat);
     }
 }
 
@@ -275,8 +275,8 @@ ClientProxy::GetVectorByID(const std::string& table_name, int64_t vector_id, Row
 
 Status
 ClientProxy::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                    const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
-                    int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
+                    const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+                    TopKQueryResult& topk_query_result) {
     try {
         // step 1: convert vectors data
         ::milvus::grpc::SearchParam search_param;
@@ -291,21 +291,14 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
             CopyRowRecord(row_record, record);
         }
 
-        // step 2: convert range array
-        for (auto& range : query_range_array) {
-            ::milvus::grpc::Range* grpc_range = search_param.add_query_range_array();
-            grpc_range->set_start_value(range.start_value);
-            grpc_range->set_end_value(range.end_value);
-        }
-
-        // step 3: search vectors
+        // step 2: search vectors
         ::milvus::grpc::TopKQueryResult result;
         Status status = client_ptr_->Search(search_param, result);
         if (result.row_num() == 0) {
             return status;
         }
 
-        // step 4: convert result array
+        // step 3: convert result array
         topk_query_result.reserve(result.row_num());
         int64_t nq = result.row_num();
         int64_t topk = result.ids().size() / nq;
@@ -423,13 +416,12 @@ ClientProxy::ShowTableInfo(const std::string& table_name, TableInfo& table_info)
 
         // get native info
         table_info.total_row_count = grpc_table_info.total_row_count();
-        ConstructTableStat(grpc_table_info.native_stat(), table_info.native_stat);
 
         // get partitions info
         for (int i = 0; i < grpc_table_info.partitions_stat_size(); i++) {
-            auto& grpc_table_stat = grpc_table_info.partitions_stat(i);
-            TableStat partition_stat;
-            ConstructTableStat(grpc_table_stat, partition_stat);
+            auto& grpc_partition_stat = grpc_table_info.partitions_stat(i);
+            PartitionStat partition_stat;
+            ConstructPartitionStat(grpc_partition_stat, partition_stat);
             table_info.partitions_stat.emplace_back(partition_stat);
         }
 
@@ -542,7 +534,6 @@ ClientProxy::CreatePartition(const PartitionParam& partition_param) {
     try {
         ::milvus::grpc::PartitionParam grpc_partition_param;
         grpc_partition_param.set_table_name(partition_param.table_name);
-        grpc_partition_param.set_partition_name(partition_param.partition_name);
         grpc_partition_param.set_tag(partition_param.partition_tag);
         Status status = client_ptr_->CreatePartition(grpc_partition_param);
         return status;
@@ -552,17 +543,15 @@ ClientProxy::CreatePartition(const PartitionParam& partition_param) {
 }
 
 Status
-ClientProxy::ShowPartitions(const std::string& table_name, PartitionList& partition_array) const {
+ClientProxy::ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const {
     try {
         ::milvus::grpc::TableName grpc_table_name;
         grpc_table_name.set_table_name(table_name);
         ::milvus::grpc::PartitionList grpc_partition_list;
         Status status = client_ptr_->ShowPartitions(grpc_table_name, grpc_partition_list);
-        partition_array.resize(grpc_partition_list.partition_array_size());
-        for (uint64_t i = 0; i < grpc_partition_list.partition_array_size(); ++i) {
-            partition_array[i].table_name = grpc_partition_list.partition_array(i).table_name();
-            partition_array[i].partition_name = grpc_partition_list.partition_array(i).partition_name();
-            partition_array[i].partition_tag = grpc_partition_list.partition_array(i).tag();
+        partition_array.resize(grpc_partition_list.partition_tag_array_size());
+        for (uint64_t i = 0; i < grpc_partition_list.partition_tag_array_size(); ++i) {
+            partition_array[i] = grpc_partition_list.partition_tag_array(i);
         }
         return status;
     } catch (std::exception& ex) {
@@ -575,7 +564,6 @@ ClientProxy::DropPartition(const PartitionParam& partition_param) {
     try {
         ::milvus::grpc::PartitionParam grpc_partition_param;
         grpc_partition_param.set_table_name(partition_param.table_name);
-        grpc_partition_param.set_partition_name(partition_param.partition_name);
         grpc_partition_param.set_tag(partition_param.partition_tag);
         Status status = client_ptr_->DropPartition(grpc_partition_param);
         return status;
