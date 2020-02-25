@@ -3,19 +3,19 @@
 <!-- TOC -->
 
 - [Build from source](#build-from-source)
-    - [Requirements](#requirements)
-    - [Compilation](#compilation)
-    - [Launch Milvus server](#launch-milvus-server)
+  - [Requirements](#requirements)
+  - [Compilation](#compilation)
+  - [Launch Milvus server](#launch-milvus-server)
 - [Compile Milvus on Docker](#compile-milvus-on-docker)
-    - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
-    - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
-    - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
-    - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
+  - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
+  - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
+  - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
+  - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
 - [Troubleshooting](#troubleshooting)
-    - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
-    - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
-    - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
-    - [CMake version is not supported](#cmake-version-is-not-supported)
+  - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
+  - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
+  - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
+  - [CMake version is not supported](#cmake-version-is-not-supported)
 
 <!-- /TOC -->
 
@@ -23,10 +23,11 @@
 
 ### Requirements
 
-- Ubuntu 18.04 or higher
-- CentOS 7
+- Operating system
+  - Ubuntu 18.04 or higher
+  - CentOS 7
 
-If your operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
+  If your operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
   
 - GCC 7.0 or higher to support C++ 17
 - CMake 3.12 or higher
@@ -40,31 +41,31 @@ For GPU-enabled version, you will also need:
 
 #### Step 1 Install dependencies
 
+##### Install in Ubuntu
+
 ```shell
 $ cd [Milvus root path]/core
 $ ./ubuntu_build_deps.sh
 ```
 
-#### Step 2 Build
+##### Install in CentOS
 
-##### Build in Ubuntu
+```shell
+$ cd [Milvus root path]/core
+$ ./centos7_build_deps.sh
+```
+
+#### Step 2 Build
 
 ```shell
 $ cd [Milvus root path]/core
 $ ./build.sh -t Debug
 ```
 
-or 
+or
 
 ```shell
 $ ./build.sh -t Release
-```
-
-##### Build in CentOS
-
-```shell
-$ cd [Milvus root path]/core
-$ ./centos7_build_deps.sh
 ```
 
 By default, it will build CPU-only version. To build GPU version, add `-g` option.
@@ -79,7 +80,7 @@ If you want to know the complete build options, run the following command.
 $./build.sh -h
 ```
 
-When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
+When the build is completed, everything that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
 
 ### Launch Milvus server
 
@@ -141,6 +142,7 @@ To enter the container:
 ```shell
 $ docker exec -it [container_id] bash
 ```
+
 ### Step 3 Download Milvus source code
 
 Download latest Milvus source code:
@@ -195,12 +197,18 @@ Follow the steps below to solve this problem:
 
 ### Error message: `internal compiler error`
 
-Try increasing the memory allocated to docker.
+Try increasing the memory allocated to Docker. If this doesn't work, you can reduce the number of threads in CMake build in `[Milvus root path]/core/build.sh`.
+
+```shell
+make -j 8 install || exit 1 # The default number of threads is 8.
+```
+
+Note: You might also need to configure CMake build for faiss in `[Milvus root path]/core/src/index/thirdparty/faiss`.
 
 ### Error message: `error while loading shared libraries: libmysqlpp.so.3`
 
 Follow the steps below to solve this problem:
-    
+
 1. Check whether `libmysqlpp.so.3` is correctly installed.
 2. If `libmysqlpp.so.3` is installed, check whether it is added to `LD_LIBRARY_PATH`.
 

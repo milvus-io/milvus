@@ -221,6 +221,14 @@ message VectorData {
     RowRecord vector_data = 2;
 }
 
+/**
+ * @brief get vector ids from a segment parameters
+ */
+message GetVectorIDsParam {
+    string table_name = 1;
+    string segment_name = 2;
+}
+
 service MilvusService {
     /**
      * @brief This method is used to create table
@@ -356,6 +364,15 @@ service MilvusService {
      * @return VectorData
      */
     rpc GetVectorByID(VectorIdentity) returns (VectorData) {}
+
+    /**
+     * @brief This method is used to get vector ids from a segment
+     *
+     * @param GetVectorIDsParam, target table and segment
+     *
+     * @return VectorIds
+     */
+    rpc GetVectorIDs(GetVectorIDsParam) returns (VectorIds) {}
 
     /**
      * @brief This method is used to query vector in table.

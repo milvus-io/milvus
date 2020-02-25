@@ -48,10 +48,13 @@ class GrpcClient {
     CreateIndex(const grpc::IndexParam& index_param);
 
     Status
-    Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param);
+    Insert(const grpc::InsertParam& insert_param, grpc::VectorIds& vector_ids);
 
     Status
     GetVectorByID(const grpc::VectorIdentity& vector_identity, ::milvus::grpc::VectorData& vector_data);
+
+    Status
+    GetIDsInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids);
 
     Status
     Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
