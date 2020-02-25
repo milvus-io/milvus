@@ -145,7 +145,6 @@ class TestGetBase:
         status, res = connect.get_vector_by_id(table, ids[id])
         logging.getLogger().info(res)
         assert status.OK()
-        # TODO
         assert not res
 
     def test_get_vector_id_not_exised(self, connect, table):
