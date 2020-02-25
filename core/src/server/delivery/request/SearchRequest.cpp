@@ -11,12 +11,16 @@
 
 #include "server/delivery/request/SearchRequest.h"
 #include "server/DBWrapper.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 #include <memory>
+#ifdef MILVUS_ENABLE_PROFILING
+#include <gperftools/profiler.h>
+#endif
 
 namespace milvus {
 namespace server {
@@ -134,8 +138,7 @@ SearchRequest::OnExecute() {
         engine::ResultDistances result_distances;
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname =
-            "/tmp/search_nq_" + std::to_string(this->search_param_->query_record_array_size()) + ".profiling";
+        std::string fname = "/tmp/search_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
 
