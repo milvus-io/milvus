@@ -116,6 +116,9 @@ class DBImpl : public DB {
     Status
     GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) override;
 
+    Status
+    GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) override;
+
     //    Status
     //    Merge(const std::set<std::string>& table_ids) override;
 

@@ -55,6 +55,10 @@ class RequestHandler {
                   const std::vector<int64_t>& ids, engine::VectorsData& vectors);
 
     Status
+    GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& table_name,
+                  const std::string& segment_name, std::vector<int64_t>& vector_ids);
+
+    Status
     ShowTables(const std::shared_ptr<Context>& context, std::vector<std::string>& tables);
 
     Status

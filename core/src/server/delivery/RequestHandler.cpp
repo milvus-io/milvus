@@ -35,6 +35,7 @@
 #include "server/delivery/request/DropTableRequest.h"
 #include "server/delivery/request/FlushRequest.h"
 #include "server/delivery/request/GetVectorByIDRequest.h"
+#include "server/delivery/request/GetVectorIDsRequest.h"
 #include "server/delivery/request/HasTableRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadTableRequest.h"
@@ -95,6 +96,15 @@ Status
 RequestHandler::GetVectorByID(const std::shared_ptr<Context>& context, const std::string& table_name,
                               const std::vector<int64_t>& ids, engine::VectorsData& vectors) {
     BaseRequestPtr request_ptr = GetVectorByIDRequest::Create(context, table_name, ids, vectors);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             const std::string& segment_name, std::vector<int64_t>& vector_ids) {
+    BaseRequestPtr request_ptr = GetVectorIDsRequest::Create(context, table_name, segment_name, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

@@ -338,6 +338,25 @@ GrpcRequestHandler::GetVectorByID(::grpc::ServerContext* context, const ::milvus
 }
 
 ::grpc::Status
+GrpcRequestHandler::GetVectorIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetVectorIDsParam* request,
+                                 ::milvus::grpc::VectorIds* response) {
+    CHECK_NULLPTR_RETURN(request);
+
+    std::vector<int64_t> vector_ids;
+    Status status = request_handler_.GetVectorIDs(context_map_[context], request->table_name(), request->segment_name(),
+                                                  vector_ids);
+
+    if (!vector_ids.empty()) {
+        response->mutable_vector_id_array()->Resize(vector_ids.size(), -1);
+        memcpy(response->mutable_vector_id_array()->mutable_data(), vector_ids.data(),
+               vector_ids.size() * sizeof(int64_t));
+    }
+    SET_RESPONSE(response->mutable_status(), status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::TopKQueryResult* response) {
     CHECK_NULLPTR_RETURN(request);

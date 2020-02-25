@@ -94,6 +94,12 @@ ConnectionImpl::GetVectorByID(const std::string& table_name, int64_t vector_id, 
 }
 
 Status
+ConnectionImpl::GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
+                std::vector<int64_t>& id_array) {
+    return client_proxy_->GetIDsInSegment(table_name, segment_name, id_array);
+}
+
+Status
 ConnectionImpl::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
                        const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
                        TopKQueryResult& topk_query_result) {

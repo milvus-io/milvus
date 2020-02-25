@@ -761,7 +761,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
 }
 
 Status
-MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& table_id, const std::string& segment_id,
+MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
                                         milvus::engine::meta::TableFilesSchema& table_files) {
     try {
         mysqlpp::StoreQueryResult res;
@@ -774,9 +774,9 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& table_id, const std::
 
             mysqlpp::Query getTableFileQuery = connectionPtr->query();
             getTableFileQuery
-                << "SELECT id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << table_id
-                << " AND segment_id = " << mysqlpp::quote << segment_id << " AND file_type <> "
+                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
+                << " FROM " << META_TABLEFILES
+                << " WHERE segment_id = " << mysqlpp::quote << segment_id << " AND file_type <> "
                 << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFilesBySegmentId: " << getTableFileQuery.str();
@@ -784,34 +784,38 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& table_id, const std::
             res = getTableFileQuery.store();
         }  // Scoped Connection
 
-        TableSchema table_schema;
-        table_schema.table_id_ = table_id;
-        DescribeTable(table_schema);
+        if (!res.empty()) {
+            TableSchema table_schema;
+            res[0]["table_id"].to_string(table_schema.table_id_);
+            auto status = DescribeTable(table_schema);
+            if (!status.ok()) {
+                return status;
+            }
 
-        Status ret;
-        for (auto& resRow : res) {
-            TableFileSchema file_schema;
-            file_schema.id_ = resRow["id"];
-            file_schema.table_id_ = table_id;
-            resRow["segment_id"].to_string(file_schema.segment_id_);
-            file_schema.index_file_size_ = table_schema.index_file_size_;
-            file_schema.engine_type_ = resRow["engine_type"];
-            file_schema.nlist_ = table_schema.nlist_;
-            file_schema.metric_type_ = table_schema.metric_type_;
-            resRow["file_id"].to_string(file_schema.file_id_);
-            file_schema.file_type_ = resRow["file_type"];
-            file_schema.file_size_ = resRow["file_size"];
-            file_schema.row_count_ = resRow["row_count"];
-            file_schema.date_ = resRow["date"];
-            file_schema.created_on_ = resRow["created_on"];
-            file_schema.dimension_ = table_schema.dimension_;
+            for (auto& resRow : res) {
+                TableFileSchema file_schema;
+                file_schema.id_ = resRow["id"];
+                file_schema.table_id_ = table_schema.table_id_;
+                resRow["segment_id"].to_string(file_schema.segment_id_);
+                file_schema.index_file_size_ = table_schema.index_file_size_;
+                file_schema.engine_type_ = resRow["engine_type"];
+                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.metric_type_ = table_schema.metric_type_;
+                resRow["file_id"].to_string(file_schema.file_id_);
+                file_schema.file_type_ = resRow["file_type"];
+                file_schema.file_size_ = resRow["file_size"];
+                file_schema.row_count_ = resRow["row_count"];
+                file_schema.date_ = resRow["date"];
+                file_schema.created_on_ = resRow["created_on"];
+                file_schema.dimension_ = table_schema.dimension_;
 
-            utils::GetTableFilePath(options_, file_schema);
-            table_files.emplace_back(file_schema);
+                utils::GetTableFilePath(options_, file_schema);
+                table_files.emplace_back(file_schema);
+            }
         }
 
         ENGINE_LOG_DEBUG << "Get table files by segment id";
-        return ret;
+        return Status::OK();
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES BY SEGMENT ID", e.what());
     }

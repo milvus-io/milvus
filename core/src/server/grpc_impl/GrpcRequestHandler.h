@@ -220,6 +220,15 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
                   ::milvus::grpc::VectorData* response);
     // *
+    // @brief This method is used to get vector ids from a segment
+    //
+    // @param GetVectorIDsParam, target table and segment
+    //
+    // @return VectorIds
+    ::grpc::Status
+    GetVectorIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetVectorIDsParam* request,
+                 ::milvus::grpc::VectorIds* response);
+    // *
     // @brief This method is used to query vector in table.
     //
     // @param SearchParam, search parameters.
