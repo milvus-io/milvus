@@ -77,8 +77,12 @@ class TestCreateBase:
         assert status.OK()
         status, res = connect.show_partitions(table)
         assert status.OK()
-        assert tag in res
-        assert tag_name in res
+        tag_list = []
+        for item in res:
+            tag_list.append(item.tag)
+        assert tag in tag_list
+        assert tag_name in tag_list
+        assert "_default" in tag_list
 
     def test_create_partition_add_vectors_default(self, connect, table):
         '''
