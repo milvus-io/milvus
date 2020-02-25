@@ -14,10 +14,10 @@ index_file_size = 10
 table_id = "test_flush"
 DELETE_TIMEOUT = 60
 nprobe = 1
-epsilon = 0.0001
 tag = "1970-01-01"
 top_k = 1
 nb = 6000
+tag = "partition_tag"
 
 
 class TestFlushBase:
@@ -57,6 +57,72 @@ class TestFlushBase:
         status = connect.flush([table])
         assert status.OK()
 
+    def test_add_partition_flush(self, connect, table):
+        '''
+        method: add vectors into partition in table, flush serveral times
+        expected: status ok
+        '''
+        vectors = gen_vector(nb, dim)
+        status = connect.create_partition(table, tag)
+        vectors = gen_vectors(nb, dim)
+        ids = [i for i in range(nb)]
+        status, ids = connect.insert(table, vectors, ids)
+        status = connect.flush([table])
+        result, res = connect.get_table_row_count(table)
+        assert res == nb
+        status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        result, res = connect.get_table_row_count(table)
+        assert res == 2 * nb
+
+    def test_add_partitions_flush(self, connect, table):
+        '''
+        method: add vectors into partitions in table, flush one
+        expected: status ok
+        '''
+        vectors = gen_vector(nb, dim)
+        tag_new = gen_unique_str()
+        status = connect.create_partition(table, tag)
+        status = connect.create_partition(table, tag_new)
+        ids = [i for i in range(nb)]
+        status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
+        status = connect.flush([table])
+        assert status.OK()
+        status, ids = connect.insert(table, vectors, ids, partition_tag=tag_new)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        result, res = connect.get_table_row_count(table)
+        assert res == 2 * nb
+
+    def test_add_tables_flush(self, connect, table):
+        '''
+        method: add vectors into tables, flush one
+        expected: status ok
+        '''
+        vectors = gen_vectors(nb, dim)
+        table_new = gen_unique_str()
+        param = {'table_name': table_new,
+            'dimension': dim,
+            'index_file_size': index_file_size,
+            'metric_type': MetricType.L2}
+        status = connect.create_table(param)
+        status = connect.create_partition(table, tag)
+        status = connect.create_partition(table_new, tag)
+        vectors = gen_vectors(nb, dim)
+        ids = [i for i in range(nb)]
+        status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
+        status, ids = connect.insert(table_new, vectors, ids, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        result, res = connect.get_table_row_count(table)
+        assert res == nb
+        result, res = connect.get_table_row_count(table_new)
+        assert res == 0
+       
     def test_add_flush_multiable_times(self, connect, table):
         '''
         method: add vectors, flush serveral times
@@ -119,6 +185,7 @@ class TestFlushBase:
         status, res = milvus.get_table_row_count(table)
         assert status.OK()
         logging.getLogger().info(res)
+        # TODO
 
 
 class TestTableNameInvalid(object):

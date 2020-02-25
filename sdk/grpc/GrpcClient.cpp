@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "grpc/GrpcClient.h"
 
@@ -114,7 +108,7 @@ GrpcClient::CreateIndex(const ::milvus::grpc::IndexParam& index_param) {
 }
 
 Status
-GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids, const ::milvus::grpc::InsertParam& insert_param) {
+GrpcClient::Insert(const ::milvus::grpc::InsertParam& insert_param, ::milvus::grpc::VectorIds& vector_ids) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->Insert(&context, insert_param, &vector_ids);
 
@@ -142,6 +136,23 @@ GrpcClient::GetVectorByID(const grpc::VectorIdentity& vector_identity, ::milvus:
     if (vector_data.status().error_code() != grpc::SUCCESS) {
         std::cerr << vector_data.status().reason() << std::endl;
         return Status(StatusCode::ServerFailed, vector_data.status().reason());
+    }
+
+    return Status::OK();
+}
+
+Status
+GrpcClient::GetIDsInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->GetVectorIDs(&context, param, &vector_ids);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "GetIDsInSegment rpc failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+    if (vector_ids.status().error_code() != grpc::SUCCESS) {
+        std::cerr << vector_ids.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, vector_ids.status().reason());
     }
 
     return Status::OK();

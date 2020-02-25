@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -393,7 +387,6 @@ TEST_F(DeleteTest, delete_add_create_index) {
 }
 
 TEST_F(DeleteTest, delete_add_auto_flush) {
-    /*
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -430,11 +423,11 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     stat = db_->InsertVectors(GetTableName(), "", xb2);
     ASSERT_TRUE(stat.ok());
 
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    //stat = db_->CreateIndex(GetTableName(), index);
-    //ASSERT_TRUE(stat.ok());
+    // stat = db_->CreateIndex(GetTableName(), index);
+    // ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
     stat = db_->GetTableRowCount(GetTableName(), row_count);
@@ -461,7 +454,6 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
                           result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
-    */
 }
 
 TEST_F(DeleteTest, compact_basic) {

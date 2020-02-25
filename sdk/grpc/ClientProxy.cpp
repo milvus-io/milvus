@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "grpc/ClientProxy.h"
 
@@ -46,7 +40,8 @@ CopyRowRecord(::milvus::grpc::RowRecord* target, const RowRecord& src) {
     }
 }
 
-void ConstructPartitionStat(const ::milvus::grpc::PartitionStat& grpc_partition_stat, PartitionStat& partition_stat) {
+void
+ConstructPartitionStat(const ::milvus::grpc::PartitionStat& grpc_partition_stat, PartitionStat& partition_stat) {
     partition_stat.tag = grpc_partition_stat.tag();
     partition_stat.row_count = grpc_partition_stat.total_row_count();
     for (int i = 0; i < grpc_partition_stat.segments_stat_size(); i++) {
@@ -227,9 +222,9 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
             auto row_ids = insert_param.mutable_row_id_array();
             row_ids->Resize(static_cast<int>(id_array.size()), -1);
             memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-            status = client_ptr_->Insert(vector_ids, insert_param);
+            status = client_ptr_->Insert(insert_param, vector_ids);
         } else {
-            status = client_ptr_->Insert(vector_ids, insert_param);
+            status = client_ptr_->Insert(insert_param, vector_ids);
             /* return Milvus generated ids back to user */
             id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
         }
@@ -266,6 +261,28 @@ ClientProxy::GetVectorByID(const std::string& table_name, int64_t vector_id, Row
             vector_data.binary_data.resize(byte_size);
             memcpy(vector_data.binary_data.data(), grpc_data.vector_data().binary_data().data(), byte_size);
         }
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to get vector by id: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
+                             std::vector<int64_t>& id_array) {
+    try {
+        ::milvus::grpc::GetVectorIDsParam param;
+        param.set_table_name(table_name);
+        param.set_segment_name(segment_name);
+
+        ::milvus::grpc::VectorIds vector_ids;
+        Status status = client_ptr_->GetIDsInSegment(param, vector_ids);
+        if (!status.ok()) {
+            return status;
+        }
+
+        id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
 
         return status;
     } catch (std::exception& ex) {

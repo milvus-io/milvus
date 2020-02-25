@@ -14,7 +14,6 @@ index_file_size = 10
 table_id = "test_add"
 ADD_TIMEOUT = 60
 nprobe = 1
-epsilon = 0.0001
 tag = "1970-01-01"
 
 
@@ -426,9 +425,9 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         vector_id = get_vector_id
-        ids = [vector_id for i in range(nq)]
-        with pytest.raises(Exception) as e:
-            status, ids = connect.add_vectors(table, vectors, ids)
+        ids = [vector_id for _ in range(nq)]
+        with pytest.raises(Exception):
+            connect.add_vectors(table, vectors, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_add_vectors(self, connect, table):
@@ -451,9 +450,8 @@ class TestAddBase:
         expected: the table row count equals to nq
         '''
         nq = 5
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nq, dim)
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
         assert len(ids) == nq
@@ -466,10 +464,9 @@ class TestAddBase:
         expected: the table row count equals to nq
         '''
         nq = 5
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nq, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status, ids = connect.add_vectors(partition_name, vectors)
+        status = connect.create_partition(table, tag)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
         assert len(ids) == nq
 
@@ -495,8 +492,7 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         new_tag = "new_tag"
-        partition_name = gen_unique_str()
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=new_tag)
         assert not status.OK()
 
@@ -508,9 +504,8 @@ class TestAddBase:
         expected: the table row count equals to nq
         '''
         nq = 5
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nq, dim)
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         for i in range(5):
             status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
@@ -591,7 +586,7 @@ class TestAddBase:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vector = gen_single_vector(dim)
@@ -599,7 +594,7 @@ class TestAddBase:
         loop_num = 5
         processes = []
         def add():
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             i = 0
             while i < loop_num:
