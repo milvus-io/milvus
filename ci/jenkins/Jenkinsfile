@@ -64,6 +64,22 @@ pipeline {
 
                         stages {
                             stage('Run Build') {
+                                when {
+                                    allOf {
+                                        anyOf {
+                                            expression { isEmptyChangelog() == true }
+                                            changeset 'ci/**'
+                                            changeset 'core/**'
+                                            changeset 'docker/**'
+                                            changeset 'test/**'
+                                        }
+                                        not {
+                                            anyOf {
+                                                changeset '**/*.md'
+                                            }
+                                        }
+                                    }
+                                }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-build-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -110,6 +126,22 @@ pipeline {
                             }
 
                             stage('Publish docker images') {
+                                when {
+                                    allOf {
+                                        anyOf {
+                                            expression { isEmptyChangelog() == true }
+                                            changeset 'ci/**'
+                                            changeset 'core/**'
+                                            changeset 'docker/**'
+                                            changeset 'test/**'
+                                        }
+                                        not {
+                                            anyOf {
+                                                changeset '**/*.md'
+                                            }
+                                        }
+                                    }
+                                }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-publish-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -132,6 +164,22 @@ pipeline {
                             }
 
                             stage('Deploy to Development') {
+                                when {
+                                    allOf {
+                                        anyOf {
+                                            expression { isEmptyChangelog() == true }
+                                            changeset 'ci/**'
+                                            changeset 'core/**'
+                                            changeset 'docker/**'
+                                            changeset 'test/**'
+                                        }
+                                        not {
+                                            anyOf {
+                                                changeset '**/*.md'
+                                            }
+                                        }
+                                    }
+                                }
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
                                     FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
@@ -190,10 +238,10 @@ pipeline {
         }
     }
     post {
-        always {
+        unsuccessful {
             script {
                 boolean isNightlyTest = isTimeTriggeredBuild()
-                if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS') && isNightlyTest) {
+                if (isNightlyTest) {
                     // Send an email only if the build status has changed from green/unstable to red
                     emailext subject: '$DEFAULT_SUBJECT',
                     body: '$DEFAULT_CONTENT',
@@ -202,11 +250,18 @@ pipeline {
                         [$class: 'RequesterRecipientProvider']
                     ],
                     replyTo: '$DEFAULT_REPLYTO',
-                    to: '$DEFAULT_RECIPIENTS'
+                    to: 'dev.milvus@zilliz.com'
                 }
             }
         }
     }
+}
+
+boolean isEmptyChangelog() {
+    if (currentBuild.changeSets.size() == 0) {
+        return true
+    }
+    return false
 }
 
 boolean isTimeTriggeredBuild() {

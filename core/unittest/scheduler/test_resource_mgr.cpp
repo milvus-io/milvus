@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
 
@@ -57,6 +51,11 @@ TEST_F(ResourceMgrBaseTest, ADD) {
     auto resource = std::make_shared<TestResource>("test", 0, true);
     auto ret = empty_mgr_->Add(ResourcePtr(resource));
     ASSERT_EQ(ret.lock(), resource);
+
+    mgr1_->Start();
+    mgr1_->Add(ResourcePtr(resource));
+    ASSERT_EQ(ret.lock(), resource);
+    mgr1_->Stop();
 }
 
 TEST_F(ResourceMgrBaseTest, ADD_DISK) {
@@ -85,6 +84,11 @@ TEST_F(ResourceMgrBaseTest, INVALID_CONNECT) {
 
 TEST_F(ResourceMgrBaseTest, CLEAR) {
     ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
+    mgr1_->Start();
+    mgr1_->Clear();
+    mgr1_->Stop();
+    ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
+
     mgr1_->Clear();
     ASSERT_EQ(mgr1_->GetNumOfResource(), 0);
 }
@@ -158,6 +162,10 @@ TEST_F(ResourceMgrBaseTest, DUMP_TASKTABLES) {
     ASSERT_FALSE(mgr1_->DumpTaskTables().empty());
 }
 
+TEST_F(ResourceMgrBaseTest, Start) {
+    empty_mgr_->Start();
+}
+
 /************ ResourceMgrAdvanceTest ************/
 
 class ResourceMgrAdvanceTest : public testing::Test {
@@ -184,7 +192,9 @@ class ResourceMgrAdvanceTest : public testing::Test {
 
 TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     bool flag = false;
-    auto callback = [&](EventPtr event) { flag = true; };
+    auto callback = [&](EventPtr event) {
+        flag = true;
+    };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
     disk_res->task_table().Put(
