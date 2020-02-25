@@ -22,8 +22,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "scheduler/optimizer/handler/GpuBuildResHandler.h"
 #include "scheduler/optimizer/Pass.h"
+#include "scheduler/optimizer/handler/GpuBuildResHandler.h"
 
 namespace milvus {
 namespace scheduler {

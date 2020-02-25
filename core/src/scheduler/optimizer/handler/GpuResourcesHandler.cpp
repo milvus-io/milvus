@@ -51,9 +51,8 @@ GpuResourcesHandler::AddGpuEnableListener() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_,
-                            lambda);
+    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda);
 }
 
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

@@ -1232,7 +1232,8 @@ Config::ExecCallBacks(const std::string& node, const std::string& sub_node, cons
 
     std::string cb_node = node + "." + sub_node;
     if (config_callback_.find(cb_node) == config_callback_.end()) {
-        return Status(SERVER_UNEXPECTED_ERROR, "Cannot find " + cb_node + " in callback map, cannot take effect in-service");
+        return Status(SERVER_UNEXPECTED_ERROR,
+                      "Cannot find " + cb_node + " in callback map, cannot take effect in-service");
     }
 
     auto& cb_map = config_callback_.at(cb_node);

@@ -41,5 +41,5 @@ class GpuResourcesHandler {
     std::string identity_;
 };
 
-} // namespace scheduler
-} // namespace milvus
+}  // namespace scheduler
+}  // namespace milvus

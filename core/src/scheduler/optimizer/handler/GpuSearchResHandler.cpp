@@ -11,6 +11,7 @@
 
 #include "scheduler/optimizer/handler/GpuSearchResHandler.h"
 
+#include <string>
 #include <vector>
 
 #include "server/Config.h"
@@ -82,5 +83,5 @@ GpuSearchResHandler::AddGpuSearchResListener() {
                             lambda_gpu_search_res);
 }
 
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

@@ -13,6 +13,9 @@
 
 #include "scheduler/optimizer/handler/GpuResourcesHandler.h"
 
+#include <limits>
+#include <vector>
+
 namespace milvus {
 namespace scheduler {
 
@@ -41,6 +44,5 @@ class GpuSearchResHandler : virtual public GpuResourcesHandler {
     std::vector<int64_t> search_gpus_;
 };
 
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
