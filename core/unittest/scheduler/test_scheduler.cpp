@@ -1,22 +1,19 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
+#include <fiu-local.h>
+#include <fiu-control.h>
 
+#include "src/scheduler/SchedInst.h"
 #include "cache/DataObj.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/ResourceFactory.h"
@@ -100,7 +97,7 @@ class SchedulerTest : public testing::Test {
     SetUp() override {
         res_mgr_ = std::make_shared<ResourceMgr>();
         ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, false);
-        ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, false);
+        ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true);
         disk_resource_ = res_mgr_->Add(std::move(disk));
         cpu_resource_ = res_mgr_->Add(std::move(cpu));
 
@@ -211,6 +208,59 @@ class SchedulerTest2 : public testing::Test {
 
 //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 //}
+
+TEST(SchedulerTestResource, SPECIFIED_RESOURCE_TEST) {
+    auto mock_index_ptr = std::make_shared<MockVecIndex>();
+    milvus::engine::Config config;
+    auto quantizer_ptr = mock_index_ptr->LoadQuantizer(config);
+    ASSERT_EQ(quantizer_ptr, nullptr);
+
+    auto vec_index_ptr = mock_index_ptr->LoadData(quantizer_ptr, config);
+    ASSERT_EQ(vec_index_ptr, nullptr);
+
+    auto s = mock_index_ptr->SetQuantizer(quantizer_ptr);
+    ASSERT_TRUE(s.ok());
+
+    s = mock_index_ptr->UnsetQuantizer();
+    ASSERT_TRUE(s.ok());
+
+    auto res = mock_index_ptr->CopyToGpuWithQuantizer(0, config);
+    ASSERT_EQ(res.first, nullptr);
+    ASSERT_EQ(res.second, nullptr);
+
+    using IndexType = milvus::engine::IndexType;
+    auto index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU, config);
+    ASSERT_EQ(index->GetType(), IndexType::SPTAG_KDT_RNT_CPU);
+
+    index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU, config);
+    ASSERT_EQ(index->GetType(), IndexType::SPTAG_BKT_RNT_CPU);
+
+#ifdef MILVUS_GPU_VERSION
+    index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_GPU, config);
+    ASSERT_EQ(index->GetType(), IndexType::FAISS_IVFPQ_GPU);
+#endif
+
+    index = GetVecIndexFactory(IndexType::NSG_MIX, config);
+    ASSERT_EQ(index->GetType(), IndexType::NSG_MIX);
+
+    index = GetVecIndexFactory(IndexType::INVALID, config);
+    ASSERT_EQ(index, nullptr);
+
+    knowhere::BinarySet empty_set;
+    auto res_ptr = LoadVecIndex(IndexType::INVALID, empty_set, 0);
+    ASSERT_EQ(res_ptr, nullptr);
+}
+
+TEST_F(SchedulerTest, schedule) {
+    scheduler_->Dump();
+}
+
+TEST(SchedulerService, service) {
+    fiu_enable("load_simple_config_mock", 1, nullptr, 0);
+    StartSchedulerService();
+    StopSchedulerService();
+    fiu_disable("load_simple_config_mock");
+}
 
 }  // namespace scheduler
 }  // namespace milvus

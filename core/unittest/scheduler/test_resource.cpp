@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
 
@@ -132,13 +126,17 @@ class ResourceAdvanceTest : public testing::Test {
     void
     WaitLoader(uint64_t count) {
         std::unique_lock<std::mutex> lock(load_mutex_);
-        cv_.wait(lock, [&] { return load_count_ == count; });
+        cv_.wait(lock, [&] {
+            return load_count_ == count;
+        });
     }
 
     void
     WaitExecutor(uint64_t count) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        cv_.wait(lock, [&] { return exec_count_ == count; });
+        cv_.wait(lock, [&] {
+            return exec_count_ == count;
+        });
     }
 
     ResourcePtr disk_resource_;
@@ -207,6 +205,12 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->exec_count_, 1);
     }
+
+    std::stringstream out;
+    out << *std::static_pointer_cast<CpuResource>(cpu_resource_);
+    out << *std::static_pointer_cast<GpuResource>(gpu_resource_);
+    out << *std::static_pointer_cast<DiskResource>(disk_resource_);
+    out << *std::static_pointer_cast<TestResource>(test_resource_);
 }
 
 TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
@@ -263,6 +267,20 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->exec_count_, 1);
     }
+
+    test_resource_->TaskAvgCost();
+    std::cout << test_resource_->Dump() << "  " << test_resource_->NumOfTaskToExec() << std::endl;
+    auto null_resource = ResourceFactory::Create("invalid", "invalid", 0);
+    ASSERT_EQ(null_resource, nullptr);
+}
+
+TEST(Connection_Test, CONNECTION_TEST) {
+    std::string connection_name = "cpu";
+    uint64_t speed = 982;
+    Connection connection(connection_name, speed);
+    ASSERT_EQ(connection_name, connection.name());
+    ASSERT_EQ(speed, connection.speed());
+    std::cout << connection.Dump() << std::endl;
 }
 
 }  // namespace scheduler
