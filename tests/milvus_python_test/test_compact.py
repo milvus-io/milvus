@@ -429,12 +429,12 @@ class TestCompactBase:
         method: add vectors, delete and compact table; server stopped and restarted during compact
         expected: status ok, request recovered
         '''
-        vectors = gen_vector(nb * 1000, dim)
+        vectors = gen_vector(nb * 100, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        delete_ids = [ids[0], ids[-1]]
+        delete_ids = ids[0:1000]
         status = connect.delete_by_id(table, delete_ids)
         assert status.OK()
         status = connect.flush([table])
