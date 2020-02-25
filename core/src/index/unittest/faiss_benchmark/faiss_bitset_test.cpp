@@ -442,11 +442,12 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
         index = cpu_index;
     }
 
-    std::vector<std::pair<int32_t, faiss::ConcurrentBitsetPtr>> bitset_array;
-    bitset_array.push_back(std::make_pair(0, CreateBitset(index->ntotal, 0)));
-    bitset_array.push_back(std::make_pair(5, CreateBitset(index->ntotal, 5)));
-    bitset_array.push_back(std::make_pair(50, CreateBitset(index->ntotal, 50)));
-    bitset_array.push_back(std::make_pair(100, CreateBitset(index->ntotal, 100)));
+    std::vector<std::pair<std::string, faiss::ConcurrentBitsetPtr>> bitset_array;
+    bitset_array.push_back(std::make_pair("nil", nullptr));
+    bitset_array.push_back(std::make_pair("0", CreateBitset(index->ntotal, 0)));
+    bitset_array.push_back(std::make_pair("5", CreateBitset(index->ntotal, 5)));
+    bitset_array.push_back(std::make_pair("50", CreateBitset(index->ntotal, 50)));
+    bitset_array.push_back(std::make_pair("100", CreateBitset(index->ntotal, 100)));
 
     for (auto nprobe : nprobes) {
         // brute-force need not set nprobe
@@ -499,8 +500,8 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                     // k = 100 for ground truth
                     int32_t hit = GetResultHitCount(gt, I, GK, t_k, t_nq, index_add_loops);
 
-                    printf("bitset = %3d%, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n",
-                           bitset_array[s].first, (t_end - t_start) / search_loops,
+                    printf("bitset = %3s%%, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n",
+                           bitset_array[s].first.c_str(), (t_end - t_start) / search_loops,
                            faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
                            faiss::indexIVF_stats.search_time / 1000 / search_loops,
                            (hit / float(t_nq * std::min(GK, t_k) / index_add_loops)));
