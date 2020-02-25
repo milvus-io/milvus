@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <chrono>
 #include <map>
@@ -21,13 +15,17 @@
 #include <string>
 #include <thread>
 #include <gtest/gtest.h>
+#include <fiu-local.h>
+#include <fiu-control.h>
+
+#define private public
 
 #include "cache/CpuCacheMgr.h"
 #include "server/Config.h"
-#include "metrics/Metrics.h"
 #include "metrics/utils.h"
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
+#include "metrics/Metrics.h"
 
 namespace {
 static constexpr int64_t TABLE_DIM = 256;
@@ -46,13 +44,30 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 } // namespace
 
 TEST_F(MetricTest, METRIC_TEST) {
+    fiu_init(0);
+
+#ifdef MILVUS_GPU_VERSION
+    FIU_ENABLE_FIU("SystemInfo.Init.nvmInit_fail");
+    milvus::server::SystemInfo::GetInstance().initialized_ = false;
+    milvus::server::SystemInfo::GetInstance().Init();
+    fiu_disable("SystemInfo.Init.nvmInit_fail");
+    FIU_ENABLE_FIU("SystemInfo.Init.nvm_getDevice_fail");
+    milvus::server::SystemInfo::GetInstance().initialized_ = false;
+    milvus::server::SystemInfo::GetInstance().Init();
+    fiu_disable("SystemInfo.Init.nvm_getDevice_fail");
+    milvus::server::SystemInfo::GetInstance().initialized_ = false;
+#endif
+
     milvus::server::SystemInfo::GetInstance().Init();
     milvus::server::Metrics::GetInstance().Init();
+
+    std::string system_info;
+    milvus::server::SystemInfo::GetInstance().GetSysInfoJsonStr(system_info);
 
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
     std::cout << milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
 
-    static const char *group_name = "test_group";
+    static const char* group_name = "test_group";
     static const int group_dim = 256;
 
     milvus::engine::meta::TableSchema group_info;
@@ -90,7 +105,7 @@ TEST_F(MetricTest, METRIC_TEST) {
 
             START_TIMER;
 //            stat = db_->Query(group_name, tags, k, qb, qxb, result_ids, result_distances);
-            ss << "Search " << j << " With Size " << (float) (count * group_dim * sizeof(float)) / (1024 * 1024)
+            ss << "Search " << j << " With Size " << (float)(count * group_dim * sizeof(float)) / (1024 * 1024)
                << " M";
 
             for (auto k = 0; k < qb; ++k) {

@@ -727,7 +727,7 @@ class TestSearchBase:
              'index_type': IndexType.FLAT,
              'store_raw_vector': False}
         # create table
-        milvus = get_milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(uri=uri)
         milvus.create_table(param)
         vectors, ids = self.init_data(milvus, table, nb=nb)
@@ -740,7 +740,7 @@ class TestSearchBase:
                 assert result[i][0].distance == 0.0
 
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=search, args=(milvus, ))
             processes.append(p)
@@ -768,7 +768,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create table
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             milvus.create_table(param)
             status, ids = milvus.add_vectors(table, vectors)
@@ -810,7 +810,7 @@ class TestSearchBase:
                      'index_file_size': 10,
                      'metric_type': MetricType.L2}
             # create table
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             milvus.create_table(param)
             status, ids = milvus.add_vectors(table, vectors)
