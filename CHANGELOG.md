@@ -19,10 +19,10 @@ Please mark all change in change log and use the issue from GitHub
 - \#1029 - check if table exists when try to delete partition
 - \#1066 - optimize http insert and search speed
 - \#1067 - Add binary vectors support in http server
-- \#1152 - Error log output continuously after server start
 - \#1075 - improve error message when page size or offset is illegal
 - \#1082 - check page_size or offset value to avoid float
 - \#1115 - http server support load table into memory
+- \#1152 - Error log output continuously after server start
 - \#1211 - Server down caused by searching with index_type: HNSW
 - \#1240 - Update license declaration
 - \#1298 - Unittest failed when on CPU2GPU case
@@ -54,11 +54,13 @@ Please mark all change in change log and use the issue from GitHub
 - \#966 - Update NOTICE.md
 - \#1002 - Rename minio to s3 in Storage Config section
 - \#1078 - Move 'insert_buffer_size' to Cache Config section
+- \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 - \#1297 - Hide partition_name parameter, avid user directly access partition table
 - \#1310 - Add default partition tag for a table
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 - \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1304, #1324 - Various fixes and improvements for Milvus documentation.
 - \#1320 - Remove debug logging from faiss
+
 
 ## Task
 
