@@ -569,7 +569,7 @@ Config::RegisterCallBack(const std::string& node, const std::string& sub_node, c
 
 Status
 Config::CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key) {
-    if (config_callback_.empty()) {
+    if (config_callback_.empty() || key.empty()) {
         return Status::OK();
     }
 
@@ -1506,6 +1506,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
+    value.clear();
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
     }
@@ -1527,6 +1528,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
+    value.clear();
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
     }
