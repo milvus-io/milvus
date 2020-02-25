@@ -235,11 +235,6 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
 
     fiu_init(0);
 
-    FIU_ENABLE_FIU("VecIndexImpl.Add.throw_knowhere_exception");
-    status = mem_table.Add(source_10);
-    ASSERT_FALSE(status.ok());
-    fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
-
     status = mem_table.Add(source_10);
     ASSERT_TRUE(status.ok());
 

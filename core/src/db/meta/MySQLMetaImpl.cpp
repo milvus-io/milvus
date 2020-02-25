@@ -534,7 +534,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type"
                            << " ,owner_table, partition_tag, version"
                            << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(TableSchema::TO_DELETE)
-                           << " AND owner_table == \"\";";
+                           << " AND owner_table = \"\";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
 
@@ -1413,8 +1413,8 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             }
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
-            allPartitionsQuery << "SELECT table_id id, state, dimension, created_on, flag, index_file_size,"
-                               << " engine_type, nlist, metric_type FROM " << META_TABLES
+            allPartitionsQuery << "SELECT table_id, id, state, dimension, created_on, flag, index_file_size,"
+                               << " engine_type, nlist, metric_type, partition_tag, version FROM " << META_TABLES
                                << " WHERE owner_table = " << mysqlpp::quote << table_id << " AND state <> "
                                << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -1435,7 +1435,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             partition_schema.engine_type_ = resRow["engine_type"];
             partition_schema.nlist_ = resRow["nlist"];
             partition_schema.metric_type_ = resRow["metric_type"];
-            resRow["owner_table"].to_string(partition_schema.owner_table_);
+            partition_schema.owner_table_ = table_id;
             resRow["partition_tag"].to_string(partition_schema.partition_tag_);
             resRow["version"].to_string(partition_schema.version_);
 

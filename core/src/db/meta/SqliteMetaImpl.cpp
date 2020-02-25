@@ -876,8 +876,8 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
         auto partitions = ConnectorPtr->select(
             columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
-                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
-                    &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::table_id_),
+                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::partition_tag_,
+                    &TableSchema::version_, &TableSchema::table_id_),
             where(c(&TableSchema::owner_table_) == table_id and
                   c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (size_t i = 0; i < partitions.size(); i++) {
@@ -891,10 +891,10 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
             partition_schema.engine_type_ = std::get<6>(partitions[i]);
             partition_schema.nlist_ = std::get<7>(partitions[i]);
             partition_schema.metric_type_ = std::get<8>(partitions[i]);
-            partition_schema.owner_table_ = std::get<9>(partitions[i]);
-            partition_schema.partition_tag_ = std::get<10>(partitions[i]);
-            partition_schema.version_ = std::get<11>(partitions[i]);
-            partition_schema.table_id_ = std::get<12>(partitions[i]);
+            partition_schema.owner_table_ = table_id;
+            partition_schema.partition_tag_ = std::get<9>(partitions[i]);
+            partition_schema.version_ = std::get<10>(partitions[i]);
+            partition_schema.table_id_ = std::get<11>(partitions[i]);
             partition_schema_array.emplace_back(partition_schema);
         }
     } catch (std::exception& e) {
@@ -1197,7 +1197,8 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                         break;
                     case (int)TableFileSchema::BACKUP:++backup_count;
                         break;
-                    default:return Status(DB_ERROR, "Unknown file type.");
+                    default:
+                        break;
                 }
 
                 auto status = utils::GetTableFilePath(options_, file_schema);
@@ -1227,7 +1228,8 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                         break;
                     case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:return Status(DB_ERROR, "Unknown file type!");
+                    default:
+                        break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;

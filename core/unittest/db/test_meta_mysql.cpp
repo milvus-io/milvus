@@ -249,7 +249,10 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
 
-    sleep(1);
+    table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    status = impl_->CreateTableFile(table_file);
+
     std::vector<int> files_to_delete;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
     status = impl_->FilesByType(table_id, files_to_delete, files_schema);
