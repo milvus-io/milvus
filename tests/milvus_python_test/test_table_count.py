@@ -65,9 +65,8 @@ class TestTableCount:
         expected: the count is equal to the length of vectors
         '''
         nb = add_vectors_nb
-        partition_name = gen_unique_str()
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, partition_name, tag)
+        status = connect.create_partition(table, tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
         time.sleep(add_time_interval)
@@ -83,11 +82,9 @@ class TestTableCount:
         '''
         new_tag = "new_tag"
         nb = add_vectors_nb
-        partition_name = gen_unique_str()
-        new_partition_name = gen_unique_str()
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status = connect.create_partition(table, new_partition_name, new_tag)
+        status = connect.create_partition(table, tag)
+        status = connect.create_partition(table, new_tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors)
         time.sleep(add_time_interval)
@@ -103,18 +100,14 @@ class TestTableCount:
         '''
         new_tag = "new_tag"
         nb = add_vectors_nb
-        partition_name = gen_unique_str()
-        new_partition_name = gen_unique_str()
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status = connect.create_partition(table, new_partition_name, new_tag)
+        status = connect.create_partition(table, tag)
+        status = connect.create_partition(table, new_tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
         time.sleep(add_time_interval)
-        status, res = connect.get_table_row_count(partition_name)
+        status, res = connect.get_table_row_count(table)
         assert res == nb
-        status, res = connect.get_table_row_count(new_partition_name)
-        assert res == 0
 
     def test_table_rows_count_multi_partitions_C(self, connect, table, add_vectors_nb):
         '''
@@ -125,19 +118,13 @@ class TestTableCount:
         '''
         new_tag = "new_tag"
         nb = add_vectors_nb
-        partition_name = gen_unique_str()
-        new_partition_name = gen_unique_str()
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, partition_name, tag)
-        status = connect.create_partition(table, new_partition_name, new_tag)
+        status = connect.create_partition(table, tag)
+        status = connect.create_partition(table, new_tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=new_tag)
         time.sleep(add_time_interval)
-        status, res = connect.get_table_row_count(partition_name)
-        assert res == nb
-        status, res = connect.get_table_row_count(new_partition_name)
-        assert res == nb
         status, res = connect.get_table_row_count(table)
         assert res == nb * 2
 
@@ -206,7 +193,7 @@ class TestTableCount:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=rows_count, args=(milvus, ))
             processes.append(p)
@@ -351,7 +338,7 @@ class TestTableCountIP:
         process_num = 8
         processes = []
         for i in range(process_num):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             p = Process(target=rows_count, args=(milvus,))
             processes.append(p)

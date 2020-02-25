@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -21,6 +15,8 @@
 #include "wrapper/utils.h"
 
 #include <gtest/gtest.h>
+#include <fiu-local.h>
+#include <fiu-control.h>
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 
 using ::testing::Combine;
@@ -129,6 +125,77 @@ TEST_F(KnowhereHybrid, test_interface) {
             hybrid_idx->UnsetQuantizer();
         }
     }
+}
+
+TEST_F(KnowhereHybrid, test_invalid_index) {
+    assert(!xb.empty());
+    fiu_init(0);
+
+    index_type = milvus::engine::IndexType::FAISS_IVFSQ8_HYBRID;
+    fiu_enable("GetVecIndexFactory.IVFSQHybrid.mock", 1, nullptr, 0);
+    index_ = GetVecIndexFactory(index_type);
+    fiu_disable("GetVecIndexFactory.IVFSQHybrid.mock");
+    conf = ParamGenerator::GetInstance().Gen(index_type);
+
+    auto elems = nq * k;
+    std::vector<int64_t> res_ids(elems);
+    std::vector<float> res_dis(elems);
+
+    conf->gpu_id = DEVICEID;
+    conf->d = dim;
+    conf->k = k;
+
+    auto status = index_->BuildAll(nb, xb.data(), ids.data(), conf);
+    ASSERT_FALSE(status.ok());
+
+    auto quantizer = std::make_shared<knowhere::Quantizer>();
+    auto quantizer_cfg = std::make_shared<knowhere::QuantizerCfg>();
+    index_->LoadQuantizer(quantizer_cfg);
+    status = index_->SetQuantizer(quantizer);
+    ASSERT_FALSE(status.ok());
+
+    fiu_enable("IVFHybridIndex.SetQuantizer.throw_knowhere_exception", 1, nullptr, 0);
+    status = index_->SetQuantizer(quantizer);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("IVFHybridIndex.SetQuantizer.throw_knowhere_exception");
+
+    fiu_enable("IVFHybridIndex.SetQuantizer.throw_std_exception", 1, nullptr, 0);
+    status = index_->SetQuantizer(quantizer);
+    ASSERT_FALSE(status.ok());
+    fiu_disable("IVFHybridIndex.SetQuantizer.throw_std_exception");
+
+    status = index_->UnsetQuantizer();
+    ASSERT_FALSE(status.ok());
+    fiu_enable("IVFHybridIndex.UnsetQuantizer.throw_knowhere_exception", 1, nullptr, 0);
+    status = index_->UnsetQuantizer();
+    ASSERT_FALSE(status.ok());
+    fiu_disable("IVFHybridIndex.UnsetQuantizer.throw_knowhere_exception");
+
+    fiu_enable("IVFHybridIndex.UnsetQuantizer.throw_std_exception", 1, nullptr, 0);
+    status = index_->UnsetQuantizer();
+    ASSERT_FALSE(status.ok());
+    fiu_disable("IVFHybridIndex.UnsetQuantizer.throw_std_exception");
+
+    auto vecindex = index_->LoadData(quantizer, quantizer_cfg);
+    ASSERT_EQ(vecindex, nullptr);
+
+    fiu_enable("IVFHybridIndex.LoadData.throw_std_exception", 1, nullptr, 0);
+    vecindex = index_->LoadData(quantizer, quantizer_cfg);
+    ASSERT_EQ(vecindex, nullptr);
+    fiu_disable("IVFHybridIndex.LoadData.throw_std_exception");
+
+    fiu_enable("IVFHybridIndex.LoadData.throw_knowhere_exception", 1, nullptr, 0);
+    vecindex = index_->LoadData(quantizer, quantizer_cfg);
+    ASSERT_EQ(vecindex, nullptr);
+    fiu_disable("IVFHybridIndex.LoadData.throw_knowhere_exception");
+
+    index_->CopyToGpuWithQuantizer(DEVICEID, conf);
+    fiu_enable("IVFHybridIndex.LoadData.throw_knowhere_exception", 1, nullptr, 0);
+    index_->CopyToGpuWithQuantizer(DEVICEID, conf);
+    fiu_disable("IVFHybridIndex.LoadData.throw_knowhere_exception");
+    fiu_enable("IVFHybridIndex.LoadData.throw_std_exception", 1, nullptr, 0);
+    index_->CopyToGpuWithQuantizer(DEVICEID, conf);
+    fiu_disable("IVFHybridIndex.LoadData.throw_std_exception");
 }
 
 #endif

@@ -37,6 +37,7 @@ set(index_srcs
         knowhere/index/vector_index/IndexBinaryIDMAP.cpp
         knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
         knowhere/index/vector_index/IndexNSG.cpp
+        knowhere/index/vector_index/IndexHNSW.cpp
         knowhere/index/vector_index/nsg/NSG.cpp
         knowhere/index/vector_index/nsg/NSGIO.cpp
         knowhere/index/vector_index/nsg/NSGHelper.cpp
