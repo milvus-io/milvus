@@ -8,7 +8,7 @@ timeout(time: 90, unit: 'MINUTES') {
 
     if (!fileExists('milvus-helm')) {
         dir ("milvus-helm") {
-            checkout([$class: 'GitSCM', branches: [[name: "0.6.0"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/0.6.0:refs/remotes/origin/0.6.0"]]])
+            checkout([$class: 'GitSCM', branches: [[name: "master"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/master:refs/remotes/origin/master"]]])
         }
     }
     dir ("milvus-helm") {
