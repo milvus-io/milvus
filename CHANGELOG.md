@@ -58,6 +58,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#1320 - Remove debug logging from faiss
 
 ## Task
+- \#1327 - Exclude third-party code from codebeat
+- \#1331 - Exclude third-party code from codacy
 
 # Milvus 0.6.0 (2019-12-07)
 
