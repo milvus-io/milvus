@@ -64,22 +64,22 @@ pipeline {
 
                         stages {
                             stage('Run Build') {
-                                when {
-                                    allOf {
-                                        anyOf {
-                                            expression { isEmptyChangelog() == true }
-                                            changeset 'ci/**'
-                                            changeset 'core/**'
-                                            changeset 'docker/**'
-                                            changeset 'test/**'
-                                        }
-                                        not {
-                                            anyOf {
-                                                changeset '**/*.md'
-                                            }
-                                        }
-                                    }
-                                }
+                                // when {
+                                //     allOf {
+                                //         anyOf {
+                                //             expression { isEmptyChangelog() == true }
+                                //             changeset 'ci/**'
+                                //             changeset 'core/**'
+                                //             changeset 'docker/**'
+                                //             changeset 'test/**'
+                                //         }
+                                //         not {
+                                //             anyOf {
+                                //                 changeset '**/*.md'
+                                //             }
+                                //         }
+                                //     }
+                                // }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-build-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -126,22 +126,22 @@ pipeline {
                             }
 
                             stage('Publish docker images') {
-                                when {
-                                    allOf {
-                                        anyOf {
-                                            expression { isEmptyChangelog() == true }
-                                            changeset 'ci/**'
-                                            changeset 'core/**'
-                                            changeset 'docker/**'
-                                            changeset 'test/**'
-                                        }
-                                        not {
-                                            anyOf {
-                                                changeset '**/*.md'
-                                            }
-                                        }
-                                    }
-                                }
+                                // when {
+                                //     allOf {
+                                //         anyOf {
+                                //             expression { isEmptyChangelog() == true }
+                                //             changeset 'ci/**'
+                                //             changeset 'core/**'
+                                //             changeset 'docker/**'
+                                //             changeset 'test/**'
+                                //         }
+                                //         not {
+                                //             anyOf {
+                                //                 changeset '**/*.md'
+                                //             }
+                                //         }
+                                //     }
+                                // }
                                 agent {
                                     kubernetes {
                                         label "${OS_NAME}-${BINARY_VERSION}-publish-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
@@ -164,22 +164,22 @@ pipeline {
                             }
 
                             stage('Deploy to Development') {
-                                when {
-                                    allOf {
-                                        anyOf {
-                                            expression { isEmptyChangelog() == true }
-                                            changeset 'ci/**'
-                                            changeset 'core/**'
-                                            changeset 'docker/**'
-                                            changeset 'test/**'
-                                        }
-                                        not {
-                                            anyOf {
-                                                changeset '**/*.md'
-                                            }
-                                        }
-                                    }
-                                }
+                                // when {
+                                //     allOf {
+                                //         anyOf {
+                                //             expression { isEmptyChangelog() == true }
+                                //             changeset 'ci/**'
+                                //             changeset 'core/**'
+                                //             changeset 'docker/**'
+                                //             changeset 'test/**'
+                                //         }
+                                //         not {
+                                //             anyOf {
+                                //                 changeset '**/*.md'
+                                //             }
+                                //         }
+                                //     }
+                                // }
                                 environment {
                                     FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
                                     FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
