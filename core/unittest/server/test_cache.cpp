@@ -1,25 +1,22 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include "cache/CpuCacheMgr.h"
-#include "cache/GpuCacheMgr.h"
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
+
+#include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
 
 namespace {
 
@@ -140,13 +137,17 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     ASSERT_EQ(cpu_mgr->CacheCapacity(), cap);
 
     uint64_t item_count = 20;
-    for (uint64_t i = 0; i < item_count; i++) {
+    for (uint64_t i = 0; i < item_count + 1; i++) {
         // each vector is 1k byte, total size less than 1G
         milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
     ASSERT_LT(cpu_mgr->ItemCount(), g_num);
+
+    //insert null data
+    std::shared_ptr<milvus::cache::DataObj> null_data_obj = nullptr;
+    cpu_mgr->InsertItem("index_null", null_data_obj);
 
     auto obj = cpu_mgr->GetIndex("index_0");
     ASSERT_TRUE(obj == nullptr);
@@ -170,9 +171,20 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
         ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
+
+        //insert aleady existed key
+        cpu_mgr->InsertItem("index_6g", data_obj);
     }
 
     cpu_mgr->PrintInfo();
+
+    cpu_mgr->ClearCache();
+    ASSERT_EQ(cpu_mgr->ItemCount(), 0);
+
+//    fiu_enable("CpuCacheMgr_CpuCacheMgr_ZeroCpucacheThreshold", 1, nullptr, 0);
+//    auto* cpu_cache_mgr = new milvus::cache::CpuCacheMgr();
+//    fiu_disable("CpuCacheMgr_CpuCacheMgr_ZeroCpucacheThreshold");
+//    delete cpu_cache_mgr;
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -202,6 +214,11 @@ TEST(CacheTest, GPU_CACHE_TEST) {
 
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
+
+//    fiu_enable("GpuCacheMgr_GpuCacheMgr_ZeroGpucacheThreshold", 1, nullptr, 0);
+//    auto* gpu_cache_mgr = new milvus::cache::GpuCacheMgr();
+//    fiu_disable("GpuCacheMgr_GpuCacheMgr_ZeroGpucacheThreshold");
+//    delete gpu_cache_mgr;
 }
 #endif
 
@@ -232,4 +249,24 @@ TEST(CacheTest, INVALID_TEST) {
         }
         ASSERT_EQ(mgr.GetItem("index_0"), nullptr);
     }
+}
+
+TEST(CacheTest, PARTIAL_LRU_TEST) {
+    constexpr int MAX_SIZE = 5;
+    milvus::cache::LRU<int, int> lru(MAX_SIZE);
+
+    lru.put(0, 2);
+    lru.put(0, 3);
+    ASSERT_EQ(lru.size(), 1);
+
+    for (int i = 1; i < MAX_SIZE; ++i) {
+        lru.put(i, 0);
+    }
+    ASSERT_EQ(lru.size(), MAX_SIZE);
+
+    lru.put(99, 0);
+    ASSERT_EQ(lru.size(), MAX_SIZE);
+    ASSERT_TRUE(lru.exists(99));
+
+    ASSERT_ANY_THROW(lru.get(-1));
 }
