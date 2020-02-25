@@ -597,7 +597,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_1) {
         for (auto i = 0; i < loop; ++i) {
             int64_t nb = VECTOR_COUNT;
             milvus::engine::VectorsData xb;
-            BuildVectors(nb, , xb);
+            BuildVectors(nb, i, xb);
             db_->InsertVectors(TABLE_NAME, "", xb);
             ASSERT_EQ(xb.id_array_.size(), nb);
         }
@@ -628,7 +628,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_2) {
     for (auto i = 0; i < loop; ++i) {
         int64_t nb = VECTOR_COUNT;
         milvus::engine::VectorsData xb;
-        BuildVectors(nb, , xb);
+        BuildVectors(nb, i, xb);
         db_->InsertVectors(TABLE_NAME, "", xb);
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
@@ -652,7 +652,7 @@ TEST_F(DBTest, BACK_TIMER_THREAD_3) {
     for (auto i = 0; i < loop; ++i) {
         int64_t nb = VECTOR_COUNT;
         milvus::engine::VectorsData xb;
-        BuildVectors(nb, , xb);
+        BuildVectors(nb, i, xb);
         db_->InsertVectors(TABLE_NAME, "", xb);
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
@@ -1069,6 +1069,8 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
     const int64_t nprobe = 10;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
     stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
@@ -1095,7 +1097,8 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
     const int64_t nprobe = 10;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
     stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_NE(result_ids.size() / topk, qb);
