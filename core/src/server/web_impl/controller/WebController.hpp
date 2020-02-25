@@ -59,7 +59,8 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(State, "*", "GET")
+    ADD_CORS(State)
+
     ENDPOINT("GET", "/state", State) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/state\'");
         tr.ElapseFromBegin("Total cost ");
@@ -67,7 +68,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
 
-    ADD_CORS(GetDevices, "*", "GET")
+    ADD_CORS(GetDevices)
 
     ENDPOINT("GET", "/devices", GetDevices) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/devices\'");
@@ -91,12 +92,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(AdvancedConfigOptions, "*", "GET, PUT")
+    ADD_CORS(AdvancedConfigOptions)
 
     ENDPOINT("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
+    ADD_CORS(GetAdvancedConfig)
 
     ENDPOINT("GET", "/config/advanced", GetAdvancedConfig) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/config/advanced\'");
@@ -120,7 +122,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         return response;
     }
-
 
     ADD_CORS(SetAdvancedConfig)
 
@@ -301,7 +302,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         return response;
     }
-
 
     ADD_CORS(DropTable)
 

@@ -9,28 +9,28 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-//#include <direct.h>
-#include <gtest/gtest.h>
-#include <opentracing/mocktracer/tracer.h>
 #include <unistd.h>
-#include <boost/filesystem.hpp>
 #include <random>
 #include <thread>
 
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
 #include <oatpp-test/UnitTest.hpp>
 #include <oatpp/core/macro/component.hpp>
 #include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
+#include <opentracing/mocktracer/tracer.h>
 
-#include "wrapper/VecIndex.h"
-
-#include "server/Server.h"
+#include "scheduler/ResourceFactory.h"
+#include "scheduler/SchedInst.h"
+#include "server/Config.h"
+#include "server/DBWrapper.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
+#include "server/Server.h"
 #include "src/version.h"
-
 #include "server/web_impl/Types.h"
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/component/AppComponent.hpp"
@@ -41,11 +41,8 @@
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
 
-#include "scheduler/ResourceFactory.h"
-#include "scheduler/SchedInst.h"
-#include "server/Config.h"
-#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
+#include "wrapper/VecIndex.h"
 
 #include "unittest/server/utils.h"
 
@@ -140,7 +137,7 @@ RandomName() {
     return random_name;
 }
 
-}  // namespace
+} // namespace
 
 namespace {
 
@@ -211,7 +208,7 @@ class WebHandlerTest : public testing::Test {
     std::shared_ptr<milvus::server::Context> dummy_context;
 };
 
-}  // namespace
+} // namespace
 
 TEST_F(WebHandlerTest, TABLE) {
     handler->RegisterRequestHandler(milvus::server::RequestHandler());

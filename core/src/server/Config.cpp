@@ -1226,12 +1226,16 @@ Status
 Config::ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value) {
     auto status = Status::OK();
 
-    std::string cb_node = node + "." + sub_node;
-    if (config_callback_.find(cb_node) == config_callback_.end()) {
-        return Status(SERVER_UNEXPECTED_ERROR, "Cannot find " + cb_node + " in callback map");
+    if (config_callback_.empty()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Callback map is empty. Cannot take effect in-service");
     }
 
-    auto cb_map = config_callback_.at(cb_node);
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Cannot find " + cb_node + " in callback map, cannot take effect in-service");
+    }
+
+    auto& cb_map = config_callback_.at(cb_node);
     for (auto& cb_kv : cb_map) {
         auto& cd = cb_kv.second;
         status = cd(value);
