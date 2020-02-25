@@ -17,7 +17,7 @@ nprobe = 1
 tag = "1970-01-01"
 top_k = 1
 nb = 6000
-tag = "partition_tag"
+tag = "tag"
 
 class TestGetBase:
     """
@@ -65,6 +65,7 @@ class TestGetBase:
         '''
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(table, tag)
+        assert status.OK()
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
         status = connect.flush([table])
@@ -123,6 +124,28 @@ class TestGetBase:
         logging.getLogger().info(res)
         assert status.OK()
         assert not res 
+
+    def test_get_vector_after_delete_with_partition(self, connect, table, get_id):
+        '''
+        target: test get_vector_by_id
+        method: add vectors into partition, and delete, get vector by the given id
+        expected: status ok, get one vector
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(table, tag)
+        status, ids = connect.insert(table, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        id = get_id
+        status = connect.delete_by_id(table, [ids[id]])
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, res = connect.get_vector_by_id(table, ids[id])
+        logging.getLogger().info(res)
+        assert status.OK()
+        assert not res
 
     def test_get_vector_id_not_exised(self, connect, table):
         '''
@@ -187,7 +210,7 @@ class TestGetIndexedVectors:
     def get_id(self, request):
         yield request.param
 
-    def test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
+    def _test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
         '''
         target: test get vector after index created
         method: add vector, create index and get vector
@@ -203,6 +226,7 @@ class TestGetIndexedVectors:
         assert status.OK()
         id = get_id
         status, res = connect.get_vector_by_id(table, ids[id])
+        assert status.OK()
         logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vectors[id])
@@ -240,7 +264,8 @@ class TestGetIndexedVectors:
         index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(table, tag)
-        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        ids = [i for i in range(nb)] 
+        status, ids = connect.add_vectors(table, vectors, ids, partition_tag=tag)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -248,9 +273,8 @@ class TestGetIndexedVectors:
         assert status.OK()
         id = get_id
         status, res = connect.get_vector_by_id(table, ids[id])
-        logging.getLogger().info(res)
         assert status.OK()
-        assert not res
+        assert_equal_vector(res, vectors[id])
 
 
 class TestGetBinary:
