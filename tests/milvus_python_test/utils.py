@@ -422,42 +422,6 @@ def gen_invalid_vector_ids():
     return invalid_vector_ids
 
 
-
-def gen_invalid_query_ranges():
-    query_ranges = [
-            [(get_last_day(1), "")],
-            [(get_current_day(), "")],
-            [(get_next_day(1), "")],
-            [(get_current_day(), get_last_day(1))],
-            [(get_next_day(1), get_last_day(1))],
-            [(get_next_day(1), get_current_day())],
-            [(0, get_next_day(1))],
-            [(-1, get_next_day(1))],
-            [(1, get_next_day(1))],
-            [(100001, get_next_day(1))],
-            [(1000000000000001, get_next_day(1))],
-            [(None, get_next_day(1))],
-            [([1,2,3], get_next_day(1))],
-            [((1,2), get_next_day(1))],
-            [({"a": 1}, get_next_day(1))],
-            [(" ", get_next_day(1))],
-            [("", get_next_day(1))],
-            [("String", get_next_day(1))],
-            [("12-s", get_next_day(1))],
-            [("BB。A", get_next_day(1))],
-            [(" siede ", get_next_day(1))],
-            [("(mn)", get_next_day(1))],
-            [("#12s", get_next_day(1))],
-            [("pip+", get_next_day(1))],
-            [("=c", get_next_day(1))],
-            [("\n", get_next_day(1))],
-            [("\t", get_next_day(1))],
-            [("中文", get_next_day(1))],
-            [("a".join("a" for i in range(256)), get_next_day(1))]
-    ]
-    return query_ranges
-
-
 def gen_invalid_index_params():
     index_params = []
     for index_type in gen_invalid_index_types():

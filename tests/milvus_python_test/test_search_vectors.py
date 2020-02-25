@@ -976,48 +976,6 @@ class TestSearchParamsInvalid(object):
             with pytest.raises(Exception) as e:
                 status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vecs)
 
-    """
-    Test search table with invalid query ranges
-    """
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_query_ranges()
-    )
-    def get_query_ranges(self, request):
-        yield request.param
-
-    # disable
-    @pytest.mark.level(1)
-    def _test_search_flat_with_invalid_query_range(self, connect, table, get_query_ranges):
-        '''
-        target: test search fuction, with the wrong query_range
-        method: search with query_range
-        expected: raise an error, and the connection is normal
-        '''
-        top_k = 1
-        nprobe = 1
-        query_vecs = [vectors[0]]
-        query_ranges = get_query_ranges
-        logging.getLogger().info(query_ranges)
-        with pytest.raises(Exception) as e:
-            status, result = connect.search_vectors(table, 1, nprobe, query_vecs, query_ranges=query_ranges)
-
-    # disable
-    @pytest.mark.level(2)
-    def _test_search_flat_with_invalid_query_range_ip(self, connect, ip_table, get_query_ranges):
-        '''
-        target: test search fuction, with the wrong query_range
-        method: search with query_range
-        expected: raise an error, and the connection is normal
-        '''
-        top_k = 1
-        nprobe = 1
-        query_vecs = [vectors[0]]
-        query_ranges = get_query_ranges
-        logging.getLogger().info(query_ranges)
-        with pytest.raises(Exception) as e:
-            status, result = connect.search_vectors(ip_table, 1, nprobe, query_vecs, query_ranges=query_ranges)
-
 
 def check_result(result, id):
     if len(result) >= 5:
