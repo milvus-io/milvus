@@ -87,7 +87,7 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.9</version>
+            <version>4.13</version>
         </dependency>
 
 <!--        <dependency>-->
