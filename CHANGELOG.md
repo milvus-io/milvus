@@ -26,7 +26,6 @@ Please mark all change in change log and use the issue from GitHub
 - \#1211 - Server down caused by searching with index_type: HNSW
 - \#1240 - Update license declaration
 
-
 ## Feature
 - \#216 - Add CLI to get server info
 - \#343 - Add Opentracing
@@ -57,6 +56,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 - \#1297 - Hide partition_name parameter, avid user directly access partition table
 - \#1310 - Add default partition tag for a table
+- \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 
 
 ## Task
