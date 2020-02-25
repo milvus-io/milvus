@@ -5,7 +5,7 @@ include_directories(${INDEX_SOURCE_DIR})
 
 set(depend_libs
         gtest gmock gtest_main gmock_main
-        faiss
+        faiss fiu
         )
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
@@ -117,11 +117,18 @@ if (KNOWHERE_GPU_VERSION)
     target_link_libraries(test_customized_index ${depend_libs} ${unittest_libs} ${basic_libs})
 endif ()
 
+if (NOT TARGET test_knowhere_common)
+    add_executable(test_knowhere_common test_common.cpp ${util_srcs})
+endif ()
+target_link_libraries(test_knowhere_common ${depend_libs} ${unittest_libs} ${basic_libs})
+
 install(TARGETS test_ivf DESTINATION unittest)
 install(TARGETS test_binaryivf DESTINATION unittest)
 install(TARGETS test_idmap DESTINATION unittest)
 install(TARGETS test_binaryidmap DESTINATION unittest)
 install(TARGETS test_sptag DESTINATION unittest)
+install(TARGETS test_knowhere_common DESTINATION unittest)
+
 if (KNOWHERE_GPU_VERSION)
     install(TARGETS test_gpuresource DESTINATION unittest)
     install(TARGETS test_customized_index DESTINATION unittest)
