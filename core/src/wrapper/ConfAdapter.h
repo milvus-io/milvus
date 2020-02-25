@@ -122,6 +122,9 @@ class HNSWConfAdapter : public ConfAdapter {
  public:
     knowhere::Config
     Match(const TempMetaConf& metaconf) override;
+
+    knowhere::Config
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
 };
 
 }  // namespace engine
