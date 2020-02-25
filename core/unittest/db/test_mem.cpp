@@ -234,12 +234,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     milvus::engine::VectorSourcePtr source_10 = std::make_shared<milvus::engine::VectorSource>(vectors_10);
 
     fiu_init(0);
-#if MERGE_NOT_YET
-    FIU_ENABLE_FIU("VecIndexImpl.Add.throw_knowhere_exception");
-    status = mem_table.Add(source_10);
-    ASSERT_FALSE(status.ok());
-    fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
-#endif
+
     status = mem_table.Add(source_10);
     ASSERT_TRUE(status.ok());
 

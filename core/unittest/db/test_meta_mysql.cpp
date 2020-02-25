@@ -121,7 +121,7 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
 }
-#if MERGE_NOT_YET
+
 TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     auto table_id = "meta_test_table";
     fiu_init(0);
@@ -249,7 +249,10 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
 
-    sleep(1);
+    table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    status = impl_->CreateTableFile(table_file);
+
     std::vector<int> files_to_delete;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
     status = impl_->FilesByType(table_id, files_to_delete, files_schema);
@@ -257,10 +260,9 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     table_file.table_id_ = table_id;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
-    milvus::engine::OngoingFileChecker filter;
     table_file.file_id_ = files_schema.front().file_id_;
-    filter.MarkOngoingFile(table_file);
-    status = impl_->CleanUpFilesWithTTL(1UL, &filter);
+    milvus::engine::OngoingFileChecker::GetInstance().MarkOngoingFile(table_file);
+    status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 
     status = impl_->DropTable(table_file.table_id_);
@@ -268,7 +270,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
 }
-#endif
+
 TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     fiu_init(0);
 
