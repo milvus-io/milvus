@@ -236,7 +236,10 @@ class TestDropBase:
         status = connect.drop_partition(table, tag)
         assert status.OK()
         status, res = connect.show_partitions(table)
-        assert tag not in res
+        tag_list = []
+        for item in res:
+            tag_list.append(item.tag)
+        assert tag not in tag_list
 
     def test_drop_partition_tag_not_existed(self, connect, table):
         '''
@@ -272,7 +275,10 @@ class TestDropBase:
         time.sleep(2)
         assert not status.OK()
         status, res = connect.show_partitions(table)
-        assert tag not in res
+        tag_list = []
+        for item in res:
+            tag_list.append(item.tag)
+        assert tag not in tag_list
 
     def test_drop_partition_create(self, connect, table):
         '''
@@ -286,7 +292,10 @@ class TestDropBase:
         status = connect.create_partition(table, tag)
         assert status.OK()
         status, res = connect.show_partitions(table)
-        assert tag in res
+        tag_list = []
+        for item in res:
+            tag_list.append(item.tag)
+        assert tag in tag_list
 
 
 class TestNameInvalid(object):
