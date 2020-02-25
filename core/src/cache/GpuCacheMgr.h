@@ -39,7 +39,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
     InsertItem(const std::string& key, const DataObjPtr& data);
 
  private:
-    bool gpu_enable_;
+    bool gpu_enable_ = true;
     std::string identity_;
     static std::mutex mutex_;
     static std::unordered_map<uint64_t, GpuCacheMgrPtr> instance_;

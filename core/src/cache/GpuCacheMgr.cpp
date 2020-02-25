@@ -36,7 +36,6 @@ GpuCacheMgr::GpuCacheMgr() {
 
     config.GetGpuResourceConfigEnable(gpu_enable_);
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        SERVER_LOG_WARNING << "Gpu enable in GpuCacheMgr.cpp";
         auto& config = server::Config::GetInstance();
         return config.GetGpuResourceConfigEnable(this->gpu_enable_);
     };
