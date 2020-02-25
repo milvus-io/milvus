@@ -27,6 +27,14 @@
 
 namespace knowhere {
 
+void
+normalize_vector(float* data, float* norm_array, size_t dim) {
+    float norm = 0.0f;
+    for (int i = 0; i < dim; i++) norm += data[i] * data[i];
+    norm = 1.0f / (sqrtf(norm) + 1e-30f);
+    for (int i = 0; i < dim; i++) norm_array[i] = data[i] * norm;
+}
+
 BinarySet
 IndexHNSW::Serialize() {
     if (!index_) {
@@ -59,6 +67,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         hnswlib::SpaceInterface<float>* space;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
+
+        normalize = index_->metric_type_ == 1 ? true : false;  // 1 == InnerProduct
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -69,6 +79,13 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
+
+    auto search_cfg = std::dynamic_pointer_cast<HNSWCfg>(config);
+    if (search_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("search conf is null");
+    }
+    index_->setEf(search_cfg->ef);
+
     GETTENSOR(dataset)
 
     size_t id_size = sizeof(int64_t) * config->k;
@@ -80,8 +97,17 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     auto compare = [](P& v1, P& v2) { return v1.first < v2.first; };
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
-        const float* single_query = p_data + i * dim;
-        std::vector<std::pair<float, int64_t>> ret = index_->searchKnn(single_query, config->k, compare);
+        std::vector<P> ret;
+        const float* single_query = p_data + i * Dimension();
+
+        if (normalize) {
+            std::vector<float> norm_vector(Dimension());
+            normalize_vector((float*)(single_query), norm_vector.data(), Dimension());
+            ret = index_->searchKnn((float*)(norm_vector.data()), config->k, compare);
+        } else {
+            ret = index_->searchKnn((float*)single_query, config->k, compare);
+        }
+
         while (ret.size() < config->k) {
             ret.push_back(std::make_pair(-1, -1));
         }
@@ -105,8 +131,8 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
 IndexModelPtr
 IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<HNSWCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
+    if (build_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("build conf is null");
     }
 
     GETTENSOR(dataset)
@@ -116,6 +142,7 @@ IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
         space = new hnswlib::L2Space(dim);
     } else if (config->metric_type == METRICTYPE::IP) {
         space = new hnswlib::InnerProductSpace(dim);
+        normalize = true;
     }
     index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, build_cfg->M, build_cfg->ef);
 
@@ -133,12 +160,22 @@ IndexHNSW::Add(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
     auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
 
-    for (int i = 0; i < 1; i++) {
-        index_->addPoint((void*)(p_data + dim * i), p_ids[i]);
-    }
+    if (normalize) {
+        std::vector<float> ep_norm_vector(Dimension());
+        normalize_vector((float*)(p_data), ep_norm_vector.data(), Dimension());
+        index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
 #pragma omp parallel for
-    for (int i = 1; i < rows; i++) {
-        index_->addPoint((void*)(p_data + dim * i), p_ids[i]);
+        for (int i = 1; i < rows; ++i) {
+            std::vector<float> norm_vector(Dimension());
+            normalize_vector((float*)(p_data + Dimension() * i), norm_vector.data(), Dimension());
+            index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
+        }
+    } else {
+        index_->addPoint((void*)(p_data), p_ids[0]);
+#pragma omp parallel for
+        for (int i = 1; i < rows; ++i) {
+            index_->addPoint((void*)(p_data + Dimension() * i), p_ids[i]);
+        }
     }
 }
 

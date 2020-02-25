@@ -1149,8 +1149,7 @@ namespace hnswlib {
                 ret.pop();
             }
 
-            // TODO(linxj): uncomment
-            std::sort(result.begin(), result.end(), comp);
+			std::sort(result.begin(), result.end(), comp);
 
             return result;
         }

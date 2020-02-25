@@ -274,6 +274,19 @@ HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
 }
 
 knowhere::Config
+HNSWConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::HNSWCfg>();
+    conf->k = metaconf.k;
+
+    if (metaconf.nprobe < metaconf.k) {
+        conf->ef = metaconf.k + 50;
+    } else {
+        conf->ef = metaconf.nprobe;
+    }
+    return conf;
+}
+
+knowhere::Config
 BinIDMAPConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
     conf->d = metaconf.dim;
