@@ -19,65 +19,25 @@
 #include "utils/Log.h"
 
 #include <fiu-local.h>
-
 namespace milvus {
 namespace scheduler {
-
-FaissFlatPass::~FaissFlatPass() {
-    server::Config& config = server::Config::GetInstance();
-
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
-    config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
-}
 
 void
 FaissFlatPass::Init() {
     server::Config& config = server::Config::GetInstance();
-
-    config.GenUniqueIdentityID("FaissFlatPass", identity_);
-
-    config.GetGpuResourceConfigEnable(gpu_enable_);
-    server::ConfigCallBackF lambda_gpu_enable = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
-        return config.GetGpuResourceConfigEnable(this->gpu_enable_);
-    };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_,
-                            lambda_gpu_enable);
-
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
-    server::ConfigCallBackF lambda_gpu_threshold = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
-        int64_t threshold;
-        auto status = config.GetEngineConfigGpuSearchThreshold(threshold);
-        if (status.ok()) {
-            this->threshold_ = threshold;
-        }
-
-        return status;
-    };
-    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_,
-                            lambda_gpu_threshold);
-
-    s = config.GetGpuResourceConfigSearchResources(gpus);
+    s = config.GetGpuResourceConfigSearchResources(search_gpus_);
     if (!s.ok()) {
         throw std::exception();
     }
-    server::ConfigCallBackF lambda_gpu_search_res = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
-        std::vector<int64_t> gpu_ids;
-        auto status = config.GetGpuResourceConfigSearchResources(gpu_ids);
-        if (status.ok()) {
-            this->gpus = gpu_ids;
-        }
 
-        return status;
-    };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_,
-                            lambda_gpu_search_res);
+    SetIdentity("FaissFlatPass");
+    AddGpuEnableListener();
+    AddGpuSearchThresholdListener();
+    AddGpuSearchResListener();
 }
 
 bool
@@ -100,10 +60,10 @@ FaissFlatPass::Run(const TaskPtr& task) {
         SERVER_LOG_DEBUG << "FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!";
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
-        auto best_device_id = count_ % gpus.size();
+        auto best_device_id = count_ % search_gpus_.size();
         SERVER_LOG_DEBUG << "FaissFlatPass: nq > gpu_search_threshold, specify gpu" << best_device_id << " to search!";
         ++count_;
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpus[best_device_id]);
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[best_device_id]);
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;

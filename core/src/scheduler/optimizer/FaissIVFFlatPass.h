@@ -23,16 +23,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Pass.h"
+#include "scheduler/optimizer/handler/GpuSearchResHandler.h"
+#include "scheduler/optimizer/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFFlatPass : public Pass {
+class FaissIVFFlatPass : public Pass, public GpuSearchResHandler {
  public:
     FaissIVFFlatPass() = default;
-
-    ~FaissIVFFlatPass();
 
  public:
     void
@@ -42,11 +41,7 @@ class FaissIVFFlatPass : public Pass {
     Run(const TaskPtr& task) override;
 
  private:
-    bool gpu_enable_;
-    std::string identity_;
-    int64_t threshold_ = std::numeric_limits<int64_t>::max();
     int64_t count_ = 0;
-    std::vector<int64_t> gpus;
 };
 
 using FaissIVFFlatPassPtr = std::shared_ptr<FaissIVFFlatPass>;
