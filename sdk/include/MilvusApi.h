@@ -298,6 +298,21 @@ class Connection {
     GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) = 0;
 
     /**
+     * @brief Get vector ids from a segment
+     *
+     * This method is used to get vector ids from a segment
+     * Return all vector(not deleted) ids
+     *
+     * @param table_name, target table's name.
+     * @param segment_name, target segment name.
+     * @param id_array, returned vector id array.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetIDsInSegment(const std::string& table_name, const std::string& segment_name, std::vector<int64_t>& id_array) = 0;
+
+    /**
      * @brief Search vector
      *
      * This method is used to query vector in table.

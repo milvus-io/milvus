@@ -57,6 +57,10 @@ class ConnectionImpl : public Connection {
     GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) override;
 
     Status
+    GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
+                    std::vector<int64_t>& id_array) override;
+
+    Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
            const std::vector<RowRecord>& query_record_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) override;

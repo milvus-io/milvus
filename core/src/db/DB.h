@@ -101,6 +101,9 @@ class DB {
     virtual Status
     GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) = 0;
 
+    virtual Status
+    GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
+
     //    virtual Status
     //    Merge(const std::set<std::string>& table_ids) = 0;
 

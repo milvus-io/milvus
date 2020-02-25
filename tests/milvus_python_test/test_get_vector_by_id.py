@@ -210,7 +210,7 @@ class TestGetIndexedVectors:
     def get_id(self, request):
         yield request.param
 
-    def _test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
+    def test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
         '''
         target: test get vector after index created
         method: add vector, create index and get vector
