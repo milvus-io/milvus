@@ -29,7 +29,9 @@ namespace server {
 
 GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
                                          const std::string& segment_name, std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, INFO_REQUEST_GROUP), table_name_(table_name), segment_name_(segment_name),
+    : BaseRequest(context, INFO_REQUEST_GROUP),
+      table_name_(table_name),
+      segment_name_(segment_name),
       vector_ids_(vector_ids) {
 }
 

@@ -806,11 +806,10 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
             }
 
             mysqlpp::Query getTableFileQuery = connectionPtr->query();
-            getTableFileQuery
-                << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, row_count, date, created_on"
-                << " FROM " << META_TABLEFILES
-                << " WHERE segment_id = " << mysqlpp::quote << segment_id << " AND file_type <> "
-                << std::to_string(TableFileSchema::TO_DELETE) << ";";
+            getTableFileQuery << "SELECT id, table_id, segment_id, engine_type, file_id, file_type, file_size, "
+                              << "row_count, date, created_on"
+                              << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id
+                              << " AND file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFilesBySegmentId: " << getTableFileQuery.str();
 
