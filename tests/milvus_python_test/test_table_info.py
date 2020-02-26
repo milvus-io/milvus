@@ -246,4 +246,5 @@ class TestTableInfoBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info.partitions_stat[0].segments_stat[0])
+        logging.getLogger().info(index_params["index_type"])
         assert nb == info.partitions_stat[0].segments_stat[0].count
