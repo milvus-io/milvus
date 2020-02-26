@@ -19,6 +19,15 @@ nb = 6000
 
 
 class TestTableInfoBase:
+    def index_string_convert(index_string, index_type):
+        if index_string == "IDMAP" and index_type == IndexType.FLAT:
+            return True
+        if index_string == "IVFSQ8" and index_type == IndexType.IVF_SQ8:
+            return True
+        if index_string == "IVFFLAT" and index_type == IndexType.IVFLAT:
+            return True
+        return False
+
     """
     ******************************************************************
       The following cases are used to test `table_info` function
@@ -245,7 +254,10 @@ class TestTableInfoBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info)
-        assert info.partitions_stat[0].segments_stat[0].index_name == index_params["index_type"]
+        index_string = info.partitions_stat[0].segments_stat[0].index_name
+        index_type = index_params["index_type"]
+        match = self.index_string_convert(index_string, index_type)
+        assert match
         assert nb == info.partitions_stat[0].segments_stat[0].count
 
     @pytest.mark.timeout(INFO_TIMEOUT)
@@ -268,7 +280,10 @@ class TestTableInfoBase:
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info)
-        assert info.partitions_stat[0].segments_stat[0].index_name == index_params["index_type"]
+        index_string = info.partitions_stat[0].segments_stat[0].index_name
+        index_type = index_params["index_type"]
+        match = self.index_string_convert(index_string, index_type)
+        assert match
         assert nb == info.partitions_stat[0].segments_stat[0].count
 
     @pytest.mark.timeout(INFO_TIMEOUT)
@@ -297,5 +312,8 @@ class TestTableInfoBase:
             status, info = connect.table_info(table)
             assert status.OK()
             logging.getLogger().info(info)
-            assert info.partitions_stat[0].segments_stat[0].index_name == index_param["index_type"]
+            index_string = info.partitions_stat[0].segments_stat[0].index_name
+            index_type = index_params["index_type"]
+            match = self.index_string_convert(index_string, index_type)
+            ssert match
             assert nb == info.partitions_stat[0].segments_stat[0].count
