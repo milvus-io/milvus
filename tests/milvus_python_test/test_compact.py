@@ -440,8 +440,8 @@ class TestCompactBase:
         assert status.OK()
         # start to compact, kill and restart server
         logging.getLogger().info("compact starting...")
-        pdb.set_trace()
         status = connect.compact(table)
+        pdb.set_trace()
         assert status.OK()
         logging.getLogger().info("compact finishing...")
         status = connect.flush([table])
@@ -449,7 +449,7 @@ class TestCompactBase:
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        assert info.partitions_stat[0].count == nb * 100 - 2
+        assert info.partitions_stat[0].count == nb * 100 - 1000
 
 
 class TestCompactJAC:
