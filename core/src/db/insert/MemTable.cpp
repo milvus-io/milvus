@@ -266,12 +266,13 @@ MemTable::ApplyDeletes() {
         for (size_t i = 0; i < uids.size(); ++i) {
             auto find_start = std::chrono::high_resolution_clock::now();
 
-            auto found = std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]);
+            std::sort(ids_to_check.begin(), ids_to_check.end());
+            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i]);
 
             auto find_end = std::chrono::high_resolution_clock::now();
             find_diff += (find_end - find_start);
 
-            if (found != ids_to_check.end()) {
+            if (found) {
                 auto set_start = std::chrono::high_resolution_clock::now();
 
                 delete_count++;
