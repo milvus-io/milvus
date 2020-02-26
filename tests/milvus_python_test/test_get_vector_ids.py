@@ -23,6 +23,8 @@ class TestGetVectorIdsBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
         status, info = connect.table_info(table)
         assert status.OK()
         return info.partitions_stat[0].segments_stat[0].segment_name
