@@ -135,20 +135,16 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // flush buffer
+        milvus_sdk::TimeRecorder rc("Flush");
         stat = conn->FlushTable(TABLE_NAME);
         std::cout << "FlushTable function call status: " << stat.message() << std::endl;
     }
 
-    milvus_sdk::Utils::Sleep(10);
     {  // get table information
         milvus::TableInfo table_info;
         stat = conn->ShowTableInfo(TABLE_NAME, table_info);
         milvus_sdk::Utils::PrintTableInfo(table_info);
         std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
-
-        std::vector<int64_t> ids;
-        stat = conn->GetIDsInSegment(TABLE_NAME, table_info.partitions_stat[0].segments_stat[0].segment_name, ids);
-        std::cout << "Totally ids in segment " << ids.size() << std::endl;
     }
 
     {
