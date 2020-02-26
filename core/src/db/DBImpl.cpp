@@ -220,6 +220,29 @@ DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
 }
 
 Status
+DBImpl::HasNativeTable(const std::string& table_id, bool& has_or_not_) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        has_or_not_ = false;
+        return status;
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            has_or_not_ = false;
+            return Status(DB_NOT_FOUND, "");
+        }
+
+        has_or_not_ = true;
+        return Status::OK();
+    }
+}
+
+Status
 DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -589,14 +612,21 @@ DBImpl::Compact(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    bool has_table;
-    auto status = HasTable(table_id, has_table);
-    if (!has_table) {
-        ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
-        return Status(DB_NOT_FOUND, "Table to compact does not exist");
-    }
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
     if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
+        if (status.code() == DB_NOT_FOUND) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        } else {
+            return status;
+        }
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        }
     }
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
