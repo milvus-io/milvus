@@ -21,6 +21,9 @@
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
 
+#include "db/Types.h"
+#include "server/context/Context.h"
+#include "server/delivery/RequestHandler.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
@@ -29,10 +32,7 @@
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
-
-#include "db/Types.h"
-#include "server/context/Context.h"
-#include "server/delivery/RequestHandler.h"
+#include "thirdparty/nlohmann/json.hpp"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -82,6 +82,30 @@ class WebRequestHandler {
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
+
+    Status
+    Cmd(const std::string& cmd, std::string& result_str);
+
+    Status
+    PreLoadTable(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    Flush(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    Compact(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    GetConfig(std::string& result_str);
+
+    Status
+    SetConfig(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    Search(const std::string& table_name, const nlohmann::json& json, std::string& result_str);
+
+    Status
+    DeleteByIDs(const std::string& table_name, const nlohmann::json& json, std::string& result_str);
 
  public:
     WebRequestHandler() {
@@ -138,6 +162,16 @@ class WebRequestHandler {
     DropPartition(const OString& table_name, const OString& tag);
 
     StatusDto::ObjectWrapper
+    ShowSegments(const OString& table_name, const OString& partition_tag, const OString& page_size, const OString& offset, OString& response);
+
+    StatusDto::ObjectWrapper
+    GetVectors(const OString& table_name, const OString& partition_tag, const OString& segment_name,
+        const OString& page_size, const OString& offset, OString& response);
+
+    StatusDto::ObjectWrapper
+    ModifyVectors(const OString& table_name, const OString& body, OString& response);
+
+    StatusDto::ObjectWrapper
     Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
            VectorIdsDto::ObjectWrapper& ids_dto);
 
@@ -147,6 +181,16 @@ class WebRequestHandler {
 
     StatusDto::ObjectWrapper
     Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto);
+
+ public:
+    StatusDto::ObjectWrapper
+    VectorsOp(const OString& table_name, const OString& payload, OString& response);
+
+    StatusDto::ObjectWrapper
+    SystemInfo(const OString& cmd, OString& response_str);
+
+    StatusDto::ObjectWrapper
+    SystemOp(const OString& op, const OString& body_str, OString& response_str);
 
  public:
     WebRequestHandler&

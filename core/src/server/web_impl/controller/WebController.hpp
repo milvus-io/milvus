@@ -678,6 +678,47 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
+    ADD_CORS(SegmentsOptions)
+
+    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}/segments", SegmentsOptions) {
+        return createResponse(Status::CODE_204, "No Content");
+    }
+
+    ADD_CORS(ShowSegments)
+
+    ENDPOINT("GET", "/tables/{table_name}/partitions/{partition_tag}/segments", ShowSegments,
+             PATH(String, table_name), PATH(String, partition_tag), QUERIES(const QueryParams&, query_params)) {
+        auto offset = query_params.get("offset");
+        auto page_size = query_params.get("page_size");
+
+        auto handler = WebRequestHandler();
+        String response;
+        auto status_dto = handler.ShowSegments(table_name, partition_tag, page_size, offset, response);
+
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:{
+                return createResponse(Status::CODE_200, response);
+                break;
+            }
+            default:{
+                return createDtoResponse(Status::CODE_400, status_dto);
+            }
+        }
+    }
+
+    ADD_CORS(GetVectors)
+    ENDPOINT("GET", "/tables/{table_name}/partitions/{partition_tag}/segments/{segment_name}/vectors", GetVectors,
+             PATH(String, table_name), PATH(String, partition_tag), PATH(String, segment_name),
+             QUERIES(const QueryParams&, query_params)) {
+        auto offset = query_params.get("offset");
+        auto page_size = query_params.get("page_size");
+
+        auto handler = WebRequestHandler();
+        String response;
+        auto status_dto = handler.GetVectors(table_name, partition_tag, segment_name, page_size, offset, response);
+
+    }
+
     ADD_CORS(VectorsOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
@@ -725,33 +766,21 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT_INFO(Search) {
-        info->summary = "Search";
+    ADD_CORS(VectorsOp)
 
-        info->pathParams.add<String>("table_name");
-
-        info->addConsumes<SearchRequestDto::ObjectWrapper>("application/json");
-
-        info->addResponse<TopkResultsDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-    }
-
-    ADD_CORS(Search)
-
-    ENDPOINT("PUT", "/tables/{table_name}/vectors", Search,
-             PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
+    ENDPOINT("PUT", "/tables/{table_name}/vectors", VectorsOp,
+             PATH(String, table_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/tables/" + table_name->std_str() + "/vectors\'");
         tr.RecordSection("Received request.");
 
-        auto results_dto = TopkResultsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
+        OString result;
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.Search(table_name, body, results_dto);
+        auto status_dto = handler.VectorsOp(table_name, body, result);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, results_dto);
+                response = createResponse(Status::CODE_200, result);
                 break;
             case StatusCode::TABLE_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
@@ -800,6 +829,31 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
+    ADD_CORS(SystemOp)
+
+    ENDPOINT("PUT", "/system/{Op}", SystemOp, PATH(String, Op), BODY_STRING(String, body_str)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + Op->std_str() + "\'");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        String response_str;
+        auto status_dto = handler.SystemOp(Op, body_str, response_str);
+
+        std::shared_ptr<OutgoingResponse> response;
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, response_str);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
 /**
  *  Finish ENDPOINTs generation ('ApiController' codegen)
  */
