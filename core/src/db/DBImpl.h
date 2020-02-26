@@ -62,6 +62,9 @@ class DBImpl : public DB {
     HasTable(const std::string& table_id, bool& has_or_not) override;
 
     Status
+    HasNativeTable(const std::string& table_id, bool& has_or_not_) override;
+
+    Status
     AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
 
     Status
