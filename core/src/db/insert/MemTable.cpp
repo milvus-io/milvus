@@ -172,7 +172,7 @@ MemTable::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
-    ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
+    ENGINE_LOG_DEBUG << "\nApplying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
@@ -225,8 +225,7 @@ MemTable::ApplyDeletes() {
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
-
-        ENGINE_LOG_DEBUG << "Applying deletes in segment: " << table_file.segment_id_;
+        ENGINE_LOG_DEBUG << "\nApplying deletes in segment: " << table_file.segment_id_;
 
         start = std::chrono::high_resolution_clock::now();
 
@@ -353,7 +352,7 @@ MemTable::ApplyDeletes() {
     diff = end - start;
 
     status = meta_->UpdateTableFiles(table_files_to_update);
-    ENGINE_LOG_DEBUG << "Updated meta in table: " << table_id_ << " in " << diff.count() << " s";
+    ENGINE_LOG_DEBUG << "\nUpdated meta in table: " << table_id_ << " in " << diff.count() << " s";
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();

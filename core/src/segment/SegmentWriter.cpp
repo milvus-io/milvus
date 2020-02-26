@@ -158,7 +158,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
 
-    ENGINE_LOG_DEBUG << "Merging from " << dir_to_merge << " to " << directory_ptr_->GetDirPath();
+    ENGINE_LOG_DEBUG << "\nMerging from " << dir_to_merge << " to " << directory_ptr_->GetDirPath();
 
     auto start = std::chrono::high_resolution_clock::now();
 
