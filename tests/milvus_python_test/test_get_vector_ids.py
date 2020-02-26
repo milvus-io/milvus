@@ -99,7 +99,7 @@ class TestGetVectorIdsBase:
         valid_segment_name = self.get_valid_segment_name(connect, table)
         segment = gen_unique_str("not_existed_segment")
         status, vector_ids = connect.get_vector_ids(table, segment)
-        logging.getLogger().log(vector_ids)
+        logging.getLogger().info(vector_ids)
         assert not status.OK()
 
     @pytest.mark.timeout(GET_TIMEOUT)
@@ -112,7 +112,7 @@ class TestGetVectorIdsBase:
         valid_segment_name = self.get_valid_segment_name(connect, table)
         segment = gen_unique_str("not_existed_segment")
         status, vector_ids = connect.get_vector_ids(table, segment)
-        logging.getLogger().log(vector_ids)
+        logging.getLogger().info(vector_ids)
         assert not status.OK()
 
     def test_search_crud(self, connect, table):
@@ -122,7 +122,8 @@ class TestGetVectorIdsBase:
         status = connect.create_index(table, index_param)
         assert status.OK()
         for i in range(50):
-            vectors = gen_vector(100000, dim)
+            logging.getLogger().info(i)
+            vectors = gen_vector(10000, dim)
             status, ids = connect.add_vectors(table, vectors)
         status = connect.flush([table])
         assert status.OK()
