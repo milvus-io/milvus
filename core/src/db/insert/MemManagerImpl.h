@@ -41,7 +41,7 @@ class MemManagerImpl : public MemManager {
             int64_t buffer_size;
             auto status = config.GetCacheConfigInsertBufferSize(buffer_size);
             if (status.ok()) {
-                options_.insert_buffer_size_ = buffer_size;
+                options_.insert_buffer_size_ = buffer_size * ONE_GB;
             }
 
             return status;

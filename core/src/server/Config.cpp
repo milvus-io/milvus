@@ -1687,8 +1687,12 @@ Config::SetMetricConfigPort(const std::string& value) {
 Status
 Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(value));
-    cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value));
-    return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
+    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
+    if (status.ok()) {
+        cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value) << 30);
+    }
+
+    return status;
 }
 
 Status
@@ -1780,7 +1784,7 @@ Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
     std::vector<int64_t> gpus;
     GetGpuResourceConfigSearchResources(gpus);
     for (auto& g : gpus) {
-        cache::GpuCacheMgr::GetInstance(g)->SetCapacity(cap);
+        cache::GpuCacheMgr::GetInstance(g)->SetCapacity(cap << 30);
     }
 
     return Status::OK();

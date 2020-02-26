@@ -814,7 +814,7 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
     auto response = client_ptr->showTables("1", "1", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::TableListFieldsDto>(object_mapper.get());
-    ASSERT_TRUE(result_dto->count->getValue() >= 0);
+    ASSERT_GE(result_dto->count->getValue(), 0);
 
     // test query table empty
     response = client_ptr->showTables("0", "0", conncetion_ptr);
@@ -914,7 +914,11 @@ TEST_F(WebControllerTest, INSERT_IDS) {
 }
 
 TEST_F(WebControllerTest, LOAD_TABLE) {
-    const OString table_name = "test_delete_vector_table_test" + OString(RandomName().c_str());
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.SetCacheConfigInsertBufferSize("1");
+    ASSERT_TRUE(status.ok());
+
+    const OString table_name = "test_web_controller_table_load_test" + OString(RandomName().c_str());
     GenTable(table_name, 64, 100, "L2");
 
     // Insert 200 vectors into table
@@ -930,7 +934,7 @@ TEST_F(WebControllerTest, LOAD_TABLE) {
 
     std::string request_str = "{\"load\": {\"table_name\": \"" + table_name->std_str() + "\"}}";
     response = client_ptr->exec("task", request_str.c_str());
-    //    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << load_result_dto->message->std_str();
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // test with non-exist table
     request_str = "{\"load\": {\"table_name\": \"OOOO124214\"}}";
