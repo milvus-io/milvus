@@ -315,5 +315,5 @@ class TestTableInfoBase:
             index_string = info.partitions_stat[0].segments_stat[0].index_name
             index_type = index_params["index_type"]
             match = self.index_string_convert(index_string, index_type)
-            ssert match
+            assert match
             assert nb == info.partitions_stat[0].segments_stat[0].count
