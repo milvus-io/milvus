@@ -194,7 +194,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
     }
 
     {
-        milvus::engine::OngoingFileChecker checker;
+        milvus::engine::OngoingFileChecker& checker = milvus::engine::OngoingFileChecker::GetInstance();
         milvus::engine::meta::TableFileSchema schema;
         schema.table_id_ = "aaa";
         schema.file_id_ = "5000";

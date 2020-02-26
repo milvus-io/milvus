@@ -294,7 +294,7 @@ MemTable::ApplyDeletes() {
         // Update table file row count
         auto& segment_id = table_file.segment_id_;
         meta::TableFilesSchema segment_files;
-        status = meta_->GetTableFilesBySegmentId(table_file.table_id_, segment_id, segment_files);
+        status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
         if (!status.ok()) {
             break;
         }

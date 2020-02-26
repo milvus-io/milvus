@@ -210,7 +210,7 @@ class TestGetIndexedVectors:
     def get_id(self, request):
         yield request.param
 
-    def _test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
+    def test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
         '''
         target: test get vector after index created
         method: add vector, create index and get vector
@@ -361,22 +361,22 @@ class TestGetBinary:
         status, res = connect.get_vector_by_id(table_new, 1) 
         assert not status.OK()
 
-    def test_get_vector_partition(self, connect, table):
+    def test_get_vector_partition(self, connect, jac_table):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
-        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        status = connect.create_partition(jac_table, tag)
+        status, ids = connect.add_vectors(jac_table, vectors, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([jac_table])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[0])
+        status, res = connect.get_vector_by_id(jac_table, ids[0])
         logging.getLogger().info(res)
         assert status.OK()
-        assert res == vectors[0] 
+        assert res == vectors[0]
 
 
 class TestGetVectorIdIngalid(object):

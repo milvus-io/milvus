@@ -387,7 +387,6 @@ TEST_F(DeleteTest, delete_add_create_index) {
 }
 
 TEST_F(DeleteTest, delete_add_auto_flush) {
-    /*
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -424,11 +423,11 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     stat = db_->InsertVectors(GetTableName(), "", xb2);
     ASSERT_TRUE(stat.ok());
 
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    //stat = db_->CreateIndex(GetTableName(), index);
-    //ASSERT_TRUE(stat.ok());
+    // stat = db_->CreateIndex(GetTableName(), index);
+    // ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
     stat = db_->GetTableRowCount(GetTableName(), row_count);
@@ -455,7 +454,6 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
                           result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
-    */
 }
 
 TEST_F(DeleteTest, compact_basic) {

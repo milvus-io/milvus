@@ -18,6 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -216,6 +217,29 @@ DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     }
 
     return meta_ptr_->HasTable(table_id, has_or_not);
+}
+
+Status
+DBImpl::HasNativeTable(const std::string& table_id, bool& has_or_not_) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        has_or_not_ = false;
+        return status;
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            has_or_not_ = false;
+            return Status(DB_NOT_FOUND, "");
+        }
+
+        has_or_not_ = true;
+        return Status::OK();
+    }
 }
 
 Status
@@ -588,14 +612,21 @@ DBImpl::Compact(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    bool has_table;
-    auto status = HasTable(table_id, has_table);
-    if (!has_table) {
-        ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
-        return Status(DB_NOT_FOUND, "Table to compact does not exist");
-    }
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
     if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
+        if (status.code() == DB_NOT_FOUND) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        } else {
+            return status;
+        }
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        }
     }
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
@@ -772,6 +803,77 @@ DBImpl::GetVectorByID(const std::string& table_id, const IDNumber& vector_id, Ve
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_query);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
+
+    return status;
+}
+
+Status
+DBImpl::GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // step 1: check table existence
+    bool has_table;
+    auto status = HasTable(table_id, has_table);
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table " << table_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Table does not exist");
+    }
+    if (!status.ok()) {
+        return status;
+    }
+
+    //  step 2: find segment
+    meta::TableFilesSchema table_files;
+    status = meta_ptr_->GetTableFilesBySegmentId(segment_id, table_files);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (table_files.empty()) {
+        return Status(DB_NOT_FOUND, "Segment does not exist");
+    }
+
+    // check the segment is belong to this table
+    if (table_files[0].table_id_ != table_id) {
+        // the segment could be in a partition under this table
+        meta::TableSchema table_schema;
+        table_schema.table_id_ = table_files[0].table_id_;
+        status = DescribeTable(table_schema);
+        if (table_schema.owner_table_ != table_id) {
+            return Status(DB_NOT_FOUND, "Segment does not belong to this table");
+        }
+    }
+
+    // step 3: load segment ids and delete offset
+    std::string segment_dir;
+    engine::utils::GetParentPath(table_files[0].location_, segment_dir);
+    segment::SegmentReader segment_reader(segment_dir);
+
+    std::vector<segment::doc_id_t> uids;
+    status = segment_reader.LoadUids(uids);
+    if (!status.ok()) {
+        return status;
+    }
+
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 4: construct id array
+    // avoid duplicate offset and erase from max offset to min offset
+    auto& deleted_offset = deleted_docs_ptr->GetDeletedDocs();
+    std::set<segment::offset_t, std::greater<segment::offset_t>> ordered_offset;
+    for (segment::offset_t offset : deleted_offset) {
+        ordered_offset.insert(offset);
+    }
+    for (segment::offset_t offset : ordered_offset) {
+        uids.erase(uids.begin() + offset);
+    }
+    vector_ids.swap(uids);
 
     return status;
 }

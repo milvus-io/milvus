@@ -617,13 +617,10 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->CleanUpShadowFiles();
     ASSERT_TRUE(status.ok());
 
-    status = impl_->DropTable(table_id);
-    ASSERT_TRUE(status.ok());
+    table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    status = impl_->CreateTableFile(table_file);
 
-    status = impl_->CleanUpFilesWithTTL(1UL);
-    ASSERT_TRUE(status.ok());
-#if MERGE_NOT_YET
-    sleep(1);
     std::vector<int> files_to_delete;
     milvus::engine::meta::TableFilesSchema files_schema;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
@@ -632,12 +629,13 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 
     table_file.table_id_ = table_id;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
-    milvus::engine::OngoingFileChecker filter;
     table_file.file_id_ = files_schema.front().file_id_;
-    filter.MarkOngoingFile(table_file);
-    status = impl_->CleanUpFilesWithTTL(1UL, &filter);
+    milvus::engine::OngoingFileChecker::GetInstance().MarkOngoingFile(table_file);
+    status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
-#endif
+
+    status = impl_->DropTable(table_id);
+    ASSERT_TRUE(status.ok());
 }
 
 TEST_F(MetaTest, INDEX_TEST) {

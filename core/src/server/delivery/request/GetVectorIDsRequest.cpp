@@ -15,35 +15,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/DeleteByIDRequest.h"
-
-#include <memory>
-#include <string>
-#include <vector>
-
+#include "server/delivery/request/GetVectorIDsRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <memory>
+#include <vector>
+
 namespace milvus {
 namespace server {
 
-DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     const std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), vector_ids_(vector_ids) {
+GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
+                                         const std::string& segment_name, std::vector<int64_t>& vector_ids)
+    : BaseRequest(context, INFO_REQUEST_GROUP),
+      table_name_(table_name),
+      segment_name_(segment_name),
+      vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
-DeleteByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                          const std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, table_name, vector_ids));
+GetVectorIDsRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
+                            const std::string& segment_name, std::vector<int64_t>& vector_ids) {
+    return std::shared_ptr<BaseRequest>(new GetVectorIDsRequest(context, table_name, segment_name, vector_ids));
 }
 
 Status
-DeleteByIDRequest::OnExecute() {
+GetVectorIDsRequest::OnExecute() {
     try {
-        TimeRecorderAuto rc("DeleteByIDRequest");
+        std::string hdr = "GetVectorIDsRequest(table=" + table_name_ + " segment=" + segment_name_ + ")";
+        TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
         auto status = ValidationUtil::ValidateTableName(table_name_);
@@ -51,7 +53,7 @@ DeleteByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check table existence
+        // only process root table, ignore partition table
         engine::meta::TableSchema table_schema;
         table_schema.table_id_ = table_name_;
         status = DBWrapper::DB()->DescribeTable(table_schema);
@@ -67,24 +69,9 @@ DeleteByIDRequest::OnExecute() {
             }
         }
 
-        // Check table's index type supports delete
-        if (table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IDMAP &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT &&
-            table_schema.engine_type_ != (int32_t)engine::EngineType::FAISS_IVFSQ8) {
-            std::string err_msg =
-                "Index type " + std::to_string(table_schema.engine_type_) + " does not support delete operation";
-            SERVER_LOG_ERROR << err_msg;
-            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
-        }
-
-        rc.RecordSection("check validation");
-
-        status = DBWrapper::DB()->DeleteVectors(table_name_, vector_ids_);
-        if (!status.ok()) {
-            return status;
-        }
+        // step 2: get vector data, now only support get one id
+        vector_ids_.clear();
+        return DBWrapper::DB()->GetVectorIDs(table_name_, segment_name_, vector_ids_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

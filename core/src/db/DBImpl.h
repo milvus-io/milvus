@@ -62,6 +62,9 @@ class DBImpl : public DB {
     HasTable(const std::string& table_id, bool& has_or_not) override;
 
     Status
+    HasNativeTable(const std::string& table_id, bool& has_or_not_) override;
+
+    Status
     AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
 
     Status
@@ -109,6 +112,9 @@ class DBImpl : public DB {
 
     Status
     GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) override;
+
+    Status
+    GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) override;
 
     //    Status
     //    Merge(const std::set<std::string>& table_ids) override;

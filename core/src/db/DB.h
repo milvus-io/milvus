@@ -53,6 +53,9 @@ class DB {
     HasTable(const std::string& table_id, bool& has_or_not_) = 0;
 
     virtual Status
+    HasNativeTable(const std::string& table_id, bool& has_or_not_) = 0;
+
+    virtual Status
     AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
 
     virtual Status
@@ -100,6 +103,9 @@ class DB {
 
     virtual Status
     GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) = 0;
+
+    virtual Status
+    GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
 
     //    virtual Status
     //    Merge(const std::set<std::string>& table_ids) = 0;
