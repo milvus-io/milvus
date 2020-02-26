@@ -111,13 +111,6 @@ DBWrapper::StartService() {
             kill(0, SIGUSR1);
         }
 
-        s = config.GetWalConfigRecordSize(opt.record_size_);
-        if (!s.ok()) {
-            std::cerr << "ERROR! Failed to get record_size configuration." << std::endl;
-            std::cerr << s.ToString() << std::endl;
-            kill(0, SIGUSR1);
-        }
-
         s = config.GetWalConfigWalPath(opt.mxlog_path_);
         if (!s.ok()) {
             std::cerr << "ERROR! Failed to get mxlog_path configuration." << std::endl;
