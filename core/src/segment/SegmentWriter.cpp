@@ -191,7 +191,8 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
 
         end = std::chrono::high_resolution_clock::now();
         diff = end - start;
-        ENGINE_LOG_DEBUG << "Sorting " << offsets_to_delete.size() << " vectors took " << diff.count() << " s";
+        ENGINE_LOG_DEBUG << "Sorting " << offsets_to_delete.size() << " offsets to delete took " << diff.count()
+                         << " s";
 
         start = std::chrono::high_resolution_clock::now();
 
@@ -200,7 +201,8 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
 
         end = std::chrono::high_resolution_clock::now();
         diff = end - start;
-        ENGINE_LOG_DEBUG << "Deduplicating " << offsets_to_delete.size() << " vectors took " << diff.count() << " s";
+        ENGINE_LOG_DEBUG << "Deduplicating " << offsets_to_delete.size() << " offsets to delete took " << diff.count()
+                         << " s";
 
         // Erase from raw data
         start = std::chrono::high_resolution_clock::now();
@@ -208,7 +210,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         size_t deleted_count = 0;
         for (auto& offset : offsets_to_delete) {
             segment_to_merge->vectors_ptr_->Erase(offset - deleted_count);
-            deleted_count++;
+            ++deleted_count;
         }
 
         end = std::chrono::high_resolution_clock::now();
