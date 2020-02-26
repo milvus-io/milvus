@@ -106,12 +106,18 @@ class TestGetVectorIdsBase:
     @pytest.mark.timeout(GET_TIMEOUT)
     def test_get_vector_ids_without_index(self, connect, table):
         '''
-        target: get vector ids where segment name does not exist
-        method: call get_vector_ids with a random segment name
+        target: get vector ids when there is no index
+        method: call get_vector_ids and check if the segment contains vectors
         expected: status not ok
         '''
-        valid_segment_name = self.get_valid_segment_name(connect, table)
-        segment = gen_unique_str("not_existed_segment")
-        status, vector_ids = connect.get_vector_ids(table, segment)
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[0].segments_stat[0].segment_name)
+        # vector_ids should match ids
         logging.getLogger().info(vector_ids)
-        assert not status.OK()
+        logging.getLogger().info(ids)
