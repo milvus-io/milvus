@@ -68,7 +68,6 @@ DBImpl::DBImpl(const DBOptions& options)
 
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
-        mxlog_config.record_size = options_.record_size_;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
         mxlog_config.buffer_size = options_.buffer_size_;
         mxlog_config.mxlog_path = options_.mxlog_path_;

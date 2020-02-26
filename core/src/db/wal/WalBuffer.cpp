@@ -179,6 +179,11 @@ MXLogBuffer::Reset(uint64_t lsn) {
     SetFileNoFrom(mxlog_buffer_reader_.file_no);
 }
 
+uint32_t
+MXLogBuffer::GetBufferSize() {
+    return mxlog_buffer_size_;
+}
+
 // buffer writer cares about surplus space of buffer
 uint32_t
 MXLogBuffer::SurplusSpace() {
