@@ -135,3 +135,9 @@ class TestGetVectorIdsBase:
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
         assert result[0][0].distance <= epsilon
+
+    def check_result(result, id):
+    if len(result) >= 5:
+        return id in [result[0].id, result[1].id, result[2].id, result[3].id, result[4].id]
+    else:
+        return id in (i.id for i in result)
