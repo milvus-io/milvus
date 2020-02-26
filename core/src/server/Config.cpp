@@ -428,24 +428,24 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
 
 Status
 Config::GenUniqueIdentityID(const std::string& identity, std::string& uid) {
-    std::vector<std::string> ele_list;
-    ele_list.push_back(identity);
+    std::vector<std::string> elements;
+    elements.push_back(identity);
 
     // get current process id
     int64_t pid = getpid();
-    ele_list.push_back(std::to_string(pid));
+    elements.push_back(std::to_string(pid));
 
     // get current thread id
     std::stringstream ss;
     ss << std::this_thread::get_id();
-    ele_list.push_back(ss.str());
+    elements.push_back(ss.str());
 
     // get current timestamp
     auto time_now = std::chrono::system_clock::now();
     auto duration_in_ms = std::chrono::duration_cast<std::chrono::microseconds>(time_now.time_since_epoch());
-    ele_list.push_back(std::to_string(duration_in_ms.count()));
+    elements.push_back(std::to_string(duration_in_ms.count()));
 
-    StringHelpFunctions::MergeStringWithDelimeter(ele_list, "-", uid);
+    StringHelpFunctions::MergeStringWithDelimeter(elements, "-", uid);
 
     return Status::OK();
 }
