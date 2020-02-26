@@ -259,6 +259,14 @@ MemTable::ApplyDeletes() {
         diff = end - start;
         ENGINE_LOG_DEBUG << "Loading uids and deleted docs took " << diff.count() << " s";
 
+        start = std::chrono::high_resolution_clock::now();
+
+        std::sort(ids_to_check.begin(), ids_to_check.end());
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Sorting " << ids_to_check << " ids took " << diff.count() << " s";
+
         size_t delete_count = 0;
         auto find_diff = std::chrono::duration<double>::zero();
         auto set_diff = std::chrono::duration<double>::zero();
@@ -266,7 +274,6 @@ MemTable::ApplyDeletes() {
         for (size_t i = 0; i < uids.size(); ++i) {
             auto find_start = std::chrono::high_resolution_clock::now();
 
-            std::sort(ids_to_check.begin(), ids_to_check.end());
             auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i]);
 
             auto find_end = std::chrono::high_resolution_clock::now();
