@@ -124,7 +124,6 @@ int bitmap_increment(bitmap_t *bitmap, unsigned int index, long offset)
 
     if (temp == 0x0f) {
 //        fprintf(stderr, "Error, 4 bit int Overflow\n");
-        fprintf(stderr, "Bloom filter Error: you have added the same id more than 15 times!\n");
         return -1;
     }
 
@@ -149,7 +148,7 @@ int bitmap_decrement(bitmap_t *bitmap, unsigned int index, long offset)
 
     if (temp == 0x00) {
 //        fprintf(stderr, "Error, Decrementing zero\n");
-        fprintf(stderr, "Bloom filter Error: you have deleted the same id more than 15 times!\n");
+//        fprintf(stderr, "Bloom filter Error: you have deleted the same id more than 15 times!\n");
         return -1;
     }
 
@@ -259,14 +258,18 @@ int counting_bloom_add(counting_bloom_t *bloom, const char *s, size_t len)
 
     hash_func(bloom, s, len, hashes);
 
+    bool error = false;
     for (i = 0; i < bloom->nfuncs; i++) {
         offset = i * bloom->counts_per_func;
         index = hashes[i] + offset;
-        bitmap_increment(bloom->bitmap, index, bloom->offset);
+        if (bitmap_increment(bloom->bitmap, index, bloom->offset) == -1) {
+            error = true;
+        }
     }
     bloom->header->count++;
 
-    return 0;
+    //return 0;
+    return error ? -1 : 0;
 }
 
 int counting_bloom_remove(counting_bloom_t *bloom, const char *s, size_t len)
@@ -276,14 +279,18 @@ int counting_bloom_remove(counting_bloom_t *bloom, const char *s, size_t len)
 
     hash_func(bloom, s, len, hashes);
 
+    bool error = false;
     for (i = 0; i < bloom->nfuncs; i++) {
         offset = i * bloom->counts_per_func;
         index = hashes[i] + offset;
-        bitmap_decrement(bloom->bitmap, index, bloom->offset);
+        if (bitmap_decrement(bloom->bitmap, index, bloom->offset) == -1) {
+            error = true;
+        }
     }
     bloom->header->count--;
 
-    return 0;
+    //return 0;
+    return error ? -1 : 0;
 }
 
 int counting_bloom_check(counting_bloom_t *bloom, const char *s, size_t len)
@@ -429,11 +436,15 @@ int scaling_bloom_add(scaling_bloom_t *bloom, const char *s, size_t len, uint64_
     if (bloom->header->max_id < id) {
         bloom->header->max_id = id;
     }
-    counting_bloom_add(cur_bloom, s, len);
+    bool error = false;
+    if (counting_bloom_add(cur_bloom, s, len) == -1) {
+        error = true;
+    }
 
     bloom->header->mem_seqnum = seqnum + 1;
 
-    return 1;
+    //return 1;
+    return error ? -1 : 1;
 }
 
 int scaling_bloom_remove(scaling_bloom_t *bloom, const char *s, size_t len, uint64_t id)
@@ -442,15 +453,19 @@ int scaling_bloom_remove(scaling_bloom_t *bloom, const char *s, size_t len, uint
     int i;
     uint64_t seqnum;
 
+    bool error = false;
     for (i = bloom->num_blooms - 1; i >= 0; i--) {
         cur_bloom = bloom->blooms[i];
         if (id >= cur_bloom->header->id) {
             seqnum = scaling_bloom_clear_seqnums(bloom);
 
-            counting_bloom_remove(cur_bloom, s, len);
+            if (counting_bloom_remove(cur_bloom, s, len) == -1) {
+                error = true;
+            }
 
             bloom->header->mem_seqnum = seqnum + 1;
-            return 1;
+            //return 1;
+            return error ? -1 : 1;
         }
     }
     return 0;

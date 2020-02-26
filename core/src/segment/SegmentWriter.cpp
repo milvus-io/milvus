@@ -83,7 +83,10 @@ SegmentWriter::WriteBloomFilter() {
         default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
         auto& uids = segment_ptr_->vectors_ptr_->GetUids();
         for (auto& uid : uids) {
-            segment_ptr_->id_bloom_filter_ptr_->Add(uid);
+            auto status = segment_ptr_->id_bloom_filter_ptr_->Add(uid);
+            if (!status.ok()) {
+                return status;
+            }
         }
         default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
     } catch (Exception& e) {

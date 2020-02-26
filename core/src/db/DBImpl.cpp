@@ -622,11 +622,17 @@ DBImpl::Compact(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
 
-    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
     for (auto& file : files_to_compact) {
+        OngoingFileChecker::GetInstance().MarkOngoingFile(file);
+
         status = CompactFile(table_id, file);
+
+        OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+
+        if (!status.ok()) {
+            return status;
+        }
     }
-    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
     ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
 
