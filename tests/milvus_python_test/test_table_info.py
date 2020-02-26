@@ -19,7 +19,7 @@ nb = 6000
 
 
 class TestTableInfoBase:
-    def index_string_convert(index_string, index_type):
+    def index_string_convert(self, index_string, index_type):
         if index_string == "IDMAP" and index_type == IndexType.FLAT:
             return True
         if index_string == "IVFSQ8" and index_type == IndexType.IVF_SQ8:
