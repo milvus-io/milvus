@@ -313,7 +313,7 @@ class TestTableInfoBase:
             assert status.OK()
             logging.getLogger().info(info)
             index_string = info.partitions_stat[0].segments_stat[0].index_name
-            index_type = index_params["index_type"]
+            index_type = index_param["index_type"]
             match = self.index_string_convert(index_string, index_type)
             assert match
             assert nb == info.partitions_stat[0].segments_stat[0].count
