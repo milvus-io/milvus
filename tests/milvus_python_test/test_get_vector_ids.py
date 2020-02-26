@@ -27,6 +27,7 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, info = connect.table_info(table)
         assert status.OK()
+        logging.getLogger().info(info.partitions_stat[0].segments_stat[0].segment_name)
         return info.partitions_stat[0].segments_stat[0].segment_name
         
     """
@@ -55,9 +56,8 @@ class TestGetVectorIdsBase:
         '''
         table_name = gen_unique_str("not_existed_table")
         segment_name = self.get_valid_segment_name(connect, table)
-        with pytest.raises(Exception) as e:
-            status, vector_ids = connect.get_vector_ids(table_name, segment_name)
-            # assert not status.OK()
+        status, vector_ids = connect.get_vector_ids(table_name, segment_name)
+        assert not status.OK()
     
     @pytest.fixture(
         scope="function",
@@ -74,14 +74,7 @@ class TestGetVectorIdsBase:
         expected: status not ok
         '''
         table_name = get_table_name
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
-        assert status.OK()
-        status = connect.flush([table])
-        assert status.OK()
-        status, info = connect.table_info(table)
-        assert status.OK()
-        segment_name =  info.partitions_stat[0].segments_stat[0].segment_name
+        segment_name = self.get_valid_segment_name(connect, table)
         status, vector_ids = connect.get_vector_ids(table_name, segment_name)
         assert not status.OK()
 
@@ -122,31 +115,3 @@ class TestGetVectorIdsBase:
         status, vector_ids = connect.get_vector_ids(table, segment)
         logging.getLogger().info(vector_ids)
         assert not status.OK()
-
-    def test_search_crud(self, connect, table):
-        index_type = IndexType.IVF_SQ8
-        nlist = 16384
-        index_param = {"index_type": index_type, "nlist": nlist}
-        status = connect.create_index(table, index_param)
-        assert status.OK()
-        for i in range(50):
-            logging.getLogger().info(i)
-            vectors = gen_vector(100000, dim)
-            status, ids = connect.add_vectors(table, vectors)
-        status = connect.flush([table])
-        assert status.OK()
-        query_vec = [vectors[0]]
-        top_k = 10
-        nprobe = 1
-        status, result = connect.search_vectors(table, top_k, nprobe, query_vec)
-        logging.getLogger().info(result)
-        assert status.OK()
-        assert len(result[0]) == min(len(vectors), top_k)
-        assert check_result(result[0], ids[0])
-        assert result[0][0].distance <= epsilon
-
-def check_result(result, id):
-    if len(result) >= 5:
-        return id in [result[0].id, result[1].id, result[2].id, result[3].id, result[4].id]
-    else:
-        return id in (i.id for i in result)
