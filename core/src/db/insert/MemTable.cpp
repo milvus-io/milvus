@@ -258,7 +258,10 @@ MemTable::ApplyDeletes() {
                 deleted_docs->AddDeletedDoc(i);
 
                 if (id_bloom_filter_ptr->Check(uids[i])) {
-                    id_bloom_filter_ptr->Remove(uids[i]);
+                    status = id_bloom_filter_ptr->Remove(uids[i]);
+                    if (!status.ok()) {
+                        return status;
+                    }
                 }
 
                 if (blacklist != nullptr) {

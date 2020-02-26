@@ -656,6 +656,11 @@ DBImpl::Compact(const std::string& table_id) {
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
     for (auto& file : files_to_compact) {
         status = CompactFile(table_id, file);
+
+        if (!status.ok()) {
+            OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
+            return status;
+        }
     }
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
@@ -689,6 +694,8 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
 
     std::string segment_dir_to_merge;
     utils::GetParentPath(file.location_, segment_dir_to_merge);
+
+    ENGINE_LOG_DEBUG << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
 
     auto file_to_compact = file;
@@ -696,6 +703,7 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     updated.emplace_back(file_to_compact);
 
     // Serialize
+    ENGINE_LOG_DEBUG << "Serializing compacted segment...";
     status = segment_writer_ptr->Serialize();
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
