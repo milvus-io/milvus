@@ -10,11 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -26,6 +29,8 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
+#include <cache/CpuCacheMgr.h>
+#include <cache/GpuCacheMgr.h>
 #include <fiu-local.h>
 
 namespace milvus {
@@ -34,6 +39,41 @@ namespace server {
 constexpr int64_t GB = 1UL << 30;
 
 static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"}});
+
+/////////////////////////////////////////////////////////////
+Config::Config() {
+    auto empty_map = std::unordered_map<std::string, ConfigCallBackF>();
+
+    // cache config
+    std::string node_cpu_cache_capacity = std::string(CONFIG_CACHE) + "." + CONFIG_CACHE_CPU_CACHE_CAPACITY;
+    config_callback_[node_cpu_cache_capacity] = empty_map;
+
+    std::string node_insert_buffer_size = std::string(CONFIG_CACHE) + "." + CONFIG_CACHE_INSERT_BUFFER_SIZE;
+    config_callback_[node_insert_buffer_size] = empty_map;
+
+    std::string node_cache_insert_data = std::string(CONFIG_CACHE) + "." + CONFIG_CACHE_CACHE_INSERT_DATA;
+    config_callback_[node_cache_insert_data] = empty_map;
+
+    // engine config
+    std::string node_blas_threshold = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_USE_BLAS_THRESHOLD;
+    config_callback_[node_blas_threshold] = empty_map;
+
+    // gpu resources config
+    std::string node_gpu_search_threshold = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
+    config_callback_[node_gpu_search_threshold] = empty_map;
+
+    std::string node_gpu_enable = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_ENABLE;
+    config_callback_[node_gpu_enable] = empty_map;
+
+    std::string node_gpu_cache_capacity = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
+    config_callback_[node_gpu_cache_capacity] = empty_map;
+
+    std::string node_gpu_search_res = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
+    config_callback_[node_gpu_search_res] = empty_map;
+
+    std::string node_gpu_build_res = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES;
+    config_callback_[node_gpu_build_res] = empty_map;
+}
 
 Config&
 Config::GetInstance() {
@@ -58,6 +98,9 @@ Config::LoadConfigFile(const std::string& filename) {
     if (!s.ok()) {
         return s;
     }
+
+    // store config file path
+    config_file_ = filename;
 
     return Status::OK();
 }
@@ -257,53 +300,99 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
         return Status(SERVER_UNEXPECTED_ERROR, str);
     }
+    auto status = Status::OK();
     if (parent_key == CONFIG_SERVER) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set server_config");
+        if (child_key == CONFIG_SERVER_ADDRESS) {
+            status = SetServerConfigAddress(value);
+        } else if (child_key == CONFIG_SERVER_DEPLOY_MODE) {
+            status = SetServerConfigDeployMode(value);
+        } else if (child_key == CONFIG_SERVER_PORT) {
+            status = SetServerConfigPort(value);
+        } else if (child_key == CONFIG_SERVER_TIME_ZONE) {
+            status = SetServerConfigTimeZone(value);
+        } else if (child_key == CONFIG_SERVER_WEB_PORT) {
+            status = SetServerConfigWebPort(value);
+        }
     } else if (parent_key == CONFIG_DB) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set db_config");
+        if (child_key == CONFIG_DB_BACKEND_URL) {
+            status = SetDBConfigBackendUrl(value);
+        }
     } else if (parent_key == CONFIG_STORAGE) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set storage_config");
+        if (child_key == CONFIG_STORAGE_PRIMARY_PATH) {
+            status = SetStorageConfigPrimaryPath(value);
+        } else if (child_key == CONFIG_STORAGE_SECONDARY_PATH) {
+            status = SetStorageConfigSecondaryPath(value);
+        } else if (child_key == CONFIG_STORAGE_S3_ENABLE) {
+            status = SetStorageConfigS3Enable(value);
+        } else if (child_key == CONFIG_STORAGE_S3_ADDRESS) {
+            status = SetStorageConfigS3Address(value);
+        } else if (child_key == CONFIG_STORAGE_S3_PORT) {
+            status = SetStorageConfigS3Port(value);
+        } else if (child_key == CONFIG_STORAGE_S3_ACCESS_KEY) {
+            status = SetStorageConfigS3AccessKey(value);
+        } else if (child_key == CONFIG_STORAGE_S3_SECRET_KEY) {
+            status = SetStorageConfigS3SecretKey(value);
+        } else if (child_key == CONFIG_STORAGE_S3_BUCKET) {
+            status = SetStorageConfigS3Bucket(value);
+        }
     } else if (parent_key == CONFIG_METRIC) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set metric_config");
+        if (child_key == CONFIG_METRIC_ENABLE_MONITOR) {
+            status = SetMetricConfigEnableMonitor(value);
+        } else if (child_key == CONFIG_METRIC_ADDRESS) {
+            status = SetMetricConfigAddress(value);
+        } else if (child_key == CONFIG_METRIC_PORT) {
+            status = SetMetricConfigPort(value);
+        }
     } else if (parent_key == CONFIG_CACHE) {
         if (child_key == CONFIG_CACHE_CPU_CACHE_CAPACITY) {
-            return SetCacheConfigCpuCacheCapacity(value);
+            status = SetCacheConfigCpuCacheCapacity(value);
         } else if (child_key == CONFIG_CACHE_CPU_CACHE_THRESHOLD) {
-            return SetCacheConfigCpuCacheThreshold(value);
+            status = SetCacheConfigCpuCacheThreshold(value);
         } else if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA) {
-            return SetCacheConfigCacheInsertData(value);
+            status = SetCacheConfigCacheInsertData(value);
         } else if (child_key == CONFIG_CACHE_INSERT_BUFFER_SIZE) {
-            return SetCacheConfigInsertBufferSize(value);
+            status = SetCacheConfigInsertBufferSize(value);
         }
     } else if (parent_key == CONFIG_ENGINE) {
         if (child_key == CONFIG_ENGINE_USE_BLAS_THRESHOLD) {
-            return SetEngineConfigUseBlasThreshold(value);
+            status = SetEngineConfigUseBlasThreshold(value);
         } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
-            return SetEngineConfigOmpThreadNum(value);
+            status = SetEngineConfigOmpThreadNum(value);
 #ifdef MILVUS_GPU_VERSION
         } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
-            return SetEngineConfigGpuSearchThreshold(value);
+            status = SetEngineConfigGpuSearchThreshold(value);
 #endif
         }
 #ifdef MILVUS_GPU_VERSION
     } else if (parent_key == CONFIG_GPU_RESOURCE) {
         if (child_key == CONFIG_GPU_RESOURCE_ENABLE) {
-            return SetGpuResourceConfigEnable(value);
+            status = SetGpuResourceConfigEnable(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_CAPACITY) {
-            return SetGpuResourceConfigCacheCapacity(value);
+            status = SetGpuResourceConfigCacheCapacity(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_THRESHOLD) {
-            return SetGpuResourceConfigCacheThreshold(value);
+            status = SetGpuResourceConfigCacheThreshold(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) {
-            return SetGpuResourceConfigSearchResources(value);
+            status = SetGpuResourceConfigSearchResources(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
-            return SetGpuResourceConfigBuildIndexResources(value);
+            status = SetGpuResourceConfigBuildIndexResources(value);
         }
 #endif
     } else if (parent_key == CONFIG_TRACING) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config");
+        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config currently");
     }
+
+    if (status.ok()) {
+        status = UpdateFileConfigFromMem(parent_key, child_key);
+        if (status.ok() && (parent_key == CONFIG_SERVER || parent_key == CONFIG_DB || parent_key == CONFIG_STORAGE ||
+                            parent_key == CONFIG_METRIC || parent_key == CONFIG_TRACING)) {
+            restart_required_ = true;
+        }
+    }
+
+    return status;
 }
 
+//////////////////////////////////////////////////////////////
 Status
 Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
     std::vector<std::string> tokens;
@@ -335,6 +424,164 @@ Config::ProcessConfigCli(std::string& result, const std::string& cmd) {
     } else {
         return Status(SERVER_UNEXPECTED_ERROR, "Invalid command: " + cmd);
     }
+}
+
+Status
+Config::GenUniqueIdentityID(const std::string& identity, std::string& uid) {
+    std::vector<std::string> elements;
+    elements.push_back(identity);
+
+    // get current process id
+    int64_t pid = getpid();
+    elements.push_back(std::to_string(pid));
+
+    // get current thread id
+    std::stringstream ss;
+    ss << std::this_thread::get_id();
+    elements.push_back(ss.str());
+
+    // get current timestamp
+    auto time_now = std::chrono::system_clock::now();
+    auto duration_in_ms = std::chrono::duration_cast<std::chrono::microseconds>(time_now.time_since_epoch());
+    elements.push_back(std::to_string(duration_in_ms.count()));
+
+    StringHelpFunctions::MergeStringWithDelimeter(elements, "-", uid);
+
+    return Status::OK();
+}
+
+Status
+Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key) {
+    if (access(config_file_.c_str(), F_OK | R_OK) != 0) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Cannot find configure file: " + config_file_);
+    }
+
+    // Store original configure file
+    std::string ori_file = config_file_ + ".ori";
+    if (access(ori_file.c_str(), F_OK) != 0) {
+        std::fstream fin(config_file_, std::ios::in);
+        std::ofstream fout(ori_file);
+
+        if (!fin.is_open() || !fout.is_open()) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Cannot open conf file. Store original conf file failed");
+        }
+        fout << fin.rdbuf();
+        fout.flush();
+        fout.close();
+        fin.close();
+    }
+
+    std::string value;
+    auto status = GetConfigValueInMem(parent_key, child_key, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // convert value string to standard string stored in yaml file
+    std::string value_str;
+    if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA || child_key == CONFIG_STORAGE_S3_ENABLE ||
+        child_key == CONFIG_METRIC_ENABLE_MONITOR || child_key == CONFIG_GPU_RESOURCE_ENABLE) {
+        value_str =
+            (value == "True" || value == "true" || value == "On" || value == "on" || value == "1") ? "true" : "false";
+    } else if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES ||
+               child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
+        std::vector<std::string> vec;
+        StringHelpFunctions::SplitStringByDelimeter(value, ",", vec);
+        for (auto& s : vec) {
+            value_str += "\n    - " + s;
+        }
+    } else {
+        value_str = value;
+    }
+
+    std::fstream conf_fin(config_file_, std::ios::in);
+    if (!conf_fin.is_open()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Cannot open conf file: " + config_file_);
+    }
+
+    bool parent_key_read = false;
+    std::string conf_str, line;
+    while (getline(conf_fin, line)) {
+        if (!parent_key_read) {
+            conf_str += line + "\n";
+            if (!(line.empty() || line.find_first_of('#') == 0 || line.find(parent_key) == std::string::npos))
+                parent_key_read = true;
+            continue;
+        }
+
+        if (line.find_first_of('#') == 0) {
+            status = Status(SERVER_UNEXPECTED_ERROR, "Cannot find child key: " + child_key);
+            break;
+        }
+
+        if (line.find(child_key) != std::string::npos) {
+            // may loss comments here, need to extract comments from line
+            conf_str += "  " + child_key + ": " + value_str + "\n";
+            break;
+        }
+
+        conf_str += line + "\n";
+    }
+
+    // values of gpu resources are sequences, need to remove old here
+    std::regex reg("\\S*");
+    if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES || child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
+        while (getline(conf_fin, line)) {
+            if (line.find("- gpu") != std::string::npos)
+                continue;
+
+            conf_str += line + "\n";
+            if (!line.empty() && line.size() > 2 && isalnum(line.at(2))) {
+                break;
+            }
+        }
+    }
+
+    if (status.ok()) {
+        while (getline(conf_fin, line)) {
+            conf_str += line + "\n";
+        }
+        conf_fin.close();
+
+        std::fstream fout(config_file_, std::ios::out | std::ios::trunc);
+        fout << conf_str;
+        fout.flush();
+        fout.close();
+    }
+
+    return status;
+}
+
+Status
+Config::RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key,
+                         ConfigCallBackF& cb) {
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, cb_node + " is not supported changed in mem");
+    }
+
+    auto& callback_map = config_callback_.at(cb_node);
+
+    callback_map[key] = cb;
+
+    return Status::OK();
+}
+
+Status
+Config::CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key) {
+    if (config_callback_.empty() || key.empty()) {
+        return Status::OK();
+    }
+
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR, cb_node + " cannot found in callback map");
+    }
+
+    auto& cb_map = config_callback_.at(cb_node);
+    cb_map.erase(key);
+
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -482,12 +729,37 @@ Config::CheckStorageConfigPrimaryPath(const std::string& value) {
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "storage_config.db_path is empty.");
     }
-    return Status::OK();
+
+    return ValidationUtil::ValidateStoragePath(value);
 }
 
 Status
 Config::CheckStorageConfigSecondaryPath(const std::string& value) {
     fiu_return_on("check_config_secondary_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+    auto status = Status::OK();
+
+    if (value.empty()) {
+        return status;
+    }
+
+    std::vector<std::string> vec;
+    StringHelpFunctions::SplitStringByDelimeter(value, ",", vec);
+    std::unordered_set<std::string> path_set;
+    for (auto& path : vec) {
+        StringHelpFunctions::TrimStringBlank(path);
+        status = ValidationUtil::ValidateStoragePath(path);
+        if (!status.ok()) {
+            return status;
+        }
+
+        path_set.insert(path);
+    }
+
+    if (path_set.size() != vec.size()) {
+        return Status(SERVER_INVALID_ARGUMENT, "Path value is duplicated");
+    }
+
     return Status::OK();
 }
 
@@ -950,6 +1222,32 @@ Config::GetConfigVersion(std::string& value) {
     return CheckConfigVersion(value);
 }
 
+Status
+Config::ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value) {
+    auto status = Status::OK();
+
+    if (config_callback_.empty()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Callback map is empty. Cannot take effect in-service");
+    }
+
+    std::string cb_node = node + "." + sub_node;
+    if (config_callback_.find(cb_node) == config_callback_.end()) {
+        return Status(SERVER_UNEXPECTED_ERROR,
+                      "Cannot find " + cb_node + " in callback map, cannot take effect in-service");
+    }
+
+    auto& cb_map = config_callback_.at(cb_node);
+    for (auto& cb_kv : cb_map) {
+        auto& cd = cb_kv.second;
+        status = cd(value);
+        if (!status.ok()) {
+            break;
+        }
+    }
+
+    return status;
+}
+
 /* server config */
 Status
 Config::GetServerConfigAddress(std::string& value) {
@@ -1213,6 +1511,7 @@ Config::GetGpuResourceConfigSearchResources(std::vector<int64_t>& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
+    value.clear();
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
     }
@@ -1234,6 +1533,7 @@ Config::GetGpuResourceConfigBuildIndexResources(std::vector<int64_t>& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(str, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
+    value.clear();
     for (std::string& res : res_vec) {
         value.push_back(std::stoll(res.substr(3)));
     }
@@ -1255,6 +1555,12 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         tracer_config.close();
         return s;
     }
+    return Status::OK();
+}
+
+Status
+Config::GetServerRestartRequired(bool& required) {
+    required = restart_required_;
     return Status::OK();
 }
 
@@ -1381,7 +1687,12 @@ Config::SetMetricConfigPort(const std::string& value) {
 Status
 Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(value));
-    return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
+    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
+    if (status.ok()) {
+        cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value) << 30);
+    }
+
+    return status;
 }
 
 Status
@@ -1393,20 +1704,36 @@ Config::SetCacheConfigCpuCacheThreshold(const std::string& value) {
 Status
 Config::SetCacheConfigInsertBufferSize(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigInsertBufferSize(value));
-    return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
+    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
 }
 
 Status
 Config::SetCacheConfigCacheInsertData(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCacheInsertData(value));
-    return SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
+    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
 }
 
 /* engine config */
 Status
 Config::SetEngineConfigUseBlasThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigUseBlasThreshold(value));
-    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
+
+    auto status = SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
 }
 
 Status
@@ -1420,7 +1747,12 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(value));
-    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
+    auto status = SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
 }
 
 #endif
@@ -1431,13 +1763,31 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigEnable(value));
-    return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
+
+    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
 }
 
 Status
 Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigCacheCapacity(value));
-    return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value);
+    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    int64_t cap = std::stol(value);
+    std::vector<int64_t> gpus;
+    GetGpuResourceConfigSearchResources(gpus);
+    for (auto& g : gpus) {
+        cache::GpuCacheMgr::GetInstance(g)->SetCapacity(cap << 30);
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -1451,7 +1801,12 @@ Config::SetGpuResourceConfigSearchResources(const std::string& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
-    return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
+    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
 }
 
 Status
@@ -1459,7 +1814,13 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
-    return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
+    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
+
+    if (!status.ok()) {
+        return status;
+    }
+
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
 }
 
 #endif

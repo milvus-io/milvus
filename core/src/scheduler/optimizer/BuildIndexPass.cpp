@@ -21,30 +21,44 @@ namespace scheduler {
 void
 BuildIndexPass::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpu_ids_);
+    Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpus_);
     fiu_do_on("BuildIndexPass.Init.get_config_fail", s = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!s.ok()) {
         throw std::exception();
     }
+
+    SetIdentity("BuildIndexPass");
+    AddGpuEnableListener();
+    AddGpuBuildResListener();
 }
 
 bool
 BuildIndexPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::BuildIndexTask)
         return false;
-    fiu_do_on("BuildIndexPass.Run.empty_gpu_ids", build_gpu_ids_.clear());
-    if (build_gpu_ids_.empty()) {
-        SERVER_LOG_WARNING << "BuildIndexPass cannot get build index gpu!";
-        return false;
-    }
 
     ResourcePtr res_ptr;
-    res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpu_ids_[specified_gpu_id_]);
+    if (!gpu_enable_) {
+        SERVER_LOG_DEBUG << "Gpu disabled, specify cpu to build index!";
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else {
+        fiu_do_on("BuildIndexPass.Run.empty_gpu_ids", build_gpus_.clear());
+        if (build_gpus_.empty()) {
+            SERVER_LOG_WARNING << "BuildIndexPass cannot get build index gpu!";
+            return false;
+        }
+
+        if (specified_gpu_id_ >= build_gpus_.size()) {
+            specified_gpu_id_ = specified_gpu_id_ % build_gpus_.size();
+        }
+        SERVER_LOG_DEBUG << "Specify gpu" << specified_gpu_id_ << " to build index!";
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, build_gpus_[specified_gpu_id_]);
+        specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpus_.size();
+    }
+
     auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
     task->label() = label;
-    SERVER_LOG_DEBUG << "Specify gpu" << specified_gpu_id_ << " to build index!";
 
-    specified_gpu_id_ = (specified_gpu_id_ + 1) % build_gpu_ids_.size();
     return true;
 }
 

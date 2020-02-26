@@ -42,6 +42,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer scheduler_optimizer_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer/handler scheduler_optimizer_handler_files)
 set(scheduler_files
         ${scheduler_main_files}
         ${scheduler_action_files}
@@ -50,6 +51,7 @@ set(scheduler_files
         ${scheduler_resource_files}
         ${scheduler_task_files}
         ${scheduler_optimizer_files}
+        ${scheduler_optimizer_handler_files}
         )
 
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)

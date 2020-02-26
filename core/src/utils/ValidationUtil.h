@@ -83,6 +83,9 @@ class ValidationUtil {
 
     static Status
     ValidateDbURI(const std::string& uri);
+
+    static Status
+    ValidateStoragePath(const std::string& path);
 };
 
 }  // namespace server

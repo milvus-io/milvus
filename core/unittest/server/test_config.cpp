@@ -9,9 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <limits>
+
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest-death-test.h>
 #include <gtest/gtest.h>
 #include <cmath>
+
 #include "config/YamlConfigMgr.h"
 #include "server/Config.h"
 #include "server/utils.h"
@@ -19,9 +24,6 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
-#include <limits>
-#include <fiu-local.h>
-#include <fiu-control.h>
 
 namespace {
 
@@ -332,8 +334,13 @@ gen_set_command(const std::string& parent_node, const std::string& child_node, c
 
 TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     std::string config_path(CONFIG_PATH);
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
     milvus::Status s;
+
+    std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+
+    auto status = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(status.ok()) << status.message();
 
     std::string get_cmd, set_cmd;
     std::string result, dummy;
@@ -346,16 +353,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     get_cmd = gen_get_command(ms::CONFIG_SERVER, ms::CONFIG_SERVER_ADDRESS);
     set_cmd = gen_set_command(ms::CONFIG_SERVER, ms::CONFIG_SERVER_ADDRESS, server_addr);
     s = config.ProcessConfigCli(dummy, set_cmd);
-    ASSERT_FALSE(s.ok());
+    ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
     /* db config */
-    std::string db_backend_url = "bad_url";
+    std::string db_backend_url = "sqlite://milvus:zilliz@:/";
     get_cmd = gen_get_command(ms::CONFIG_DB, ms::CONFIG_DB_BACKEND_URL);
     set_cmd = gen_set_command(ms::CONFIG_DB, ms::CONFIG_DB_BACKEND_URL, db_backend_url);
     s = config.ProcessConfigCli(dummy, set_cmd);
-    ASSERT_FALSE(s.ok());
+    ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
@@ -364,7 +371,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     get_cmd = gen_get_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR);
     set_cmd = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, metric_enable_monitor);
     s = config.ProcessConfigCli(dummy, set_cmd);
-    ASSERT_FALSE(s.ok());
+    ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
@@ -373,7 +380,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     get_cmd = gen_get_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_S3_ENABLE);
     set_cmd = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_S3_ENABLE, storage_s3_enable);
     s = config.ProcessConfigCli(dummy, set_cmd);
-    ASSERT_FALSE(s.ok());
+    ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
 
@@ -994,8 +1001,67 @@ TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
 
 #ifndef MILVUS_GPU_VERSION
-    s = config.ProcessConfigCli(dummy, gen_set_command(ms::CONFIG_TRACING,
-        ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources));
+    s = config.ProcessConfigCli(
+        dummy,
+        gen_set_command(ms::CONFIG_TRACING, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, build_index_resources));
     ASSERT_FALSE(s.ok());
+#endif
+}
+
+TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
+    std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+
+    auto status = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    // validate if setting config store in files
+    status = config.SetCacheConfigInsertBufferSize("2");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    // test numeric config value
+    status = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(status.ok()) << status.message();
+    int64_t value;
+    status = config.GetCacheConfigInsertBufferSize(value);
+    ASSERT_TRUE(status.ok()) << status.message();
+    ASSERT_EQ(value, 2);
+
+    // test boolean config value
+    status = config.SetMetricConfigEnableMonitor("True");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(status.ok()) << status.message();
+    bool enable;
+    status = config.GetMetricConfigEnableMonitor(enable);
+    ASSERT_TRUE(status.ok()) << status.message();
+    ASSERT_EQ(true, enable);
+
+    // invalid path
+    status = config.SetStorageConfigPrimaryPath("/a--/a");
+    ASSERT_FALSE(status.ok());
+
+    // test path
+    status = config.SetStorageConfigPrimaryPath("/tmp/milvus_config_unittest");
+    ASSERT_TRUE(status.ok());
+
+    std::string path_value;
+    status = config.GetStorageConfigPrimaryPath(path_value);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(path_value, "/tmp/milvus_config_unittest");
+
+#ifdef MILVUS_GPU_VERSION
+    status = config.SetGpuResourceConfigBuildIndexResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(status.ok()) << status.message();
+    std::vector<int64_t> gpus;
+    status = config.GetGpuResourceConfigBuildIndexResources(gpus);
+    ASSERT_TRUE(status.ok()) << status.message();
+    ASSERT_EQ(1, gpus.size());
+    ASSERT_EQ(0, gpus[0]);
+    ASSERT_EQ(value, 2);
 #endif
 }

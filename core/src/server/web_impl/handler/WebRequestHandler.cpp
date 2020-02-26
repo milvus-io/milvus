@@ -23,6 +23,7 @@
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/utils/Util.h"
+#include "thirdparty/nlohmann/json.hpp"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
@@ -581,6 +582,7 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    partition_list_dto->count = partitions.size();
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
     if (offset_value < partitions.size()) {
@@ -740,44 +742,151 @@ WebRequestHandler::Search(const OString& table_name, const SearchRequestDto::Obj
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto) {
+WebRequestHandler::SystemInfo(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto) {
     std::string info = cmd->std_str();
     auto status = Status::OK();
-
-    // TODO: (yhz) now only support load table into memory, may remove in the future
-    if ("task" == info) {
-        auto action = query_params.get("action");
-        if (nullptr == action.get()) {
-            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'action\' is required in url \'/system/task\'");
-        }
-        std::string action_str = action->std_str();
-
-        auto target = query_params.get("target");
-        if (nullptr == target.get()) {
-            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param \'target\' is required in url \'/system/task\'");
-        }
-        std::string target_str = target->std_str();
-
-        if ("load" == action_str) {
-            status = request_handler_.PreloadTable(context_ptr_, target_str);
-        } else {
-            std::string error_msg = std::string("Unknown action value \'") + action_str + "\'";
-            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, error_msg.c_str());
-        }
-
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    if ("info" == info) {
-        info = "get_system_info";
-    }
-
     std::string reply_str;
-    status = CommandLine(info, reply_str);
 
-    if (status.ok()) {
-        cmd_dto->reply = reply_str.c_str();
+    if ("config" == info) {
+        info = "get_config *";
+        status = CommandLine(info, reply_str);
+        if (status.ok()) {
+            try {
+                nlohmann::json j = nlohmann::json::parse(reply_str);
+#ifdef MILVUS_GPU_VERSION
+                auto gpu_search_res = j["gpu_resource_config"]["search_resources"].get<std::string>();
+                std::vector<std::string> gpus;
+                StringHelpFunctions::SplitStringByDelimeter(gpu_search_res, ",", gpus);
+                j["gpu_resource_config"]["search_resources"] = gpus;
+
+                auto gpu_build_res = j["gpu_resource_config"]["build_index_resources"].get<std::string>();
+                gpus.clear();
+                StringHelpFunctions::SplitStringByDelimeter(gpu_build_res, ",", gpus);
+                j["gpu_resource_config"]["build_index_resources"] = gpus;
+#endif
+                // check if server require start
+                Config& config = Config::GetInstance();
+                bool required = false;
+                config.GetServerRestartRequired(required);
+                j["restart_required"] = required;
+                cmd_dto->reply = j.dump().c_str();
+            } catch (std::exception& e) {
+                RETURN_STATUS_DTO(UNEXPECTED_ERROR, e.what());
+            }
+        }
+    } else {
+        if ("info" == info) {
+            info = "get_system_info";
+        }
+        status = CommandLine(info, reply_str);
+
+        if (status.ok()) {
+            cmd_dto->reply = reply_str.c_str();
+        }
     }
+
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
+StatusDto::ObjectWrapper
+WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString& response_str) {
+    Status status = Status::OK();
+
+    if (nullptr == body_str.get() || body_str->getSize() == 0) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Payload is empty.");
+    }
+    try {
+        nlohmann::json j = nlohmann::json::parse(body_str->c_str());
+        if (op->equals("task")) {
+            if (j.contains("load")) {
+                auto table_name = j["load"]["table_name"];
+                if (!table_name.is_string()) {
+                    RETURN_STATUS_DTO(ILLEGAL_BODY, "\"table_name\" must be a string")
+                }
+                status = request_handler_.PreloadTable(context_ptr_, table_name.get<std::string>());
+            }
+            if (j.contains("flush")) {
+                auto table_names = j["flush"]["table_names"];
+                if (!table_names.is_array()) {
+                    RETURN_STATUS_DTO(ILLEGAL_BODY, "\"table_names\" must be a array")
+                }
+                std::vector<std::string> names;
+                for (auto& n : table_names) {
+                    if (!n.is_string()) {
+                        RETURN_STATUS_DTO(ILLEGAL_BODY, "item of \"table_names\" must be a string")
+                    }
+                    names.push_back(n.get<std::string>());
+                }
+                status = Status(SERVER_UNEXPECTED_ERROR, "Flush() is not implemented");
+                //                status = request_handler_.Flush(context_ptr_, table_names);
+            }
+            if (j.contains("compact")) {
+                auto table_names = j["compact"]["table_names"];
+                if (!table_names.is_array()) {
+                    RETURN_STATUS_DTO(ILLEGAL_BODY, "\"table_name\" must be a array")
+                }
+                std::vector<std::string> names;
+                for (auto& n : table_names) {
+                    names.push_back(n.get<std::string>());
+                }
+                status = Status(SERVER_UNEXPECTED_ERROR, "Compact() is not implemented");
+                //                status = request_handler_.Compact(context_ptr_, table_names);
+            }
+        } else if (op->equals("config")) {
+            if (!j.is_object()) {
+                RETURN_STATUS_DTO(ILLEGAL_BODY, "Error format")
+            }
+
+            std::vector<std::string> cmds;
+            for (auto& el : j.items()) {
+                auto evalue = el.value();
+                if (!evalue.is_object()) {
+                    RETURN_STATUS_DTO(ILLEGAL_BODY, "Invalid payload format, the root value must be json map");
+                }
+
+                for (auto& iel : el.value().items()) {
+                    auto ievalue = iel.value();
+                    if (!(ievalue.is_string() || ievalue.is_number() || ievalue.is_boolean())) {
+                        RETURN_STATUS_DTO(ILLEGAL_BODY, "Config value must be one of string, numeric or boolean")
+                    }
+                    std::ostringstream ss;
+                    if (ievalue.is_string()) {
+                        std::string vle = ievalue;
+                        ss << "set_config " << el.key() << "." << iel.key() << " " << vle;
+                    } else {
+                        ss << "set_config " << el.key() << "." << iel.key() << " " << ievalue;
+                    }
+                    std::string cmd = ss.str();
+                    cmds.push_back(cmd);
+                }
+            }
+
+            std::string reply;
+            for (auto& c : cmds) {
+                status = CommandLine(c, reply);
+                if (!status.ok()) {
+                    ASSIGN_RETURN_STATUS_DTO(status)
+                }
+            }
+        }
+    } catch (nlohmann::detail::parse_error& e) {
+        std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
+        RETURN_STATUS_DTO(ILLEGAL_BODY, emsg.c_str());
+    } catch (nlohmann::detail::type_error& e) {
+        std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
+        RETURN_STATUS_DTO(ILLEGAL_BODY, emsg.c_str());
+    }
+
+    nlohmann::json j = nlohmann::json();
+    j["code"] = status.code();
+    j["message"] = status.message();
+    if (op->equals("config")) {
+        Config& config = Config::GetInstance();
+        bool required = false;
+        config.GetServerRestartRequired(required);
+        j["restart_required"] = required;
+    }
+    response_str = j.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status);
 }
