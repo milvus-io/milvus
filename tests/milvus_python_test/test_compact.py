@@ -422,7 +422,6 @@ class TestCompactBase:
         logging.getLogger().info(res)
         assert status.OK()
 
-    @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_server_crashed_recovery(self, connect, table):
         '''
         target: test compact when server crashed unexpectedly and restarted
@@ -441,7 +440,7 @@ class TestCompactBase:
         assert status.OK()
         # start to compact, kill and restart server
         logging.getLogger().info("compact starting...")
-        # pdb.set_trace()
+        pdb.set_trace()
         status = connect.compact(table)
         assert status.OK()
         logging.getLogger().info("compact finishing...")
