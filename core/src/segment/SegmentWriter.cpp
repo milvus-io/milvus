@@ -158,6 +158,10 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
 
+    ENGINE_LOG_DEBUG << "Merging from " << dir_to_merge << " to " << directory_ptr_->GetDirPath();
+
+    auto start = std::chrono::high_resolution_clock::now();
+
     SegmentReader segment_reader_to_merge(dir_to_merge);
     bool in_cache;
     auto status = segment_reader_to_merge.LoadCache(in_cache);
@@ -173,23 +177,53 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     segment_reader_to_merge.GetSegment(segment_to_merge);
     auto& uids = segment_to_merge->vectors_ptr_->GetUids();
 
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Loading segment took " << diff.count() << " s";
+
     if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
         auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
 
         // Sort and remove duplicates
+        start = std::chrono::high_resolution_clock::now();
+
         std::sort(offsets_to_delete.begin(), offsets_to_delete.end());
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Sorting " << offsets_to_delete.size() << " vectors took " << diff.count() << " s";
+
+        start = std::chrono::high_resolution_clock::now();
+
         offsets_to_delete.erase(std::unique(offsets_to_delete.begin(), offsets_to_delete.end()),
                                 offsets_to_delete.end());
 
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Deduplicating " << offsets_to_delete.size() << " vectors took " << diff.count() << " s";
+
         // Erase from raw data
+        start = std::chrono::high_resolution_clock::now();
+
         size_t deleted_count = 0;
         for (auto& offset : offsets_to_delete) {
             segment_to_merge->vectors_ptr_->Erase(offset - deleted_count);
             deleted_count++;
         }
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Erasing " << offsets_to_delete.size() << " vectors took " << diff.count() << " s";
     }
 
+    start = std::chrono::high_resolution_clock::now();
+
     AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), segment_to_merge->vectors_ptr_->GetUids());
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Adding " << segment_to_merge->vectors_ptr_->GetCount() << " vectors and uids took "
+                     << diff.count() << " s";
 
     return Status::OK();
 }
