@@ -55,8 +55,9 @@ class TestGetVectorIdsBase:
         '''
         table_name = gen_unique_str("not_existed_table")
         segment_name = self.get_valid_segment_name(connect, table)
-        status, vector_ids = connect.get_vector_ids(table_name, segment_name)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status, vector_ids = connect.get_vector_ids(table_name, segment_name)
+            # assert not status.OK()
     
     @pytest.fixture(
         scope="function",
@@ -73,7 +74,14 @@ class TestGetVectorIdsBase:
         expected: status not ok
         '''
         table_name = get_table_name
-        segment_name = self.get_valid_segment_name(connect, table)
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        segment_name =  info.partitions_stat[0].segments_stat[0].segment_name
         status, vector_ids = connect.get_vector_ids(table_name, segment_name)
         assert not status.OK()
 
@@ -123,7 +131,7 @@ class TestGetVectorIdsBase:
         assert status.OK()
         for i in range(50):
             logging.getLogger().info(i)
-            vectors = gen_vector(10000, dim)
+            vectors = gen_vector(100000, dim)
             status, ids = connect.add_vectors(table, vectors)
         status = connect.flush([table])
         assert status.OK()
