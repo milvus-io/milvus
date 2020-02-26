@@ -81,10 +81,6 @@ DeleteByIDRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-#ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
-        ProfilerStart(fname.c_str());
-#endif
         status = DBWrapper::DB()->DeleteVectors(table_name_, vector_ids_);
         if (!status.ok()) {
             return status;
