@@ -565,7 +565,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         auto handler = WebRequestHandler();
         String response;
-        auto status_dto = handler.GetSegmentVectors(table_name, segment_name, page_size, offset, response);
+        auto status_dto = handler.GetSegmentVectors(table_name, segment_name, query_params, response);
 
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:{

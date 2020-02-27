@@ -421,6 +421,8 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     } catch (nlohmann::detail::type_error& e) {
         return Status(BODY_PARSE_FAIL, "");
     }
+
+    return Status::OK();
 }
 
 Status
@@ -447,6 +449,40 @@ WebRequestHandler::DeleteByIDs(const std::string& table_name, const nlohmann::js
     }
 
     return status;
+}
+
+Status
+WebRequestHandler::GetVectorsByIDs(const std::string& table_name, const std::vector<int64_t>& ids,  nlohmann::json& json_out) {
+    std::vector<engine::VectorsData> vector_batch;
+    for (size_t i = 0; i < ids.size(); i++) {
+        auto vec_ids = std::vector<int64_t>(ids.begin() + i, ids.begin() + i + 1);
+        engine::VectorsData vectors_data;
+        auto status = request_handler_.GetVectorByID(context_ptr_, table_name, ids, vectors_data);
+        if (!status.ok()) {
+            return status;
+        }
+        vector_batch.push_back(vectors_data);
+    }
+
+    bool bin;
+    auto status = IsBinaryTable(table_name, bin);
+    if (!status.ok()) {
+        return status;
+    }
+
+    nlohmann::json vectors_json;
+    for (size_t i = 0 ; i < vector_batch.size(); i++) {
+        nlohmann::json vector_json;
+        if (bin) {
+            vector_json["vector"] = vector_batch.at(i).binary_data_;
+        } else {
+            vector_json["vector"] = vector_batch.at(i).float_data_;
+        }
+        vector_json["id"] = std::to_string(ids[i]);
+        json_out.push_back(vector_json);
+    }
+
+    return Status::OK();
 }
 
 ////////////////////////////////// Router methods ////////////////////////////////////////////
@@ -930,7 +966,9 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
 
     struct TableInfo info;
     auto status = request_handler_.ShowTableInfo(context_ptr_, table_name->std_str(), info);
-    ASSIGN_RETURN_STATUS_DTO(status)
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
+    }
 
     std::vector<std::pair<std::string, SegmentStat>> segments;
     for (auto & par_stat : info.partitions_stat_) {
@@ -958,17 +996,16 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
     result_json["segments"] = segs_json;
     result_json["count"] = size;
 
-    response->createFromCString(result_json.dump().c_str());
+    response = result_json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetSegmentVectors(const OString& table_name, const OString& segment_name,
-                                     const OString& page_size, const OString& offset, OString& response) {
+                                     const OQueryParams& query_params, OString& response) {
     int64_t offset_value = 0;
-    int64_t page_size_value = 10;
-
+    OString offset = query_params.get("offset");
     if (nullptr != offset.get()) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
@@ -978,6 +1015,8 @@ WebRequestHandler::GetSegmentVectors(const OString& table_name, const OString& s
         offset_value = std::stol(offset_str);
     }
 
+    int64_t page_size_value = 10;
+    OString page_size = query_params.get("page_size");
     if (nullptr != page_size.get()) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
@@ -1001,35 +1040,20 @@ WebRequestHandler::GetSegmentVectors(const OString& table_name, const OString& s
     auto ids_end = std::min(vector_ids.size(), (size_t)(offset_value + page_size_value));
 
     auto ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
-    engine::VectorsData vectors;
-    status = request_handler_.GetVectorByID(context_ptr_, table_name->std_str(), ids, vectors);
+    nlohmann::json vectors_json;
+    status = GetVectorsByIDs(table_name->std_str(), ids, vectors_json);
 
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    bool bin;
-    status = IsBinaryTable(table_name->std_str(), bin);
-    if (status.ok()) {
-        nlohmann::json result_json;
-        int64_t dim = vectors.id_array_.size() / vectors.vector_count_;
-        nlohmann::json vectors_json;
-        for (size_t i = 0; i < vectors.vector_count_; i++) {
-            nlohmann::json vector_json;
-            if (!bin) {
-                vector_json["vector"] = std::vector<float>(vectors.float_data_.begin() + i * dim, vectors.float_data_.begin() + (i + 1) * dim);
-            } else {
-                vector_json["vector"] = std::vector<uint8_t>(vectors.binary_data_.begin() + i * dim, vectors.binary_data_.begin() + (i + 1) * dim);
-            }
-            vector_json["id"] = vectors.id_array_[i];
-            vectors_json.push_back(vector_json);
-        }
+    nlohmann::json result_json;
+    if (vectors_json.empty()) {
+        result_json["vectors"] = std::vector<int64_t>();
+    } else {
         result_json["vectors"] = vectors_json;
-        result_json["code"] = status.code();
-        result_json["message"] = status.message();
-
-        response->createFromCString(result_json.dump().c_str());
     }
+    result_json["count"] = vector_ids.size();
+    result_json["code"] = status.code();
+    result_json["message"] = status.message();
+
+    response = result_json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1042,31 +1066,34 @@ WebRequestHandler::GetSegmentVectors(const OString& table_name, const OString& s
 StatusDto::ObjectWrapper
 WebRequestHandler::GetVector(const OString& table_name, const OQueryParams& query_params, OString& response) {
     auto id_str = query_params.get("id");
-    if (id_str.get() == nullptr || id_str.empty()) {
+    if (id_str.get() == nullptr) {
         RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Need to specify vector id in query string")
+    }
+    if (!ValidationUtil::ValidateStringIsNumber(id_str->std_str()).ok()) {
+        RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
+                          "Query param \'id\' is illegal, only non-negative integer supported");
     }
 
     auto id = std::stol(id_str->c_str());
 
     std::vector<int64_t> ids = {id};
     engine::VectorsData vectors;
-    auto status = request_handler_.GetVectorByID(context_ptr_, table_name->std_str(), ids, vectors);
-    if (status.ok()) {
-        bool bin;
-        status = IsBinaryTable(table_name->std_str(), bin);
-        if (status.ok()) {
-            nlohmann::json json;
-            json["code"] = status.code();
-            json["message"] = status.message();
-            if (bin)
-                json["vector"] = vectors.binary_data_;
-            else
-                json["vector"] = vectors.float_data_;
-
-            response->createFromCString(json.dump().c_str());
-        }
-
+    nlohmann::json vectors_json;
+    auto status = GetVectorsByIDs(table_name->std_str(), ids, vectors_json);
+    if (!status.ok()) {
+        ASSIGN_RETURN_STATUS_DTO(status)
     }
+
+    nlohmann::json json;
+    json["code"] = status.code();
+    json["message"] = status.message();
+    if (vectors_json.empty()) {
+        json["vector"] = std::vector<int64_t>();
+    } else {
+        json["vector"] = vectors_json[0]["vector"];
+    }
+
+    response = json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1086,7 +1113,7 @@ WebRequestHandler::VectorsOp(const OString& table_name, const OString& payload, 
         }
 
         if (status.ok()) {
-            response->createFromCString(result_str.c_str());
+            response = result_str.c_str();
         }
 
         ASSIGN_RETURN_STATUS_DTO(status)
@@ -1376,7 +1403,7 @@ WebRequestHandler::GetTableInfo(const OString& table_name, const OString& page_s
         }
         info_json["partitons_stat"] = par_stat_json;
 
-        response->createFromCString(info_json.dump().c_str());
+        response = info_json.dump().c_str();
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)

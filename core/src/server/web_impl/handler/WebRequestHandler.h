@@ -120,6 +120,9 @@ class WebRequestHandler {
     Status
     DeleteByIDs(const std::string& table_name, const nlohmann::json& json, std::string& result_str);
 
+    Status
+    GetVectorsByIDs(const std::string& table_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
+
  public:
     WebRequestHandler() {
         context_ptr_ = GenContextPtr("Web Handler");
@@ -193,8 +196,7 @@ class WebRequestHandler {
     ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
 
     StatusDto::ObjectWrapper
-    GetSegmentVectors(const OString& table_name, const OString& segment_name,
-                      const OString& page_size, const OString& offset, OString& response);
+    GetSegmentVectors(const OString& table_name, const OString& segment_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
     GetVector(const OString& table_name, const OQueryParams& query_params, OString& response);
