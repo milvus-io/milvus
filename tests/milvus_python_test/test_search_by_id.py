@@ -48,6 +48,19 @@ class TestSearchBase:
         status, ids = connect.add_vectors(table, add_vectors)
         sleep(add_interval_time)
         return add_vectors, ids
+
+    def init_data_binary(self, connect, table, nb=6000):
+        '''
+        Generate vectors and add it in table, before search vectors
+        '''
+        global binary_vectors
+        if nb == 6000:
+            add_vectors = binary_vectors
+        else:
+            add_vectors = gen_binary_vectors(nb, dim)
+        status, ids = connect.add_vectors(table, add_vectors)
+        sleep(add_interval_time)
+        return add_vectors, ids
     
     def init_data_no_flush(self, connect, table, nb=6000):
         global vectors
@@ -211,25 +224,6 @@ class TestSearchBase:
         status, ids = connect.add_vectors(table, add_vectors, partition_tag=partition_tag)
         connect.flush([table])
         return add_vectors, ids
-
-    def init_binary_data(self, connect, table, nb=6000, insert=True):
-        '''
-        Generate vectors and add it in table, before search vectors
-        '''
-        ids = []
-        global binary_vectors
-        global raw_vectors
-        if nb == 6000:
-            add_vectors = binary_vectors
-            add_raw_vectors = raw_vectors
-        else:  
-            add_raw_vectors, add_vectors = gen_binary_vectors(nb, dim)
-            # add_vectors /= numpy.linalg.norm(add_vectors)
-            # add_vectors = add_vectors.tolist()
-        if insert is True:
-            status, ids = connect.add_vectors(table, add_vectors)
-            sleep(add_interval_time)
-        return add_raw_vectors, add_vectors, ids
 
     @pytest.fixture(
         scope="function",
@@ -537,6 +531,33 @@ class TestSearchBase:
         query_ids = non_exist_id
         with pytest.raises(Exception) as e: 
             status, result = connect.search_by_id(table_name, top_k, nprobe, query_id)
+
+    def test_search_jac(self, connect, jac_table, get_jaccard_index_params):
+        index_params = get_jaccard_index_params
+        vectors, ids = self.init_data_binary(connect, jac_table)
+        status = connect.create_index(jac_table, index_params)
+        assert status.OK()
+        query_id = ids[0]
+        status, result = connect.search_by_id(jac_table, top_k, nprobe, query_id)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
+
+    def test_search_ham(self, connect, ham_table, get_hamming_index_params):
+        index_params = get_hamming_index_params
+        vectors, ids = self.init_data_binary(connect, ham_table)
+        status = connect.create_index(ham_table, index_params)
+        assert status.OK()
+        query_id = ids[0]
+        status, result = connect.search_by_id(ham_table, top_k, nprobe, query_id)
+        logging.getLogger().info(status)
+        logging.getLogger().info(result)
+        assert status.OK()
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon 
+
 
 """
 ******************************************************************

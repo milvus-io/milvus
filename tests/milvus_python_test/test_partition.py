@@ -162,19 +162,17 @@ class TestCreateBase:
             'metric_type': MetricType.L2}
         status = connect.create_table(param)
         status = connect.create_partition(table_new, tag)
-        assert status.OK()
         nq = 100
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
-        assert status.OK()
         status = connect.flush([table])
         assert status.OK()
         ids = [(i+100) for i in range(nq)]
         status, ids = connect.insert(table_new, vectors, ids, partition_tag=tag)
         status = connect.flush([table])
         assert status.OK()
-        status, res = connect.get_table_row_count(table_new)
+        status, res = connect.get_table_row_count(table)
         assert res == nq
         status, res = connect.get_table_row_count(table_new)
         assert res == nq
