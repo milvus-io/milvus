@@ -1280,7 +1280,6 @@ DBImpl::StartMergeTask() {
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
-        ENGINE_LOG_DEBUG << "StartCompactionTask pop result";
         if (!merge_thread_results_.empty()) {
             std::chrono::milliseconds span(10);
             if (merge_thread_results_.back().wait_for(span) == std::future_status::ready) {
@@ -1292,7 +1291,6 @@ DBImpl::StartMergeTask() {
     // add new merge task
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
-        ENGINE_LOG_DEBUG << "StartCompactionTask enqueue";
         if (merge_thread_results_.empty()) {
             // collect merge files for all tables(if merge_table_ids_ is empty) for two reasons:
             // 1. other tables may still has un-merged files
@@ -1312,7 +1310,7 @@ DBImpl::StartMergeTask() {
         }
     }
 
-    // ENGINE_LOG_DEBUG << "End StartCompactionTask";
+    // ENGINE_LOG_DEBUG << "End StartMergeTask";
 }
 
 Status
