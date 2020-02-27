@@ -166,11 +166,9 @@ class TestCreateBase:
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
-        status = connect.flush([table])
-        assert status.OK()
         ids = [(i+100) for i in range(nq)]
         status, ids = connect.insert(table_new, vectors, ids, partition_tag=tag)
-        status = connect.flush([table])
+        status = connect.flush([table, table_new])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert res == nq
