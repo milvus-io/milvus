@@ -37,7 +37,6 @@ class TestGetBase:
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_vector_by_id(table, ids[0]) 
-        logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vector[0])
 
@@ -53,7 +52,6 @@ class TestGetBase:
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_vector_by_id(table, ids[0])
-        logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
@@ -71,7 +69,6 @@ class TestGetBase:
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_vector_by_id(table, ids[0])
-        logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
@@ -82,13 +79,12 @@ class TestGetBase:
         expected: status ok, get one vector 
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors, ids=[1 for i in range(nb)])
-        assert status.OK()
-        time.sleep(1)
+        ids = [i for i in range(nb)]
+        ids[1] = 0; ids[-1] = 0
+        status, ids = connect.add_vectors(table, vectors, ids=ids)
         status = connect.flush([table])
-        assert not status.OK()
-        status, res = connect.get_vector_by_id(table, 1) 
-        logging.getLogger().info(res)
+        assert status.OK()
+        status, res = connect.get_vector_by_id(table, 0) 
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
@@ -122,7 +118,6 @@ class TestGetBase:
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_vector_by_id(table, ids[id])
-        logging.getLogger().info(res)
         assert status.OK()
         assert not res 
 
@@ -144,7 +139,6 @@ class TestGetBase:
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_vector_by_id(table, ids[id])
-        logging.getLogger().info(res)
         assert status.OK()
         assert not res
 
@@ -252,7 +246,6 @@ class TestGetIndexedVectors:
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_vector_by_id(table, ids[id])
-        logging.getLogger().info(res)
         assert status.OK()
         assert not res
 
@@ -296,7 +289,6 @@ class TestGetBinary:
         status = connect.flush([jac_table])
         assert status.OK()
         status, res = connect.get_vector_by_id(jac_table, ids[0]) 
-        logging.getLogger().info(res)
         assert status.OK()
         assert res == vector[0]
 
@@ -312,7 +304,6 @@ class TestGetBinary:
         status = connect.flush([jac_table])
         assert status.OK()
         status, res = connect.get_vector_by_id(jac_table, ids[0])
-        logging.getLogger().info(res)
         assert status.OK()
         assert res == vectors[0]
 
@@ -323,12 +314,12 @@ class TestGetBinary:
         expected: status ok, get one vector 
         '''
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(jac_table, vectors, ids=[1 for i in range(nb)])
-        assert status.OK()
+        ids = [i for i in range(nb)]
+        ids[0] = 0; ids[-1] = 0
+        status, ids = connect.add_vectors(jac_table, vectors, ids=ids)
         status = connect.flush([jac_table])
-        assert not status.OK()
+        assert status.OK()
         status, res = connect.get_vector_by_id(jac_table, 1) 
-        logging.getLogger().info(res)
         assert status.OK()
         assert res == vectors[0] 
 
@@ -375,7 +366,6 @@ class TestGetBinary:
         status = connect.flush([jac_table])
         assert status.OK()
         status, res = connect.get_vector_by_id(jac_table, ids[0])
-        logging.getLogger().info(res)
         assert status.OK()
         assert res == vectors[0]
 
