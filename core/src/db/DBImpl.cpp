@@ -1365,7 +1365,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
         fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
         fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
+            ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir
+                             << ". Error: " << status.message();
         }
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
@@ -1378,10 +1379,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
         // typical error: out of disk space, out of memory or permition denied
         table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
         status = meta_ptr_->UpdateTableFile(table_file);
-        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
-
+        ENGINE_LOG_DEBUG << "Mark file: " << table_file.file_id_ << " to to_delete";
         return status;
     }
 

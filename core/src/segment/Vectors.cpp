@@ -16,9 +16,11 @@
 // under the License.
 
 #include "segment/Vectors.h"
+#include "utils/Log.h"
 
 #include <iostream>
 #include <utility>
+#include <vector>
 
 namespace milvus {
 namespace segment {
@@ -40,13 +42,60 @@ Vectors::AddUids(const std::vector<doc_id_t>& uids) {
 }
 
 void
-Vectors::Erase(size_t offset) {
+Vectors::Erase(int32_t offset) {
     auto code_length = GetCodeLength();
     if (code_length != 0) {
         auto step = offset * code_length;
         data_.erase(data_.begin() + step, data_.begin() + step + code_length);
         uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
     }
+}
+
+void
+Vectors::Erase(std::vector<int32_t>& offsets) {
+    // Sort and remove duplicates
+    auto start = std::chrono::high_resolution_clock::now();
+
+    std::sort(offsets.begin(), offsets.end());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto diff = end - start;
+    ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+
+    start = std::chrono::high_resolution_clock::now();
+
+    offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+
+    // Reconstruct raw vectors and uids
+    size_t new_size = uids_.size() - offsets.size();
+    std::vector<uint8_t> new_data(new_size);
+    auto code_length = GetCodeLength();
+    std::vector<doc_id_t> new_uids(new_size * code_length);
+
+    auto count = 0;
+    auto skip = offsets.cbegin();
+    for (size_t i = 0; i < uids_.size();) {
+        while (i == *skip) {
+            ++i;
+            ++skip;
+        }
+
+        new_uids[count] = uids_[i];
+
+        for (size_t j = 0; j < code_length; ++j) {
+            new_data[count * code_length + j] = data_[i * code_length + j];
+        }
+
+        ++count;
+        ++skip;
+    }
+
+    data_.swap(new_data);
+    uids_.swap(new_uids);
 }
 
 const std::vector<uint8_t>&
