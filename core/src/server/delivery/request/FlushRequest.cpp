@@ -44,6 +44,7 @@ FlushRequest::OnExecute() {
 
     TimeRecorderAuto rc(hdr);
     Status status = Status::OK();
+    SERVER_LOG_DEBUG << hdr;
 
     for (auto& name : table_names_) {
         // only process root table, ignore partition table

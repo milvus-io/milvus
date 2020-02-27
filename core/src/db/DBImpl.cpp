@@ -561,22 +561,28 @@ DBImpl::Flush(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
+    ENGINE_LOG_DEBUG << "Begin flush table: " << table_id;
 
     Status status;
     if (options_.wal_enable_) {
+        ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush(table_id);
+        ENGINE_LOG_DEBUG << "wal_mgr_->Flush";
         if (lsn != 0) {
             wal_task_swn_.Notify();
             flush_task_swn_.Wait();
+            ENGINE_LOG_DEBUG << "flush_task_swn_.Wait()";
         }
 
     } else {
+        ENGINE_LOG_DEBUG << "MemTable flush";
         wal::MXLogRecord record;
         record.type = wal::MXLogType::Flush;
         record.table_id = table_id;
         status = ExecWalRecord(record);
     }
+
+    ENGINE_LOG_DEBUG << "End flush table: " << table_id;
 
     return status;
 }
@@ -587,20 +593,24 @@ DBImpl::Flush() {
         return SHUTDOWN_ERROR;
     }
 
-    // ENGINE_LOG_DEBUG << "Flushing all tables";
+    ENGINE_LOG_DEBUG << "Begin flush all tables";
 
     Status status;
     if (options_.wal_enable_) {
+        ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush();
         if (lsn != 0) {
             wal_task_swn_.Notify();
             flush_task_swn_.Wait();
         }
     } else {
+        ENGINE_LOG_DEBUG << "MemTable flush";
         wal::MXLogRecord record;
         record.type = wal::MXLogType::Flush;
         status = ExecWalRecord(record);
     }
+
+    ENGINE_LOG_DEBUG << "End flush all tables";
 
     return status;
 }
@@ -1182,18 +1192,22 @@ DBImpl::BackgroundTimerTask() {
 
 void
 DBImpl::WaitMergeFileFinish() {
+    ENGINE_LOG_DEBUG << "Begin WaitMergeFileFinish";
     std::lock_guard<std::mutex> lck(compact_result_mutex_);
     for (auto& iter : compact_thread_results_) {
         iter.wait();
     }
+    ENGINE_LOG_DEBUG << "End WaitMergeFileFinish";
 }
 
 void
 DBImpl::WaitBuildIndexFinish() {
+    ENGINE_LOG_DEBUG << "Begin WaitBuildIndexFinish";
     std::lock_guard<std::mutex> lck(index_result_mutex_);
     for (auto& iter : index_thread_results_) {
         iter.wait();
     }
+    ENGINE_LOG_DEBUG << "End WaitBuildIndexFinish";
 }
 
 void
@@ -1264,9 +1278,11 @@ DBImpl::StartCompactionTask() {
         Flush();
     }
 
+    ENGINE_LOG_DEBUG << "Begin StartCompactionTask";
     // compaction has been finished?
     {
         std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        ENGINE_LOG_DEBUG << "StartCompactionTask pop result";
         if (!compact_thread_results_.empty()) {
             std::chrono::milliseconds span(10);
             if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
@@ -1278,6 +1294,7 @@ DBImpl::StartCompactionTask() {
     // add new compaction task
     {
         std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        ENGINE_LOG_DEBUG << "StartCompactionTask enqueue";
         if (compact_thread_results_.empty()) {
             // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
             // 1. other tables may still has un-merged files
@@ -1296,6 +1313,8 @@ DBImpl::StartCompactionTask() {
             compact_table_ids_.clear();
         }
     }
+
+    ENGINE_LOG_DEBUG << "End StartCompactionTask";
 }
 
 Status
@@ -1947,6 +1966,7 @@ DBImpl::BackgroundWalTask() {
     wal::MXLogRecord record;
 
     auto auto_flush = [&]() {
+        ENGINE_LOG_DEBUG << "Begin auto flush";
         record.type = wal::MXLogType::Flush;
         record.table_id.clear();
         ExecWalRecord(record);
@@ -1954,6 +1974,8 @@ DBImpl::BackgroundWalTask() {
         StartMetricTask();
         StartCompactionTask();
         StartBuildIndexTask();
+
+        ENGINE_LOG_DEBUG << "End auto flush";
     };
 
     while (true) {
