@@ -181,10 +181,6 @@ tracing_config:
 #                      | It should be in range [64, 2048]. If the value set out of  |            |                 |
 #                      | the range, the system will use the boundary value.         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# record_size          | Max size of one single wal record. Unit is MB.             | Integer    | 2               |
-#                      | It should be in range [1, buffer_size]. If the value set   |            |                 |
-#                      | out of the range, the system will use the boundary value.  |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # wal_path             | The root path of wal relative files, include wal meta      | String     | NULL            |
 #                      | files.                                                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -192,5 +188,4 @@ wal_config:
   enable: true
   recovery_error_ignore: true
   buffer_size: 128   # MB
-  record_size: 2     # MB
   wal_path: /tmp/milvus/wal

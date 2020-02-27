@@ -82,14 +82,12 @@ class MXLogBuffer {
     RemoveOldFiles(uint64_t flushed_lsn);
 
     uint32_t
-    GetBufferSize() {
-        return mxlog_buffer_size_;
-    }
+    GetBufferSize();
 
- private:
     uint32_t
     SurplusSpace();
 
+ private:
     uint32_t
     RecordSize(const MXLogRecord& record);
 
