@@ -196,8 +196,7 @@ Server::Start() {
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 
-        StartService();
-        return Status::OK();
+        return StartService();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -253,14 +252,33 @@ Server::LoadConfig() {
     return milvus::Status::OK();
 }
 
-void
+Status
 Server::StartService() {
-    engine::KnowhereResource::Initialize();
+    Status stat;
+    stat = engine::KnowhereResource::Initialize();
+    if (!stat.ok()) {
+        std::cerr << "knowhere resource initialize fail: " << stat.message() << std::endl;
+        return stat;
+    }
+
     scheduler::StartSchedulerService();
-    DBWrapper::GetInstance().StartService();
+
+    stat = DBWrapper::GetInstance().StartService();
+    if (!stat.ok()) {
+        std::cerr << "DBWrapper start service fail: " << stat.message() << std::endl;
+        return stat;
+    }
+
     grpc::GrpcServer::GetInstance().Start();
     web::WebServer::GetInstance().Start();
-    storage::S3ClientWrapper::GetInstance().StartService();
+
+    stat = storage::S3ClientWrapper::GetInstance().StartService();
+    if (!stat.ok()) {
+        std::cerr << "S3 client start service fail: " << stat.message() << std::endl;
+        return stat;
+    }
+
+    return Status::OK();
 }
 
 void
