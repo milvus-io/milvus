@@ -817,7 +817,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     index_->GetUids(uids);
     for (int64_t i = 0; i < n; i++) {
         int64_t offset = labels[i];
-        if (offset == -1) {
+        if (offset != -1) {
             labels[i] = uids[offset];
         }
     }
@@ -861,7 +861,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
     index_->GetUids(uids);
     for (int64_t i = 0; i < n; i++) {
         int64_t offset = labels[i];
-        if (offset == -1) {
+        if (offset != -1) {
             labels[i] = uids[offset];
         }
     }
@@ -940,7 +940,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         index_->GetUids(uids);
         for (int64_t i = 0; i < n; i++) {
             int64_t offset = labels[i];
-            if (offset == -1) {
+            if (offset != -1) {
                 labels[i] = uids[offset];
             }
         }
