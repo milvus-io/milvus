@@ -137,7 +137,7 @@ static const char* CONFIG_WAL_ENABLE_DEFAULT = "false";
 static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
-static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "128";
+static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
 static const char* CONFIG_WAL_WAL_PATH = "wal_path";
 
 class Config {
