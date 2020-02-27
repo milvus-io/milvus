@@ -16,6 +16,8 @@
 // under the License.
 
 #include "segment/IdBloomFilter.h"
+#include "utils/Log.h"
+#include "utils/Status.h"
 
 #include <string>
 
@@ -43,18 +45,26 @@ IdBloomFilter::Check(doc_id_t uid) {
     return scaling_bloom_check(bloom_filter_, s.c_str(), s.size());
 }
 
-void
+Status
 IdBloomFilter::Add(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
-    scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid);
+    if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
+        ENGINE_LOG_ERROR << "Error adding in bloom filter: 4 bit counter Overflow";
+        return Status(DB_ERROR, "Bloom filter error: 4 bit counter Overflow");
+    }
+    return Status::OK();
 }
 
-void
+Status
 IdBloomFilter::Remove(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
-    scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid);
+    if (scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
+        ENGINE_LOG_ERROR << "Error removing in bloom filter: Decrementing zero in counter";
+        return Status(DB_ERROR, "Error removing in bloom filter: Decrementing zero in counter");
+    }
+    return Status::OK();
 }
 
 // const std::string&

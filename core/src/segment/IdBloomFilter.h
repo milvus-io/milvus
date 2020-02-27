@@ -21,6 +21,7 @@
 #include <mutex>
 
 #include "dablooms/dablooms.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace segment {
@@ -39,10 +40,10 @@ class IdBloomFilter {
     bool
     Check(doc_id_t uid);
 
-    void
+    Status
     Add(doc_id_t uid);
 
-    void
+    Status
     Remove(doc_id_t uid);
 
     size_t

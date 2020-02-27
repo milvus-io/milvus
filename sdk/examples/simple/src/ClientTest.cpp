@@ -135,6 +135,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // flush buffer
+        milvus_sdk::TimeRecorder rc("Flush");
         stat = conn->FlushTable(TABLE_NAME);
         std::cout << "FlushTable function call status: " << stat.message() << std::endl;
     }

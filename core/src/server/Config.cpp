@@ -192,9 +192,6 @@ Config::ValidateConfig() {
     uint32_t buffer_size;
     CONFIG_CHECK(GetWalConfigBufferSize(buffer_size));
 
-    uint32_t record_size;
-    CONFIG_CHECK(GetWalConfigRecordSize(record_size));
-
     std::string wal_path;
     CONFIG_CHECK(GetWalConfigWalPath(wal_path));
 
@@ -782,17 +779,6 @@ Config::CheckWalConfigBufferSize(const std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::CheckWalConfigRecordSize(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid wal record size: " + value +
-                          ". Possible reason: wal_config.record_size is not a positive integer.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-
-    return Status::OK();
-}
-
 #ifdef MILVUS_GPU_VERSION
 
 Status
@@ -1363,17 +1349,6 @@ Config::GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore) {
     }
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     recovery_error_ignore = (str == "true" || str == "on" || str == "yes" || str == "1");
-    return Status::OK();
-}
-
-Status
-Config::GetWalConfigRecordSize(uint32_t& record_size) {
-    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECORD_SIZE, CONFIG_WAL_RECORD_SIZE_DEFAULT);
-    Status s = CheckWalConfigRecordSize(str);
-    if (!s.ok()) {
-        return s;
-    }
-    record_size = (uint32_t)std::stoul(str);
     return Status::OK();
 }
 
