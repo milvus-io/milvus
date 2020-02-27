@@ -307,6 +307,18 @@ VecIndexImpl::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
     return Status::OK();
 }
 
+Status
+VecIndexImpl::SetUids(std::vector<segment::doc_id_t>& uids) {
+    index_->SetUids(uids);
+    return Status::OK();
+}
+
+Status
+VecIndexImpl::GetUids(std::vector<segment::doc_id_t>& uids) {
+    uids = index_->GetUids();
+    return Status::OK();
+}
+
 const float*
 BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
