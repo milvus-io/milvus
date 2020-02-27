@@ -425,6 +425,9 @@ ExecutionEngineImpl::Load(bool to_cache) {
             auto& vectors = segment_ptr->vectors_ptr_;
             auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
 
+            auto vectors_uids = vectors->GetUids();
+            index_->SetUids(vectors_uids);
+
             auto vectors_data = vectors->GetData();
 
             faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
@@ -809,6 +812,16 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 
     auto status = index_->Search(n, data, distances, labels, conf);
 
+    // map offsets to ids
+    std::vector<segment::doc_id_t> uids;
+    index_->GetUids(uids);
+    for (int64_t i = 0; i < n; i++) {
+        int64_t offset = labels[i];
+        if (offset != -1) {
+            labels[i] = uids[offset];
+        }
+    }
+
     if (hybrid) {
         HybridUnset();
     }
@@ -842,6 +855,16 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
     }
 
     auto status = index_->Search(n, data, distances, labels, conf);
+
+    // map offsets to ids
+    std::vector<segment::doc_id_t> uids;
+    index_->GetUids(uids);
+    for (int64_t i = 0; i < n; i++) {
+        int64_t offset = labels[i];
+        if (offset != -1) {
+            labels[i] = uids[offset];
+        }
+    }
 
     if (hybrid) {
         HybridUnset();
@@ -911,6 +934,16 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     status = Status::OK();
     if (!offsets.empty()) {
         status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
+
+        // map offsets to ids
+        std::vector<segment::doc_id_t> uids;
+        index_->GetUids(uids);
+        for (int64_t i = 0; i < n; i++) {
+            int64_t offset = labels[i];
+            if (offset != -1) {
+                labels[i] = uids[offset];
+            }
+        }
     }
 
     if (hybrid) {
