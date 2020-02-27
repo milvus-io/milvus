@@ -210,14 +210,14 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
 
         size_t deleted_count = 0;
         for (auto& offset : offsets_to_delete) {
-            start = std::chrono::high_resolution_clock::now();
+            // start = std::chrono::high_resolution_clock::now();
 
             segment_to_merge->vectors_ptr_->Erase(offset - deleted_count);
             ++deleted_count;
 
-            end = std::chrono::high_resolution_clock::now();
-            diff = end - start;
-            ENGINE_LOG_DEBUG << "Erasing " << offset << " took " << diff.count() << " s";
+            // end = std::chrono::high_resolution_clock::now();
+            // diff = end - start;
+            // ENGINE_LOG_DEBUG << "Erasing " << offset << " took " << diff.count() << " s";
         }
 
         end = std::chrono::high_resolution_clock::now();
