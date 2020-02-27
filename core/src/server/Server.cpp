@@ -257,16 +257,16 @@ Server::StartService() {
     Status stat;
     stat = engine::KnowhereResource::Initialize();
     if (!stat.ok()) {
-        std::cerr << "knowhere resource initialize fail: " << stat.message() << std::endl;
-        return stat;
+        SERVER_LOG_ERROR << "KnowhereResource initialize fail: " << stat.message();
+        goto FAIL;
     }
 
     scheduler::StartSchedulerService();
 
     stat = DBWrapper::GetInstance().StartService();
     if (!stat.ok()) {
-        std::cerr << "DBWrapper start service fail: " << stat.message() << std::endl;
-        return stat;
+        SERVER_LOG_ERROR << "DBWrapper start service fail: " << stat.message();
+        goto FAIL;
     }
 
     grpc::GrpcServer::GetInstance().Start();
@@ -274,11 +274,14 @@ Server::StartService() {
 
     stat = storage::S3ClientWrapper::GetInstance().StartService();
     if (!stat.ok()) {
-        std::cerr << "S3 client start service fail: " << stat.message() << std::endl;
-        return stat;
+        SERVER_LOG_ERROR << "S3Client start service fail: " << stat.message();
+        goto FAIL;
     }
 
     return Status::OK();
+FAIL:
+    std::cerr << "Milvus initializes fail: " << stat.message() << std::endl;
+    return stat;
 }
 
 void
