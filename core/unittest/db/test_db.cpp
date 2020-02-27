@@ -1250,10 +1250,14 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
 
     stat = db_->GetVectorIDs(TABLE_NAME, partition_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
-//    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+    //    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
 }
 
 TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
+    auto options = GetOptions();
+    options.wal_enable_ = false;
+    db_ = milvus::engine::DBFactory::Build(options);
+
     milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
     auto stat = db_->CreateTable(table_schema);
     ASSERT_TRUE(stat.ok());

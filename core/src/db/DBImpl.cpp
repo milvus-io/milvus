@@ -561,9 +561,19 @@ DBImpl::Flush(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
+    Status status;
+    bool has_table;
+    status = HasTable(table_id, has_table);
+    if (!status.ok()) {
+        return status;
+    }
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table to flush does not exist: " << table_id;
+        return Status(DB_NOT_FOUND, "Table to flush does not exist");
+    }
+
     ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
 
-    Status status;
     if (options_.wal_enable_) {
         auto lsn = wal_mgr_->Flush(table_id);
         if (lsn != 0) {
@@ -1889,16 +1899,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.table_id.empty()) {
                 // flush one table
-                bool has_table;
-                status = HasTable(record.table_id, has_table);
-                if (!status.ok()) {
-                    return status;
-                }
-                if (!has_table) {
-                    ENGINE_LOG_ERROR << "Table to flush does not exist: " << record.table_id;
-                    return Status(DB_NOT_FOUND, "Table to flush does not exist");
-                }
-
                 std::vector<meta::TableSchema> partition_array;
                 status = meta_ptr_->ShowPartitions(record.table_id, partition_array);
                 if (!status.ok()) {
