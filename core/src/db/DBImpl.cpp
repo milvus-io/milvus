@@ -1264,26 +1264,6 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().PushToGateway();
 }
 
-/*
-
-Status
-DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
-    std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
-    std::set<std::string> temp_table_ids;
-    mem_mgr_->Serialize(temp_table_ids);
-    for (auto& id : temp_table_ids) {
-        sync_table_ids.insert(id);
-    }
-
-    if (!temp_table_ids.empty()) {
-        SERVER_LOG_DEBUG << "Insert cache serialized";
-    }
-
-    return Status::OK();
-}
-
- */
-
 void
 DBImpl::StartMergeTask() {
     static uint64_t compact_clock_tick = 0;

@@ -233,7 +233,6 @@ class DBImpl : public DB {
 
     meta::MetaPtr meta_ptr_;
     MemManagerPtr mem_mgr_;
-    std::mutex mem_serialize_mutex_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
