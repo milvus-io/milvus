@@ -16,10 +16,10 @@
 #include <string>
 #include <utility>
 
-#include <opentracing/mocktracer/tracer.h>
 #include <oatpp/core/data/mapping/type/Object.hpp>
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
+#include <opentracing/mocktracer/tracer.h>
 
 #include "db/Types.h"
 #include "server/context/Context.h"
@@ -76,9 +76,22 @@ class WebRequestHandler {
         return context_ptr;
     }
 
+ private:
+    Status
+    ParseSegmentStat(const SegmentStat& seg_stat, nlohmann::json& json);
+
+    Status
+    ParsePartitionStat(const PartitionStat& par_stat, nlohmann::json& json);
+
+    Status
+    IsBinaryTable(const std::string& table_name, bool& bin);
+
+    Status
+    TableStat(const std::string& table_name, TableInfo& table_info);
+
  protected:
     Status
-    GetTableInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
+    GetTableMetaInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
@@ -162,16 +175,6 @@ class WebRequestHandler {
     DropPartition(const OString& table_name, const OString& tag);
 
     StatusDto::ObjectWrapper
-    ShowSegments(const OString& table_name, const OString& partition_tag, const OString& page_size, const OString& offset, OString& response);
-
-    StatusDto::ObjectWrapper
-    GetVectors(const OString& table_name, const OString& partition_tag, const OString& segment_name,
-        const OString& page_size, const OString& offset, OString& response);
-
-    StatusDto::ObjectWrapper
-    ModifyVectors(const OString& table_name, const OString& body, OString& response);
-
-    StatusDto::ObjectWrapper
     Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
            VectorIdsDto::ObjectWrapper& ids_dto);
 
@@ -183,6 +186,19 @@ class WebRequestHandler {
     Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto);
 
  public:
+    StatusDto::ObjectWrapper
+    GetTableInfo(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
+
+    StatusDto::ObjectWrapper
+    ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
+
+    StatusDto::ObjectWrapper
+    GetSegmentVectors(const OString& table_name, const OString& segment_name,
+                      const OString& page_size, const OString& offset, OString& response);
+
+    StatusDto::ObjectWrapper
+    GetVector(const OString& table_name, const OQueryParams& query_params, OString& response);
+
     StatusDto::ObjectWrapper
     VectorsOp(const OString& table_name, const OString& payload, OString& response);
 
