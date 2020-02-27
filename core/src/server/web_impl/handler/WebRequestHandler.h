@@ -86,12 +86,28 @@ class WebRequestHandler {
     Status
     IsBinaryTable(const std::string& table_name, bool& bin);
 
-    Status
-    TableStat(const std::string& table_name, TableInfo& table_info);
-
  protected:
+    /**
+     *
+     * Table
+     */
     Status
-    GetTableMetaInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
+    GetTableMetaInfo(const std::string& table_name, nlohmann::json& json_out);
+
+    Status
+    GetTableStat(const std::string& table_name, nlohmann::json& json_out);
+
+    /**
+     *
+     * Segment
+     */
+    Status
+    GetSegmentVectors(const std::string& table_name, const std::string& segment_name,
+        int64_t page_size, int64_t offset, nlohmann::json& json_out);
+
+    Status
+    GetSegmentIds(const std::string& table_name, const std::string& segment_name,
+                      int64_t page_size, int64_t offset, nlohmann::json& json_out);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
@@ -150,12 +166,6 @@ class WebRequestHandler {
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
 
     StatusDto::ObjectWrapper
-    GetTable(const OString& table_name, const OQueryParams& query_params, TableFieldsDto::ObjectWrapper& schema_dto);
-
-    StatusDto::ObjectWrapper
-    ShowTables(const OString& offset, const OString& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
-
-    StatusDto::ObjectWrapper
     DropTable(const OString& table_name);
 
     StatusDto::ObjectWrapper
@@ -190,13 +200,16 @@ class WebRequestHandler {
 
  public:
     StatusDto::ObjectWrapper
-    GetTableInfo(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
+    ShowTables(const OString& offset, const OString& page_size, OString& result);
+
+    StatusDto::ObjectWrapper
+    GetTable(const OString& table_name, const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
 
     StatusDto::ObjectWrapper
-    GetSegmentVectors(const OString& table_name, const OString& segment_name, const OQueryParams& query_params, OString& response);
+    GetSegmentInfo(const OString& table_name, const OString& segment_name, const OString& info, const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     GetVector(const OString& table_name, const OQueryParams& query_params, OString& response);
@@ -205,7 +218,7 @@ class WebRequestHandler {
     VectorsOp(const OString& table_name, const OString& payload, OString& response);
 
     StatusDto::ObjectWrapper
-    SystemInfo(const OString& cmd, OString& response_str);
+    SystemInfo(const OString& cmd, const OQueryParams& query_params, OString& response_str);
 
     StatusDto::ObjectWrapper
     SystemOp(const OString& op, const OString& body_str, OString& response_str);
