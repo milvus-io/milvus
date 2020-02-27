@@ -146,7 +146,10 @@ class WebRequestHandler {
            TopkResultsDto::ObjectWrapper& results_dto);
 
     StatusDto::ObjectWrapper
-    Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto);
+    SystemInfo(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);
+
+    StatusDto::ObjectWrapper
+    SystemOp(const OString& op, const OString& body_str, OString& response_str);
 
  public:
     WebRequestHandler&

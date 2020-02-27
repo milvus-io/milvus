@@ -33,6 +33,7 @@ class PartitionListDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(PartitionListDto, Object)
 
     DTO_FIELD(List<PartitionFieldsDto::ObjectWrapper>::ObjectWrapper, partitions);
+    DTO_FIELD(Int64, count) = 0;
 };
 
 #include OATPP_CODEGEN_END(DTO)

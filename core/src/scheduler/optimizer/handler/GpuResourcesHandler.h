@@ -11,40 +11,36 @@
 #ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include <condition_variable>
-#include <deque>
+#include <exception>
 #include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
-#include "scheduler/optimizer/Pass.h"
-#include "scheduler/optimizer/handler/GpuSearchResHandler.h"
+#include "server/Config.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFFlatPass : public Pass, public GpuSearchResHandler {
+class GpuResourcesHandler {
  public:
-    FaissIVFFlatPass() = default;
+    GpuResourcesHandler();
+
+    ~GpuResourcesHandler();
 
  public:
+    virtual void
+    OnGpuEnableChanged(bool enable);
+
+ protected:
     void
-    Init() override;
+    SetIdentity(const std::string& identity);
 
-    bool
-    Run(const TaskPtr& task) override;
+    void
+    AddGpuEnableListener();
 
- private:
-    int64_t count_ = 0;
+ protected:
+    bool gpu_enable_ = true;
+    std::string identity_;
 };
-
-using FaissIVFFlatPassPtr = std::shared_ptr<FaissIVFFlatPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
