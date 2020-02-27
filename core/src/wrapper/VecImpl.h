@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "VecIndex.h"
 #include "knowhere/index/vector_index/VectorIndex.h"
@@ -74,6 +75,12 @@ class VecIndexImpl : public VecIndex {
 
     Status
     GetBlacklist(faiss::ConcurrentBitsetPtr& list) override;
+
+    Status
+    SetUids(std::vector<segment::doc_id_t>& uids) override;
+
+    Status
+    GetUids(std::vector<segment::doc_id_t>& uids) override;
 
  protected:
     int64_t dim = 0;
