@@ -16,11 +16,13 @@
 // under the License.
 
 #include "segment/Vectors.h"
-#include "utils/Log.h"
 
+#include <chrono>
 #include <iostream>
 #include <utility>
 #include <vector>
+
+#include "utils/Log.h"
 
 namespace milvus {
 namespace segment {
@@ -72,16 +74,25 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
 
     // Reconstruct raw vectors and uids
     size_t new_size = uids_.size() - offsets.size();
-    std::vector<uint8_t> new_data(new_size);
+    std::vector<doc_id_t> new_uids(new_size);
     auto code_length = GetCodeLength();
-    std::vector<doc_id_t> new_uids(new_size * code_length);
+    std::vector<uint8_t> new_data(new_size * code_length);
 
     auto count = 0;
     auto skip = offsets.cbegin();
-    for (size_t i = 0; i < uids_.size();) {
-        while (i == *skip) {
+    auto loop_size = uids_.size();
+
+    for (size_t i = 0; i < loop_size;) {
+        while (i == *skip && skip != offsets.cend()) {
+
             ++i;
             ++skip;
+
+            if (i == loop_size) {
+                new_data.swap(data_);
+                new_uids.swap(uids_);
+                return;
+            }
         }
 
         new_uids[count] = uids_[i];
@@ -91,11 +102,13 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
         }
 
         ++count;
-        ++skip;
+        ++i;
     }
 
-    data_.swap(new_data);
-    uids_.swap(new_uids);
+    new_data.swap(data_);
+    new_uids.swap(uids_);
+    // uids_ = new_uids;
+    // data_ = new_data;
 }
 
 const std::vector<uint8_t>&

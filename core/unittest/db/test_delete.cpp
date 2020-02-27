@@ -523,8 +523,9 @@ TEST_F(DeleteTest, compact_with_index) {
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
+    xb.id_array_.clear();
     for (int64_t i = 0; i < nb; i++) {
-        xb.id_array_.push_back(i);
+        xb.id_array_.emplace_back(i);
     }
 
     stat = db_->InsertVectors(GetTableName(), "", xb);
