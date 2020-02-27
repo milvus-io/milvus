@@ -69,7 +69,8 @@ DBImpl::DBImpl(const DBOptions& options)
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
-        mxlog_config.buffer_size = options_.buffer_size_;
+        // 2 buffers in the WAL
+        mxlog_config.buffer_size = options_.buffer_size_ / 2;
         mxlog_config.mxlog_path = options_.mxlog_path_;
         wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
