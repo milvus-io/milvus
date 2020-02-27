@@ -68,7 +68,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
 
-        normalize = index_->metric_type_ == 1 ? true : false;  // 1 == InnerProduct
+        // normalize = index_->metric_type_ == 1 ? true : false;  // 1 == InnerProduct
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -114,7 +114,7 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
         std::vector<float> dist;
         std::vector<int64_t> ids;
         std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                       [](const std::pair<float, int64_t>& e) { return e.first; });
+                       [](const std::pair<float, int64_t>& e) { return float(1 - e.first); });
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
@@ -142,7 +142,7 @@ IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
         space = new hnswlib::L2Space(dim);
     } else if (config->metric_type == METRICTYPE::IP) {
         space = new hnswlib::InnerProductSpace(dim);
-        normalize = true;
+        // normalize = true;
     }
     index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, build_cfg->M, build_cfg->ef);
 
