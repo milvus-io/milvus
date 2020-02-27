@@ -256,27 +256,6 @@ XSearchTask::Execute() {
             double span = rc.RecordSection(hdr + ", do search");
             //            search_job->AccumSearchCost(span);
 
-            // step 2.5: map offsets to user-provided ids
-            std::string segment_dir;
-            engine::utils::GetParentPath(file_->location_, segment_dir);
-            segment::SegmentReader segment_reader(segment_dir);
-            std::vector<segment::doc_id_t> uids;
-            auto status = segment_reader.LoadUids(uids);
-            if (!status.ok()) {
-                search_job->GetStatus() = s;
-                search_job->SearchDone(index_id_);
-                return;
-            }
-            std::vector<int64_t> mapped_ids;
-            for (auto& offset : output_ids) {
-                if (offset == -1) {
-                    // empty result
-                    mapped_ids.emplace_back(offset);
-                } else {
-                    mapped_ids.emplace_back(uids[offset]);
-                }
-            }
-
             // step 3: pick up topk result
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
             if (search_job->GetResultIds().front() == -1 && search_job->GetResultIds().size() > spec_k) {
@@ -286,7 +265,7 @@ XSearchTask::Execute() {
             }
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
-                XSearchTask::MergeTopkToResultSet(mapped_ids, output_distance, spec_k, nq, topk, ascending_reduce,
+                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 
