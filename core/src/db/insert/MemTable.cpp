@@ -15,6 +15,7 @@
 #include <segment/SegmentReader.h>
 #include <wrapper/VecIndex.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -174,6 +175,8 @@ MemTable::ApplyDeletes() {
 
     ENGINE_LOG_DEBUG << "Applying " << doc_ids_to_delete_.size() << " deletes in table: " << table_id_;
 
+    auto start_total = std::chrono::high_resolution_clock::now();
+
     auto start = std::chrono::high_resolution_clock::now();
 
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
@@ -215,14 +218,17 @@ MemTable::ApplyDeletes() {
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_check);
 
-    ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes";
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Found " << ids_to_check_map.size() << " segment to apply deletes in " << diff.count() << " s";
 
     meta::TableFilesSchema table_files_to_update;
 
     for (auto& kv : ids_to_check_map) {
         auto& table_file = table_files[kv.first];
-
         ENGINE_LOG_DEBUG << "Applying deletes in segment: " << table_file.segment_id_;
+
+        start = std::chrono::high_resolution_clock::now();
 
         std::string segment_dir;
         utils::GetParentPath(table_file.location_, segment_dir);
@@ -250,9 +256,33 @@ MemTable::ApplyDeletes() {
 
         segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
 
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Loading uids and deleted docs took " << diff.count() << " s";
+
+        start = std::chrono::high_resolution_clock::now();
+
+        std::sort(ids_to_check.begin(), ids_to_check.end());
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Sorting " << ids_to_check.size() << " ids took " << diff.count() << " s";
+
         size_t delete_count = 0;
+        auto find_diff = std::chrono::duration<double>::zero();
+        auto set_diff = std::chrono::duration<double>::zero();
+
         for (size_t i = 0; i < uids.size(); ++i) {
-            if (std::find(ids_to_check.begin(), ids_to_check.end(), uids[i]) != ids_to_check.end()) {
+            auto find_start = std::chrono::high_resolution_clock::now();
+
+            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i]);
+
+            auto find_end = std::chrono::high_resolution_clock::now();
+            find_diff += (find_end - find_start);
+
+            if (found) {
+                auto set_start = std::chrono::high_resolution_clock::now();
+
                 delete_count++;
 
                 deleted_docs->AddDeletedDoc(i);
@@ -269,12 +299,21 @@ MemTable::ApplyDeletes() {
                         blacklist->set(i);
                     }
                 }
+
+                auto set_end = std::chrono::high_resolution_clock::now();
+                set_diff += (set_end - set_start);
             }
         }
+
+        ENGINE_LOG_DEBUG << "Finding " << ids_to_check.size() << " uids in " << uids.size() << " uids took "
+                         << find_diff.count() << " s in total";
+        ENGINE_LOG_DEBUG << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 
         if (index != nullptr) {
             index->SetBlacklist(blacklist);
         }
+
+        start = std::chrono::high_resolution_clock::now();
 
         segment::Segment tmp_segment;
         segment::SegmentWriter segment_writer(segment_dir);
@@ -282,16 +321,27 @@ MemTable::ApplyDeletes() {
         if (!status.ok()) {
             break;
         }
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
         ENGINE_LOG_DEBUG << "Appended " << deleted_docs->GetSize()
-                         << " deleted docs in segment: " << table_file.segment_id_;
+                         << " offsets to deleted docs in segment: " << table_file.segment_id_ << " in " << diff.count()
+                         << " s";
+
+        start = std::chrono::high_resolution_clock::now();
 
         status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
             break;
         }
-        ENGINE_LOG_DEBUG << "Updated bloom filter in segment: " << table_file.segment_id_;
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Updated bloom filter in segment: " << table_file.segment_id_ << " in " << diff.count()
+                         << " s";
 
         // Update table file row count
+        start = std::chrono::high_resolution_clock::now();
+
         auto& segment_id = table_file.segment_id_;
         meta::TableFilesSchema segment_files;
         status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
@@ -307,8 +357,11 @@ MemTable::ApplyDeletes() {
         }
     }
 
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+
     status = meta_->UpdateTableFiles(table_files_to_update);
-    ENGINE_LOG_DEBUG << "Updated meta in table: " << table_id_;
+    ENGINE_LOG_DEBUG << "Updated meta in table: " << table_id_ << " in " << diff.count() << " s";
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
@@ -318,9 +371,9 @@ MemTable::ApplyDeletes() {
 
     doc_ids_to_delete_.clear();
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = end - start;
-    ENGINE_LOG_DEBUG << "Finished applying deletes in table " << table_id_ << " in " << diff.count() << " s";
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff_total = end_total - start_total;
+    ENGINE_LOG_DEBUG << "Finished applying deletes in table " << table_id_ << " in " << diff_total.count() << " s";
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_check);
 

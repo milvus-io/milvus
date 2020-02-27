@@ -16,11 +16,12 @@
 // under the License.
 
 #include "server/delivery/request/FlushRequest.h"
+
+#include <memory>
+
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-
-#include <memory>
 
 namespace milvus {
 namespace server {
@@ -64,6 +65,9 @@ FlushRequest::OnExecute() {
         }
 
         status = DBWrapper::DB()->Flush(name);
+        if (!status.ok()) {
+            return status;
+        }
     }
 
     return status;
