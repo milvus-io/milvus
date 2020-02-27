@@ -44,7 +44,6 @@ struct MXLogRecord {
 
 struct MXLogConfiguration {
     bool recovery_error_ignore;
-    uint32_t record_size;
     uint32_t buffer_size;
     std::string mxlog_path;
 };

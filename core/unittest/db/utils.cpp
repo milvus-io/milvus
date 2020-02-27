@@ -219,7 +219,6 @@ DBTestWAL::GetOptions() {
     options.wal_enable_ = true;
     options.recovery_error_ignore_ = true;
     options.buffer_size_ = 128;
-    options.record_size_ = 2;
     options.mxlog_path_ = "/tmp/milvus_test/wal/";
 
     return options;
@@ -245,7 +244,6 @@ DBTestWALRecovery_Error::GetOptions() {
     options.wal_enable_ = true;
     options.recovery_error_ignore_ = false;
     options.buffer_size_ = 128;
-    options.record_size_ = 2;
     options.mxlog_path_ = "/tmp/milvus_test/wal/";
 
     return options;
