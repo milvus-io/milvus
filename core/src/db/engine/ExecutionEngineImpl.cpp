@@ -13,6 +13,7 @@
 
 #include <faiss/utils/ConcurrentBitset.h>
 #include <fiu-local.h>
+
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -463,37 +464,43 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 return status;
             }
 
+            ENGINE_LOG_DEBUG << "Finished loading raw data from segment " << segment_dir;
+
         } else {
             try {
                 double physical_size = PhysicalSize();
                 server::CollectExecutionEngineMetrics metrics(physical_size);
                 index_ = read_index(location_);
 
-                segment::DeletedDocsPtr deleted_docs_ptr;
-                auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
-                if (!status.ok()) {
-                    std::string msg = "Failed to load deleted docs from " + location_;
-                    ENGINE_LOG_ERROR << msg;
-                    return Status(DB_ERROR, msg);
-                }
-                auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-
-                faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-                    std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-                for (auto& offset : deleted_docs) {
-                    if (!concurrent_bitset_ptr->test(offset)) {
-                        concurrent_bitset_ptr->set(offset);
-                    }
-                }
-
-                index_->SetBlacklist(concurrent_bitset_ptr);
-
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;
                     ENGINE_LOG_ERROR << msg;
                     return Status(DB_ERROR, msg);
                 } else {
-                    ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+                    segment::DeletedDocsPtr deleted_docs_ptr;
+                    auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+                    if (!status.ok()) {
+                        std::string msg = "Failed to load deleted docs from " + location_;
+                        ENGINE_LOG_ERROR << msg;
+                        return Status(DB_ERROR, msg);
+                    }
+                    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+                    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+                        std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+                    for (auto& offset : deleted_docs) {
+                        if (!concurrent_bitset_ptr->test(offset)) {
+                            concurrent_bitset_ptr->set(offset);
+                        }
+                    }
+
+                    index_->SetBlacklist(concurrent_bitset_ptr);
+
+                    std::vector<segment::doc_id_t> uids;
+                    segment_reader_ptr->LoadUids(uids);
+                    index_->SetUids(uids);
+
+                    ENGINE_LOG_DEBUG << "Finished loading index file from segment " << segment_dir;
                 }
             } catch (std::exception& e) {
                 ENGINE_LOG_ERROR << e.what();
@@ -898,19 +905,24 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         HybridLoad();
     }
 
-    std::string segment_dir;
-    utils::GetParentPath(location_, segment_dir);
-    segment::SegmentReader segment_reader(segment_dir);
+    // std::string segment_dir;
+    // utils::GetParentPath(location_, segment_dir);
+    // segment::SegmentReader segment_reader(segment_dir);
     //    segment::IdBloomFilterPtr id_bloom_filter_ptr;
     //    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
 
     // Check if the id is present. If so, find its offset
+    std::vector<segment::doc_id_t> uids;
+    index_->GetUids(uids);
+
     std::vector<int64_t> offsets;
+    /*
     std::vector<segment::doc_id_t> uids;
     auto status = segment_reader.LoadUids(uids);
     if (!status.ok()) {
         return status;
     }
+     */
 
     // There is only one id in ids
     for (auto& id : ids) {
@@ -931,13 +943,11 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         }
     }
 
-    status = Status::OK();
+    auto status = Status::OK();
     if (!offsets.empty()) {
         status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
 
         // map offsets to ids
-        std::vector<segment::doc_id_t> uids;
-        index_->GetUids(uids);
         for (int64_t i = 0; i < n; i++) {
             int64_t offset = labels[i];
             if (offset != -1) {
