@@ -51,7 +51,7 @@ IdBloomFilter::Add(doc_id_t uid) {
     const std::lock_guard<std::mutex> lock(mutex_);
     if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
         ENGINE_LOG_ERROR << "Error adding in bloom filter: 4 bit counter Overflow";
-        return Status(DB_ERROR, "Bloom filter error: 4 bit counter Overflow");
+        return Status(DB_BLOOM_FILTER_ERROR, "Bloom filter error: 4 bit counter Overflow");
     }
     return Status::OK();
 }
