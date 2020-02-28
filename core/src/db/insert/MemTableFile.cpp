@@ -138,10 +138,18 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 
     auto status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
-        std::string directory;
-        utils::GetParentPath(table_file_schema_.location_, directory);
-        ENGINE_LOG_ERROR << "Failed to flush segment " << directory;
-        return status;
+        ENGINE_LOG_ERROR << status.message();
+
+        table_file_schema_.file_type_ = meta::TableFileSchema::TO_DELETE;
+        meta_->UpdateTableFile(table_file_schema_);
+        ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
+                         << " to to_delete";
+
+        if (status.code() == DB_BLOOM_FILTER_ERROR) {
+            return Status(DB_BLOOM_FILTER_ERROR, "Failed to serialize segment due to duplicate vector id");
+        } else {
+            return status;
+        }
     }
 
     //    execution_engine_->Serialize();
