@@ -108,8 +108,6 @@ class MemManagerImpl : public MemManager {
     uint64_t
     GetMaxLSN(const MemList& tables);
 
-    using MemIdMap = std::map<std::string, MemTablePtr>;
-    using MemList = std::vector<MemTablePtr>;
     std::string identity_;
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
