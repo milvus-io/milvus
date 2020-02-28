@@ -104,11 +104,11 @@ class TestGetVectorIdsBase:
         assert not status.OK()
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_without_index(self, connect, table):
+    def test_get_vector_ids_without_index_A(self, connect, table):
         '''
         target: get vector ids when there is no index
         method: call get_vector_ids and check if the segment contains vectors
-        expected: status not ok
+        expected: status ok
         '''
         vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(table, vectors)
@@ -119,8 +119,107 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[0].segments_stat[0].segment_name)
         # vector_ids should match ids
+        assert len(vector_ids) == 10
         for i in range(10):
             assert vector_ids[i] == ids[i]
 
 
-    
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_get_vector_ids_without_index_B(self, connect, table):
+        '''
+        target: get vector ids when there is no index but with partition
+        method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
+        expected: status ok
+        '''
+        vectors = gen_vector(10, dim)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        assert info.partitions_stat[1].tag == tag
+        status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[1].segments_stat[0].segment_name)
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index_params()
+    )
+    def get_simple_index_params(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
+                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
+        else:
+            pytest.skip("Only support CPU mode")
+        return request.param
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_get_vector_ids_with_index_A(self, connect, table, get_simple_index_params):
+        '''
+        target: get vector ids when there is index
+        method: call get_vector_ids and check if the segment contains vectors
+        expected: status ok
+        '''
+        index_params = get_simple_index_params
+        status = connect.create_index(table, index_params) 
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[0].segments_stat[0].segment_name)
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_get_vector_ids_with_index_B(self, connect, table, get_simple_index_params):
+        '''
+        target: get vector ids when there is index and with partition
+        method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
+        expected: status ok
+        '''
+        index_params = get_simple_index_params
+        status = connect.create_index(table, index_params) 
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        assert info.partitions_stat[1].tag == tag
+        status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[1].segments_stat[0].segment_name)
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_get_vector_ids_after_delete_vectors(self, connect, table):
+        '''
+        target: get vector ids after vectors are deleted
+        method: add vectors and delete a few, call get_vector_ids
+        expected: status ok, vector_ids decreased after vectors deleted
+        '''
+        vectors = gen_vector(2, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        delete_ids = [ids[0]]
+        status = connect.delete_by_id(table, delete_ids)
+        status = connect.flush([table])
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[0].segments_stat[0].segment_name)
+        assert len(vector_ids) == 1
+        assert vector_ids[0] == ids[1]

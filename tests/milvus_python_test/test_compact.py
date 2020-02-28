@@ -439,18 +439,15 @@ class TestCompactBase:
         status = connect.flush([table])
         assert status.OK()
         # start to compact, kill and restart server
-        pdb.set_trace()
         logging.getLogger().info("compact starting...")
         status = connect.compact(table)
         pdb.set_trace()
         assert status.OK()
-        logging.getLogger().info("compact finishing...")
         status = connect.flush([table])
         assert status.OK()
         # get table info after compact
         status, info = connect.table_info(table)
         assert status.OK()
-        pdb.set_trace()
         assert info.partitions_stat[0].count == nb * 100 - 1000
 
 
