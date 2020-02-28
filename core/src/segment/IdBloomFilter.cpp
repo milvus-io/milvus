@@ -52,10 +52,9 @@ IdBloomFilter::Add(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
-        free_scaling_bloom(bloom_filter_);
-
-        ENGINE_LOG_ERROR << "Error adding id=" << s << " to bloom filter: 4 bit counter Overflow";
-        return Status(DB_BLOOM_FILTER_ERROR, "Bloom filter error: 4 bit counter Overflow");
+        // Counter overflow does not affect bloom filter's normal functionality
+        ENGINE_LOG_WARNING << "Error adding id=" << s << " to bloom filter: 4 bit counter Overflow";
+        // return Status(DB_BLOOM_FILTER_ERROR, "Bloom filter error: 4 bit counter Overflow");
     }
     return Status::OK();
 }
@@ -65,8 +64,9 @@ IdBloomFilter::Remove(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     if (scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
-        ENGINE_LOG_ERROR << "Error removing in bloom filter: Decrementing zero in counter";
-        return Status(DB_ERROR, "Error removing in bloom filter: Decrementing zero in counter");
+        // Should never go in here, but just to be safe
+        ENGINE_LOG_WARNING << "Error removing id=" << s << " in bloom filter: Decrementing zero in counter";
+        // return Status(DB_BLOOM_FILTER_ERROR, "Error removing in bloom filter: Decrementing zero in counter");
     }
     return Status::OK();
 }
