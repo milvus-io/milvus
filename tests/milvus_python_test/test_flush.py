@@ -152,34 +152,26 @@ class TestFlushBase:
         assert status.OK()
         assert res == nb 
 
-    # both autoflush / flush
-    def test_add_flush_same_ids(self, connect, table):
-        '''
-        method: add vectors, with same ids, count(same ids) > 15
-        expected: status ok
-        '''
-        vectors = gen_vectors(nb, dim)
-        ids = [i for i in range(nb)]
-        for i, item in enumerate(ids):
-            if item <= 20:
-                ids[i] = 0
-        status, ids = connect.add_vectors(table, vectors, ids)
-        time.sleep(2)
-        status = connect.flush([table])
-        assert status.OK()
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
-        assert res == 0
+    @pytest.fixture(
+        scope="function",
+        params=[
+            1,
+            100
+        ],
+    )
+    def same_ids(self, request):
+        yield request.param
 
-    def test_add_flush_same_ids_less_15(self, connect, table):
+    # both autoflush / flush
+    def test_add_flush_same_ids(self, connect, table, same_ids):
         '''
-        method: add vectors, with same ids, count(same ids) < 15
+        method: add vectors, with same ids, count(same ids) < 15, > 15
         expected: status ok
         '''
         vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         for i, item in enumerate(ids):
-            if item <= 5:
+            if item <= same_ids:
                 ids[i] = 0
         status, ids = connect.add_vectors(table, vectors, ids)
         time.sleep(2)
