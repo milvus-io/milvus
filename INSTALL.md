@@ -27,7 +27,7 @@
   - Ubuntu 18.04 or higher
   - CentOS 7
 
-  > Note: If your operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
+  > Note: If your Linux operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
   
 - GCC 7.0 or higher to support C++ 17
 - CMake 3.12 or higher
@@ -110,7 +110,7 @@ $ ./stop_server.sh
 
 ## Compile Milvus on Docker
 
-With the following Docker images, you should be able to compile Milvus on any Linux platform that run Docker. To build a GPU supported Milvus, you need to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
+With the following Docker images, you should be able to compile Milvus on any Linux platform that runs Docker. To build a GPU supported Milvus, you need to install [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker/) first.
 
 ### Step 1 Pull Milvus Docker images
 
