@@ -728,8 +728,8 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
         compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
-        status = meta_ptr_->UpdateTableFile(compacted_file);
-        if (status.ok()) {
+        auto mark_status = meta_ptr_->UpdateTableFile(compacted_file);
+        if (mark_status.ok()) {
             ENGINE_LOG_DEBUG << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
         return status;

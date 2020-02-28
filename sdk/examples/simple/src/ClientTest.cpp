@@ -10,14 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "examples/simple/src/ClientTest.h"
-#include "include/MilvusApi.h"
-#include "examples/utils/TimeRecorder.h"
-#include "examples/utils/Utils.h"
 
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
+
+#include "examples/utils/TimeRecorder.h"
+#include "examples/utils/Utils.h"
+#include "include/MilvusApi.h"
 
 namespace {
 
@@ -26,7 +27,7 @@ const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
 constexpr int64_t TABLE_DIMENSION = 512;
 constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ROW_COUNT = 10000;
+constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
@@ -162,8 +163,7 @@ void
 ClientTest::SearchVectorsByIds(const std::string& table_name, int64_t topk, int64_t nprobe) {
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_,
-                                topk_query_result);
+    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_, topk_query_result);
 }
 
 void
@@ -192,12 +192,18 @@ ClientTest::DeleteByIds(const std::string& table_name, const std::vector<int64_t
     milvus::Status stat = conn_->DeleteByID(table_name, id_array);
     std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
 
-    stat = conn_->FlushTable(table_name);
-    std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    {
+        milvus_sdk::TimeRecorder rc("Flush");
+        stat = conn_->FlushTable(table_name);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    }
 
-    // compact table
-    stat = conn_->CompactTable(table_name);
-    std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+    {
+        // compact table
+        milvus_sdk::TimeRecorder rc1("Compact");
+        stat = conn_->CompactTable(table_name);
+        std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+    }
 }
 
 void
