@@ -19,6 +19,15 @@ nb = 6000
 
 
 class TestTableInfoBase:
+    def index_string_convert(self, index_string, index_type):
+        if index_string == "IDMAP" and index_type == IndexType.FLAT:
+            return True
+        if index_string == "IVFSQ8" and index_type == IndexType.IVF_SQ8:
+            return True
+        if index_string == "IVFFLAT" and index_type == IndexType.IVFLAT:
+            return True
+        return False
+
     """
     ******************************************************************
       The following cases are used to test `table_info` function
@@ -206,7 +215,6 @@ class TestTableInfoBase:
         assert status.OK()
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info)
         assert info.count == nb * 2
         for partition in info.partitions_stat:
             if partition.tag == tag:
@@ -245,5 +253,67 @@ class TestTableInfoBase:
         assert status.OK()
         status, info = connect.table_info(table)
         assert status.OK()
-        logging.getLogger().info(info.partitions_stat[0].segments_stat[0])
+        logging.getLogger().info(info)
+        index_string = info.partitions_stat[0].segments_stat[0].index_name
+        index_type = index_params["index_type"]
+        match = self.index_string_convert(index_string, index_type)
+        assert match
         assert nb == info.partitions_stat[0].segments_stat[0].count
+
+    @pytest.mark.timeout(INFO_TIMEOUT)
+    def test_get_table_info_after_create_same_index_repeatedly(self, connect, table, get_simple_index_params):
+        '''
+        target: test table info after index created repeatedly
+        method: create table, add vectors, create index and call table_info multiple times 
+        expected: status ok, index info shown in segments_stat
+        '''
+        index_params = get_simple_index_params
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_params)
+        assert status.OK()
+        status, info = connect.table_info(table)
+        assert status.OK()
+        logging.getLogger().info(info)
+        index_string = info.partitions_stat[0].segments_stat[0].index_name
+        index_type = index_params["index_type"]
+        match = self.index_string_convert(index_string, index_type)
+        assert match
+        assert nb == info.partitions_stat[0].segments_stat[0].count
+
+    @pytest.mark.timeout(INFO_TIMEOUT)
+    def test_get_table_info_after_create_different_index_repeatedly(self, connect, table, get_simple_index_params):
+        '''
+        target: test table info after index created repeatedly
+        method: create table, add vectors, create index and call table_info multiple times 
+        expected: status ok, index info shown in segments_stat
+        '''
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        nlist = 16384
+        index_type_1 = IndexType.IVF_SQ8
+        index_type_2 = IndexType.IVFLAT
+        index_type_3 = IndexType.FLAT
+        index_params = [
+            {"index_type": index_type_1, "nlist": nlist}, 
+            {"index_type": index_type_2, "nlist": nlist},
+            {"index_type": index_type_3, "nlist": nlist}]
+        for index_param in index_params:
+            status = connect.create_index(table, index_param)
+            assert status.OK()
+            status, info = connect.table_info(table)
+            assert status.OK()
+            logging.getLogger().info(info)
+            index_string = info.partitions_stat[0].segments_stat[0].index_name
+            index_type = index_param["index_type"]
+            match = self.index_string_convert(index_string, index_type)
+            assert match
+            assert nb == info.partitions_stat[0].segments_stat[0].count

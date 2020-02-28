@@ -26,7 +26,7 @@ using TableSchemaPtr = std::shared_ptr<milvus::engine::meta::TableSchema>;
 using TableMetaPtr = std::shared_ptr<std::unordered_map<std::string, TableSchemaPtr> >;
 
 #define WAL_BUFFER_MAX_SIZE ((uint32_t)2 * 1024 * 1024 * 1024)
-#define WAL_BUFFER_MIN_SIZE ((uint32_t)64 * 1024 * 1024)
+#define WAL_BUFFER_MIN_SIZE ((uint32_t)32 * 1024 * 1024)
 #define LSN_OFFSET_MASK 0x00000000ffffffff
 
 enum class MXLogType { InsertBinary, InsertVector, Delete, Update, Flush, None };
@@ -44,7 +44,6 @@ struct MXLogRecord {
 
 struct MXLogConfiguration {
     bool recovery_error_ignore;
-    uint32_t record_size;
     uint32_t buffer_size;
     std::string mxlog_path;
 };

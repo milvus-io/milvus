@@ -62,15 +62,15 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 }  // namespace
 
 DBImpl::DBImpl(const DBOptions& options)
-    : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
+    : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
 
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
-        mxlog_config.record_size = options_.record_size_;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
-        mxlog_config.buffer_size = options_.buffer_size_;
+        // 2 buffers in the WAL
+        mxlog_config.buffer_size = options_.buffer_size_ / 2;
         mxlog_config.mxlog_path = options_.mxlog_path_;
         wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
@@ -145,7 +145,7 @@ DBImpl::Stop() {
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         if (options_.wal_enable_) {
-            // wait flush compaction/buildindex finish
+            // wait flush merge/buildindex finish
             wal_task_swn_.Notify();
             bg_wal_thread_.join();
 
@@ -155,7 +155,7 @@ DBImpl::Stop() {
             record.type = wal::MXLogType::Flush;
             ExecWalRecord(record);
 
-            // wait compaction/buildindex finish
+            // wait merge/buildindex finish
             bg_timer_thread_.join();
         }
 
@@ -217,6 +217,29 @@ DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     }
 
     return meta_ptr_->HasTable(table_id, has_or_not);
+}
+
+Status
+DBImpl::HasNativeTable(const std::string& table_id, bool& has_or_not_) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        has_or_not_ = false;
+        return status;
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            has_or_not_ = false;
+            return Status(DB_NOT_FOUND, "");
+        }
+
+        has_or_not_ = true;
+        return Status::OK();
+    }
 }
 
 Status
@@ -538,22 +561,38 @@ DBImpl::Flush(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    ENGINE_LOG_DEBUG << "Flushing table: " << table_id;
-
     Status status;
+    bool has_table;
+    status = HasTable(table_id, has_table);
+    if (!status.ok()) {
+        return status;
+    }
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table to flush does not exist: " << table_id;
+        return Status(DB_NOT_FOUND, "Table to flush does not exist");
+    }
+
+    ENGINE_LOG_DEBUG << "Begin flush table: " << table_id;
+
     if (options_.wal_enable_) {
+        ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush(table_id);
+        ENGINE_LOG_DEBUG << "wal_mgr_->Flush";
         if (lsn != 0) {
             wal_task_swn_.Notify();
             flush_task_swn_.Wait();
+            ENGINE_LOG_DEBUG << "flush_task_swn_.Wait()";
         }
 
     } else {
+        ENGINE_LOG_DEBUG << "MemTable flush";
         wal::MXLogRecord record;
         record.type = wal::MXLogType::Flush;
         record.table_id = table_id;
         status = ExecWalRecord(record);
     }
+
+    ENGINE_LOG_DEBUG << "End flush table: " << table_id;
 
     return status;
 }
@@ -564,20 +603,24 @@ DBImpl::Flush() {
         return SHUTDOWN_ERROR;
     }
 
-    // ENGINE_LOG_DEBUG << "Flushing all tables";
+    ENGINE_LOG_DEBUG << "Begin flush all tables";
 
     Status status;
     if (options_.wal_enable_) {
+        ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush();
         if (lsn != 0) {
             wal_task_swn_.Notify();
             flush_task_swn_.Wait();
         }
     } else {
+        ENGINE_LOG_DEBUG << "MemTable flush";
         wal::MXLogRecord record;
         record.type = wal::MXLogType::Flush;
         status = ExecWalRecord(record);
     }
+
+    ENGINE_LOG_DEBUG << "End flush all tables";
 
     return status;
 }
@@ -589,14 +632,21 @@ DBImpl::Compact(const std::string& table_id) {
         return SHUTDOWN_ERROR;
     }
 
-    bool has_table;
-    auto status = HasTable(table_id, has_table);
-    if (!has_table) {
-        ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
-        return Status(DB_NOT_FOUND, "Table to compact does not exist");
-    }
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
     if (!status.ok()) {
-        return Status(DB_ERROR, status.message());
+        if (status.code() == DB_NOT_FOUND) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        } else {
+            return status;
+        }
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        }
     }
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
@@ -626,6 +676,11 @@ DBImpl::Compact(const std::string& table_id) {
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
     for (auto& file : files_to_compact) {
         status = CompactFile(table_id, file);
+
+        if (!status.ok()) {
+            OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
+            return status;
+        }
     }
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
@@ -659,6 +714,8 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
 
     std::string segment_dir_to_merge;
     utils::GetParentPath(file.location_, segment_dir_to_merge);
+
+    ENGINE_LOG_DEBUG << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
 
     auto file_to_compact = file;
@@ -666,18 +723,19 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     updated.emplace_back(file_to_compact);
 
     // Serialize
+    ENGINE_LOG_DEBUG << "Serializing compacted segment...";
     status = segment_writer_ptr->Serialize();
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
         compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
-        status = meta_ptr_->UpdateTableFile(compacted_file);
-        if (status.ok()) {
+        auto mark_status = meta_ptr_->UpdateTableFile(compacted_file);
+        if (mark_status.ok()) {
             ENGINE_LOG_DEBUG << "Mark file: " << compacted_file.file_id_ << " to to_delete";
         }
         return status;
     }
 
-    // Drop index again, in case some files were in the index building process during compaction
+    // Drop index again, in case some files were in the index building process during merging
     // TODO: might be too frequent?
     DropIndex(table_id);
 
@@ -1145,25 +1203,29 @@ DBImpl::BackgroundTimerTask() {
         std::this_thread::sleep_for(std::chrono::milliseconds(options_.auto_flush_interval_));
 
         StartMetricTask();
-        StartCompactionTask();
+        StartMergeTask();
         StartBuildIndexTask();
     }
 }
 
 void
 DBImpl::WaitMergeFileFinish() {
-    std::lock_guard<std::mutex> lck(compact_result_mutex_);
-    for (auto& iter : compact_thread_results_) {
+    ENGINE_LOG_DEBUG << "Begin WaitMergeFileFinish";
+    std::lock_guard<std::mutex> lck(merge_result_mutex_);
+    for (auto& iter : merge_thread_results_) {
         iter.wait();
     }
+    ENGINE_LOG_DEBUG << "End WaitMergeFileFinish";
 }
 
 void
 DBImpl::WaitBuildIndexFinish() {
+    ENGINE_LOG_DEBUG << "Begin WaitBuildIndexFinish";
     std::lock_guard<std::mutex> lck(index_result_mutex_);
     for (auto& iter : index_thread_results_) {
         iter.wait();
     }
+    ENGINE_LOG_DEBUG << "End WaitBuildIndexFinish";
 }
 
 void
@@ -1202,28 +1264,8 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().PushToGateway();
 }
 
-/*
-
-Status
-DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
-    std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
-    std::set<std::string> temp_table_ids;
-    mem_mgr_->Serialize(temp_table_ids);
-    for (auto& id : temp_table_ids) {
-        sync_table_ids.insert(id);
-    }
-
-    if (!temp_table_ids.empty()) {
-        SERVER_LOG_DEBUG << "Insert cache serialized";
-    }
-
-    return Status::OK();
-}
-
- */
-
 void
-DBImpl::StartCompactionTask() {
+DBImpl::StartMergeTask() {
     static uint64_t compact_clock_tick = 0;
     ++compact_clock_tick;
     if (compact_clock_tick % COMPACT_ACTION_INTERVAL != 0) {
@@ -1234,38 +1276,41 @@ DBImpl::StartCompactionTask() {
         Flush();
     }
 
-    // compaction has been finished?
+    // ENGINE_LOG_DEBUG << "Begin StartMergeTask";
+    // merge task has been finished?
     {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (!compact_thread_results_.empty()) {
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        if (!merge_thread_results_.empty()) {
             std::chrono::milliseconds span(10);
-            if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
-                compact_thread_results_.pop_back();
+            if (merge_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                merge_thread_results_.pop_back();
             }
         }
     }
 
-    // add new compaction task
+    // add new merge task
     {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (compact_thread_results_.empty()) {
-            // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        if (merge_thread_results_.empty()) {
+            // collect merge files for all tables(if merge_table_ids_ is empty) for two reasons:
             // 1. other tables may still has un-merged files
             // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
-            if (compact_table_ids_.empty()) {
+            if (merge_table_ids_.empty()) {
                 std::vector<meta::TableSchema> table_schema_array;
                 meta_ptr_->AllTables(table_schema_array);
                 for (auto& schema : table_schema_array) {
-                    compact_table_ids_.insert(schema.table_id_);
+                    merge_table_ids_.insert(schema.table_id_);
                 }
             }
 
             // start merge file thread
-            compact_thread_results_.push_back(
-                compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
-            compact_table_ids_.clear();
+            merge_thread_results_.push_back(
+                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, merge_table_ids_));
+            merge_table_ids_.clear();
         }
     }
+
+    // ENGINE_LOG_DEBUG << "End StartMergeTask";
 }
 
 Status
@@ -1316,9 +1361,6 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
         status = segment_writer_ptr->Serialize();
         fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
         fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
-        }
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
@@ -1326,13 +1368,13 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
     }
 
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
+
         // if failed to serialize merge file to disk
-        // typical error: out of disk space, out of memory or permition denied
+        // typical error: out of disk space, out of memory or permission denied
         table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
         status = meta_ptr_->UpdateTableFile(table_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
 
         return status;
     }
@@ -1389,8 +1431,8 @@ DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void
-DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    // ENGINE_LOG_TRACE << " Background compaction thread start";
+DBImpl::BackgroundMerge(std::set<std::string> table_ids) {
+    // ENGINE_LOG_TRACE << " Background merge thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -1416,7 +1458,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
         meta_ptr_->CleanUpFilesWithTTL(ttl);
     }
 
-    // ENGINE_LOG_TRACE << " Background compaction thread exit";
+    // ENGINE_LOG_TRACE << " Background merge thread exit";
 }
 
 void
@@ -1769,9 +1811,9 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             }
         }
 
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
         for (auto& table : table_ids) {
-            compact_table_ids_.insert(table);
+            merge_table_ids_.insert(table);
         }
         return max_lsn;
     };
@@ -1851,16 +1893,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         case wal::MXLogType::Flush: {
             if (!record.table_id.empty()) {
                 // flush one table
-                bool has_table;
-                status = HasTable(record.table_id, has_table);
-                if (!status.ok()) {
-                    return status;
-                }
-                if (!has_table) {
-                    ENGINE_LOG_ERROR << "Table to flush does not exist: " << record.table_id;
-                    return Status(DB_NOT_FOUND, "Table to flush does not exist");
-                }
-
                 std::vector<meta::TableSchema> partition_array;
                 status = meta_ptr_->ShowPartitions(record.table_id, partition_array);
                 if (!status.ok()) {
@@ -1922,7 +1954,7 @@ DBImpl::BackgroundWalTask() {
         ExecWalRecord(record);
 
         StartMetricTask();
-        StartCompactionTask();
+        StartMergeTask();
         StartBuildIndexTask();
     };
 

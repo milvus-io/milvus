@@ -57,7 +57,10 @@ class Vectors {
     GetCodeLength() const;
 
     void
-    Erase(size_t offset);
+    Erase(int32_t offset);
+
+    void
+    Erase(std::vector<int32_t>& offsets);
 
     size_t
     Size();

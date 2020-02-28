@@ -17,8 +17,13 @@
 
 #include "segment/Vectors.h"
 
+#include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <utility>
+#include <vector>
+
+#include "utils/Log.h"
 
 namespace milvus {
 namespace segment {
@@ -40,13 +45,79 @@ Vectors::AddUids(const std::vector<doc_id_t>& uids) {
 }
 
 void
-Vectors::Erase(size_t offset) {
+Vectors::Erase(int32_t offset) {
     auto code_length = GetCodeLength();
     if (code_length != 0) {
         auto step = offset * code_length;
         data_.erase(data_.begin() + step, data_.begin() + step + code_length);
         uids_.erase(uids_.begin() + offset, uids_.begin() + offset + 1);
     }
+}
+
+void
+Vectors::Erase(std::vector<int32_t>& offsets) {
+    if (offsets.empty()) {
+        return;
+    }
+
+    // Sort and remove duplicates
+    auto start = std::chrono::high_resolution_clock::now();
+
+    std::sort(offsets.begin(), offsets.end());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+
+    start = std::chrono::high_resolution_clock::now();
+
+    offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
+
+    // Reconstruct raw vectors and uids
+    ENGINE_LOG_DEBUG << "Begin erasing...";
+
+    size_t new_size = uids_.size() - offsets.size();
+    std::vector<doc_id_t> new_uids(new_size);
+    auto code_length = GetCodeLength();
+    std::vector<uint8_t> new_data(new_size * code_length);
+
+    auto count = 0;
+    auto skip = offsets.cbegin();
+    auto loop_size = uids_.size();
+
+    for (size_t i = 0; i < loop_size;) {
+        while (i == *skip && skip != offsets.cend()) {
+            ++i;
+            ++skip;
+        }
+
+        if (i == loop_size) {
+            break;
+        }
+
+        new_uids[count] = uids_[i];
+
+        for (size_t j = 0; j < code_length; ++j) {
+            new_data[count * code_length + j] = data_[i * code_length + j];
+        }
+
+        ++count;
+        ++i;
+    }
+
+    data_.clear();
+    uids_.clear();
+    data_.swap(new_data);
+    uids_.swap(new_uids);
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
+                     << diff.count() << " s";
 }
 
 const std::vector<uint8_t>&

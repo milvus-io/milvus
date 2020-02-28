@@ -16,6 +16,8 @@
 // under the License.
 
 #include "segment/IdBloomFilter.h"
+#include "utils/Log.h"
+#include "utils/Status.h"
 
 #include <string>
 
@@ -27,7 +29,9 @@ IdBloomFilter::IdBloomFilter(scaling_bloom_t* bloom_filter) : bloom_filter_(bloo
 
 IdBloomFilter::~IdBloomFilter() {
     const std::lock_guard<std::mutex> lock(mutex_);
-    free_scaling_bloom(bloom_filter_);
+    if (bloom_filter_) {
+        free_scaling_bloom(bloom_filter_);
+    }
 }
 
 scaling_bloom_t*
@@ -43,18 +47,28 @@ IdBloomFilter::Check(doc_id_t uid) {
     return scaling_bloom_check(bloom_filter_, s.c_str(), s.size());
 }
 
-void
+Status
 IdBloomFilter::Add(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
-    scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid);
+    if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
+        // Counter overflow does not affect bloom filter's normal functionality
+        ENGINE_LOG_WARNING << "Warning adding id=" << s << " to bloom filter: 4 bit counter Overflow";
+        // return Status(DB_BLOOM_FILTER_ERROR, "Bloom filter error: 4 bit counter Overflow");
+    }
+    return Status::OK();
 }
 
-void
+Status
 IdBloomFilter::Remove(doc_id_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
-    scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid);
+    if (scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
+        // Should never go in here, but just to be safe
+        ENGINE_LOG_WARNING << "Warning removing id=" << s << " in bloom filter: Decrementing zero in counter";
+        // return Status(DB_BLOOM_FILTER_ERROR, "Error removing in bloom filter: Decrementing zero in counter");
+    }
+    return Status::OK();
 }
 
 // const std::string&

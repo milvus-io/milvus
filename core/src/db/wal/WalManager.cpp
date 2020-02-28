@@ -27,7 +27,6 @@ namespace wal {
 WalManager::WalManager(const MXLogConfiguration& config) {
     mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
     mxlog_config_.buffer_size = config.buffer_size * 1024 * 1024;
-    mxlog_config_.record_size = std::max((uint32_t)1, config.record_size) * 1024 * 1024;
     mxlog_config_.mxlog_path = config.mxlog_path;
 
     // check the path end with '/'
@@ -108,12 +107,8 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
     }
 
-    // check record size
-    auto record_max_size = p_buffer_->GetBufferSize();
-    if (mxlog_config_.record_size > record_max_size) {
-        WAL_LOG_INFO << "the record is changed to " << record_max_size;
-        mxlog_config_.record_size = record_max_size;
-    }
+    // buffer size may changed
+    mxlog_config_.buffer_size = p_buffer_->GetBufferSize();
 
     last_applied_lsn_ = applied_lsn;
     return error_code;
@@ -238,22 +233,14 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
         return false;
     }
 
-    uint32_t max_record_data_size = mxlog_config_.record_size - SizeOfMXLogRecordHeader;
-
     size_t vector_num = vector_ids.size();
     if (vector_num == 0) {
         WAL_LOG_ERROR << "The ids is empty.";
         return false;
     }
     size_t dim = vectors.size() / vector_num;
-
-    // split and insert into wal
-    size_t vectors_per_record =
-        (max_record_data_size - table_id.size() - partition_tag.size()) / ((dim * sizeof(T)) + sizeof(IDNumber));
-    if (vectors_per_record == 0) {
-        WAL_LOG_ERROR << "The record size is too small to save one row. " << mxlog_config_.record_size;
-        return false;
-    }
+    size_t unit_size = dim * sizeof(T) + sizeof(IDNumber);
+    size_t head_size = SizeOfMXLogRecordHeader + table_id.length() + partition_tag.length();
 
     MXLogRecord record;
     record.type = log_type;
@@ -261,8 +248,20 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
     record.partition_tag = partition_tag;
 
     uint64_t new_lsn = 0;
-    for (size_t i = 0; i < vector_num; i += vectors_per_record) {
-        record.length = std::min(vector_num - i, vectors_per_record);
+    for (size_t i = 0; i < vector_num; i += record.length) {
+        size_t surplus_space = p_buffer_->SurplusSpace();
+        size_t max_rcd_num = 0;
+        if (surplus_space >= head_size + unit_size) {
+            max_rcd_num = (surplus_space - head_size) / unit_size;
+        } else {
+            max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
+        }
+        if (max_rcd_num == 0) {
+            WAL_LOG_ERROR << "Wal buffer size is too small " << mxlog_config_.buffer_size << " unit " << unit_size;
+            return false;
+        }
+
+        record.length = std::min(vector_num - i, max_rcd_num);
         record.ids = vector_ids.data() + i;
         record.data_size = record.length * dim * sizeof(T);
         record.data = vectors.data() + i * dim;
@@ -290,13 +289,14 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
 
 bool
 WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids) {
-    uint32_t max_record_data_size = mxlog_config_.record_size - SizeOfMXLogRecordHeader;
-
     size_t vector_num = vector_ids.size();
+    if (vector_num == 0) {
+        WAL_LOG_ERROR << "The ids is empty.";
+        return false;
+    }
 
-    // split and insert into wal
-    size_t vectors_per_record = (max_record_data_size - table_id.size()) / (sizeof(IDNumber));
-    __glibcxx_assert(vectors_per_record > 0);
+    size_t unit_size = sizeof(IDNumber);
+    size_t head_size = SizeOfMXLogRecordHeader + table_id.length();
 
     MXLogRecord record;
     record.type = MXLogType::Delete;
@@ -304,8 +304,16 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
     record.partition_tag = "";
 
     uint64_t new_lsn = 0;
-    for (size_t i = 0; i < vector_num; i += vectors_per_record) {
-        record.length = std::min(vector_num - i, vectors_per_record);
+    for (size_t i = 0; i < vector_num; i += record.length) {
+        size_t surplus_space = p_buffer_->SurplusSpace();
+        size_t max_rcd_num = 0;
+        if (surplus_space >= head_size + unit_size) {
+            max_rcd_num = (surplus_space - head_size) / unit_size;
+        } else {
+            max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
+        }
+
+        record.length = std::min(vector_num - i, max_rcd_num);
         record.ids = vector_ids.data() + i;
         record.data_size = 0;
         record.data = nullptr;
