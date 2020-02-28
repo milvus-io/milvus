@@ -9,6 +9,7 @@ import logging
 from time import sleep
 from multiprocessing import Process
 import numpy
+import sklearn.preprocessing
 from milvus import IndexType, MetricType
 from utils import *
 
