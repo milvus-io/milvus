@@ -110,7 +110,7 @@ class TestGetVectorIdsBase:
         method: call get_vector_ids and check if the segment contains vectors
         expected: status not ok
         '''
-        vectors = gen_vector(5, dim)
+        vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
@@ -119,5 +119,8 @@ class TestGetVectorIdsBase:
         assert status.OK()
         status, vector_ids = connect.get_vector_ids(table, info.partitions_stat[0].segments_stat[0].segment_name)
         # vector_ids should match ids
-        logging.getLogger().info(vector_ids)
-        logging.getLogger().info(ids)
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+
+    
