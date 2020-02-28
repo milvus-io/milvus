@@ -36,7 +36,7 @@ DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
 
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
-    auto bloom_filter =
+    scaling_bloom_t* bloom_filter =
         new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
     if (bloom_filter == nullptr) {
         std::string err_msg =
@@ -67,7 +67,7 @@ DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
                                    segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
-    auto bloom_filter =
+    scaling_bloom_t* bloom_filter =
         new_scaling_bloom(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
     if (bloom_filter == nullptr) {
         std::string err_msg =

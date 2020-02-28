@@ -47,15 +47,16 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 
 Status
 SegmentWriter::Serialize() {
-    // TODO(zhiru)
-    auto status = WriteVectors();
+    auto status = WriteBloomFilter();
     if (!status.ok()) {
         return status;
     }
-    status = WriteBloomFilter();
+
+    status = WriteVectors();
     if (!status.ok()) {
         return status;
     }
+
     // Write an empty deleted doc
     status = WriteDeletedDocs();
     return status;
