@@ -117,11 +117,10 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
 
         if (normalize) {
             std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                        [](const std::pair<float, int64_t>& e) { return float(1 - e.first); });
+                           [](const std::pair<float, int64_t>& e) { return float(1 - e.first); });
         } else {
             std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                        [](const std::pair<float, int64_t>& e) { return e.first; });
-
+                           [](const std::pair<float, int64_t>& e) { return e.first; });
         }
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
@@ -168,23 +167,23 @@ IndexHNSW::Add(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
     auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
 
-//     if (normalize) {
-//         std::vector<float> ep_norm_vector(Dimension());
-//         normalize_vector((float*)(p_data), ep_norm_vector.data(), Dimension());
-//         index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
-// #pragma omp parallel for
-//         for (int i = 1; i < rows; ++i) {
-//             std::vector<float> norm_vector(Dimension());
-//             normalize_vector((float*)(p_data + Dimension() * i), norm_vector.data(), Dimension());
-//             index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
-//         }
-//     } else {
-//         index_->addPoint((void*)(p_data), p_ids[0]);
-// #pragma omp parallel for
-//         for (int i = 1; i < rows; ++i) {
-//             index_->addPoint((void*)(p_data + Dimension() * i), p_ids[i]);
-//         }
-//     }
+    //     if (normalize) {
+    //         std::vector<float> ep_norm_vector(Dimension());
+    //         normalize_vector((float*)(p_data), ep_norm_vector.data(), Dimension());
+    //         index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
+    // #pragma omp parallel for
+    //         for (int i = 1; i < rows; ++i) {
+    //             std::vector<float> norm_vector(Dimension());
+    //             normalize_vector((float*)(p_data + Dimension() * i), norm_vector.data(), Dimension());
+    //             index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
+    //         }
+    //     } else {
+    //         index_->addPoint((void*)(p_data), p_ids[0]);
+    // #pragma omp parallel for
+    //         for (int i = 1; i < rows; ++i) {
+    //             index_->addPoint((void*)(p_data + Dimension() * i), p_ids[i]);
+    //         }
+    //     }
 
     index_->addPoint((void*)(p_data), p_ids[0]);
 #pragma omp parallel for
