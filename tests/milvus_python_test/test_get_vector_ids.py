@@ -131,6 +131,8 @@ class TestGetVectorIdsBase:
         method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
         expected: status ok
         '''
+        status = connect.create_partition(table, tag)
+        assert status.OK()
         vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
         assert status.OK()
@@ -187,6 +189,8 @@ class TestGetVectorIdsBase:
         method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
         expected: status ok
         '''
+        status = connect.create_partition(table, tag)
+        assert status.OK()
         index_params = get_simple_index_params
         status = connect.create_index(table, index_params) 
         assert status.OK()
