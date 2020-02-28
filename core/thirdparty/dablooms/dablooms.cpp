@@ -169,7 +169,7 @@ int bitmap_check(bitmap_t *bitmap, unsigned int index, long offset)
 
 int bitmap_flush(bitmap_t *bitmap)
 {
-    if ((msync(bitmap->array, bitmap->bytes, MS_SYNC) < 0)) {
+    if ((msync(bitmap->array, bitmap->bytes, MS_ASYNC) < 0)) {
         perror("Error, flushing bitmap to disk");
         return -1;
     } else {
