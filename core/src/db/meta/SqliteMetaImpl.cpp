@@ -213,7 +213,7 @@ SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
             columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
                     &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
-                    &TableSchema::partition_tag_, &TableSchema::version_),
+                    &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::flush_lsn_),
             where(c(&TableSchema::table_id_) == table_schema.table_id_ and
                   c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
 
@@ -230,6 +230,7 @@ SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
             table_schema.owner_table_ = std::get<9>(groups[0]);
             table_schema.partition_tag_ = std::get<10>(groups[0]);
             table_schema.version_ = std::get<11>(groups[0]);
+            table_schema.flush_lsn_ = std::get<12>(groups[0]);
         } else {
             return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
@@ -271,7 +272,7 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             columns(&TableSchema::id_, &TableSchema::table_id_, &TableSchema::dimension_, &TableSchema::created_on_,
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
                     &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
-                    &TableSchema::partition_tag_, &TableSchema::version_),
+                    &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::flush_lsn_),
             where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE and c(&TableSchema::owner_table_) == ""));
         for (auto& table : selected) {
             TableSchema schema;
@@ -287,6 +288,7 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             schema.owner_table_ = std::get<9>(table);
             schema.partition_tag_ = std::get<10>(table);
             schema.version_ = std::get<11>(table);
+            schema.flush_lsn_ = std::get<12>(table);
 
             table_schema_array.emplace_back(schema);
         }
