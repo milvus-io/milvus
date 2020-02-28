@@ -415,22 +415,21 @@ class TestGetVectorIdsJAC:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
+    def get_jaccard_index_params(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
         else:
-            pytest.skip("Only support CPU mode")
-        return request.param
+            pytest.skip("Skip index Temporary")
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_A(self, connect, jac_table, get_simple_index_params):
+    def test_get_vector_ids_with_index_A(self, connect, jac_table, get_jaccard_index_params):
         '''
         target: get vector ids when there is index
         method: call get_vector_ids and check if the segment contains vectors
         expected: status ok
         '''
-        index_params = get_simple_index_params
+        index_params = get_jaccard_index_params
         status = connect.create_index(jac_table, index_params) 
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
@@ -447,7 +446,7 @@ class TestGetVectorIdsJAC:
             assert vector_ids[i] == ids[i]
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_B(self, connect, jac_table, get_simple_index_params):
+    def test_get_vector_ids_with_index_B(self, connect, jac_table, get_jaccard_index_params):
         '''
         target: get vector ids when there is index and with partition
         method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
@@ -455,7 +454,7 @@ class TestGetVectorIdsJAC:
         '''
         status = connect.create_partition(jac_table, tag)
         assert status.OK()
-        index_params = get_simple_index_params
+        index_params = get_jaccard_index_params
         status = connect.create_index(jac_table, index_params) 
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
