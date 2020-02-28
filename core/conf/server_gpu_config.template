@@ -106,9 +106,7 @@ metric_config:
 #                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
 #                      | must be less than system memory size.                      |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# cache_insert_data    | Whether to load inserted data into cache immediately for   | Boolean    | false           |
-#                      | hot query. If want to simultaneously insert and query      |            |                 |
-#                      | vectors, it's recommended to enable this config.           |            |                 |
+# cache_insert_data    | Whether to load data to cache for hot query                | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 cache_config:
   cpu_cache_capacity: 4
