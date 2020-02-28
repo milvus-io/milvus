@@ -441,7 +441,7 @@ class TestCompactBase:
         # start to compact, kill and restart server
         logging.getLogger().info("compact starting...")
         status = connect.compact(table)
-        pdb.set_trace()
+        # pdb.set_trace()
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
