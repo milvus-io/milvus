@@ -16,6 +16,8 @@ dim = 128
 table_id = "test_search"
 add_interval_time = 2
 vectors = gen_vectors(6000, dim)
+vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
+vectors = vectors.tolist()
 nprobe = 1
 epsilon = 0.001
 tag = "1970-01-01"
@@ -32,6 +34,8 @@ class TestSearchBase:
             add_vectors = vectors
         else:  
             add_vectors = gen_vectors(nb, dim)
+            vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
+            vectors = vectors.tolist()
         if partition_tags is None:
             status, ids = connect.add_vectors(table, add_vectors)
             assert status.OK()
