@@ -138,6 +138,21 @@ class TestFlushBase:
         status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
         assert status.OK()
 
+    def test_add_flush_auto(self, connect, table):
+        '''
+        method: add vectors
+        expected: status ok
+        '''
+        vectors = gen_vectors(nb, dim)
+        ids = [i for i in range(nb)]
+        status, ids = connect.add_vectors(table, vectors, ids)
+        assert status.OK()
+        time.sleep(2)
+        status, res = connect.get_table_row_count(table)
+        assert status.OK()
+        assert res == nb 
+
+    # both autoflush / flush
     def test_add_flush_same_ids(self, connect, table):
         '''
         method: add vectors, with same ids, count(same ids) > 15
@@ -217,6 +232,7 @@ class TestFlushBase:
         p = Process(target=flush, args=(table, ))
         p.start()
         status, res = milvus.get_table_row_count(table)
+        assert status.OK()
         p.join()
         status, res = milvus.get_table_row_count(table)
         assert status.OK()
