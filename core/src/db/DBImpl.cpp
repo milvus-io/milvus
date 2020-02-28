@@ -1361,9 +1361,6 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
         status = segment_writer_ptr->Serialize();
         fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
         fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
-        }
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
