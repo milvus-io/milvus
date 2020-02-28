@@ -793,6 +793,16 @@ TEST_F(DBTest, PARTITION_TEST) {
         ASSERT_EQ(partition_schema_array[i].table_id_, table_name + "_" + std::to_string(i));
     }
 
+    // check table existence
+    std::string special_part = "special";
+    stat = db_->CreatePartition(table_name, special_part, special_part);
+    ASSERT_TRUE(stat.ok());
+    bool has_table = false;
+    stat = db_->HasNativeTable(special_part, has_table);
+    ASSERT_FALSE(has_table);
+    stat = db_->HasTable(special_part, has_table);
+    ASSERT_TRUE(has_table);
+
     {  // build index
         milvus::engine::TableIndex index;
         index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
@@ -1240,7 +1250,31 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
 
     stat = db_->GetVectorIDs(TABLE_NAME, partition_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
-//    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+    //    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+}
+
+TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
+    auto options = GetOptions();
+    options.wal_enable_ = false;
+    db_ = milvus::engine::DBFactory::Build(options);
+
+    milvus::engine::meta::TableSchema table_schema = BuildTableSchema();
+    auto stat = db_->CreateTable(table_schema);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t size = 20;
+    milvus::engine::VectorsData vector;
+    BuildVectors(size, 0, vector);
+    vector.id_array_.clear();
+    for (int i = 0; i < size; ++i) {
+        vector.id_array_.emplace_back(0);
+    }
+
+    stat = db_->InsertVectors(TABLE_NAME, "", vector);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->Flush(TABLE_NAME);
+    ASSERT_TRUE(stat.ok());
 }
 
 /*

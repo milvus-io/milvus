@@ -41,7 +41,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         id_generator_->GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
     } else {
         vector_ids_to_add.resize(num_vectors_added);
-        for (int pos = current_num_vectors_added; pos < current_num_vectors_added + num_vectors_added; pos++) {
+        for (size_t pos = current_num_vectors_added; pos < current_num_vectors_added + num_vectors_added; pos++) {
             vector_ids_to_add[pos - current_num_vectors_added] = vectors_.id_array_[pos];
         }
     }

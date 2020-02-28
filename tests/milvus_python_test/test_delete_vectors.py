@@ -52,7 +52,6 @@ class TestDeleteBase:
         status = connect.delete_by_id(table, ids)
         assert status.OK()
         status = connect.flush([table])
-        # pdb.set_trace()
         status, res = connect.search_vectors(table, top_k, nprobe, vector) 
         logging.getLogger().info(res)
         assert status.OK()
@@ -65,10 +64,10 @@ class TestDeleteBase:
         expected: status ok, vector deleted
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors, ids=[1 for i in range(nb)])
-        assert status.OK()
+        connect.add_vectors(table, vectors, ids=[1 for i in range(nb)])
         status = connect.flush([table])
-        assert status.OK()
+        # Bloom filter error 
+        assert not status.OK()
         status = connect.delete_by_id(table, [1])
         assert status.OK()
         status = connect.flush([table])

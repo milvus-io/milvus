@@ -138,9 +138,17 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 
     auto status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
-        std::string directory;
-        utils::GetParentPath(table_file_schema_.location_, directory);
-        ENGINE_LOG_ERROR << "Failed to flush segment " << directory;
+        ENGINE_LOG_ERROR << "Failed to serialize segment: " << table_file_schema_.segment_id_;
+
+        /* Can't mark it as to_delete because data is stored in this mem table file. Any further flush
+         * will try to serialize the same mem table file and it won't be able to find the directory
+         * to write to or update the associated table file in meta.
+         *
+        table_file_schema_.file_type_ = meta::TableFileSchema::TO_DELETE;
+        meta_->UpdateTableFile(table_file_schema_);
+        ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
+                         << " to to_delete";
+        */
         return status;
     }
 

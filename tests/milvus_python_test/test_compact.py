@@ -422,6 +422,34 @@ class TestCompactBase:
         logging.getLogger().info(res)
         assert status.OK()
 
+    def test_compact_server_crashed_recovery(self, connect, table):
+        '''
+        target: test compact when server crashed unexpectedly and restarted
+        method: add vectors, delete and compact table; server stopped and restarted during compact
+        expected: status ok, request recovered
+        '''
+        vectors = gen_vector(nb * 100, dim)
+        status, ids = connect.add_vectors(table, vectors)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        delete_ids = ids[0:1000]
+        status = connect.delete_by_id(table, delete_ids)
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        # start to compact, kill and restart server
+        logging.getLogger().info("compact starting...")
+        status = connect.compact(table)
+        # pdb.set_trace()
+        assert status.OK()
+        status = connect.flush([table])
+        assert status.OK()
+        # get table info after compact
+        status, info = connect.table_info(table)
+        assert status.OK()
+        assert info.partitions_stat[0].count == nb * 100 - 1000
+
 
 class TestCompactJAC:
     """
