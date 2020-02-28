@@ -362,7 +362,7 @@ class TestSearchBase:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
             assert check_result(result[0], ids[0])
-            assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+            assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
         else:
             assert not status.OK()
 
@@ -385,7 +385,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
-        assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
         status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vec, partition_tags=[tag])
         logging.getLogger().info(result)
         assert status.OK()
@@ -410,7 +410,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
-        assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
     @pytest.mark.level(2)
     def test_search_vectors_without_connect(self, dis_connect, table):
