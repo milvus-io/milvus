@@ -26,7 +26,7 @@ const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
 constexpr int64_t TABLE_DIMENSION = 512;
 constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ROW_COUNT = 10000;
+constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
@@ -192,12 +192,18 @@ ClientTest::DeleteByIds(const std::string& table_name, const std::vector<int64_t
     milvus::Status stat = conn_->DeleteByID(table_name, id_array);
     std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
 
-    stat = conn_->FlushTable(table_name);
-    std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    {
+        milvus_sdk::TimeRecorder rc("Flush");
+        stat = conn_->FlushTable(table_name);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    }
 
-    // compact table
-    stat = conn_->CompactTable(table_name);
-    std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+    {
+        // compact table
+        milvus_sdk::TimeRecorder rc1("Compact");
+        stat = conn_->CompactTable(table_name);
+        std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+    }
 }
 
 void
@@ -245,7 +251,10 @@ ClientTest::Test() {
 
     PreloadTable(table_name);
 
-    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    std::vector<int64_t> delete_ids;// = {search_id_array_[0], search_id_array_[1]};
+    for (int64_t i = 0; i < 200000; ++i) {
+        delete_ids.emplace_back(search_id_array_[i]);
+    }
     DeleteByIds(table_name, delete_ids);
     SearchVectors(table_name, TOP_K, NPROBE);
 

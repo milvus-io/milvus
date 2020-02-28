@@ -254,7 +254,7 @@ WalManager::Insert(const std::string& table_id, const std::string& partition_tag
         if (surplus_space >= head_size + unit_size) {
             max_rcd_num = (surplus_space - head_size) / unit_size;
         } else {
-            max_rcd_num = mxlog_config_.buffer_size / unit_size;
+            max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
         }
         if (max_rcd_num == 0) {
             WAL_LOG_ERROR << "Wal buffer size is too small " << mxlog_config_.buffer_size << " unit " << unit_size;
@@ -310,7 +310,7 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
         if (surplus_space >= head_size + unit_size) {
             max_rcd_num = (surplus_space - head_size) / unit_size;
         } else {
-            max_rcd_num = mxlog_config_.buffer_size / unit_size;
+            max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
         }
 
         record.length = std::min(vector_num - i, max_rcd_num);

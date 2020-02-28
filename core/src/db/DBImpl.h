@@ -167,14 +167,14 @@ class DBImpl : public DB {
     StartMetricTask();
 
     void
-    StartCompactionTask();
+    StartMergeTask();
 
     Status
     MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files);
     Status
     BackgroundMergeFiles(const std::string& table_id);
     void
-    BackgroundCompaction(std::set<std::string> table_ids);
+    BackgroundMerge(std::set<std::string> table_ids);
 
     void
     StartBuildIndexTask(bool force = false);
@@ -233,7 +233,6 @@ class DBImpl : public DB {
 
     meta::MetaPtr meta_ptr_;
     MemManagerPtr mem_mgr_;
-    std::mutex mem_serialize_mutex_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
@@ -273,11 +272,10 @@ class DBImpl : public DB {
     SimpleWaitNotify wal_task_swn_;
     SimpleWaitNotify flush_task_swn_;
 
-    ThreadPool compact_thread_pool_;
-    std::mutex compact_result_mutex_;
-    std::list<std::future<void>> compact_thread_results_;
-    std::set<std::string> compact_table_ids_;
-    //    std::mutex compact_table_ids_mutex_;
+    ThreadPool merge_thread_pool_;
+    std::mutex merge_result_mutex_;
+    std::list<std::future<void>> merge_thread_results_;
+    std::set<std::string> merge_table_ids_;
 
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;
@@ -286,7 +284,6 @@ class DBImpl : public DB {
     std::mutex build_index_mutex_;
 
     IndexFailedChecker index_failed_checker_;
-    // OngoingFileChecker OngoingFileChecker::GetInstance();
 
     std::mutex flush_merge_compact_mutex_;
 };  // DBImpl

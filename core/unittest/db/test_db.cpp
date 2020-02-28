@@ -1274,7 +1274,7 @@ TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush(TABLE_NAME);
-    ASSERT_FALSE(stat.ok());
+    ASSERT_TRUE(stat.ok());
 }
 
 /*

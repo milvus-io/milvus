@@ -47,15 +47,16 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 
 Status
 SegmentWriter::Serialize() {
-    // TODO(zhiru)
-    auto status = WriteVectors();
+    auto status = WriteBloomFilter();
     if (!status.ok()) {
         return status;
     }
-    status = WriteBloomFilter();
+
+    status = WriteVectors();
     if (!status.ok()) {
         return status;
     }
+
     // Write an empty deleted doc
     status = WriteDeletedDocs();
     return status;
@@ -185,14 +186,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
         auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
 
         // Erase from raw data
-        ENGINE_LOG_DEBUG << "Begin erasing...";
-        start = std::chrono::high_resolution_clock::now();
-
         segment_to_merge->vectors_ptr_->Erase(offsets_to_delete);
-
-        end = std::chrono::high_resolution_clock::now();
-        diff = end - start;
-        ENGINE_LOG_DEBUG << "Erasing " << offsets_to_delete.size() << " vectors took " << diff.count() << " s";
     }
 
     start = std::chrono::high_resolution_clock::now();

@@ -17,6 +17,7 @@
 
 #include "segment/Vectors.h"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <utility>
@@ -55,13 +56,17 @@ Vectors::Erase(int32_t offset) {
 
 void
 Vectors::Erase(std::vector<int32_t>& offsets) {
+    if (offsets.empty()) {
+        return;
+    }
+
     // Sort and remove duplicates
     auto start = std::chrono::high_resolution_clock::now();
 
     std::sort(offsets.begin(), offsets.end());
 
     auto end = std::chrono::high_resolution_clock::now();
-    auto diff = end - start;
+    std::chrono::duration<double> diff = end - start;
     ENGINE_LOG_DEBUG << "Sorting " << offsets.size() << " offsets to delete took " << diff.count() << " s";
 
     start = std::chrono::high_resolution_clock::now();
@@ -73,6 +78,8 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
     ENGINE_LOG_DEBUG << "Deduplicating " << offsets.size() << " offsets to delete took " << diff.count() << " s";
 
     // Reconstruct raw vectors and uids
+    ENGINE_LOG_DEBUG << "Begin erasing...";
+
     size_t new_size = uids_.size() - offsets.size();
     std::vector<doc_id_t> new_uids(new_size);
     auto code_length = GetCodeLength();
@@ -84,15 +91,12 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
 
     for (size_t i = 0; i < loop_size;) {
         while (i == *skip && skip != offsets.cend()) {
-
             ++i;
             ++skip;
+        }
 
-            if (i == loop_size) {
-                new_data.swap(data_);
-                new_uids.swap(uids_);
-                return;
-            }
+        if (i == loop_size) {
+            break;
         }
 
         new_uids[count] = uids_[i];
@@ -105,10 +109,15 @@ Vectors::Erase(std::vector<int32_t>& offsets) {
         ++i;
     }
 
-    new_data.swap(data_);
-    new_uids.swap(uids_);
-    // uids_ = new_uids;
-    // data_ = new_data;
+    data_.clear();
+    uids_.clear();
+    data_.swap(new_data);
+    uids_.swap(new_uids);
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Erasing " << offsets.size() << " vectors out of " << loop_size << " vectors took "
+                     << diff.count() << " s";
 }
 
 const std::vector<uint8_t>&

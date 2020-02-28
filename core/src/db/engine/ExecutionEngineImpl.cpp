@@ -822,7 +822,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     // map offsets to ids
     std::vector<segment::doc_id_t> uids;
     index_->GetUids(uids);
-    for (int64_t i = 0; i < n; i++) {
+    for (int64_t i = 0; i < n * k; i++) {
         int64_t offset = labels[i];
         if (offset != -1) {
             labels[i] = uids[offset];
@@ -866,7 +866,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
     // map offsets to ids
     std::vector<segment::doc_id_t> uids;
     index_->GetUids(uids);
-    for (int64_t i = 0; i < n; i++) {
+    for (int64_t i = 0; i < n * k; i++) {
         int64_t offset = labels[i];
         if (offset != -1) {
             labels[i] = uids[offset];
@@ -948,7 +948,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
 
         // map offsets to ids
-        for (int64_t i = 0; i < n; i++) {
+        for (int64_t i = 0; i < n * k; i++) {
             int64_t offset = labels[i];
             if (offset != -1) {
                 labels[i] = uids[offset];
