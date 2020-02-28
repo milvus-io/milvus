@@ -28,6 +28,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
@@ -797,6 +798,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
         }
     }
 #endif
+    TimeRecorder rc("ExecutionEngineImpl::Search");
 
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
@@ -817,7 +819,9 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
         HybridLoad();
     }
 
+    rc.RecordSection("search prepare");
     auto status = index_->Search(n, data, distances, labels, conf);
+    rc.RecordSection("search done");
 
     // map offsets to ids
     std::vector<segment::doc_id_t> uids;
@@ -828,6 +832,8 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
             labels[i] = uids[offset];
         }
     }
+
+    rc.RecordSection("map uids");
 
     if (hybrid) {
         HybridUnset();
