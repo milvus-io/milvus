@@ -94,7 +94,7 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     auto p_dist = (float*)malloc(dist_size * rows);
 
     using P = std::pair<float, int64_t>;
-    auto compare = [](P& v1, P& v2) { return v1.first < v2.first; };
+    auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
