@@ -26,6 +26,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1211 - Server down caused by searching with index_type: HNSW
 - \#1240 - Update license declaration
 - \#1298 - Unittest failed when on CPU2GPU case
+- \#1359 - Negative distance value returned when searching with HNSW index type
 
 ## Feature
 - \#216 - Add CLI to get server info

@@ -319,7 +319,7 @@ class TestGetBinary:
         status, ids = connect.add_vectors(jac_table, vectors, ids=ids)
         status = connect.flush([jac_table])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_table, 1) 
+        status, res = connect.get_vector_by_id(jac_table, 0) 
         assert status.OK()
         assert res == vectors[0] 
 

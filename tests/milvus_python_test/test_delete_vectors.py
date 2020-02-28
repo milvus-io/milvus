@@ -67,7 +67,7 @@ class TestDeleteBase:
         connect.add_vectors(table, vectors, ids=[1 for i in range(nb)])
         status = connect.flush([table])
         # Bloom filter error 
-        assert not status.OK()
+        assert status.OK()
         status = connect.delete_by_id(table, [1])
         assert status.OK()
         status = connect.flush([table])

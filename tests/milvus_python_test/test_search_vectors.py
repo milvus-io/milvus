@@ -9,6 +9,7 @@ import logging
 from time import sleep
 from multiprocessing import Process
 import numpy
+import sklearn.preprocessing
 from milvus import IndexType, MetricType
 from utils import *
 
@@ -16,6 +17,8 @@ dim = 128
 table_id = "test_search"
 add_interval_time = 2
 vectors = gen_vectors(6000, dim)
+vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
+vectors = vectors.tolist()
 nprobe = 1
 epsilon = 0.001
 tag = "1970-01-01"
@@ -32,6 +35,8 @@ class TestSearchBase:
             add_vectors = vectors
         else:  
             add_vectors = gen_vectors(nb, dim)
+            vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
+            vectors = vectors.tolist()
         if partition_tags is None:
             status, ids = connect.add_vectors(table, add_vectors)
             assert status.OK()
@@ -357,7 +362,7 @@ class TestSearchBase:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
             assert check_result(result[0], ids[0])
-            assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+            assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
         else:
             assert not status.OK()
 
@@ -380,7 +385,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
-        assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
         status, result = connect.search_vectors(ip_table, top_k, nprobe, query_vec, partition_tags=[tag])
         logging.getLogger().info(result)
         assert status.OK()
@@ -405,7 +410,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
-        assert abs(result[0][0].distance - numpy.inner(numpy.array(query_vec[0]), numpy.array(query_vec[0]))) <= gen_inaccuracy(result[0][0].distance)
+        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
 
     @pytest.mark.level(2)
     def test_search_vectors_without_connect(self, dis_connect, table):
