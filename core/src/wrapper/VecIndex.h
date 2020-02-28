@@ -16,11 +16,13 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/Quantizer.h"
+#include "segment/Types.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
 
@@ -183,6 +185,18 @@ class VecIndex : public cache::DataObj {
     virtual Status
     GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
         ENGINE_LOG_ERROR << "GetBlacklist not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    SetUids(std::vector<segment::doc_id_t>& uids) {
+        ENGINE_LOG_ERROR << "SetUIDArray not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    GetUids(std::vector<segment::doc_id_t>& uids) {
+        ENGINE_LOG_ERROR << "GetUIDArray not support";
         return Status::OK();
     }
 
