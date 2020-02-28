@@ -51,23 +51,12 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
 #include OATPP_CODEGEN_BEGIN(ApiController)
 
-    ENDPOINT_INFO(root) {
-        info->summary = "Index.html page";
-    }
-
     ADD_CORS(root)
 
     ENDPOINT("GET", "/", root) {
         auto response = createResponse(Status::CODE_200, "Welcome to milvus");
         response->putHeader(Header::CONTENT_TYPE, "text/plain");
         return response;
-    }
-
-    ENDPOINT_INFO(State) {
-        info->summary = "Server state";
-        info->description = "Check web server whether is ready.";
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
     }
 
     ADD_CORS(State)
@@ -78,12 +67,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createDtoResponse(Status::CODE_200, StatusDto::createShared());
     }
 
-    ENDPOINT_INFO(GetDevices) {
-        info->summary = "Obtain system devices info";
-
-        info->addResponse<DevicesDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-    }
 
     ADD_CORS(GetDevices)
 
@@ -115,13 +98,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(GetAdvancedConfig) {
-        info->summary = "Obtain cache config and enging config";
-
-        info->addResponse<AdvancedConfigDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-    }
-
     ADD_CORS(GetAdvancedConfig)
 
     ENDPOINT("GET", "/config/advanced", GetAdvancedConfig) {
@@ -145,15 +121,6 @@ class WebController : public oatpp::web::server::api::ApiController {
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
-    }
-
-    ENDPOINT_INFO(SetAdvancedConfig) {
-        info->summary = "Modify cache config and enging config";
-
-        info->addConsumes<AdvancedConfigDto::ObjectWrapper>("application/json");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
     ADD_CORS(SetAdvancedConfig)
@@ -188,13 +155,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(GetGPUConfig) {
-        info->summary = "Obtain GPU resources config info";
-
-        info->addResponse<GPUConfigDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-    }
-
     ADD_CORS(GetGPUConfig)
 
     ENDPOINT("GET", "/config/gpu_resources", GetGPUConfig) {
@@ -219,14 +179,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.ElapseFromBegin(ttr);
 
         return response;
-    }
-
-    ENDPOINT_INFO(SetGPUConfig) {
-        info->summary = "Set GPU resources config";
-        info->addConsumes<GPUConfigDto::ObjectWrapper>("application/json");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
     ADD_CORS(SetGPUConfig)
@@ -261,15 +213,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(CreateTable) {
-        info->summary = "Create table";
-
-        info->addConsumes<TableRequestDto::ObjectWrapper>("application/json");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-    }
-
     ADD_CORS(CreateTable)
 
     ENDPOINT("POST", "/tables", CreateTable, BODY_DTO(TableRequestDto::ObjectWrapper, body)) {
@@ -292,16 +235,6 @@ class WebController : public oatpp::web::server::api::ApiController {
                           + ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
         return response;
-    }
-
-    ENDPOINT_INFO(ShowTables) {
-        info->summary = "Show whole tables";
-
-        info->queryParams.add<Int64>("offset");
-        info->queryParams.add<Int64>("page_size");
-
-        info->addResponse<TableListFieldsDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
     ADD_CORS(ShowTables)
@@ -339,16 +272,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(GetTable) {
-        info->summary = "Get table";
-
-        info->pathParams.add<String>("table_name");
-
-        info->addResponse<TableFieldsDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-    }
-
     ADD_CORS(GetTable)
 
     ENDPOINT("GET", "/tables/{table_name}", GetTable,
@@ -378,14 +301,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.ElapseFromBegin(ttr);
 
         return response;
-    }
-
-    ENDPOINT_INFO(DropTable) {
-        info->summary = "Drop table";
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(DropTable)
@@ -422,16 +337,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(CreateIndex) {
-        info->summary = "Create index";
-
-        info->addConsumes<IndexRequestDto::ObjectWrapper>("application/json");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-    }
-
     ADD_CORS(CreateIndex)
 
     ENDPOINT("POST", "/tables/{table_name}/indexes", CreateIndex,
@@ -459,16 +364,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.ElapseFromBegin(ttr);
 
         return response;
-    }
-
-    ENDPOINT_INFO(GetIndex) {
-        info->summary = "Describe index";
-
-        info->pathParams.add<String>("table_name");
-
-        info->addResponse<IndexDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(GetIndex)
@@ -499,16 +394,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.ElapseFromBegin(ttr);
 
         return response;
-    }
-
-    ENDPOINT_INFO(DropIndex) {
-        info->summary = "Drop index";
-
-        info->pathParams.add<String>("table_name");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
     }
 
     ADD_CORS(DropIndex)
@@ -545,18 +430,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(CreatePartition) {
-        info->summary = "Create partition";
-
-        info->pathParams.add<String>("table_name");
-
-        info->addConsumes<PartitionRequestDto::ObjectWrapper>("application/json");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-    }
-
     ADD_CORS(CreatePartition)
 
     ENDPOINT("POST", "/tables/{table_name}/partitions",
@@ -583,22 +456,6 @@ class WebController : public oatpp::web::server::api::ApiController {
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
-    }
-
-    ENDPOINT_INFO(ShowPartitions) {
-        info->summary = "Show partitions";
-
-        info->pathParams.add<String>("table_name");
-
-        info->queryParams.add<Int64>("offset");
-        info->queryParams.add<Int64>("page_size");
-
-        //
-        info->addResponse<PartitionListDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        // Error occurred.
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        //
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(ShowPartitions)
@@ -638,17 +495,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(DropPartition) {
-        info->summary = "Drop partition";
-
-        info->pathParams.add<String>("table_name");
-        info->pathParams.add<String>("partition_tag");
-
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_204, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-    }
-
     ADD_CORS(DropPartition)
 
     ENDPOINT("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition,
@@ -684,18 +530,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ENDPOINT_INFO(Insert) {
-        info->summary = "Insert vectors";
-
-        info->pathParams.add<String>("table_name");
-
-        info->addConsumes<InsertRequestDto::ObjectWrapper>("application/json");
-
-        info->addResponse<VectorIdsDto::ObjectWrapper>(Status::CODE_201, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
-    }
-
     ADD_CORS(Insert)
 
     ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
@@ -723,18 +557,6 @@ class WebController : public oatpp::web::server::api::ApiController {
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
-    }
-
-    ENDPOINT_INFO(Search) {
-        info->summary = "Search";
-
-        info->pathParams.add<String>("table_name");
-
-        info->addConsumes<SearchRequestDto::ObjectWrapper>("application/json");
-
-        info->addResponse<TopkResultsDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_404, "application/json");
     }
 
     ADD_CORS(Search)
@@ -766,34 +588,51 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ENDPOINT_INFO(SystemMsg) {
-        info->summary = "Command";
+    ADD_CORS(SystemInfo)
 
-        info->pathParams.add<String>("cmd_str");
-
-        info->addResponse<CommandDto::ObjectWrapper>(Status::CODE_200, "application/json");
-        info->addResponse<StatusDto::ObjectWrapper>(Status::CODE_400, "application/json");
-    }
-
-    ADD_CORS(SystemMsg)
-
-    ENDPOINT("GET", "/system/{msg}", SystemMsg, PATH(String, msg), QUERIES(const QueryParams&, query_params)) {
+    ENDPOINT("GET", "/system/{msg}", SystemInfo, PATH(String, msg), QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/system/" + msg->std_str() + "\'");
         tr.RecordSection("Received request.");
 
-        auto cmd_dto = CommandDto::createShared();
+        auto info_dto = CommandDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
-        auto status_dto = handler.Cmd(msg, query_params, cmd_dto);
+        auto status_dto = handler.SystemInfo(msg, info_dto);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, cmd_dto);
+                response = createDtoResponse(Status::CODE_200, info_dto);
                 break;
             default:
-                return createDtoResponse(Status::CODE_400, status_dto);
+                response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
+                           + ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
+
+    ADD_CORS(SystemOp)
+
+    ENDPOINT("PUT", "/system/{Op}", SystemOp, PATH(String, Op), BODY_STRING(String, body_str)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + Op->std_str() + "\'");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+
+        String response_str;
+        auto status_dto = handler.SystemOp(Op, body_str, response_str);
+
+        std::shared_ptr<OutgoingResponse> response;
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, response_str);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
         tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue())
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 

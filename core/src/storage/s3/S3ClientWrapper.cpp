@@ -64,7 +64,10 @@ S3ClientWrapper::StartService() {
         client_ptr_ = std::make_shared<S3ClientMock>();
     }
 
-    return CreateBucket();
+    std::cout << "S3 service connection check ...... " << std::flush;
+    Status stat = CreateBucket();
+    std::cout << (stat.ok() ? "OK" : "FAIL") << std::endl;
+    return stat;
 }
 
 void

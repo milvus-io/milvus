@@ -41,7 +41,7 @@ class Server {
     Status
     LoadConfig();
 
-    void
+    Status
     StartService();
     void
     StopService();

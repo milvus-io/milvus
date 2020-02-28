@@ -58,12 +58,15 @@ Please mark all change in change log and use the issue from GitHub
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
 - \#1297 - Hide partition_name parameter, avid user directly access partition table
 - \#1310 - Add default partition tag for a table
-- \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
-- \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1304, #1324 - Various fixes and improvements for Milvus documentation.
+- \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1303, #1304, #1324, #1388 - Various fixes and improvements for Milvus documentation.
+- \#1234 - Do S3 server validation check when Milvus startup
+- \#1263 - Allow system conf modifiable and some take effect directly
 - \#1320 - Remove debug logging from faiss
 
 
 ## Task
+- \#1327 - Exclude third-party code from codebeat
+- \#1331 - Exclude third-party code from codacy
 
 # Milvus 0.6.0 (2019-12-07)
 
