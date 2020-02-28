@@ -10,14 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "examples/simple/src/ClientTest.h"
-#include "include/MilvusApi.h"
-#include "examples/utils/TimeRecorder.h"
-#include "examples/utils/Utils.h"
 
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
+
+#include "examples/utils/TimeRecorder.h"
+#include "examples/utils/Utils.h"
+#include "include/MilvusApi.h"
 
 namespace {
 
@@ -162,8 +163,7 @@ void
 ClientTest::SearchVectorsByIds(const std::string& table_name, int64_t topk, int64_t nprobe) {
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_,
-                                topk_query_result);
+    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_, topk_query_result);
 }
 
 void
@@ -251,10 +251,7 @@ ClientTest::Test() {
 
     PreloadTable(table_name);
 
-    std::vector<int64_t> delete_ids;// = {search_id_array_[0], search_id_array_[1]};
-    for (int64_t i = 0; i < 200000; ++i) {
-        delete_ids.emplace_back(search_id_array_[i]);
-    }
+    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
     DeleteByIds(table_name, delete_ids);
     SearchVectors(table_name, TOP_K, NPROBE);
 
