@@ -621,7 +621,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(Insert)
 
     ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
-             PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
+             PATH(String, table_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + table_name->std_str() + "/vectors\'");
         tr.RecordSection("Received request.");
 

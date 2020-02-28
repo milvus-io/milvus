@@ -68,6 +68,8 @@ enum StatusCode : int {
     ILLEGAL_BODY = 34,
     BODY_PARSE_FAIL = 35,
     ILLEGAL_QUERY_PARAM = 36,
+
+    MAX = ILLEGAL_QUERY_PARAM
 };
 
 static const std::unordered_map<engine::EngineType, std::string> IndexMap = {

@@ -86,6 +86,9 @@ class WebRequestHandler {
     Status
     IsBinaryTable(const std::string& table_name, bool& bin);
 
+    Status
+    CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin);
+
  protected:
     /**
      *
@@ -145,6 +148,7 @@ class WebRequestHandler {
         request_handler_ = RequestHandler();
     }
 
+ public:
     StatusDto::ObjectWrapper
     GetDevices(DevicesDto::ObjectWrapper& devices);
 
@@ -162,12 +166,25 @@ class WebRequestHandler {
     SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
 #endif
 
+    /**********
+     *
+     * Table
+     */
     StatusDto::ObjectWrapper
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
+    StatusDto::ObjectWrapper
+    ShowTables(const OString& offset, const OString& page_size, OString& result);
+
+    StatusDto::ObjectWrapper
+    GetTable(const OString& table_name, const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     DropTable(const OString& table_name);
 
+    /**********
+     *
+     * Index
+     */
     StatusDto::ObjectWrapper
     CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param);
 
@@ -177,6 +194,10 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     DropIndex(const OString& table_name);
 
+    /***********
+     *
+     * Partition
+     */
     StatusDto::ObjectWrapper
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
@@ -187,29 +208,22 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     DropPartition(const OString& table_name, const OString& tag);
 
-    StatusDto::ObjectWrapper
-    Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
-           VectorIdsDto::ObjectWrapper& ids_dto);
-
-    StatusDto::ObjectWrapper
-    Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
-           TopkResultsDto::ObjectWrapper& results_dto);
-
-    StatusDto::ObjectWrapper
-    Cmd(const OString& cmd, const OQueryParams& query_params, CommandDto::ObjectWrapper& cmd_dto);
-
- public:
-    StatusDto::ObjectWrapper
-    ShowTables(const OString& offset, const OString& page_size, OString& result);
-
-    StatusDto::ObjectWrapper
-    GetTable(const OString& table_name, const OQueryParams& query_params, OString& result);
-
+    /***********
+     *
+     * Segment
+     */
     StatusDto::ObjectWrapper
     ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
 
     StatusDto::ObjectWrapper
     GetSegmentInfo(const OString& table_name, const OString& segment_name, const OString& info, const OQueryParams& query_params, OString& result);
+
+    /**
+     *
+     * Vector
+     */
+    StatusDto::ObjectWrapper
+    Insert(const OString& table_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
     GetVector(const OString& table_name, const OQueryParams& query_params, OString& response);
@@ -217,6 +231,10 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     VectorsOp(const OString& table_name, const OString& payload, OString& response);
 
+    /**
+     *
+     * System
+     */
     StatusDto::ObjectWrapper
     SystemInfo(const OString& cmd, const OQueryParams& query_params, OString& response_str);
 
