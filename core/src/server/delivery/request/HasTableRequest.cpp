@@ -44,11 +44,21 @@ HasTableRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        status = DBWrapper::DB()->HasTable(table_name_, has_table_);
+        status = DBWrapper::DB()->HasNativeTable(table_name_, has_table_);
         fiu_do_on("HasTableRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("HasTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             return status;
+        }
+
+        // only process root table, ignore partition table
+        if (has_table_) {
+            engine::meta::TableSchema table_schema;
+            table_schema.table_id_ = table_name_;
+            status = DBWrapper::DB()->DescribeTable(table_schema);
+            if (!table_schema.owner_table_.empty()) {
+                has_table_ = false;
+            }
         }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

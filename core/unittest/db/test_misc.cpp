@@ -9,6 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <gtest/gtest.h>
+
+#include <boost/filesystem.hpp>
+#include <thread>
+#include <vector>
+
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Options.h"
@@ -18,10 +24,6 @@
 #include "utils/Exception.h"
 #include "utils/Status.h"
 
-#include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
-#include <thread>
-#include <vector>
 #include <fiu-local.h>
 #include <fiu-control.h>
 #include "db/utils.h"
@@ -122,8 +124,8 @@ TEST(DBMiscTest, UTILS_TEST) {
     file.file_type_ = 3;
     file.date_ = 155000;
     status = milvus::engine::utils::GetTableFilePath(options, file);
-    ASSERT_FALSE(status.ok());
-    ASSERT_TRUE(file.location_.empty());
+    ASSERT_TRUE(status.ok());
+    ASSERT_FALSE(file.location_.empty());
 
     status = milvus::engine::utils::DeleteTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
@@ -153,7 +155,10 @@ TEST(DBMiscTest, UTILS_TEST) {
     fiu_disable("GetTableFilePath.enable_s3");
 
     status = milvus::engine::utils::DeleteTableFilePath(options, file);
+
     ASSERT_TRUE(status.ok());
+
+    status = milvus::engine::utils::DeleteSegment(options, file);
 }
 
 TEST(DBMiscTest, CHECKER_TEST) {
@@ -189,7 +194,7 @@ TEST(DBMiscTest, CHECKER_TEST) {
     }
 
     {
-        milvus::engine::OngoingFileChecker checker;
+        milvus::engine::OngoingFileChecker& checker = milvus::engine::OngoingFileChecker::GetInstance();
         milvus::engine::meta::TableFileSchema schema;
         schema.table_id_ = "aaa";
         schema.file_id_ = "5000";

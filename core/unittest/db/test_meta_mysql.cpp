@@ -158,29 +158,6 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.DescribeTable.throw_exception");
 
-    //DropDataByDate
-    milvus::engine::meta::DatesT dates;
-    dates.clear();
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
-    dates.push_back(milvus::engine::utils::GetDate());
-    status = impl_->DropDataByDate("notexist", dates);
-    ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
-
-    FIU_ENABLE_FIU("MySQLMetaImpl.DropDataByDate.null_connection");
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.DropDataByDate.null_connection");
-
-    FIU_ENABLE_FIU("MySQLMetaImpl.DropDataByDate.throw_exception");
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.DropDataByDate.throw_exception");
-
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
     //Count
     uint64_t cnt = 0;
     status = impl_->Count(table_id, cnt);
@@ -253,24 +230,6 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->UpdateTableFiles(files_schema);
     ASSERT_TRUE(status.ok());
 
-    dates.clear();
-    for (auto i = 2; i < 10; ++i) {
-        dates.push_back(milvus::engine::utils::GetDateWithDelta(-1 * i));
-    }
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
-    table_file.date_ = milvus::engine::utils::GetDateWithDelta(-2);
-    status = impl_->UpdateTableFile(table_file);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.date_, milvus::engine::utils::GetDateWithDelta(-2));
-    ASSERT_FALSE(table_file.file_type_ == milvus::engine::meta::TableFileSchema::TO_DELETE);
-
-    dates.clear();
-    dates.push_back(table_file.date_);
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
     std::vector<size_t> ids = {table_file.id_};
     milvus::engine::meta::TableFilesSchema files;
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
@@ -290,7 +249,10 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
 
-    sleep(1);
+    table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    status = impl_->CreateTableFile(table_file);
+
     std::vector<int> files_to_delete;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
     status = impl_->FilesByType(table_id, files_to_delete, files_schema);
@@ -298,10 +260,9 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
     table_file.table_id_ = table_id;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
-    milvus::engine::OngoingFileChecker filter;
     table_file.file_id_ = files_schema.front().file_id_;
-    filter.MarkOngoingFile(table_file);
-    status = impl_->CleanUpFilesWithTTL(1UL, &filter);
+    milvus::engine::OngoingFileChecker::GetInstance().MarkOngoingFile(table_file);
+    status = impl_->CleanUpFilesWithTTL(1UL);
     ASSERT_TRUE(status.ok());
 
     status = impl_->DropTable(table_file.table_id_);
@@ -591,35 +552,35 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
-    status = impl_->FilesToMerge(table.table_id_, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
+    milvus::engine::meta::TableFilesSchema table_files;
+    status = impl_->FilesToMerge(table.table_id_, table_files);
+    ASSERT_EQ(table_files.size(), raw_files_cnt);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToMerge.null_connection");
-    status = impl_->FilesToMerge(table.table_id_, dated_files);
+    status = impl_->FilesToMerge(table.table_id_, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToMerge.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToMerge.throw_exception");
-    status = impl_->FilesToMerge(table.table_id_, dated_files);
+    status = impl_->FilesToMerge(table.table_id_, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToMerge.throw_exception");
 
-    status = impl_->FilesToMerge("notexist", dated_files);
+    status = impl_->FilesToMerge("notexist", table_files);
     ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
     table_file.file_size_ = milvus::engine::ONE_GB + 1;
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
-
+#if 0
     {
         //skip large files
-        milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
-        status = impl_->FilesToMerge(table.table_id_, dated_files);
+        milvus::engine::meta::TableFilesSchema table_files;
+        status = impl_->FilesToMerge(table.table_id_, table_files);
         ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
     }
-
+#endif
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
@@ -638,36 +599,31 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToIndex.throw_exception");
 
-    milvus::engine::meta::DatesT dates = {table_file.date_};
+    table_files.clear();
     std::vector<size_t> ids;
-    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
+    status = impl_->FilesToSearch(table_id, ids, table_files);
+    ASSERT_EQ(table_files.size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
-    status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
-
-    status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
-
+    table_files.clear();
     ids.push_back(size_t(9999999999));
-    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), 0);
+    status = impl_->FilesToSearch(table_id, ids, table_files);
+    ASSERT_EQ(table_files.size(), 0);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToSearch.null_connection");
-    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
+    status = impl_->FilesToSearch(table_id, ids, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToSearch.null_connection");
 
     FIU_ENABLE_FIU("MySQLMetaImpl.FilesToSearch.throw_exception");
-    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
+    status = impl_->FilesToSearch(table_id, ids, table_files);
     ASSERT_FALSE(status.ok());
     fiu_disable("MySQLMetaImpl.FilesToSearch.throw_exception");
 
-    status = impl_->FilesToSearch("notexist", ids, dates, dated_files);
+    status = impl_->FilesToSearch("notexist", ids, table_files);
     ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
+    table_files.clear();
     std::vector<int> file_types;
-    milvus::engine::meta::TableFilesSchema table_files;
     status = impl_->FilesByType(table.table_id_, file_types, table_files);
     ASSERT_TRUE(table_files.empty());
     ASSERT_FALSE(status.ok());

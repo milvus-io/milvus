@@ -68,6 +68,8 @@ CreateTableRequest::OnExecute() {
             return status;
         }
 
+        rc.RecordSection("check validation");
+
         // step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;

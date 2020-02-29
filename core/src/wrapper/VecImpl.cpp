@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "wrapper/VecImpl.h"
+
 #include "DataTransfer.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
@@ -201,6 +202,122 @@ VecIndexImpl::GetDeviceId() {
 #endif
 }
 
+Status
+VecIndexImpl::GetVectorById(const int64_t n, const int64_t* xid, float* x, const Config& cfg) {
+    if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
+    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
+    } else {
+        throw WrapperException("not support");
+    }
+
+    try {
+        auto dataset = std::make_shared<knowhere::Dataset>();
+        dataset->Set(knowhere::meta::ROWS, n);
+        dataset->Set(knowhere::meta::DIM, dim);
+        dataset->Set(knowhere::meta::IDS, xid);
+
+        Config search_cfg = cfg;
+        auto res = index_->GetVectorById(dataset, search_cfg);
+
+        // TODO(linxj): avoid copy here.
+        auto res_x = res->Get<float*>(knowhere::meta::TENSOR);
+        memcpy(x, res_x, sizeof(float) * n * dim);
+        free(res_x);
+    } catch (knowhere::KnowhereException& e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
+    } catch (std::exception& e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_ERROR, e.what());
+    }
+    return Status::OK();
+}
+
+Status
+VecIndexImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg) {
+    if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
+    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
+    } else {
+        throw WrapperException("not support");
+    }
+
+    try {
+        auto k = cfg->k;
+        auto dataset = std::make_shared<knowhere::Dataset>();
+        dataset->Set(knowhere::meta::ROWS, nq);
+        dataset->Set(knowhere::meta::DIM, dim);
+        dataset->Set(knowhere::meta::IDS, xq);
+
+        Config search_cfg = cfg;
+        auto res = index_->SearchById(dataset, search_cfg);
+        //{
+        //    auto& ids = ids_array;
+        //    auto& dists = dis_array;
+        //    std::stringstream ss_id;
+        //    std::stringstream ss_dist;
+        //    for (auto i = 0; i < 10; i++) {
+        //        for (auto j = 0; j < k; ++j) {
+        //            ss_id << *(ids->data()->GetValues<int64_t>(1, i * k + j)) << " ";
+        //            ss_dist << *(dists->data()->GetValues<float>(1, i * k + j)) << " ";
+        //        }
+        //        ss_id << std::endl;
+        //        ss_dist << std::endl;
+        //    }
+        //    std::cout << "id\n" << ss_id.str() << std::endl;
+        //    std::cout << "dist\n" << ss_dist.str() << std::endl;
+        //}
+
+        //        auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
+        //        auto p_dist = dis_array->data()->GetValues<float>(1, 0);
+
+        // TODO(linxj): avoid copy here.
+        auto res_ids = res->Get<int64_t*>(knowhere::meta::IDS);
+        auto res_dist = res->Get<float*>(knowhere::meta::DISTANCE);
+        memcpy(ids, res_ids, sizeof(int64_t) * nq * k);
+        memcpy(dist, res_dist, sizeof(float) * nq * k);
+        free(res_ids);
+        free(res_dist);
+    } catch (knowhere::KnowhereException& e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
+    } catch (std::exception& e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_ERROR, e.what());
+    }
+    return Status::OK();
+}
+
+Status
+VecIndexImpl::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+    if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
+        raw_index->SetBlacklist(list);
+    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
+        raw_index->SetBlacklist(list);
+    }
+    return Status::OK();
+}
+
+Status
+VecIndexImpl::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    if (auto raw_index = std::dynamic_pointer_cast<knowhere::IVF>(index_)) {
+        raw_index->GetBlacklist(list);
+    } else if (auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
+        raw_index->GetBlacklist(list);
+    }
+    return Status::OK();
+}
+
+Status
+VecIndexImpl::SetUids(std::vector<segment::doc_id_t>& uids) {
+    index_->SetUids(uids);
+    return Status::OK();
+}
+
+const std::vector<segment::doc_id_t>&
+VecIndexImpl::GetUids() const {
+    return index_->GetUids();
+}
+
 const float*
 BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
@@ -250,6 +367,15 @@ BFIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const 
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
+    return Status::OK();
+}
+
+Status
+BFIndex::AddWithoutIds(const int64_t& nb, const float* xb, const Config& cfg) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    std::static_pointer_cast<knowhere::IDMAP>(index_)->AddWithoutId(ret_ds, cfg);
     return Status::OK();
 }
 

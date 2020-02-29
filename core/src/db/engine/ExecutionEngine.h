@@ -84,14 +84,24 @@ class ExecutionEngine {
     //    virtual std::shared_ptr<ExecutionEngine>
     //    Clone() = 0;
 
+    //    virtual Status
+    //    Merge(const std::string& location) = 0;
+
     virtual Status
-    Merge(const std::string& location) = 0;
+    GetVectorByID(const int64_t& id, float* vector, bool hybrid) = 0;
+
+    virtual Status
+    GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
 
     virtual Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels, bool hybrid) = 0;
 
     virtual Status
     Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+           bool hybrid) = 0;
+
+    virtual Status
+    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
            bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
