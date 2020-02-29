@@ -107,6 +107,8 @@ static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
 static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
+static const char* CONFIG_ENGINE_USE_AVX512 = "use_avx512";
+static const char* CONFIG_ENGINE_USE_AVX512_DEFAULT = "true";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
@@ -257,6 +259,8 @@ class Config {
     CheckEngineConfigUseBlasThreshold(const std::string& value);
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
+    Status
+    CheckEngineConfigUseAVX512(const std::string& value);
 
     /* wal config */
     Status
@@ -360,6 +364,8 @@ class Config {
     GetEngineConfigUseBlasThreshold(int64_t& value);
     Status
     GetEngineConfigOmpThreadNum(int64_t& value);
+    Status
+    GetEngineConfigUseAVX512(bool& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -460,6 +466,8 @@ class Config {
     SetEngineConfigUseBlasThreshold(const std::string& value);
     Status
     SetEngineConfigOmpThreadNum(const std::string& value);
+    Status
+    SetEngineConfigUseAVX512(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status

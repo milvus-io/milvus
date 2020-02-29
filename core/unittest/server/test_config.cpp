@@ -272,6 +272,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetEngineConfigOmpThreadNum(int64_val).ok());
     ASSERT_TRUE(int64_val == engine_omp_thread_num);
 
+    bool engine_use_avx512 = false;
+    ASSERT_TRUE(config.SetEngineConfigUseAVX512(std::to_string(engine_use_avx512)).ok());
+    ASSERT_TRUE(config.GetEngineConfigUseAVX512(bool_val).ok());
+    ASSERT_TRUE(bool_val == engine_use_avx512);
+
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
     ASSERT_TRUE(config.SetEngineConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold)).ok());
@@ -410,6 +415,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(result == cache_insert_buffer_size);
 
     std::string cache_insert_data = "true";
     get_cmd = gen_get_command(ms::CONFIG_CACHE, ms::CONFIG_CACHE_CACHE_INSERT_DATA);
@@ -417,6 +423,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == cache_insert_data);
 
     /* engine config */
@@ -437,6 +444,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == engine_omp_thread_num);
+
+    std::string engine_use_avx512 = "true";
+    get_cmd = gen_get_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_USE_AVX512);
+    set_cmd = gen_set_command(ms::CONFIG_ENGINE, ms::CONFIG_ENGINE_USE_AVX512, engine_use_avx512);
+    s = config.ProcessConfigCli(dummy, set_cmd);
+    ASSERT_TRUE(s.ok());
+    s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
+    ASSERT_TRUE(result == engine_use_avx512);
 
 #ifdef MILVUS_GPU_VERSION
     std::string engine_gpu_search_threshold = "800";
@@ -475,6 +491,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     s = config.ProcessConfigCli(dummy, set_cmd);
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(result == gpu_cache_threshold);
 
     std::string search_resources = "gpu0";
@@ -582,6 +599,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("a").ok());
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("10000").ok());
     ASSERT_FALSE(config.SetEngineConfigOmpThreadNum("-10").ok());
+
+    ASSERT_FALSE(config.SetEngineConfigUseAVX512("N").ok());
 
 #ifdef MILVUS_GPU_VERSION
     ASSERT_FALSE(config.SetEngineConfigGpuSearchThreshold("-1").ok());

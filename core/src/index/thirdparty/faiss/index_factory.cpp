@@ -195,12 +195,12 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             }
         } else if (!index && (stok == "SQ8" || stok == "SQ4" || stok == "SQ6" ||
                               stok == "SQfp16")) {
-            ScalarQuantizer::QuantizerType qt =
-                stok == "SQ8" ? ScalarQuantizer::QT_8bit :
-                stok == "SQ6" ? ScalarQuantizer::QT_6bit :
-                stok == "SQ4" ? ScalarQuantizer::QT_4bit :
-                stok == "SQfp16" ? ScalarQuantizer::QT_fp16 :
-                ScalarQuantizer::QT_4bit;
+            QuantizerType qt =
+                stok == "SQ8" ? QuantizerType::QT_8bit :
+                stok == "SQ6" ? QuantizerType::QT_6bit :
+                stok == "SQ4" ? QuantizerType::QT_4bit :
+                stok == "SQfp16" ? QuantizerType::QT_fp16 :
+                QuantizerType::QT_4bit;
             if (coarse_quantizer) {
                 FAISS_THROW_IF_NOT (!use_2layer);
                 IndexIVFScalarQuantizer *index_ivf =
@@ -216,12 +216,12 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
             }
         } else if (!index && (stok == "SQ8Hybrid" || stok == "SQ4Hybrid" || stok == "SQ6Hybrid" ||
                               stok == "SQfp16Hybrid")) {
-            ScalarQuantizer::QuantizerType qt =
-                    stok == "SQ8Hybrid" ? ScalarQuantizer::QT_8bit :
-                    stok == "SQ6Hybrid" ? ScalarQuantizer::QT_6bit :
-                    stok == "SQ4Hybrid" ? ScalarQuantizer::QT_4bit :
-                    stok == "SQfp16Hybrid" ? ScalarQuantizer::QT_fp16 :
-                    ScalarQuantizer::QT_4bit;
+            QuantizerType qt =
+                    stok == "SQ8Hybrid" ? QuantizerType::QT_8bit :
+                    stok == "SQ6Hybrid" ? QuantizerType::QT_6bit :
+                    stok == "SQ4Hybrid" ? QuantizerType::QT_4bit :
+                    stok == "SQfp16Hybrid" ? QuantizerType::QT_fp16 :
+                    QuantizerType::QT_4bit;
             FAISS_THROW_IF_NOT_MSG(coarse_quantizer,
                                    "SQ Hybrid only with an IVF");
             FAISS_THROW_IF_NOT (!use_2layer);
@@ -299,7 +299,7 @@ Index *index_factory (int d, const char *description_in, MetricType metric)
         } else if (!index &&
                    sscanf (tok, "HNSW%d_SQ%d", &M, &pq_m) == 2 &&
                    pq_m == 8) {
-            index_1 = new IndexHNSWSQ (d, ScalarQuantizer::QT_8bit, M);
+            index_1 = new IndexHNSWSQ (d, QuantizerType::QT_8bit, M);
         } else if (!index && (stok == "LSH" || stok == "LSHr" ||
                               stok == "LSHrt" || stok == "LSHt")) {
             bool rotate_data = strstr(tok, "r") != nullptr;

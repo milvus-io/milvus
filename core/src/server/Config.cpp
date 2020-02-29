@@ -195,6 +195,9 @@ Config::ValidateConfig() {
     int64_t engine_omp_thread_num;
     CONFIG_CHECK(GetEngineConfigOmpThreadNum(engine_omp_thread_num));
 
+    bool engine_use_avx512;
+    CONFIG_CHECK(GetEngineConfigUseAVX512(engine_use_avx512));
+
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold;
     CONFIG_CHECK(GetEngineConfigGpuSearchThreshold(engine_gpu_search_threshold));
@@ -279,6 +282,7 @@ Config::ResetDefaultConfig() {
     /* engine config */
     CONFIG_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
+    CONFIG_CHECK(SetEngineConfigUseAVX512(CONFIG_ENGINE_USE_AVX512_DEFAULT));
 #ifdef MILVUS_GPU_VERSION
     CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
 #endif
@@ -374,6 +378,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetEngineConfigUseBlasThreshold(value);
         } else if (child_key == CONFIG_ENGINE_OMP_THREAD_NUM) {
             status = SetEngineConfigOmpThreadNum(value);
+        } else if (child_key == CONFIG_ENGINE_USE_AVX512) {
+            status = SetEngineConfigUseAVX512(value);
 #ifdef MILVUS_GPU_VERSION
         } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             status = SetEngineConfigGpuSearchThreshold(value);
@@ -1022,6 +1028,16 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
+Config::CheckEngineConfigUseAVX512(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid engine config: " + value + ". Possible reason: engine_config.use_avx512 is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
 Config::CheckWalConfigEnable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         std::string msg = "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
@@ -1508,6 +1524,15 @@ Config::GetEngineConfigOmpThreadNum(int64_t& value) {
     return Status::OK();
 }
 
+Status
+Config::GetEngineConfigUseAVX512(bool& value) {
+    std::string str = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, CONFIG_ENGINE_USE_AVX512_DEFAULT);
+    CONFIG_CHECK(CheckEngineConfigUseAVX512(str));
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    value = (str == "true" || str == "on" || str == "yes" || str == "1");
+    return Status::OK();
+}
+
 #ifdef MILVUS_GPU_VERSION
 
 Status
@@ -1851,6 +1876,12 @@ Status
 Config::SetEngineConfigOmpThreadNum(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigOmpThreadNum(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, value);
+}
+
+Status
+Config::SetEngineConfigUseAVX512(const std::string& value) {
+    CONFIG_CHECK(CheckEngineConfigUseAVX512(value));
+    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, value);
 }
 
 #ifdef MILVUS_GPU_VERSION
