@@ -25,7 +25,6 @@
 #include "server/web_impl/utils/Util.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/StringHelpFunctions.h"
-#include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
 namespace milvus {
@@ -199,7 +198,7 @@ WebRequestHandler::GetTableStat(const std::string& table_name, nlohmann::json& j
             ParsePartitionStat(par, par_json);
             par_stat_json.push_back(par_json);
         }
-        json_out["partitons_stat"] = par_stat_json;
+        json_out["partitions_stat"] = par_stat_json;
     }
 
     return status;
@@ -231,8 +230,6 @@ WebRequestHandler::GetSegmentVectors(const std::string& table_name, const std::s
     json_out["count"] = vector_ids.size();
 
     AddStatusToJson(json_out, status.code(), status.message());
-//    json_out["code"] = status.code();
-//    json_out["message"] = status.message();
 
     return Status::OK();
 }
@@ -291,8 +288,6 @@ WebRequestHandler::PreLoadTable(const nlohmann::json& json, std::string& result_
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
-//        result["code"] = status.code();
-//        result["message"] = status.message();
         result_str = result.dump();
     }
 
@@ -1162,11 +1157,9 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
 
         segs_json.push_back(seg_json);
     }
-    AddStatusToJson(result_json, status.code(), status.message());
-//    result_json["code"] = status.code();
-//    result_json["message"] = status.message();
     result_json["segments"] = segs_json;
     result_json["count"] = size;
+    AddStatusToJson(result_json, status.code(), status.message());
 
     response = result_json.dump().c_str();
 

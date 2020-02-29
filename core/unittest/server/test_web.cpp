@@ -888,29 +888,33 @@ TEST_F(WebControllerTest, GET_TABLE_META) {
 
 TEST_F(WebControllerTest, GET_TABLE_STAT) {
     OString table_name = "web_test_get_table_stat" + OString(RandomName().c_str());
-    GenTable(table_name, 10, 10, "L2");
+    GenTable(table_name, 128, 5, "L2");
 
-    OQueryParams params;
+    for (size_t i = 0; i < 5; i++) {
+        InsertData(table_name, 128, 1000);
+    }
 
-    auto response = client_ptr->getTable(table_name, "", conncetion_ptr);
+    auto response = client_ptr->getTable(table_name, "stat", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    auto result_dto = response->readBodyToDto<milvus::server::web::TableFieldsDto>(object_mapper.get());
-    ASSERT_EQ(table_name->std_str(), result_dto->table_name->std_str());
-    ASSERT_EQ(10, result_dto->dimension);
-    ASSERT_EQ("L2", result_dto->metric_type->std_str());
-    ASSERT_EQ(10, result_dto->index_file_size->getValue());
-    ASSERT_EQ("FLAT", result_dto->index->std_str());
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("count"));
+    ASSERT_EQ(5 * 1000, result_json["count"].get<int64_t>());
 
-    // invalid table name
-    table_name = "57474dgdfhdfhdh  dgd";
-    response = client_ptr->getTable(table_name, "", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    auto status_sto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_TABLE_NAME, status_sto->code->getValue());
+    ASSERT_TRUE(result_json.contains("partitions_stat"));
 
-    table_name = "test_table_not_found_000000000111010101002020203020aaaaa3030435";
-    response = client_ptr->getTable(table_name, "", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+    auto partitions_stat_json = result_json["partitions_stat"];
+    ASSERT_TRUE(partitions_stat_json.is_array());
+
+    auto partition0_json = partitions_stat_json[0];
+    ASSERT_TRUE(partition0_json.contains("segments_stat"));
+    ASSERT_TRUE(partition0_json.contains("count"));
+    ASSERT_TRUE(partition0_json.contains("partition_tag"));
+
+    auto seg0_stat = partition0_json["segments_stat"][0];
+    ASSERT_TRUE(seg0_stat.contains("segment_name"));
+    ASSERT_TRUE(seg0_stat.contains("index"));
+    ASSERT_TRUE(seg0_stat.contains("count"));
+    ASSERT_TRUE(seg0_stat.contains("size"));
 }
 
 TEST_F(WebControllerTest, SHOW_TABLES) {
@@ -937,7 +941,7 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
     response = client_ptr->showTables("1", "1.1", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 
-    response = client_ptr->showTables("0", "90000000000000000000000000000000000000000000000000000000", conncetion_ptr);
+    response = client_ptr->showTables("0", "9000000000000000000000000000000000000000000000000000000", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
