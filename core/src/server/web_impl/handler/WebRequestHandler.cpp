@@ -79,7 +79,7 @@ WebErrorMap(ErrorCode code) {
 /////////////////////////////////// Private methods ///////////////////////////////////////
 Status
 WebRequestHandler::ParseSegmentStat(const milvus::server::SegmentStat& seg_stat, nlohmann::json& json) {
-    json["name"] = seg_stat.name_;
+    json["segment_name"] = seg_stat.name_;
     json["index"] = seg_stat.index_name_;
     json["count"] = seg_stat.row_num_;
     json["size"] = seg_stat.data_size_;
@@ -238,8 +238,13 @@ WebRequestHandler::GetSegmentIds(const std::string& table_name, const std::strin
         auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
         auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
 
-        auto ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
-        json_out["ids"] = ids;
+        if (ids_begin >= ids_end) {
+            json_out["ids"] = std::vector<int64_t>();
+        } else {
+            for (size_t i = ids_begin; i < ids_end; i++) {
+                json_out["ids"].push_back(std::to_string(vector_ids.at(i)));
+            }
+        }
     }
 
     return status;
@@ -524,7 +529,7 @@ WebRequestHandler::DeleteByIDs(const std::string& table_name, const nlohmann::js
     }
 
     for (auto & id : ids) {
-        vector_ids.emplace_back(std::stol(id.get<std::string>()));
+        vector_ids.emplace_back(id.get<int64_t>());
     }
 
     auto status = request_handler_.DeleteByID(context_ptr_, table_name, vector_ids);
@@ -1290,9 +1295,9 @@ WebRequestHandler::GetVector(const OString& table_name, const OQueryParams& quer
     json["code"] = status.code();
     json["message"] = status.message();
     if (vectors_json.empty()) {
-        json["vector"] = std::vector<int64_t>();
+        json["vectors"] = std::vector<int64_t>();
     } else {
-        json["vector"] = vectors_json[0]["vector"];
+        json["vectors"] = vectors_json;
     }
 
     response = json.dump().c_str();

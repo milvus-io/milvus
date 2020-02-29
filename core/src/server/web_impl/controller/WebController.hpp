@@ -539,12 +539,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(SegmentsOptions)
-
-    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}/segments", SegmentsOptions) {
-        return createResponse(Status::CODE_204, "No Content");
-    }
-
     ADD_CORS(ShowSegments)
 
     ENDPOINT("GET", "/tables/{table_name}/segments", ShowSegments,
