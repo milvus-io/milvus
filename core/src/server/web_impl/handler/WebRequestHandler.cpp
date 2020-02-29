@@ -11,6 +11,7 @@
 
 #include "server/web_impl/handler/WebRequestHandler.h"
 
+#include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <string>
@@ -68,7 +69,7 @@ WebErrorMap(ErrorCode code) {
     };
     if (code < StatusCode::MAX) {
         return StatusCode(code);
-    }else if (code_map.find(code) != code_map.end()) {
+    } else if (code_map.find(code) != code_map.end()) {
         return code_map.at(code);
     } else {
         return StatusCode::UNEXPECTED_ERROR;
@@ -115,7 +116,7 @@ WebRequestHandler::IsBinaryTable(const std::string& table_name, bool& bin) {
     if (status.ok()) {
         auto metric = engine::MetricType(schema.metric_type_);
         bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
-                        engine::MetricType::TANIMOTO == metric;
+              engine::MetricType::TANIMOTO == metric;
     }
 
     return status;
@@ -130,20 +131,20 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
     vectors.vector_count_ = json.size();
 
     if (!bin) {
-        for (auto & vec : json) {
+        for (auto& vec : json) {
             if (!vec.is_array()) {
                 return Status(ILLEGAL_BODY, "A vector in field \"vectors\" must be a float array");
             }
-            for (auto & data : vec) {
+            for (auto& data : vec) {
                 vectors.float_data_.emplace_back(data.get<float>());
             }
         }
     } else {
-        for (auto & vec : json) {
+        for (auto& vec : json) {
             if (!vec.is_array()) {
                 return Status(ILLEGAL_BODY, "A vector in field \"vectors\" must be a float array");
             }
-            for (auto & data : vec) {
+            for (auto& data : vec) {
                 vectors.binary_data_.emplace_back(data.get<uint8_t>());
             }
         }
@@ -193,7 +194,7 @@ WebRequestHandler::GetTableStat(const std::string& table_name, nlohmann::json& j
         json_out["count"] = table_info.total_row_num_;
 
         std::vector<nlohmann::json> par_stat_json;
-        for (auto & par : table_info.partitions_stat_) {
+        for (auto& par : table_info.partitions_stat_) {
             nlohmann::json par_json;
             ParsePartitionStat(par, par_json);
             par_stat_json.push_back(par_json);
@@ -205,9 +206,8 @@ WebRequestHandler::GetTableStat(const std::string& table_name, nlohmann::json& j
 }
 
 Status
-WebRequestHandler::GetSegmentVectors(const std::string& table_name, const std::string& segment_name,
-    int64_t page_size, int64_t offset, nlohmann::json& json_out) {
-
+WebRequestHandler::GetSegmentVectors(const std::string& table_name, const std::string& segment_name, int64_t page_size,
+                                     int64_t offset, nlohmann::json& json_out) {
     std::vector<int64_t> vector_ids;
     auto status = request_handler_.GetVectorIDs(context_ptr_, table_name, segment_name, vector_ids);
     if (!status.ok()) {
@@ -235,8 +235,8 @@ WebRequestHandler::GetSegmentVectors(const std::string& table_name, const std::s
 }
 
 Status
-WebRequestHandler::GetSegmentIds(const std::string& table_name, const std::string& segment_name,
-                                 int64_t page_size, int64_t offset, nlohmann::json& json_out) {
+WebRequestHandler::GetSegmentIds(const std::string& table_name, const std::string& segment_name, int64_t page_size,
+                                 int64_t offset, nlohmann::json& json_out) {
     std::vector<int64_t> vector_ids;
     auto status = request_handler_.GetVectorIDs(context_ptr_, table_name, segment_name, vector_ids);
     if (status.ok()) {
@@ -268,8 +268,8 @@ WebRequestHandler::Cmd(const std::string& cmd, std::string& result_str) {
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
-//        result["code"] = status.code();
-//        result["message"] = status.message();
+        //        result["code"] = status.code();
+        //        result["message"] = status.message();
         result["reply"] = reply;
         result_str = result.dump();
     }
@@ -306,7 +306,7 @@ WebRequestHandler::Flush(const nlohmann::json& json, std::string& result_str) {
     }
 
     std::vector<std::string> names;
-    for (auto & name : table_names) {
+    for (auto& name : table_names) {
         names.emplace_back(name.get<std::string>());
     }
 
@@ -314,8 +314,8 @@ WebRequestHandler::Flush(const nlohmann::json& json, std::string& result_str) {
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
-//        result["code"] = status.code();
-//        result["message"] = status.message();
+        //        result["code"] = status.code();
+        //        result["message"] = status.message();
         result_str = result.dump();
     }
 
@@ -368,7 +368,7 @@ WebRequestHandler::GetConfig(std::string& result_str) {
         // check if server require start
         Config& config = Config::GetInstance();
         bool required = false;
-//        config.GetServerRestartRequired(required);
+        //        config.GetServerRestartRequired(required);
         j["restart_required"] = required;
         result_str = j.dump();
     }
@@ -420,7 +420,7 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
 
     Config& config = Config::GetInstance();
     bool required = false;
-//    config.GetServerRestartRequired(required);
+    //    config.GetServerRestartRequired(required);
 
     nlohmann::json result;
     result["code"] = StatusCode::SUCCESS;
@@ -459,7 +459,8 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     TopKQueryResult result;
     if (json.contains("vector_id")) {
         auto vec_id = json["vector_id"].get<int64_t>();
-        auto status = request_handler_.SearchByID(context_ptr_, table_name, vec_id, topk, nprobe, partition_tags, result);
+        auto status =
+            request_handler_.SearchByID(context_ptr_, table_name, vec_id, topk, nprobe, partition_tags, result);
         if (!status.ok()) {
             return status;
         }
@@ -491,7 +492,8 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
             return status;
         }
 
-        status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, nprobe, partition_tags, file_id_vec, result);
+        status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, nprobe, partition_tags,
+                                         file_id_vec, result);
         if (!status.ok()) {
             return status;
         }
@@ -534,7 +536,7 @@ WebRequestHandler::DeleteByIDs(const std::string& table_name, const nlohmann::js
         return Status(BODY_FIELD_LOSS, "\"ids\" must be an array");
     }
 
-    for (auto & id : ids) {
+    for (auto& id : ids) {
         vector_ids.emplace_back(id.get<int64_t>());
     }
 
@@ -550,7 +552,8 @@ WebRequestHandler::DeleteByIDs(const std::string& table_name, const nlohmann::js
 }
 
 Status
-WebRequestHandler::GetVectorsByIDs(const std::string& table_name, const std::vector<int64_t>& ids,  nlohmann::json& json_out) {
+WebRequestHandler::GetVectorsByIDs(const std::string& table_name, const std::vector<int64_t>& ids,
+                                   nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
     for (size_t i = 0; i < ids.size(); i++) {
         auto vec_ids = std::vector<int64_t>(ids.begin() + i, ids.begin() + i + 1);
@@ -569,7 +572,7 @@ WebRequestHandler::GetVectorsByIDs(const std::string& table_name, const std::vec
     }
 
     nlohmann::json vectors_json;
-    for (size_t i = 0 ; i < vector_batch.size(); i++) {
+    for (size_t i = 0; i < vector_batch.size(); i++) {
         nlohmann::json vector_json;
         if (bin) {
             vector_json["vector"] = vector_batch.at(i).binary_data_;
@@ -1105,7 +1108,8 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
  * Segment {
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response) {
+WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_size, const OString& offset,
+                                OString& response) {
     int64_t offset_value = 0;
     int64_t page_size_value = 10;
 
@@ -1138,8 +1142,8 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
     }
 
     std::vector<std::pair<std::string, SegmentStat>> segments;
-    for (auto & par_stat : info.partitions_stat_) {
-        for (auto & seg_stat : par_stat.segments_stat_) {
+    for (auto& par_stat : info.partitions_stat_) {
+        for (auto& seg_stat : par_stat.segments_stat_) {
             auto segment_stat = std::pair<std::string, SegmentStat>(par_stat.tag_, seg_stat);
             segments.push_back(segment_stat);
         }
@@ -1206,7 +1210,7 @@ WebRequestHandler::GetSegmentInfo(const OString& table_name, const OString& segm
         if (status.ok()) {
             result = json.dump().c_str();
         }
-    // Get vector ids
+        // Get vector ids
     } else if (re == "ids") {
         nlohmann::json json;
         status = GetSegmentIds(table_name->std_str(), segment_name->std_str(), page_size_value, offset_value, json);
@@ -1222,8 +1226,7 @@ WebRequestHandler::GetSegmentInfo(const OString& table_name, const OString& segm
  * Vector {
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::Insert(const OString& table_name, const OString& body,
-                          VectorIdsDto::ObjectWrapper& ids_dto) {
+WebRequestHandler::Insert(const OString& table_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto) {
     if (nullptr == body.get() || body->getSize() == 0) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
     }
@@ -1253,7 +1256,7 @@ WebRequestHandler::Insert(const OString& table_name, const OString& body,
         }
         auto& id_array = vectors.id_array_;
         id_array.clear();
-        for (auto & id : ids_json) {
+        for (auto& id : ids_json) {
             id_array.emplace_back(id.get<int64_t>());
         }
     }
@@ -1283,8 +1286,7 @@ WebRequestHandler::GetVector(const OString& table_name, const OQueryParams& quer
         RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Need to specify vector id in query string")
     }
     if (!ValidationUtil::ValidateStringIsNumber(id_str->std_str()).ok()) {
-        RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
-                          "Query param \'id\' is illegal, only non-negative integer supported");
+        RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'id\' is illegal, only non-negative integer supported");
     }
 
     auto id = std::stol(id_str->c_str());
@@ -1325,7 +1327,7 @@ WebRequestHandler::VectorsOp(const OString& table_name, const OString& payload, 
             status = Search(table_name->std_str(), payload_json["search"], result_str);
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
-        };
+        }
 
         if (status.ok()) {
             response = result_str.c_str();
@@ -1338,7 +1340,7 @@ WebRequestHandler::VectorsOp(const OString& table_name, const OString& payload, 
     } catch (nlohmann::detail::type_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, emsg.c_str());
-    } catch(std::exception& e) {
+    } catch (std::exception& e) {
         RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
     }
 
@@ -1402,7 +1404,6 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
         } else if (op->equals("config")) {
             SetConfig(j, result_str);
         } else {
-
         }
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();

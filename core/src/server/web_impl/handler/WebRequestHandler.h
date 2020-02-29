@@ -15,11 +15,12 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include <opentracing/mocktracer/tracer.h>
 #include <oatpp/core/data/mapping/type/Object.hpp>
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
-#include <opentracing/mocktracer/tracer.h>
 
 #include "db/Types.h"
 #include "server/context/Context.h"
@@ -108,12 +109,12 @@ class WebRequestHandler {
      * Segment
      */
     Status
-    GetSegmentVectors(const std::string& table_name, const std::string& segment_name,
-        int64_t page_size, int64_t offset, nlohmann::json& json_out);
+    GetSegmentVectors(const std::string& table_name, const std::string& segment_name, int64_t page_size, int64_t offset,
+                      nlohmann::json& json_out);
 
     Status
-    GetSegmentIds(const std::string& table_name, const std::string& segment_name,
-                      int64_t page_size, int64_t offset, nlohmann::json& json_out);
+    GetSegmentIds(const std::string& table_name, const std::string& segment_name, int64_t page_size, int64_t offset,
+                  nlohmann::json& json_out);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
@@ -219,7 +220,8 @@ class WebRequestHandler {
     ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
 
     StatusDto::ObjectWrapper
-    GetSegmentInfo(const OString& table_name, const OString& segment_name, const OString& info, const OQueryParams& query_params, OString& result);
+    GetSegmentInfo(const OString& table_name, const OString& segment_name, const OString& info,
+                   const OQueryParams& query_params, OString& result);
 
     /**
      *
