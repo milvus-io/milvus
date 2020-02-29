@@ -194,10 +194,9 @@ class VecIndex : public cache::DataObj {
         return Status::OK();
     }
 
-    virtual Status
-    GetUids(std::vector<segment::doc_id_t>& uids) {
+    virtual const std::vector<segment::doc_id_t>&
+    GetUids() const {
         ENGINE_LOG_ERROR << "GetUIDArray not support";
-        return Status::OK();
     }
 
  private:

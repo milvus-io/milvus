@@ -16,7 +16,6 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/Log.h"
-#include "utils/TimeRecorder.h"
 #include "wrapper/WrapperException.h"
 #include "wrapper/gpu/GPUVecImpl.h"
 
@@ -89,9 +88,7 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         fiu_do_on("VecIndexImpl.Search.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("VecIndexImpl.Search.throw_std_exception", throw std::exception());
 
-        TimeRecorder rc("VecIndexImpl::Search");
         auto res = index_->Search(dataset, search_cfg);
-        rc.RecordSection("search done");
         //{
         //    auto& ids = ids_array;
         //    auto& dists = dis_array;
@@ -119,7 +116,6 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
         memcpy(dist, res_dist, sizeof(float) * nq * k);
         free(res_ids);
         free(res_dist);
-        rc.RecordSection("copy dataset");
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
@@ -317,10 +313,9 @@ VecIndexImpl::SetUids(std::vector<segment::doc_id_t>& uids) {
     return Status::OK();
 }
 
-Status
-VecIndexImpl::GetUids(std::vector<segment::doc_id_t>& uids) {
-    uids = index_->GetUids();
-    return Status::OK();
+const std::vector<segment::doc_id_t>&
+VecIndexImpl::GetUids() const {
+    return index_->GetUids();
 }
 
 const float*
