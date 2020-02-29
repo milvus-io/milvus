@@ -136,7 +136,7 @@ Config::ValidateConfig() {
     int64_t db_archive_days_threshold;
     CONFIG_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
 
-    int auto_flush_interval;
+    int64_t auto_flush_interval;
     CONFIG_CHECK(GetDBConfigAutoFlushInterval(auto_flush_interval));
 
     /* storage config */
@@ -235,7 +235,7 @@ Config::ValidateConfig() {
     bool recovery_error_ignore;
     CONFIG_CHECK(GetWalConfigRecoveryErrorIgnore(recovery_error_ignore));
 
-    uint32_t buffer_size;
+    int64_t buffer_size;
     CONFIG_CHECK(GetWalConfigBufferSize(buffer_size));
 
     std::string wal_path;
@@ -1037,36 +1037,6 @@ Config::CheckEngineConfigUseAVX512(const std::string& value) {
     return Status::OK();
 }
 
-Status
-Config::CheckWalConfigEnable(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg = "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg =
-            "Invalid wal config: " + value + ". Possible reason: wal_config.recovery_error_ignore is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-    return Status::OK();
-}
-
-Status
-Config::CheckWalConfigBufferSize(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::string msg = "Invalid wal buffer size: " + value +
-                          ". Possible reason: wal_config.buffer_size is not a positive integer.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }
-
-    return Status::OK();
-}
-
 #ifdef MILVUS_GPU_VERSION
 
 Status
@@ -1223,6 +1193,36 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 }
 
 #endif
+
+/* wal config */
+Status
+Config::CheckWalConfigEnable(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg = "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid wal config: " + value + ". Possible reason: wal_config.recovery_error_ignore is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigBufferSize(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid wal buffer size: " + value +
+                          ". Possible reason: wal_config.buffer_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
@@ -1384,13 +1384,10 @@ Config::GetDBConfigPreloadTable(std::string& value) {
 }
 
 Status
-Config::GetDBConfigAutoFlushInterval(int& value) {
+Config::GetDBConfigAutoFlushInterval(int64_t& value) {
     std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT);
-    Status s = CheckDBConfigAutoFlushInterval(str);
-    if (!s.ok()) {
-        return s;
-    }
-    value = (int)std::stoi(str);
+    CONFIG_CHECK(CheckDBConfigAutoFlushInterval(str));
+    value = std::stoll(str);
     return Status::OK();
 }
 
@@ -1655,10 +1652,7 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
 Status
 Config::GetWalConfigEnable(bool& wal_enable) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_ENABLE, CONFIG_WAL_ENABLE_DEFAULT);
-    Status s = CheckWalConfigEnable(str);
-    if (!s.ok()) {
-        return s;
-    }
+    CONFIG_CHECK(CheckWalConfigEnable(str));
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     wal_enable = (str == "true" || str == "on" || str == "yes" || str == "1");
     return Status::OK();
@@ -1668,29 +1662,23 @@ Status
 Config::GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore) {
     std::string str =
         GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
-    Status s = CheckWalConfigRecoveryErrorIgnore(str);
-    if (!s.ok()) {
-        return s;
-    }
+    CONFIG_CHECK(CheckWalConfigRecoveryErrorIgnore(str));
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     recovery_error_ignore = (str == "true" || str == "on" || str == "yes" || str == "1");
     return Status::OK();
 }
 
 Status
-Config::GetWalConfigBufferSize(uint32_t& buffer_size) {
+Config::GetWalConfigBufferSize(int64_t& buffer_size) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
-    Status s = CheckWalConfigBufferSize(str);
-    if (!s.ok()) {
-        return s;
-    }
-    buffer_size = (uint32_t)std::stoul(str);
+    CONFIG_CHECK(CheckWalConfigBufferSize(str));
+    buffer_size = std::stoll(str);
     return Status::OK();
 }
 
 Status
 Config::GetWalConfigWalPath(std::string& wal_path) {
-    wal_path = GetConfigStr(CONFIG_WAL, CONFIG_WAL_WAL_PATH, "");
+    wal_path = GetConfigStr(CONFIG_WAL, CONFIG_WAL_WAL_PATH, CONFIG_WAL_WAL_PATH_DEFAULT);
     return Status::OK();
 }
 
@@ -1823,12 +1811,9 @@ Config::SetMetricConfigPort(const std::string& value) {
 Status
 Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(value));
-    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
-    if (status.ok()) {
-        cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value) << 30);
-    }
-
-    return status;
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value));
+    cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value) << 30);
+    return Status::OK();
 }
 
 Status
@@ -1840,22 +1825,14 @@ Config::SetCacheConfigCpuCacheThreshold(const std::string& value) {
 Status
 Config::SetCacheConfigInsertBufferSize(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigInsertBufferSize(value));
-    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value));
     return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, value);
 }
 
 Status
 Config::SetCacheConfigCacheInsertData(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCacheInsertData(value));
-    auto status = SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value));
     return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CACHE_INSERT_DATA, value);
 }
 
@@ -1863,12 +1840,7 @@ Config::SetCacheConfigCacheInsertData(const std::string& value) {
 Status
 Config::SetEngineConfigUseBlasThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigUseBlasThreshold(value));
-
-    auto status = SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value));
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
 }
 
@@ -1885,18 +1857,12 @@ Config::SetEngineConfigUseAVX512(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
-/* gpu resource config */
 Status
 Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigGpuSearchThreshold(value));
-    auto status = SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value));
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, value);
 }
-
 #endif
 
 /* gpu resource config */
@@ -1905,30 +1871,21 @@ Config::SetEngineConfigGpuSearchThreshold(const std::string& value) {
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigEnable(value));
-
-    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
 }
 
 Status
 Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigCacheCapacity(value));
-    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value);
-    if (!status.ok()) {
-        return status;
-    }
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value));
 
     int64_t cap = std::stol(value);
     std::vector<int64_t> gpus;
     GetGpuResourceConfigSearchResources(gpus);
-    for (auto& g : gpus) {
-        cache::GpuCacheMgr::GetInstance(g)->SetCapacity(cap << 30);
+    for (auto& gpu_id : gpus) {
+        cache::GpuCacheMgr::GetInstance(gpu_id)->SetCapacity(cap << 30);
     }
-
     return Status::OK();
 }
 
@@ -1943,11 +1900,7 @@ Config::SetGpuResourceConfigSearchResources(const std::string& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigSearchResources(res_vec));
-    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, value);
 }
 
@@ -1956,12 +1909,7 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     std::vector<std::string> res_vec;
     server::StringHelpFunctions::SplitStringByDelimeter(value, CONFIG_GPU_RESOURCE_DELIMITER, res_vec);
     CONFIG_CHECK(CheckGpuResourceConfigBuildIndexResources(res_vec));
-    auto status = SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
-
-    if (!status.ok()) {
-        return status;
-    }
-
+    CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
 }
 

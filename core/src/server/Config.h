@@ -130,7 +130,6 @@ static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 
-// TODO:
 /* tracing config */
 static const char* CONFIG_TRACING = "tracing_config";
 static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
@@ -138,12 +137,13 @@ static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
 /* wal config */
 static const char* CONFIG_WAL = "wal_config";
 static const char* CONFIG_WAL_ENABLE = "enable";
-static const char* CONFIG_WAL_ENABLE_DEFAULT = "false";
+static const char* CONFIG_WAL_ENABLE_DEFAULT = "true";
 static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
 static const char* CONFIG_WAL_WAL_PATH = "wal_path";
+static const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
 class Config {
  private:
@@ -262,14 +262,6 @@ class Config {
     Status
     CheckEngineConfigUseAVX512(const std::string& value);
 
-    /* wal config */
-    Status
-    CheckWalConfigEnable(const std::string& value);
-    Status
-    CheckWalConfigRecoveryErrorIgnore(const std::string& value);
-    Status
-    CheckWalConfigBufferSize(const std::string& value);
-
 #ifdef MILVUS_GPU_VERSION
     Status
     CheckEngineConfigGpuSearchThreshold(const std::string& value);
@@ -286,6 +278,14 @@ class Config {
     Status
     CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>& value);
 #endif
+
+    /* wal config */
+    Status
+    CheckWalConfigEnable(const std::string& value);
+    Status
+    CheckWalConfigRecoveryErrorIgnore(const std::string& value);
+    Status
+    CheckWalConfigBufferSize(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -321,7 +321,7 @@ class Config {
     Status
     GetDBConfigPreloadTable(std::string& value);
     Status
-    GetDBConfigAutoFlushInterval(int& value);
+    GetDBConfigAutoFlushInterval(int64_t& value);
 
     /* storage config */
     Status
@@ -391,13 +391,10 @@ class Config {
     /* wal config */
     Status
     GetWalConfigEnable(bool& wal_enable);
-
     Status
     GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore);
-
     Status
-    GetWalConfigBufferSize(uint32_t& buffer_size);
-
+    GetWalConfigBufferSize(int64_t& buffer_size);
     Status
     GetWalConfigWalPath(std::string& wal_path);
 
