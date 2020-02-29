@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
 #pragma once
 
@@ -29,12 +23,13 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Pass.h"
+#include "scheduler/optimizer/Pass.h"
+#include "scheduler/optimizer/handler/GpuSearchResHandler.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFSQ8HPass : public Pass {
+class FaissIVFSQ8HPass : public Pass, public GpuSearchResHandler {
  public:
     FaissIVFSQ8HPass() = default;
 
@@ -46,9 +41,7 @@ class FaissIVFSQ8HPass : public Pass {
     Run(const TaskPtr& task) override;
 
  private:
-    int64_t threshold_ = std::numeric_limits<int64_t>::max();
     int64_t count_ = 0;
-    std::vector<int64_t> gpus;
 };
 
 using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;

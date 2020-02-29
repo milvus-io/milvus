@@ -1,20 +1,14 @@
 #-------------------------------------------------------------------------------
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
-#   http:#www.apache.org/licenses/LICENSE-2.0
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
 #
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
 include_directories(${MILVUS_SOURCE_DIR})
@@ -42,6 +36,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -55,6 +50,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_file
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer scheduler_optimizer_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/optimizer/handler scheduler_optimizer_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
 set(scheduler_files
@@ -63,15 +59,18 @@ set(scheduler_files
         ${scheduler_event_files}
         ${scheduler_job_files}
         ${scheduler_optimizer_files}
+        ${scheduler_optimizer_handler_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
         )
 
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
 set(thirdparty_files
         ${thirdparty_easyloggingpp_files}
         ${thirdparty_nlohmann_files}
+        ${thirdparty_dablooms_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
@@ -92,10 +91,42 @@ set(grpc_server_files
         ${grpc_interceptor_files}
         )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/utils web_utils_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
+set(web_server_files
+        ${web_handler_files}
+        ${web_conponent_files}
+        ${web_controller_files}
+        ${web_dto_files}
+        ${web_utils_files}
+        ${web_impl_files}
+        )
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/file storage_file_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
+set(storage_files
+        ${storage_main_files}
+        ${storage_file_files}
+        ${storage_s3_files}
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/store store_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -104,10 +135,16 @@ set(engine_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+        ${db_wal_files}
         ${metrics_files}
+        ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
+        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
@@ -127,12 +164,18 @@ set(prometheus_lib
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
+        curl
         )
 
 set(boost_lib
         libboost_system.a
         libboost_filesystem.a
         libboost_serialization.a
+        )
+
+set(s3_client_lib
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
         )
 
 set(third_party_libs
@@ -143,6 +186,9 @@ set(third_party_libs
         zlib
         fiu
         ${boost_lib}
+        ${s3_client_lib}
+        curl
+        crypto
         )
 
 if (MILVUS_GPU_VERSION)
@@ -228,6 +274,7 @@ set(server_libs
         milvus_engine
         metrics
         tracing
+        oatpp
         )
 
 add_executable(milvus_server
@@ -237,6 +284,7 @@ add_executable(milvus_server
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
+        ${web_server_files}
         ${server_context_files}
         ${utils_files}
         ${tracing_files}

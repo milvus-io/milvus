@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -50,5 +44,24 @@ namespace milvus {
 #define WRAPPER_LOG_WARNING LOG(WARNING) << WRAPPER_DOMAIN_NAME
 #define WRAPPER_LOG_ERROR LOG(ERROR) << WRAPPER_DOMAIN_NAME
 #define WRAPPER_LOG_FATAL LOG(FATAL) << WRAPPER_DOMAIN_NAME
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define STORAGE_DOMAIN_NAME "[STORAGE] "
+
+#define STORAGE_LOG_TRACE LOG(TRACE) << STORAGE_DOMAIN_NAME
+#define STORAGE_LOG_DEBUG LOG(DEBUG) << STORAGE_DOMAIN_NAME
+#define STORAGE_LOG_INFO LOG(INFO) << STORAGE_DOMAIN_NAME
+#define STORAGE_LOG_WARNING LOG(WARNING) << STORAGE_DOMAIN_NAME
+#define STORAGE_LOG_ERROR LOG(ERROR) << STORAGE_DOMAIN_NAME
+#define STORAGE_LOG_FATAL LOG(FATAL) << STORAGE_DOMAIN_NAME
+
+#define WAL_DOMAIN_NAME "[WAL] "
+
+#define WAL_LOG_TRACE LOG(TRACE) << WAL_DOMAIN_NAME
+#define WAL_LOG_DEBUG LOG(DEBUG) << WAL_DOMAIN_NAME
+#define WAL_LOG_INFO LOG(INFO) << WAL_DOMAIN_NAME
+#define WAL_LOG_WARNING LOG(WARNING) << WAL_DOMAIN_NAME
+#define WAL_LOG_ERROR LOG(ERROR) << WAL_DOMAIN_NAME
+#define WAL_LOG_FATAL LOG(FATAL) << WAL_DOMAIN_NAME
 
 }  // namespace milvus

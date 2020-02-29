@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
 #include <opentracing/mocktracer/tracer.h>
@@ -35,6 +29,10 @@
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
+#include "server/grpc_impl/GrpcServer.h"
+
+#include <fiu-local.h>
+#include <fiu-control.h>
 
 namespace {
 
@@ -47,7 +45,7 @@ constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 void
 CopyRowRecord(::milvus::grpc::RowRecord* target, const std::vector<float>& src) {
-    auto vector_data = target->mutable_vector_data();
+    auto vector_data = target->mutable_float_data();
     vector_data->Resize(static_cast<int>(src.size()), 0.0);
     memcpy(vector_data->mutable_data(), src.data(), src.size() * sizeof(float));
 }
@@ -73,10 +71,10 @@ class RpcHandlerTest : public testing::Test {
         milvus::engine::DBOptions opt;
 
         milvus::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        milvus::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
-        milvus::server::Config::GetInstance().SetDBConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
+        milvus::server::Config::GetInstance().SetStorageConfigPrimaryPath("/tmp/milvus_test");
+        milvus::server::Config::GetInstance().SetStorageConfigSecondaryPath("");
         milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
         milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
@@ -108,6 +106,7 @@ class RpcHandlerTest : public testing::Test {
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
         handler->SetContext(&context, dummy_context);
+        handler->random_id();
         ::grpc::Status grpc_status = handler->CreateTable(&context, &request, &status);
     }
 
@@ -172,6 +171,17 @@ TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ASSERT_TRUE(status.error_code() == ::grpc::Status::OK.error_code());
     int error_code = reply.status().error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
+
+    fiu_init(0);
+    fiu_enable("HasTableRequest.OnExecute.table_not_exist", 1, NULL, 0);
+    handler->HasTable(&context, &request, &reply);
+    ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
+    fiu_disable("HasTableRequest.OnExecute.table_not_exist");
+
+    fiu_enable("HasTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->HasTable(&context, &request, &reply);
+    ASSERT_NE(reply.status().error_code(), ::milvus::grpc::ErrorCode::SUCCESS);
+    fiu_disable("HasTableRequest.OnExecute.throw_std_exception");
 }
 
 TEST_F(RpcHandlerTest, INDEX_TEST) {
@@ -196,6 +206,30 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     int error_code = response.error_code();
     //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
+    fiu_init(0);
+    fiu_enable("CreateIndexRequest.OnExecute.not_has_table", 1, NULL, 0);
+    grpc_status = handler->CreateIndex(&context, &request, &response);
+    ASSERT_TRUE(grpc_status.ok());
+    fiu_disable("CreateIndexRequest.OnExecute.not_has_table");
+
+    fiu_enable("CreateIndexRequest.OnExecute.throw_std.exception", 1, NULL, 0);
+    grpc_status = handler->CreateIndex(&context, &request, &response);
+    ASSERT_TRUE(grpc_status.ok());
+    fiu_disable("CreateIndexRequest.OnExecute.throw_std.exception");
+
+    fiu_enable("CreateIndexRequest.OnExecute.create_index_fail", 1, NULL, 0);
+    grpc_status = handler->CreateIndex(&context, &request, &response);
+    ASSERT_TRUE(grpc_status.ok());
+    fiu_disable("CreateIndexRequest.OnExecute.create_index_fail");
+
+#ifdef MILVUS_GPU_VERSION
+    request.mutable_index()->set_index_type(static_cast<int>(milvus::engine::EngineType::FAISS_PQ));
+    fiu_enable("CreateIndexRequest.OnExecute.ip_meteric", 1, NULL, 0);
+    grpc_status = handler->CreateIndex(&context, &request, &response);
+    ASSERT_TRUE(grpc_status.ok());
+    fiu_disable("CreateIndexRequest.OnExecute.ip_meteric");
+#endif
+
     ::milvus::grpc::TableName table_name;
     ::milvus::grpc::IndexParam index_param;
     handler->DescribeIndex(&context, &table_name, &index_param);
@@ -203,12 +237,33 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     handler->DescribeIndex(&context, &table_name, &index_param);
     table_name.set_table_name(TABLE_NAME);
     handler->DescribeIndex(&context, &table_name, &index_param);
+
+    fiu_init(0);
+    fiu_enable("DescribeIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->DescribeIndex(&context, &table_name, &index_param);
+    fiu_disable("DescribeIndexRequest.OnExecute.throw_std_exception");
+
     ::milvus::grpc::Status status;
     table_name.Clear();
     handler->DropIndex(&context, &table_name, &status);
     table_name.set_table_name("test5");
     handler->DropIndex(&context, &table_name, &status);
+
     table_name.set_table_name(TABLE_NAME);
+
+    fiu_init(0);
+    fiu_enable("DropIndexRequest.OnExecute.table_not_exist", 1, NULL, 0);
+    handler->DropIndex(&context, &table_name, &status);
+    fiu_disable("DropIndexRequest.OnExecute.table_not_exist");
+
+    fiu_enable("DropIndexRequest.OnExecute.drop_index_fail", 1, NULL, 0);
+    handler->DropIndex(&context, &table_name, &status);
+    fiu_disable("DropIndexRequest.OnExecute.drop_index_fail");
+
+    fiu_enable("DropIndexRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->DropIndex(&context, &table_name, &status);
+    fiu_disable("DropIndexRequest.OnExecute.throw_std_exception");
+
     handler->DropIndex(&context, &table_name, &status);
 }
 
@@ -229,9 +284,52 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     }
     handler->Insert(&context, &request, &vector_ids);
     ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_init(0);
+    fiu_enable("InsertRequest.OnExecute.id_array_error", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.id_array_error");
+
+    fiu_enable("InsertRequest.OnExecute.db_not_found", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.db_not_found");
+
+    fiu_enable("InsertRequest.OnExecute.describe_table_fail", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.describe_table_fail");
+
+    fiu_enable("InsertRequest.OnExecute.illegal_vector_id", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.illegal_vector_id");
+
+    fiu_enable("InsertRequest.OnExecute.illegal_vector_id2", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.illegal_vector_id2");
+
+    fiu_enable("InsertRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.throw_std_exception");
+
+    fiu_enable("InsertRequest.OnExecute.invalid_dim", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    ASSERT_NE(vector_ids.vector_id_array_size(), VECTOR_COUNT);
+    fiu_disable("InsertRequest.OnExecute.invalid_dim");
+
+    fiu_enable("InsertRequest.OnExecute.insert_fail", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    fiu_disable("InsertRequest.OnExecute.insert_fail");
+
+    fiu_enable("InsertRequest.OnExecute.invalid_ids_size", 1, NULL, 0);
+    handler->Insert(&context, &request, &vector_ids);
+    fiu_disable("InsertRequest.OnExecute.invalid_ids_size");
 
     // insert vectors with wrong dim
-    std::vector<float > record_wrong_dim(TABLE_DIM - 1, 0.5f);
+    std::vector<float> record_wrong_dim(TABLE_DIM - 1, 0.5f);
     ::milvus::grpc::RowRecord* grpc_record = request.add_row_record_array();
     CopyRowRecord(grpc_record, record_wrong_dim);
     handler->Insert(&context, &request, &vector_ids);
@@ -285,18 +383,6 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     }
     handler->Search(&context, &request, &response);
 
-    // test search with range
-    ::milvus::grpc::Range* range = request.mutable_query_range_array()->Add();
-    range->set_start_value(CurrentTmDate(-2));
-    range->set_end_value(CurrentTmDate(-3));
-    handler->Search(&context, &request, &response);
-    request.mutable_query_range_array()->Clear();
-
-    request.set_table_name("test2");
-    handler->Search(&context, &request, &response);
-    request.set_table_name(TABLE_NAME);
-    handler->Search(&context, &request, &response);
-
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string* file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
@@ -339,6 +425,15 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::Status status = handler->DescribeTable(&context, &table_name, &table_schema);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
+    fiu_init(0);
+    fiu_enable("DescribeTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
+    handler->DescribeTable(&context, &table_name, &table_schema);
+    fiu_disable("DescribeTableRequest.OnExecute.describe_table_fail");
+
+    fiu_enable("DescribeTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->DescribeTable(&context, &table_name, &table_schema);
+    fiu_disable("DescribeTableRequest.OnExecute.throw_std_exception");
+
     ::milvus::grpc::InsertParam request;
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
@@ -380,6 +475,16 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->ShowTables(&context, &cmd, &table_name_list);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
+    // show table info
+    ::milvus::grpc::TableInfo table_info;
+    status = handler->ShowTableInfo(&context, &table_name, &table_info);
+    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+
+    fiu_init(0);
+    fiu_enable("ShowTablesRequest.OnExecute.show_tables_fail", 1, NULL, 0);
+    handler->ShowTables(&context, &cmd, &table_name_list);
+    fiu_disable("ShowTablesRequest.OnExecute.show_tables_fail");
+
     // Count Table
     ::milvus::grpc::TableRowCount count;
     table_name.Clear();
@@ -388,6 +493,18 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->CountTable(&context, &table_name, &count);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
     //    ASSERT_EQ(count.table_row_count(), vector_ids.vector_id_array_size());
+    fiu_init(0);
+    fiu_enable("CountTableRequest.OnExecute.db_not_found", 1, NULL, 0);
+    status = handler->CountTable(&context, &table_name, &count);
+    fiu_disable("CountTableRequest.OnExecute.db_not_found");
+
+    fiu_enable("CountTableRequest.OnExecute.status_error", 1, NULL, 0);
+    status = handler->CountTable(&context, &table_name, &count);
+    fiu_disable("CountTableRequest.OnExecute.status_error");
+
+    fiu_enable("CountTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    status = handler->CountTable(&context, &table_name, &count);
+    fiu_disable("CountTableRequest.OnExecute.throw_std_exception");
 
     // Preload Table
     table_name.Clear();
@@ -396,15 +513,77 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     status = handler->PreloadTable(&context, &table_name, &response);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
+    fiu_enable("PreloadTableRequest.OnExecute.preload_table_fail", 1, NULL, 0);
+    handler->PreloadTable(&context, &table_name, &response);
+    fiu_disable("PreloadTableRequest.OnExecute.preload_table_fail");
+
+    fiu_enable("PreloadTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->PreloadTable(&context, &table_name, &response);
+    fiu_disable("PreloadTableRequest.OnExecute.throw_std_exception");
+
+    fiu_init(0);
+    fiu_enable("CreateTableRequest.OnExecute.invalid_index_file_size", 1, NULL, 0);
+    tableschema.set_table_name(tablename);
+    handler->CreateTable(&context, &tableschema, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreateTableRequest.OnExecute.invalid_index_file_size");
+
+    fiu_enable("CreateTableRequest.OnExecute.db_already_exist", 1, NULL, 0);
+    tableschema.set_table_name(tablename);
+    handler->CreateTable(&context, &tableschema, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreateTableRequest.OnExecute.db_already_exist");
+
+    fiu_enable("CreateTableRequest.OnExecute.create_table_fail", 1, NULL, 0);
+    tableschema.set_table_name(tablename);
+    handler->CreateTable(&context, &tableschema, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreateTableRequest.OnExecute.create_table_fail");
+
+    fiu_enable("CreateTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    tableschema.set_table_name(tablename);
+    handler->CreateTable(&context, &tableschema, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreateTableRequest.OnExecute.throw_std_exception");
+
     // Drop table
     table_name.set_table_name("");
     // test invalid table name
     ::grpc::Status grpc_status = handler->DropTable(&context, &table_name, &response);
     table_name.set_table_name(tablename);
+
+    fiu_enable("DropTableRequest.OnExecute.db_not_found", 1, NULL, 0);
+    handler->DropTable(&context, &table_name, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("DropTableRequest.OnExecute.db_not_found");
+
+    fiu_enable("DropTableRequest.OnExecute.describe_table_fail", 1, NULL, 0);
+    handler->DropTable(&context, &table_name, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("DropTableRequest.OnExecute.describe_table_fail");
+
+    fiu_enable("DropTableRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->DropTable(&context, &table_name, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("DropTableRequest.OnExecute.throw_std_exception");
+
     grpc_status = handler->DropTable(&context, &table_name, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
-    int error_code = status.error_code();
+    int error_code = response.error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
+
+    tableschema.set_table_name(table_name.table_name());
+    handler->DropTable(&context, &table_name, &response);
+    sleep(1);
+    handler->CreateTable(&context, &tableschema, &response);
+    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
+
+    fiu_enable("DropTableRequest.OnExecute.drop_table_fail", 1, NULL, 0);
+    handler->DropTable(&context, &table_name, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("DropTableRequest.OnExecute.drop_table_fail");
+
+    handler->DropTable(&context, &table_name, &response);
 }
 
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
@@ -422,8 +601,6 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     ::milvus::grpc::PartitionParam partition_param;
     partition_param.set_table_name(str_table_name);
-    std::string partition_name = "tbl_partition_0";
-    partition_param.set_partition_name(partition_name);
     std::string partition_tag = "0";
     partition_param.set_tag(partition_tag);
     handler->CreatePartition(&context, &partition_param, &response);
@@ -434,17 +611,59 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::milvus::grpc::PartitionList partition_list;
     handler->ShowPartitions(&context, &table_name, &partition_list);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-    ASSERT_EQ(partition_list.partition_array_size(), 1);
+    ASSERT_EQ(partition_list.partition_tag_array_size(), 2);
+
+    fiu_init(0);
+    fiu_enable("ShowPartitionsRequest.OnExecute.invalid_table_name", 1, NULL, 0);
+    handler->ShowPartitions(&context, &table_name, &partition_list);
+    fiu_disable("ShowPartitionsRequest.OnExecute.invalid_table_name");
+
+    fiu_enable("ShowPartitionsRequest.OnExecute.show_partition_fail", 1, NULL, 0);
+    handler->ShowPartitions(&context, &table_name, &partition_list);
+    fiu_disable("ShowPartitionsRequest.OnExecute.show_partition_fail");
+
+    fiu_init(0);
+    fiu_enable("CreatePartitionRequest.OnExecute.invalid_table_name", 1, NULL, 0);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreatePartitionRequest.OnExecute.invalid_table_name");
+
+    fiu_enable("CreatePartitionRequest.OnExecute.invalid_partition_name", 1, NULL, 0);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreatePartitionRequest.OnExecute.invalid_partition_name");
+
+    fiu_enable("CreatePartitionRequest.OnExecute.invalid_partition_tags", 1, NULL, 0);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreatePartitionRequest.OnExecute.invalid_partition_tags");
+
+    fiu_enable("CreatePartitionRequest.OnExecute.db_already_exist", 1, NULL, 0);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreatePartitionRequest.OnExecute.db_already_exist");
+
+    fiu_enable("CreatePartitionRequest.OnExecute.create_partition_fail", 1, NULL, 0);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreatePartitionRequest.OnExecute.create_partition_fail");
+
+    fiu_enable("CreatePartitionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    handler->CreatePartition(&context, &partition_param, &response);
+    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("CreatePartitionRequest.OnExecute.throw_std_exception");
 
     ::milvus::grpc::PartitionParam partition_parm;
     partition_parm.set_table_name(str_table_name);
     partition_parm.set_tag(partition_tag);
-    handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 
-    partition_parm.set_partition_name(partition_name);
+    fiu_enable("DropPartitionRequest.OnExecute.invalid_table_name", 1, NULL, 0);
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
+    fiu_disable("DropPartitionRequest.OnExecute.invalid_table_name");
+
+    handler->DropPartition(&context, &partition_parm, &response);
+    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
@@ -461,32 +680,19 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
     command.set_cmd("test");
     handler->Cmd(&context, &command, &reply);
-}
 
-TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
-    ::grpc::ServerContext context;
-    handler->SetContext(&context, dummy_context);
-    handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    ::milvus::grpc::DeleteByDateParam request;
-    ::milvus::grpc::Status status;
-    handler->DeleteByDate(&context, nullptr, &status);
-    handler->DeleteByDate(&context, &request, &status);
+    command.set_cmd("status");
+    handler->Cmd(&context, &command, &reply);
+    command.set_cmd("mode");
+    handler->Cmd(&context, &command, &reply);
 
-    request.set_table_name(TABLE_NAME);
-    request.mutable_range()->set_start_value(CurrentTmDate(-3));
-    request.mutable_range()->set_end_value(CurrentTmDate(-2));
+    command.set_cmd("build_commit_id");
+    handler->Cmd(&context, &command, &reply);
 
-    ::grpc::Status grpc_status = handler->DeleteByDate(&context, &request, &status);
-    int error_code = status.error_code();
-    //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
-
-    request.mutable_range()->set_start_value("test6");
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-    request.mutable_range()->set_start_value(CurrentTmDate(-2));
-    request.mutable_range()->set_end_value("test6");
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-    request.mutable_range()->set_end_value(CurrentTmDate(-2));
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
+    command.set_cmd("set_config");
+    handler->Cmd(&context, &command, &reply);
+    command.set_cmd("get_config");
+    handler->Cmd(&context, &command, &reply);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -520,6 +726,27 @@ class RpcSchedulerTest : public testing::Test {
     std::shared_ptr<DummyRequest> request_ptr;
 };
 
+class AsyncDummyRequest : public milvus::server::BaseRequest {
+ public:
+    milvus::Status
+    OnExecute() override {
+        return milvus::Status::OK();
+    }
+
+    static milvus::server::BaseRequestPtr
+    Create(std::string& dummy) {
+        return std::shared_ptr<milvus::server::BaseRequest>(new DummyRequest(dummy));
+    }
+
+    void TestSetStatus() {
+        SetStatus(milvus::SERVER_INVALID_ARGUMENT, "");
+    }
+
+ public:
+    explicit AsyncDummyRequest(std::string& dummy)
+        : BaseRequest(std::make_shared<milvus::server::Context>("dummy_request_id2"), dummy, true) {
+    }
+};
 }  // namespace
 
 TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
@@ -527,13 +754,85 @@ TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     ASSERT_TRUE(status.ok());
 
     milvus::server::RequestScheduler::GetInstance().Start();
+//    milvus::server::RequestScheduler::GetInstance().Stop();
+//    milvus::server::RequestScheduler::GetInstance().Start();
+
     std::string dummy = "dql";
     milvus::server::BaseRequestPtr base_task_ptr = DummyRequest::Create(dummy);
-    milvus::server::RequestScheduler::GetInstance().ExecRequest(base_task_ptr);
+    milvus::server::RequestScheduler::ExecRequest(base_task_ptr);
 
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+
+    fiu_init(0);
+    fiu_enable("RequestScheduler.ExecuteRequest.push_queue_fail", 1, NULL, 0);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
+    fiu_disable("RequestScheduler.ExecuteRequest.push_queue_fail");
+
+//    std::string dummy2 = "dql2";
+//    milvus::server::BaseRequestPtr base_task_ptr2 = DummyRequest::Create(dummy2);
+//    fiu_enable("RequestScheduler.PutToQueue.null_queue", 1, NULL, 0);
+//    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr2);
+//    fiu_disable("RequestScheduler.PutToQueue.null_queue");
+
+    std::string dummy3 = "dql3";
+    milvus::server::BaseRequestPtr base_task_ptr3 = DummyRequest::Create(dummy3);
+    fiu_enable("RequestScheduler.TakeToExecute.throw_std_exception", 1, NULL, 0);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr3);
+    fiu_disable("RequestScheduler.TakeToExecute.throw_std_exception");
+
+    std::string dummy4 = "dql4";
+    milvus::server::BaseRequestPtr base_task_ptr4 = DummyRequest::Create(dummy4);
+    fiu_enable("RequestScheduler.TakeToExecute.execute_fail", 1, NULL, 0);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr4);
+    fiu_disable("RequestScheduler.TakeToExecute.execute_fail");
+
+    std::string dummy5 = "dql5";
+    milvus::server::BaseRequestPtr base_task_ptr5 = DummyRequest::Create(dummy5);
+    fiu_enable("RequestScheduler.PutToQueue.push_null_thread", 1, NULL, 0);
+    milvus::server::RequestScheduler::GetInstance().ExecuteRequest(base_task_ptr5);
+    fiu_disable("RequestScheduler.PutToQueue.push_null_thread");
+
     request_ptr = nullptr;
     milvus::server::RequestScheduler::GetInstance().ExecuteRequest(request_ptr);
 
+    milvus::server::BaseRequestPtr null_ptr = nullptr;
+    milvus::server::RequestScheduler::ExecRequest(null_ptr);
+
+    std::string async_dummy = "AsyncDummyRequest";
+    auto async_ptr = std::make_shared<AsyncDummyRequest>(async_dummy);
+    auto base_ptr = std::static_pointer_cast<milvus::server::BaseRequest>(async_ptr);
+    milvus::server::RequestScheduler::ExecRequest(base_ptr);
+    async_ptr->TestSetStatus();
+
     milvus::server::RequestScheduler::GetInstance().Stop();
+    milvus::server::RequestScheduler::GetInstance().Start();
+    milvus::server::RequestScheduler::GetInstance().Stop();
+}
+
+TEST(RpcTest, RPC_SERVER_TEST) {
+    using GrpcServer =  milvus::server::grpc::GrpcServer;
+    GrpcServer& server = GrpcServer::GetInstance();
+
+    fiu_init(0);
+    fiu_enable("check_config_address_fail", 1, NULL, 0);
+    server.Start();
+    sleep(2);
+    fiu_disable("check_config_address_fail");
+    server.Stop();
+
+    fiu_enable("check_config_port_fail", 1, NULL, 0);
+    server.Start();
+    sleep(2);
+    fiu_disable("check_config_port_fail");
+    server.Stop();
+
+    server.Start();
+    sleep(2);
+    server.Stop();
+}
+
+TEST(RpcTest, InterceptorHookHandlerTest) {
+    auto handler = std::make_shared<milvus::server::grpc::GrpcInterceptorHookHandler>();
+    handler->OnPostRecvInitialMetaData(nullptr, nullptr);
+    handler->OnPreSendMessage(nullptr, nullptr);
 }

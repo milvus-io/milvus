@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -49,6 +43,14 @@ ToKnowhereErrorCode(const ErrorCode error_code) {
     return KNOWHERE_ERROR_CODE_BASE + error_code;
 }
 
+constexpr ErrorCode WAL_SUCCESS = 0;
+constexpr ErrorCode WAL_ERROR_CODE_BASE = 60000;
+
+constexpr ErrorCode
+ToWalErrorCode(const ErrorCode error_code) {
+    return WAL_ERROR_CODE_BASE + error_code;
+}
+
 // server error code
 constexpr ErrorCode SERVER_UNEXPECTED_ERROR = ToServerErrorCode(1);
 constexpr ErrorCode SERVER_UNSUPPORTED_ERROR = ToServerErrorCode(2);
@@ -65,7 +67,6 @@ constexpr ErrorCode SERVER_BUILD_INDEX_ERROR = ToServerErrorCode(12);
 constexpr ErrorCode SERVER_TABLE_NOT_EXIST = ToServerErrorCode(100);
 constexpr ErrorCode SERVER_INVALID_TABLE_NAME = ToServerErrorCode(101);
 constexpr ErrorCode SERVER_INVALID_TABLE_DIMENSION = ToServerErrorCode(102);
-constexpr ErrorCode SERVER_INVALID_TIME_RANGE = ToServerErrorCode(103);
 constexpr ErrorCode SERVER_INVALID_VECTOR_DIMENSION = ToServerErrorCode(104);
 constexpr ErrorCode SERVER_INVALID_INDEX_TYPE = ToServerErrorCode(105);
 constexpr ErrorCode SERVER_INVALID_ROWRECORD = ToServerErrorCode(106);
@@ -80,6 +81,7 @@ constexpr ErrorCode SERVER_INVALID_INDEX_NLIST = ToServerErrorCode(114);
 constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
 constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
 constexpr ErrorCode SERVER_OUT_OF_MEMORY = ToServerErrorCode(117);
+constexpr ErrorCode SERVER_INVALID_PARTITION_TAG = ToServerErrorCode(118);
 
 // db error code
 constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
@@ -89,12 +91,20 @@ constexpr ErrorCode DB_ALREADY_EXIST = ToDbErrorCode(4);
 constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 constexpr ErrorCode DB_INVALID_META_URI = ToDbErrorCode(7);
+constexpr ErrorCode DB_EMPTY_TABLE = ToDbErrorCode(8);
+constexpr ErrorCode DB_BLOOM_FILTER_ERROR = ToDbErrorCode(9);
 
 // knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
 constexpr ErrorCode KNOWHERE_INVALID_ARGUMENT = ToKnowhereErrorCode(2);
 constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
 constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
+
+// knowhere error code
+constexpr ErrorCode WAL_ERROR = ToWalErrorCode(1);
+constexpr ErrorCode WAL_META_ERROR = ToWalErrorCode(2);
+constexpr ErrorCode WAL_FILE_ERROR = ToWalErrorCode(3);
+constexpr ErrorCode WAL_PATH_ERROR = ToWalErrorCode(4);
 
 namespace server {
 class ServerException : public std::exception {

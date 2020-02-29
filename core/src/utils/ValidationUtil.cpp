@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/ValidationUtil.h"
 #include "Log.h"
@@ -21,9 +15,15 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
+
 #ifdef MILVUS_GPU_VERSION
+
 #include <cuda_runtime.h>
+
 #endif
+
+#include <fiu-local.h>
+#include <src/db/Types.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -33,7 +33,7 @@ namespace milvus {
 namespace server {
 
 constexpr size_t TABLE_NAME_SIZE_LIMIT = 255;
-constexpr int64_t TABLE_DIMENSION_LIMIT = 16384;
+constexpr int64_t TABLE_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
 
 Status
@@ -78,7 +78,8 @@ Status
 ValidationUtil::ValidateTableDimension(int64_t dimension) {
     if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
         std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
-                          "The table dimension must be within the range of 1 ~ 16384.";
+                          "The table dimension must be within the range of 1 ~ " +
+                          std::to_string(TABLE_DIMENSION_LIMIT) + ".";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     } else {
@@ -108,6 +109,12 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     return Status::OK();
 }
 
+bool
+ValidationUtil::IsBinaryIndexType(int32_t index_type) {
+    return (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP)) ||
+           (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT));
+}
+
 Status
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if (nlist <= 0) {
@@ -135,14 +142,20 @@ ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
 
 Status
 ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
-    if (metric_type != static_cast<int32_t>(engine::MetricType::L2) &&
-        metric_type != static_cast<int32_t>(engine::MetricType::IP)) {
+    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
         std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
-                          "Make sure the metric type is either MetricType.L2 or MetricType.IP.";
+                          "Make sure the metric type is in MetricType list.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
     return Status::OK();
+}
+
+bool
+ValidationUtil::IsBinaryMetricType(int32_t metric_type) {
+    return (metric_type == static_cast<int32_t>(engine::MetricType::HAMMING)) ||
+           (metric_type == static_cast<int32_t>(engine::MetricType::JACCARD)) ||
+           (metric_type == static_cast<int32_t>(engine::MetricType::TANIMOTO));
 }
 
 Status
@@ -177,7 +190,33 @@ ValidationUtil::ValidatePartitionName(const std::string& partition_name) {
         return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    return ValidateTableName(partition_name);
+    std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
+    // Table name size shouldn't exceed 16384.
+    if (partition_name.size() > TABLE_NAME_SIZE_LIMIT) {
+        std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
+    }
+
+    // Table name first character should be underscore or character.
+    char first_char = partition_name[0];
+    if (first_char != '_' && std::isalpha(first_char) == 0) {
+        std::string msg = invalid_msg + "The first character of a partition name must be an underscore or letter.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
+    }
+
+    int64_t table_name_size = partition_name.size();
+    for (int64_t i = 1; i < table_name_size; ++i) {
+        char name_char = partition_name[i];
+        if (name_char != '_' && std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg + "Partition name can only contain numbers, letters, and underscores.";
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_TABLE_NAME, msg);
+        }
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -190,7 +229,14 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
         if (valid_tag.empty()) {
             std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
             SERVER_LOG_ERROR << msg;
-            return Status(SERVER_INVALID_NPROBE, msg);
+            return Status(SERVER_INVALID_TABLE_NAME, msg);
+        }
+
+        // max length of partition tag
+        if (valid_tag.length() > 255) {
+            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
     }
 
@@ -202,6 +248,8 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
+    fiu_do_on("ValidationUtil.ValidateGpuIndex.get_device_count_fail", cuda_err = cudaError::cudaErrorUnknown);
+
     if (cuda_err != cudaSuccess) {
         std::string msg = "Failed to get gpu card number, cuda error:" + std::to_string(cuda_err);
         SERVER_LOG_ERROR << msg;
@@ -219,8 +267,11 @@ ValidationUtil::ValidateGpuIndex(int32_t gpu_index) {
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 Status
 ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
+    fiu_return_on("ValidationUtil.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
+
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
@@ -233,6 +284,7 @@ ValidationUtil::GetGpuMemory(int32_t gpu_index, size_t& memory) {
     memory = deviceProp.totalGlobalMem;
     return Status::OK();
 }
+
 #endif
 
 Status
@@ -240,6 +292,7 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
     struct in_addr address;
 
     int result = inet_pton(AF_INET, ip_address.c_str(), &address);
+    fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
         case 1:
@@ -263,7 +316,11 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
     try {
-        int32_t value = std::stoi(str);
+        int64_t value = std::stol(str);
+        fiu_do_on("ValidationUtil.ValidateStringIsNumber.throw_exception", throw std::exception());
+        if (value < 0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Negative number");
+        }
     } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
@@ -272,6 +329,7 @@ ValidationUtil::ValidateStringIsNumber(const std::string& str) {
 
 Status
 ValidationUtil::ValidateStringIsBool(const std::string& str) {
+    fiu_return_on("ValidateStringNotBool", Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str));
     std::string s = str;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     if (s == "true" || s == "on" || s == "yes" || s == "1" || s == "false" || s == "off" || s == "no" || s == "0" ||
@@ -285,6 +343,9 @@ Status
 ValidationUtil::ValidateStringIsFloat(const std::string& str) {
     try {
         float val = std::stof(str);
+        if (val < 0.0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Negative float: " + str);
+        }
     } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid float: " + str);
     }
@@ -340,6 +401,19 @@ ValidationUtil::ValidateDbURI(const std::string& uri) {
     }
 
     return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid db backend uri"));
+}
+
+Status
+ValidationUtil::ValidateStoragePath(const std::string& path) {
+    // Validate storage path if is valid, only correct absolute path will be validated pass
+    // Invalid path only contain character[a-zA-Z], number[0-9], '-', and '_',
+    // and path must start with '/'.
+    // examples below are invalid
+    // '/a//a', '/a--/a', '/-a/a', '/a@#/a', 'aaa/sfs'
+    std::string path_pattern = "^\\/(\\w+-?\\/?)+$";
+    std::regex regex(path_pattern);
+
+    return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");
 }
 
 }  // namespace server

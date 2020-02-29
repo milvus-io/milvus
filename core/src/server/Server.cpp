@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/Server.h"
 
@@ -26,7 +20,9 @@
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "server/web_impl/WebServer.h"
 #include "src/version.h"
+#include "storage/s3/S3ClientWrapper.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
@@ -200,8 +196,7 @@ Server::Start() {
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 
-        StartService();
-        return Status::OK();
+        return StartService();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -257,16 +252,42 @@ Server::LoadConfig() {
     return milvus::Status::OK();
 }
 
-void
+Status
 Server::StartService() {
-    engine::KnowhereResource::Initialize();
+    Status stat;
+    stat = engine::KnowhereResource::Initialize();
+    if (!stat.ok()) {
+        SERVER_LOG_ERROR << "KnowhereResource initialize fail: " << stat.message();
+        goto FAIL;
+    }
+
     scheduler::StartSchedulerService();
-    DBWrapper::GetInstance().StartService();
+
+    stat = DBWrapper::GetInstance().StartService();
+    if (!stat.ok()) {
+        SERVER_LOG_ERROR << "DBWrapper start service fail: " << stat.message();
+        goto FAIL;
+    }
+
     grpc::GrpcServer::GetInstance().Start();
+    web::WebServer::GetInstance().Start();
+
+    stat = storage::S3ClientWrapper::GetInstance().StartService();
+    if (!stat.ok()) {
+        SERVER_LOG_ERROR << "S3Client start service fail: " << stat.message();
+        goto FAIL;
+    }
+
+    return Status::OK();
+FAIL:
+    std::cerr << "Milvus initializes fail: " << stat.message() << std::endl;
+    return stat;
 }
 
 void
 Server::StopService() {
+    storage::S3ClientWrapper::GetInstance().StopService();
+    web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();

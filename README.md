@@ -1,39 +1,75 @@
 ![Milvuslogo](https://github.com/milvus-io/docs/blob/master/assets/milvus_logo.png)
 
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
-![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
-![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
-[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-jinhai-cn-milvus-master)
-![Release](https://img.shields.io/badge/release-v0.6.0-yellowgreen)
-![Release_date](https://img.shields.io/badge/release%20date-December-yellowgreen)
+
+![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
+![Language](https://img.shields.io/github/languages/count/milvus-io/milvus)
+![GitHub top language](https://img.shields.io/github/languages/top/milvus-io/milvus)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/milvus-io/milvus)
+![GitHub Release Date](https://img.shields.io/github/release-date/milvus-io/milvus)
+
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/milvus-io/milvus/pulse/monthly)
+![OSS Lifecycle](https://img.shields.io/osslifecycle/milvus-io/milvus)
+[![HitCount](http://hits.dwyl.com/milvus-io/milvus.svg)](http://hits.dwyl.com/milvus-io/milvus)
+![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
+
+[![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
 [![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
-[![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
+[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-milvus-io-milvus-master)
+[![CodeFactor Grade](https://www.codefactor.io/repository/github/milvus-io/milvus/badge)](https://www.codefactor.io/repository/github/milvus-io/milvus)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95)](https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard)
+[![Scrutinizer Quality Score](https://scrutinizer-ci.com/g/milvus-io/milvus/badges/quality-score.png?b=master)](https://scrutinizer-ci.com/g/milvus-io/milvus/)
+
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
 [中文版](README_CN.md) | [日本語版](README_JP.md)
 
 ## What is Milvus
 
-Milvus is the world's fastest similarity search engine for massive-scale feature vectors. Built with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
+Milvus is an open source vector similarity search engine. Built with heterogeneous computing architecture for the best cost efficiency. Searches over billion-scale vectors take only milliseconds with minimum computing resources.
 
-For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/en/aboutmilvus/overview/).
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md).
 
-Milvus provides stable [Python](https://github.com/milvus-io/pymilvus), [Java](https://github.com/milvus-io/milvus-sdk-java) and [C++](https://github.com/milvus-io/milvus/tree/master/sdk) SDKs. 
-
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/en/release/v0.6.0/).
-
-## Get started
-
-See the [Milvus install guide](https://www.milvus.io/docs/en/userguide/install_milvus/) for using Docker containers. To install Milvus from source code, see [build from source](install.md).
-
-To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/en/reference/milvus_config/).
-
-### Try your first Milvus program
-
-Try running a program with Milvus using [Python](https://www.milvus.io/docs/en/userguide/example_code/), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples). 
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0.md).
 
 ## Roadmap
 
-Please read our [roadmap](https://milvus.io/docs/en/roadmap/) for upcoming features.
+To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/milestones).
+
+It is a Work in Progress, and is subject to reasonable adjustments when necessary. And we greatly welcome any comments/requirements/suggestions regarding Milvus roadmap.:clap:
+
+## Application scenarios
+
+Milvus is broadly applicable to a variety of areas. Below screenshot showcases our content-based image retrieval demo system built based on Milvus and VGG.
+
+[![image retrieval demo](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)](https://raw.githubusercontent.com/milvus-io/docs/v0.7.0/assets/image_retrieval.png)
+
+To explore more Milvus solutions and application scenarios, see our [bootcamp](https://github.com/milvus-io/bootcamp) repository.
+
+## Test reports
+
+See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
+
+## Supported clients
+
+- [Go](https://github.com/milvus-io/milvus-sdk-go)
+- [Python](https://github.com/milvus-io/pymilvus)
+- [Java](https://github.com/milvus-io/milvus-sdk-java)
+- [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+- [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Provided by [arkie](https://www.arkie.cn/))
+
+## Get started
+
+See the [Milvus install guide](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) for using Docker containers. To install Milvus from source code, see [build from source](INSTALL.md).
+
+To edit Milvus settings, read [Milvus configuration](https://www.milvus.io/docs/v0.6.0/reference/milvus_config.md).
+
+### Try your first Milvus program
+
+Try running a program with Milvus using [Python](https://www.milvus.io/docs/guides/get_started/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+
 
 ## Contribution guidelines
 
@@ -43,7 +79,15 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 
 ## Join our community
 
-To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk). 
+:heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk).
+
+See our [community](https://github.com/milvus-io/community) repository to learn about our governance and access more community resources.
+
+## Mailing lists
+
+- [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
+- [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
+- [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
 
 ## Contributors
 
@@ -59,6 +103,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
     <td align="center"><a href="https://github.com/akihoni"><img src="https://avatars0.githubusercontent.com/u/36330442?v=4" width="100px;" alt=""/><br /><sub><b>Sijie Zhang</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=akihoni" title="Documentation">📖</a></td>
     <td align="center"><a href="https://github.com/PizzaL"><img src="https://avatars0.githubusercontent.com/u/5666666?v=4" width="100px;" alt=""/><br /><sub><b>PizzaL</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=PizzaL" title="Code">💻</a></td>
     <td align="center"><a href="https://github.com/levylll"><img src="https://avatars2.githubusercontent.com/u/5645285?v=4" width="100px;" alt=""/><br /><sub><b>levylll</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=levylll" title="Code">💻</a></td>
+    <td align="center"><a href="https://github.com/aaronjin2010"><img src="https://avatars1.githubusercontent.com/u/48044391?v=4" width="100px;" alt=""/><br /><sub><b>aaronjin2010</b></sub></a><br /><a href="https://github.com/milvus-io/milvus/commits?author=aaronjin2010" title="Code">💻</a></td>
   </tr>
 </table>
 
@@ -71,11 +116,7 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 - [Milvus.io](https://www.milvus.io)
 
-- [Milvus bootcamp](https://github.com/milvus-io/bootcamp)
-
-- [Milvus test reports](https://github.com/milvus-io/milvus/tree/master/docs)
-
-- [Milvus FAQ](https://www.milvus.io/docs/en/faq/operational_faq/)
+- [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
 
 - [Milvus Medium](https://medium.com/@milvusio)
 
@@ -84,6 +125,8 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 - [Milvus Twitter](https://twitter.com/milvusio)
 
 - [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+
+- [Milvus design docs](DESIGN.md)
 
 ## License
 

@@ -1,26 +1,15 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-
-#include "MemManager.h"
-#include "MemTable.h"
-#include "db/meta/Meta.h"
-#include "utils/Status.h"
 
 #include <ctime>
 #include <map>
@@ -30,21 +19,66 @@
 #include <string>
 #include <vector>
 
+#include "MemManager.h"
+#include "MemTable.h"
+#include "db/meta/Meta.h"
+#include "server/Config.h"
+#include "utils/Status.h"
+
 namespace milvus {
 namespace engine {
 
 class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
+    using MemIdMap = std::map<std::string, MemTablePtr>;
+    using MemList = std::vector<MemTablePtr>;
 
     MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
+        server::Config& config = server::Config::GetInstance();
+        config.GenUniqueIdentityID("MemManagerImpl", identity_);
+
+        server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+            server::Config& config = server::Config::GetInstance();
+            int64_t buffer_size;
+            auto status = config.GetCacheConfigInsertBufferSize(buffer_size);
+            if (status.ok()) {
+                options_.insert_buffer_size_ = buffer_size * ONE_GB;
+            }
+
+            return status;
+        };
+
+        config.RegisterCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_, lambda);
+    }
+
+    ~MemManagerImpl() {
+        server::Config& config = server::Config::GetInstance();
+        config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_);
     }
 
     Status
-    InsertVectors(const std::string& table_id, size_t n, const float* vectors, IDNumbers& vector_ids) override;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    Serialize(std::set<std::string>& table_ids) override;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
+
+    Status
+    DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) override;
+
+    Status
+    DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
+
+    Status
+    Flush(const std::string& table_id) override;
+
+    Status
+    Flush(std::set<std::string>& table_ids) override;
+
+    //    Status
+    //    Serialize(std::set<std::string>& table_ids) override;
 
     Status
     EraseMemVector(const std::string& table_id) override;
@@ -63,12 +97,18 @@ class MemManagerImpl : public MemManager {
     GetMemByTable(const std::string& table_id);
 
     Status
-    InsertVectorsNoLock(const std::string& table_id, size_t n, const float* vectors, IDNumbers& vector_ids);
+    InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source, uint64_t lsn);
+
     Status
     ToImmutable();
 
-    using MemIdMap = std::map<std::string, MemTablePtr>;
-    using MemList = std::vector<MemTablePtr>;
+    Status
+    ToImmutable(const std::string& table_id);
+
+    uint64_t
+    GetMaxLSN(const MemList& tables);
+
+    std::string identity_;
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
     meta::MetaPtr meta_;

@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 #pragma once
 
 #include <condition_variable>
@@ -46,8 +40,8 @@ using ResultDistances = engine::ResultDistances;
 
 class SearchJob : public Job {
  public:
-    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nq, uint64_t nprobe,
-              const float* vectors);
+    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nprobe,
+              const engine::VectorsData& vectors);
 
  public:
     bool
@@ -82,7 +76,7 @@ class SearchJob : public Job {
 
     uint64_t
     nq() const {
-        return nq_;
+        return vectors_.vector_count_;
     }
 
     uint64_t
@@ -90,7 +84,7 @@ class SearchJob : public Job {
         return nprobe_;
     }
 
-    const float*
+    const engine::VectorsData&
     vectors() const {
         return vectors_;
     }
@@ -109,10 +103,9 @@ class SearchJob : public Job {
     const std::shared_ptr<server::Context> context_;
 
     uint64_t topk_ = 0;
-    uint64_t nq_ = 0;
     uint64_t nprobe_ = 0;
     // TODO: smart pointer
-    const float* vectors_ = nullptr;
+    const engine::VectorsData& vectors_;
 
     Id2IndexMap index_files_;
     // TODO: column-base better ?

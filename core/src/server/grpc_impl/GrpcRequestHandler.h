@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -129,6 +123,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                ::milvus::grpc::TableNameList* response) override;
     // *
+    // @brief This method is used to get table detail information.
+    //
+    // @param TableName, target table name.
+    //
+    // @return TableInfo
+    ::grpc::Status
+    ShowTableInfo(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                  ::milvus::grpc::TableInfo* response);
+
+    // *
     // @brief This method is used to delete table.
     //
     // @param TableName, table name is going to be deleted.
@@ -201,6 +205,24 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
            ::milvus::grpc::VectorIds* response) override;
     // *
+    // @brief This method is used to get vector data by id.
+    //
+    // @param VectorIdentity, target vector id.
+    //
+    // @return VectorData
+    ::grpc::Status
+    GetVectorByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorIdentity* request,
+                  ::milvus::grpc::VectorData* response);
+    // *
+    // @brief This method is used to get vector ids from a segment
+    //
+    // @param GetVectorIDsParam, target table and segment
+    //
+    // @return VectorIds
+    ::grpc::Status
+    GetVectorIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetVectorIDsParam* request,
+                 ::milvus::grpc::VectorIds* response);
+    // *
     // @brief This method is used to query vector in table.
     //
     // @param SearchParam, search parameters.
@@ -209,6 +231,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
            ::milvus::grpc::TopKQueryResult* response) override;
+
+    // *
+    // @brief This method is used to query vector by id.
+    //
+    // @param SearchByIDParam, search parameters.
+    //
+    // @return TopKQueryResult
+    ::grpc::Status
+    SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
+               ::milvus::grpc::TopKQueryResult* response);
 
     // *
     // @brief This method is used to query vector in specified files.
@@ -229,15 +261,17 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
         ::milvus::grpc::StringReply* response) override;
+
     // *
-    // @brief This method is used to delete vector by date range
+    // @brief This method is used to delete vector by id
     //
-    // @param DeleteByDateParam, delete parameters.
+    // @param DeleteByIDParam, delete parameters.
     //
     // @return status
     ::grpc::Status
-    DeleteByDate(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByDateParam* request,
-                 ::milvus::grpc::Status* response) override;
+    DeleteByID(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByIDParam* request,
+               ::milvus::grpc::Status* response);
+
     // *
     // @brief This method is used to preload table
     //
@@ -247,6 +281,24 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
                  ::milvus::grpc::Status* response) override;
+
+    // *
+    // @brief This method is used to flush buffer into storage.
+    //
+    // @param FlushParam, flush parameters
+    //
+    // @return Status
+    ::grpc::Status
+    Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request, ::milvus::grpc::Status* response);
+
+    // *
+    // @brief This method is used to compact table
+    //
+    // @param TableName, target table name.
+    //
+    // @return Status
+    ::grpc::Status
+    Compact(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request, ::milvus::grpc::Status* response);
 
     GrpcRequestHandler&
     RegisterRequestHandler(const RequestHandler& handler) {

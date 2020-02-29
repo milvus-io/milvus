@@ -1,29 +1,25 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "wrapper/ConfAdapter.h"
+
+#include <fiu-local.h>
+#include <cmath>
+#include <memory>
+#include <vector>
+
 #include "WrapperException.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "server/Config.h"
 #include "utils/Log.h"
-
-#include <cmath>
-#include <memory>
-#include <vector>
 
 // TODO(lxj): add conf checker
 
@@ -37,9 +33,9 @@ namespace engine {
 #endif
 
 void
-ConfAdapter::MatchBase(knowhere::Config conf) {
+ConfAdapter::MatchBase(knowhere::Config conf, knowhere::METRICTYPE default_metric) {
     if (conf->metric_type == knowhere::DEFAULT_TYPE)
-        conf->metric_type = knowhere::METRICTYPE::L2;
+        conf->metric_type = default_metric;
 }
 
 knowhere::Config
@@ -63,7 +59,7 @@ ConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
 knowhere::Config
 IVFConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
@@ -74,13 +70,13 @@ IVFConfAdapter::Match(const TempMetaConf& metaconf) {
 static constexpr float TYPICAL_COUNT = 1000000.0;
 
 int64_t
-IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
-    if (size <= TYPICAL_COUNT / 16384 + 1) {
+IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist, const int64_t& per_nlist) {
+    if (size <= TYPICAL_COUNT / per_nlist + 1) {
         // handle less row count, avoid nlist set to 0
         return 1;
     } else if (int(size / TYPICAL_COUNT) * nlist <= 0) {
         // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
-        return int(size / TYPICAL_COUNT * 16384);
+        return int(size / TYPICAL_COUNT * per_nlist);
     }
     return nlist;
 }
@@ -112,7 +108,7 @@ IVFConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type)
 knowhere::Config
 IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFSQCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
@@ -159,7 +155,7 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
             }
         }
     }
-
+    fiu_do_on("IVFPQConfAdapter.Match.empty_resset", resset.clear());
     if (resset.empty()) {
         // todo(linxj): throw exception here.
         WRAPPER_LOG_ERROR << "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-"
@@ -207,7 +203,7 @@ IVFPQConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
 knowhere::Config
 NSGConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::NSGCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
     conf->gpu_id = metaconf.gpu_id;
@@ -266,5 +262,50 @@ SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& 
     return conf;
 }
 
+knowhere::Config
+HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::HNSWCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+
+    conf->ef = 500;  // ef can be auto-configured by using sample data.
+    conf->M = 24;    // A reasonable range of M is from 5 to 48.
+    return conf;
+}
+
+knowhere::Config
+HNSWConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::HNSWCfg>();
+    conf->k = metaconf.k;
+
+    if (metaconf.nprobe < metaconf.k) {
+        conf->ef = metaconf.k + 32;
+    } else {
+        conf->ef = metaconf.nprobe;
+    }
+    return conf;
+}
+
+knowhere::Config
+BinIDMAPConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    conf->gpu_id = metaconf.gpu_id;
+    conf->k = metaconf.k;
+    MatchBase(conf, knowhere::METRICTYPE::HAMMING);
+    return conf;
+}
+
+knowhere::Config
+BinIVFConfAdapter::Match(const TempMetaConf& metaconf) {
+    auto conf = std::make_shared<knowhere::IVFBinCfg>();
+    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 2048);
+    conf->d = metaconf.dim;
+    conf->metric_type = metaconf.metric_type;
+    conf->gpu_id = metaconf.gpu_id;
+    MatchBase(conf, knowhere::METRICTYPE::HAMMING);
+    return conf;
+}
 }  // namespace engine
 }  // namespace milvus

@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <faiss/utils/distances.h>
 #include <omp.h>
@@ -44,8 +38,14 @@ DBWrapper::StartService() {
         return s;
     }
 
+    s = config.GetDBConfigAutoFlushInterval(opt.auto_flush_interval_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
     std::string path;
-    s = config.GetDBConfigPrimaryPath(path);
+    s = config.GetStorageConfigPrimaryPath(path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
@@ -54,7 +54,7 @@ DBWrapper::StartService() {
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
-    s = config.GetDBConfigSecondaryPath(db_slave_path);
+    s = config.GetStorageConfigSecondaryPath(db_slave_path);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
         return s;
@@ -88,6 +88,37 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
+    // get wal configurations
+    s = config.GetWalConfigEnable(opt.wal_enable_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get wal_enable configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    if (opt.wal_enable_) {
+        s = config.GetWalConfigRecoveryErrorIgnore(opt.recovery_error_ignore_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get recovery_error_ignore configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        s = config.GetWalConfigBufferSize(opt.buffer_size_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get buffer_size configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        s = config.GetWalConfigWalPath(opt.mxlog_path_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get mxlog_path configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+    }
+
     // engine config
     int64_t omp_thread;
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
@@ -116,6 +147,17 @@ DBWrapper::StartService() {
     }
 
     faiss::distance_compute_blas_threshold = use_blas_threshold;
+    server::ConfigCallBackF lambda = [](const std::string& value) -> Status {
+        Config& config = Config::GetInstance();
+        int64_t blas_threshold;
+        auto status = config.GetEngineConfigUseBlasThreshold(blas_threshold);
+        if (status.ok()) {
+            faiss::distance_compute_blas_threshold = blas_threshold;
+        }
+
+        return status;
+    };
+    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_USE_BLAS_THRESHOLD, "DBWrapper", lambda);
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;
@@ -165,7 +207,8 @@ DBWrapper::StartService() {
         db_ = engine::DBFactory::Build(opt);
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
-                  << ". Possible reason: the meta system does not work." << std::endl;
+                  << ". Possible reason: Meta Tables schema is damaged "
+                  << "or created by in-compatible Milvus version." << std::endl;
         kill(0, SIGUSR1);
     }
 

@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -68,6 +62,10 @@ constexpr int64_t DEFAULT_BKTNUMBER = INVALID_VALUE;
 constexpr int64_t DEFAULT_BKTKMEANSK = INVALID_VALUE;
 constexpr int64_t DEFAULT_BKTLEAFSIZE = INVALID_VALUE;
 
+// HNSW Config
+constexpr int64_t DEFAULT_M = INVALID_VALUE;
+constexpr int64_t DEFAULT_EF = INVALID_VALUE;
+
 struct IVFCfg : public Cfg {
     int64_t nlist = DEFAULT_NLIST;
     int64_t nprobe = DEFAULT_NPROBE;
@@ -82,12 +80,26 @@ struct IVFCfg : public Cfg {
     std::stringstream
     DumpImpl() override;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using IVFConfig = std::shared_ptr<IVFCfg>;
+
+struct IVFBinCfg : public IVFCfg {
+    bool
+    CheckValid() override {
+        if (metric_type == METRICTYPE::HAMMING || metric_type == METRICTYPE::TANIMOTO ||
+            metric_type == METRICTYPE::JACCARD) {
+            return true;
+        }
+        std::stringstream ss;
+        ss << "MetricType: " << int(metric_type) << " not support!";
+        KNOWHERE_THROW_MSG(ss.str());
+        return false;
+    }
+};
 
 struct IVFSQCfg : public IVFCfg {
     // TODO(linxj): cpu only support SQ4 SQ6 SQ8 SQ16, gpu only support SQ4, SQ8, SQ16
@@ -103,10 +115,10 @@ struct IVFSQCfg : public IVFCfg {
 
     IVFSQCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using IVFSQConfig = std::shared_ptr<IVFSQCfg>;
 
@@ -126,10 +138,10 @@ struct IVFPQCfg : public IVFCfg {
 
     IVFPQCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using IVFPQConfig = std::shared_ptr<IVFPQCfg>;
 
@@ -154,10 +166,10 @@ struct NSGCfg : public IVFCfg {
     std::stringstream
     DumpImpl() override;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using NSGConfig = std::shared_ptr<NSGCfg>;
 
@@ -193,10 +205,10 @@ struct KDTCfg : public SPTAGCfg {
 
     KDTCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using KDTConfig = std::shared_ptr<KDTCfg>;
 
@@ -207,11 +219,33 @@ struct BKTCfg : public SPTAGCfg {
 
     BKTCfg() = default;
 
-    bool
-    CheckValid() override {
-        return true;
-    };
+    //    bool
+    //    CheckValid() override {
+    //        return true;
+    //    };
 };
 using BKTConfig = std::shared_ptr<BKTCfg>;
+
+struct BinIDMAPCfg : public Cfg {
+    bool
+    CheckValid() override {
+        if (metric_type == METRICTYPE::HAMMING || metric_type == METRICTYPE::TANIMOTO ||
+            metric_type == METRICTYPE::JACCARD) {
+            return true;
+        }
+        std::stringstream ss;
+        ss << "MetricType: " << int(metric_type) << " not support!";
+        KNOWHERE_THROW_MSG(ss.str());
+        return false;
+    }
+};
+
+struct HNSWCfg : public Cfg {
+    int64_t M = DEFAULT_M;
+    int64_t ef = DEFAULT_EF;
+
+    HNSWCfg() = default;
+};
+using HNSWConfig = std::shared_ptr<HNSWCfg>;
 
 }  // namespace knowhere

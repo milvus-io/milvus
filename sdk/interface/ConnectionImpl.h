@@ -1,28 +1,22 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-
-#include "MilvusApi.h"
-#include "../grpc/ClientProxy.h"
 
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "../grpc/ClientProxy.h"
+#include "MilvusApi.h"
 
 namespace milvus {
 
@@ -60,9 +54,20 @@ class ConnectionImpl : public Connection {
            std::vector<int64_t>& id_array) override;
 
     Status
+    GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) override;
+
+    Status
+    GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
+                    std::vector<int64_t>& id_array) override;
+
+    Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           const std::vector<RowRecord>& query_record_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) override;
+
+    Status
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
+               int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
@@ -72,6 +77,9 @@ class ConnectionImpl : public Connection {
 
     Status
     ShowTables(std::vector<std::string>& table_array) override;
+
+    Status
+    ShowTableInfo(const std::string& table_name, TableInfo& table_info) override;
 
     std::string
     ClientVersion() const override;
@@ -86,7 +94,7 @@ class ConnectionImpl : public Connection {
     DumpTaskTables() const override;
 
     Status
-    DeleteByDate(const std::string& table_name, const Range& range) override;
+    DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) override;
 
     Status
     PreloadTable(const std::string& table_name) const override;
@@ -101,10 +109,25 @@ class ConnectionImpl : public Connection {
     CreatePartition(const PartitionParam& param) override;
 
     Status
-    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const override;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const override;
 
     Status
     DropPartition(const PartitionParam& param) override;
+
+    Status
+    GetConfig(const std::string& node_name, std::string& value) const override;
+
+    Status
+    SetConfig(const std::string& node_name, const std::string& value) const override;
+
+    Status
+    FlushTable(const std::string& table_name) override;
+
+    Status
+    Flush() override;
+
+    Status
+    CompactTable(const std::string& table_name) override;
 
  private:
     std::shared_ptr<ClientProxy> client_proxy_;

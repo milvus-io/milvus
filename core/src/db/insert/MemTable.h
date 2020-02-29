@@ -1,30 +1,26 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "MemTableFile.h"
 #include "VectorSource.h"
 #include "utils/Status.h"
-
-#include <memory>
-#include <mutex>
-#include <string>
-#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -36,7 +32,13 @@ class MemTable {
     MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
     Status
-    Add(VectorSourcePtr& source, IDNumbers& vector_ids);
+    Add(const VectorSourcePtr& source);
+
+    Status
+    Delete(segment::doc_id_t doc_id);
+
+    Status
+    Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
     void
     GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);
@@ -45,7 +47,7 @@ class MemTable {
     GetTableFileCount();
 
     Status
-    Serialize();
+    Serialize(uint64_t wal_lsn);
 
     bool
     Empty();
@@ -55,6 +57,16 @@ class MemTable {
 
     size_t
     GetCurrentMem();
+
+    uint64_t
+    GetLSN();
+
+    void
+    SetLSN(uint64_t lsn);
+
+ private:
+    Status
+    ApplyDeletes();
 
  private:
     const std::string table_id_;
@@ -66,6 +78,10 @@ class MemTable {
     DBOptions options_;
 
     std::mutex mutex_;
+
+    std::set<segment::doc_id_t> doc_ids_to_delete_;
+
+    std::atomic<uint64_t> lsn_;
 };  // MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;

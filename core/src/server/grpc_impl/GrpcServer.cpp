@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/grpc_impl/GrpcServer.h"
 
@@ -55,6 +49,7 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     void
     UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
+        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, 20);
     }
 
     void
@@ -102,9 +97,8 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
-    RequestHandler handler;
     GrpcRequestHandler service(opentracing::Tracer::Global());
-    service.RegisterRequestHandler(handler);
+    service.RegisterRequestHandler(RequestHandler());
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

@@ -9,7 +9,6 @@ spec:
   containers:
   - name: milvus-cpu-build-env
     image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.7.0-centos7
-    imagePullPolicy: Always
     env:
     - name: POD_IP
       valueFrom:

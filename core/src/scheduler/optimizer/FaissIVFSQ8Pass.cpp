@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
 #include "scheduler/optimizer/FaissIVFSQ8Pass.h"
 #include "cache/GpuCacheMgr.h"
@@ -35,10 +29,15 @@ FaissIVFSQ8Pass::Init() {
     if (!s.ok()) {
         threshold_ = std::numeric_limits<int32_t>::max();
     }
-    s = config.GetGpuResourceConfigSearchResources(gpus);
+    s = config.GetGpuResourceConfigSearchResources(search_gpus_);
     if (!s.ok()) {
-        throw;
+        throw std::exception();
     }
+
+    SetIdentity("FaissIVFSQ8Pass");
+    AddGpuEnableListener();
+    AddGpuSearchThresholdListener();
+    AddGpuSearchResListener();
 #endif
 }
 
@@ -55,15 +54,18 @@ FaissIVFSQ8Pass::Run(const TaskPtr& task) {
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
-    if (search_job->nq() < threshold_) {
+    if (!gpu_enable_) {
+        SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: gpu disable, specify cpu to search!";
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_job->nq() < threshold_) {
         SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: nq < gpu_search_threshold, specify cpu to search!";
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
-        auto best_device_id = count_ % gpus.size();
+        auto best_device_id = count_ % search_gpus_.size();
         SERVER_LOG_DEBUG << "FaissIVFSQ8Pass: nq > gpu_search_threshold, specify gpu" << best_device_id
                          << " to search!";
         count_++;
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, gpus[best_device_id]);
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[best_device_id]);
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;

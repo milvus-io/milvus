@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -53,26 +47,38 @@ class GrpcClient {
     Status
     CreateIndex(const grpc::IndexParam& index_param);
 
-    void
-    Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param, Status& status);
+    Status
+    Insert(const grpc::InsertParam& insert_param, grpc::VectorIds& vector_ids);
 
     Status
-    Search(::milvus::grpc::TopKQueryResult& topk_query_result, const grpc::SearchParam& search_param);
+    GetVectorByID(const grpc::VectorIdentity& vector_identity, ::milvus::grpc::VectorData& vector_data);
 
     Status
-    DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
+    GetIDsInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids);
+
+    Status
+    Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
+
+    Status
+    SearchByID(const grpc::SearchByIDParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
+
+    Status
+    DescribeTable(const std::string& table_name, grpc::TableSchema& grpc_schema);
 
     int64_t
-    CountTable(const std::string& table_name, Status& status);
+    CountTable(grpc::TableName& table_name, Status& status);
 
     Status
     ShowTables(milvus::grpc::TableNameList& table_name_list);
 
     Status
-    Cmd(std::string& result, const std::string& cmd);
+    ShowTableInfo(grpc::TableName& table_name, grpc::TableInfo& table_info);
 
     Status
-    DeleteByDate(grpc::DeleteByDateParam& delete_by_range_param);
+    Cmd(const std::string& cmd, std::string& result);
+
+    Status
+    DeleteByID(grpc::DeleteByIDParam& delete_by_id_param);
 
     Status
     PreloadTable(grpc::TableName& table_name);
@@ -91,6 +97,12 @@ class GrpcClient {
 
     Status
     DropPartition(const ::milvus::grpc::PartitionParam& partition_param);
+
+    Status
+    Flush(const std::string& table_name);
+
+    Status
+    Compact(milvus::grpc::TableName& table_name);
 
     Status
     Disconnect();

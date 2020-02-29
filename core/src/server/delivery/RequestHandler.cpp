@@ -1,39 +1,42 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/RequestHandler.h"
+
+#include <set>
+
 #include "server/delivery/RequestScheduler.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/delivery/request/CmdRequest.h"
+#include "server/delivery/request/CompactRequest.h"
 #include "server/delivery/request/CountTableRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
 #include "server/delivery/request/CreateTableRequest.h"
-#include "server/delivery/request/DeleteByDateRequest.h"
+#include "server/delivery/request/DeleteByIDRequest.h"
 #include "server/delivery/request/DescribeIndexRequest.h"
 #include "server/delivery/request/DescribeTableRequest.h"
 #include "server/delivery/request/DropIndexRequest.h"
 #include "server/delivery/request/DropPartitionRequest.h"
 #include "server/delivery/request/DropTableRequest.h"
+#include "server/delivery/request/FlushRequest.h"
+#include "server/delivery/request/GetVectorByIDRequest.h"
+#include "server/delivery/request/GetVectorIDsRequest.h"
 #include "server/delivery/request/HasTableRequest.h"
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadTableRequest.h"
+#include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
+#include "server/delivery/request/ShowTableInfoRequest.h"
 #include "server/delivery/request/ShowTablesRequest.h"
 
 namespace milvus {
@@ -75,11 +78,27 @@ RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::
 }
 
 Status
-RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
-                       std::vector<float>& data_list, const std::string& partition_tag,
-                       std::vector<int64_t>& id_array) {
-    BaseRequestPtr request_ptr =
-        InsertRequest::Create(context, table_name, record_size, data_list, partition_tag, id_array);
+RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& table_name,
+                       engine::VectorsData& vectors, const std::string& partition_tag) {
+    BaseRequestPtr request_ptr = InsertRequest::Create(context, table_name, vectors, partition_tag);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::GetVectorByID(const std::shared_ptr<Context>& context, const std::string& table_name,
+                              const std::vector<int64_t>& ids, engine::VectorsData& vectors) {
+    BaseRequestPtr request_ptr = GetVectorByIDRequest::Create(context, table_name, ids, vectors);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& table_name,
+                             const std::string& segment_name, std::vector<int64_t>& vector_ids) {
+    BaseRequestPtr request_ptr = GetVectorIDsRequest::Create(context, table_name, segment_name, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -94,13 +113,32 @@ RequestHandler::ShowTables(const std::shared_ptr<Context>& context, std::vector<
 }
 
 Status
-RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t record_size,
-                       const std::vector<float>& data_list,
-                       const std::vector<std::pair<std::string, std::string>>& range_list, int64_t topk, int64_t nprobe,
+RequestHandler::ShowTableInfo(const std::shared_ptr<Context>& context, const std::string& table_name,
+                              TableInfo& table_info) {
+    BaseRequestPtr request_ptr = ShowTableInfoRequest::Create(context, table_name, table_info);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& table_name,
+                       const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
                        const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                        TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = SearchRequest::Create(context, table_name, record_size, data_list, range_list, topk,
-                                                       nprobe, partition_list, file_id_list, result);
+    BaseRequestPtr request_ptr =
+        SearchRequest::Create(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
+                           int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+                           TopKQueryResult& result) {
+    BaseRequestPtr request_ptr =
+        SearchByIDRequest::Create(context, table_name, vector_id, topk, nprobe, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -132,9 +170,9 @@ RequestHandler::Cmd(const std::shared_ptr<Context>& context, const std::string& 
 }
 
 Status
-RequestHandler::DeleteByRange(const std::shared_ptr<Context>& context, const std::string& table_name,
-                              const Range& range) {
-    BaseRequestPtr request_ptr = DeleteByDateRequest::Create(context, table_name, range);
+RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::string& table_name,
+                           const std::vector<int64_t>& vector_ids) {
+    BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, table_name, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -167,8 +205,8 @@ RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::st
 
 Status
 RequestHandler::CreatePartition(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                const std::string& partition_name, const std::string& tag) {
-    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, table_name, partition_name, tag);
+                                const std::string& tag) {
+    BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, table_name, tag);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -185,8 +223,24 @@ RequestHandler::ShowPartitions(const std::shared_ptr<Context>& context, const st
 
 Status
 RequestHandler::DropPartition(const std::shared_ptr<Context>& context, const std::string& table_name,
-                              const std::string& partition_name, const std::string& tag) {
-    BaseRequestPtr request_ptr = DropPartitionRequest::Create(context, table_name, partition_name, tag);
+                              const std::string& tag) {
+    BaseRequestPtr request_ptr = DropPartitionRequest::Create(context, table_name, tag);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& table_names) {
+    BaseRequestPtr request_ptr = FlushRequest::Create(context, table_names);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::string& table_name) {
+    BaseRequestPtr request_ptr = CompactRequest::Create(context, table_name);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

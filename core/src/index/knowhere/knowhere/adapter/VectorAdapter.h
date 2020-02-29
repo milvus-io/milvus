@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -34,5 +28,10 @@ extern const char* DISTANCE;
     auto dim = dataset->Get<int64_t>(meta::DIM);   \
     auto rows = dataset->Get<int64_t>(meta::ROWS); \
     auto p_data = dataset->Get<const float*>(meta::TENSOR);
+
+#define GETBINARYTENSOR(dataset)                   \
+    auto dim = dataset->Get<int64_t>(meta::DIM);   \
+    auto rows = dataset->Get<int64_t>(meta::ROWS); \
+    auto p_data = dataset->Get<const uint8_t*>(meta::TENSOR);
 
 }  // namespace knowhere

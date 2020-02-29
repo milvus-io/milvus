@@ -1,28 +1,22 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-
-#include "db/Types.h"
-#include "utils/Status.h"
 
 #include <memory>
 #include <set>
 #include <string>
+
+#include "db/Types.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -30,10 +24,27 @@ namespace engine {
 class MemManager {
  public:
     virtual Status
-    InsertVectors(const std::string& table_id, size_t n, const float* vectors, IDNumbers& vector_ids) = 0;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) = 0;
 
     virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) = 0;
+
+    virtual Status
+    DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) = 0;
+
+    virtual Status
+    DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
+
+    virtual Status
+    Flush(const std::string& table_id) = 0;
+
+    virtual Status
+    Flush(std::set<std::string>& table_ids) = 0;
+
+    //    virtual Status
+    //    Serialize(std::set<std::string>& table_ids) = 0;
 
     virtual Status
     EraseMemVector(const std::string& table_id) = 0;

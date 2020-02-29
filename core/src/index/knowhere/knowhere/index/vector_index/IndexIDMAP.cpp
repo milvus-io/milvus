@@ -1,24 +1,17 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
-#include <faiss/IndexFlat.h>
-#include <faiss/MetaIndexes.h>
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <faiss/AutoTune.h>
+#include <faiss/IndexFlat.h>
+#include <faiss/MetaIndexes.h>
 #include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
 #include <faiss/index_io.h>
@@ -66,7 +59,6 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    config->CheckValid();
     GETTENSOR(dataset)
 
     auto elems = rows * config->k;
@@ -85,7 +77,7 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
 
 void
 IDMAP::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
-    index_->search(n, (float*)data, k, distances, labels);
+    index_->search(n, (float*)data, k, distances, labels, bitset_);
 }
 
 void
@@ -108,7 +100,8 @@ IDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset)
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const float*>(meta::TENSOR);
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {
@@ -149,12 +142,11 @@ IDMAP::GetRawIds() {
     }
 }
 
-const char* type = "IDMap,Flat";
-
 void
 IDMAP::Train(const Config& config) {
     config->CheckValid();
 
+    const char* type = "IDMap,Flat";
     auto index = faiss::index_factory(config->d, type, GetMetricType(config->metric_type));
     index_.reset(index);
 }
@@ -191,6 +183,62 @@ IDMAP::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 void
 IDMAP::Seal() {
     // do nothing
+}
+
+DatasetPtr
+IDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    //    GETTENSOR(dataset)
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
+
+    size_t p_x_size = sizeof(float) * elems;
+    auto p_x = (float*)malloc(p_x_size);
+
+    index_->get_vector_by_id(1, p_data, p_x, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::TENSOR, p_x);
+    return ret_ds;
+}
+
+DatasetPtr
+IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    //    GETTENSOR(dataset)
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+
+    auto elems = rows * config->k;
+    size_t p_id_size = sizeof(int64_t) * elems;
+    size_t p_dist_size = sizeof(float) * elems;
+    auto p_id = (int64_t*)malloc(p_id_size);
+    auto p_dist = (float*)malloc(p_dist_size);
+
+    // todo: enable search by id (zhiru)
+    //    auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+    //    index_->searchById(rows, (float*)p_data, config->k, p_dist, p_id, blacklist);
+    index_->search_by_id(rows, p_data, config->k, p_dist, p_id, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
+    return ret_ds;
+}
+
+void
+IDMAP::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+    bitset_ = std::move(list);
+}
+
+void
+IDMAP::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    list = bitset_;
 }
 
 }  // namespace knowhere

@@ -1,30 +1,24 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
-
-#include "db/Constants.h"
-#include "db/engine/ExecutionEngine.h"
-#include "src/version.h"
 
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "db/Constants.h"
+#include "db/engine/ExecutionEngine.h"
+#include "src/version.h"
 
 namespace milvus {
 namespace engine {
@@ -41,7 +35,10 @@ constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
 
 using DateT = int;
 const DateT EmptyDate = -1;
-using DatesT = std::vector<DateT>;
+
+struct EnvironmentSchema {
+    uint64_t global_lsn_ = 0;
+};  // EnvironmentSchema
 
 struct TableSchema {
     typedef enum {
@@ -62,6 +59,7 @@ struct TableSchema {
     std::string owner_table_;
     std::string partition_tag_;
     std::string version_ = CURRENT_VERSION;
+    uint64_t flush_lsn_ = 0;
 };  // TableSchema
 
 struct TableFileSchema {
@@ -78,12 +76,14 @@ struct TableFileSchema {
 
     size_t id_ = 0;
     std::string table_id_;
+    std::string segment_id_;
     std::string file_id_;
     int32_t file_type_ = NEW;
     size_t file_size_ = 0;
     size_t row_count_ = 0;
     DateT date_ = EmptyDate;
     uint16_t dimension_ = 0;
+    // TODO(zhiru)
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
@@ -91,11 +91,11 @@ struct TableFileSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
-};                                               // TableFileSchema
+    uint64_t flush_lsn_ = 0;
+};  // TableFileSchema
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;
-using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 
 }  // namespace meta
 }  // namespace engine

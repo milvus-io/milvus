@@ -1,24 +1,19 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "unittest/utils.h"
 #include "knowhere/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
+#include <math.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -39,19 +34,46 @@ DataGen::Init_with_default() {
 }
 
 void
+BinaryDataGen::Init_with_binary_default() {
+    Generate(dim, nb, nq);
+}
+
+void
 DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     this->nb = nb;
     this->nq = nq;
     this->dim = dim;
 
-    GenAll(dim, nb, xb, ids, nq, xq);
+    GenAll(dim, nb, xb, ids, xids, nq, xq);
     assert(xb.size() == (size_t)dim * nb);
     assert(xq.size() == (size_t)dim * nq);
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
+    id_dataset = generate_id_dataset(nq, ids.data());
+    xid_dataset = generate_id_dataset(nq, xids.data());
+    xid_dataset->Set(knowhere::meta::DIM, (int64_t)dim);
 }
 
+void
+BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
+    this->nb = nb;
+    this->nq = nq;
+    this->dim = dim;
+
+    int64_t dim_x = dim / 8;
+    GenBinaryAll(dim_x, nb, xb, ids, xids, nq, xq);
+    assert(xb.size() == (size_t)dim_x * nb);
+    assert(xq.size() == (size_t)dim_x * nq);
+
+    base_dataset = generate_binary_dataset(nb, dim, xb.data(), ids.data());
+    query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
+    id_dataset = generate_id_dataset(nq, ids.data());
+    xid_dataset = generate_id_dataset(nq, xids.data());
+}
+
+// not used
+#if 0
 knowhere::DatasetPtr
 DataGen::GenQuery(const int& nq) {
     xq.resize(nq * dim);
@@ -60,22 +82,45 @@ DataGen::GenQuery(const int& nq) {
     }
     return generate_query_dataset(nq, dim, xq.data());
 }
+#endif
 
 void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
-       std::vector<float>& xq) {
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    GenAll(dim, nb, xb.data(), ids.data(), nq, xq.data());
+    xids.resize(1);
+    GenAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
 }
 
 void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq) {
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq) {
     GenBase(dim, nb, xb, ids);
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
+    xids[0] = 3;  // pseudo random
+}
+
+void
+GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
+             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq) {
+    xb.resize(nb * dim);
+    xq.resize(nq * dim);
+    ids.resize(nb);
+    xids.resize(1);
+    GenBinaryAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
+}
+
+void
+GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
+             uint8_t* xq) {
+    GenBinaryBase(dim, nb, xb, ids);
+    for (int64_t i = 0; i < nq * dim; ++i) {
+        xq[i] = xb[i];
+    }
+    xids[0] = 3;  // pseudo random
 }
 
 void
@@ -86,6 +131,17 @@ GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids) {
             xb[i * dim + j] = drand48();
         }
         xb[dim * i] += i / 1000.;
+        ids[i] = i;
+    }
+}
+
+void
+GenBinaryBase(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids) {
+    for (auto i = 0; i < nb; ++i) {
+        for (auto j = 0; j < dim; ++j) {
+            // p_data[i * d + j] = float(base + i);
+            xb[i * dim + j] = (uint8_t)lrand48();
+        }
         ids[i] = i;
     }
 }
@@ -131,6 +187,16 @@ generate_dataset(int64_t nb, int64_t dim, const float* xb, const int64_t* ids) {
 }
 
 knowhere::DatasetPtr
+generate_binary_dataset(int64_t nb, int64_t dim, const uint8_t* xb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
+    return ret_ds;
+}
+
+knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
     auto ret_ds = std::make_shared<knowhere::Dataset>();
     ret_ds->Set(knowhere::meta::ROWS, nb);
@@ -139,12 +205,84 @@ generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
     return ret_ds;
 }
 
+knowhere::DatasetPtr
+generate_id_dataset(int64_t nb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
+    return ret_ds;
+}
+
+knowhere::DatasetPtr
+generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::DIM, dim);
+    ret_ds->Set(knowhere::meta::TENSOR, xb);
+    return ret_ds;
+}
+
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
     auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
     for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *((int64_t*)(ids) + i * k));
-        //        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
+        switch (check_mode) {
+            case CheckMode::CHECK_EQUAL:
+                ASSERT_EQ(i, *((int64_t*)(ids) + i * k));
+                break;
+            case CheckMode::CHECK_NOT_EQUAL:
+                ASSERT_NE(i, *((int64_t*)(ids) + i * k));
+                break;
+            default:
+                ASSERT_TRUE(false);
+                break;
+        }
+    }
+}
+
+void
+AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+          const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
+    auto base = base_dataset->Get<const float*>(knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
+    auto x = result->Get<float*>(knowhere::meta::TENSOR);
+    for (auto i = 0; i < n; i++) {
+        auto id = ids[i];
+        for (auto j = 0; j < dim; j++) {
+            switch (check_mode) {
+                case CheckMode::CHECK_EQUAL: {
+                    ASSERT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+                    break;
+                }
+                case CheckMode::CHECK_NOT_EQUAL: {
+                    ASSERT_NE(*(base + id * dim + j), *(x + i * dim + j));
+                    break;
+                }
+                case CheckMode::CHECK_APPROXIMATE_EQUAL: {
+                    float a = *(base + id * dim + j);
+                    float b = *(x + i * dim + j);
+                    ASSERT_TRUE((std::fabs(a - b) / std::fabs(a)) < 0.1);
+                    break;
+                }
+                default:
+                    ASSERT_TRUE(false);
+                    break;
+            }
+        }
+    }
+}
+
+void
+AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+               const knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
+    auto base = base_dataset->Get<const uint8_t*>(knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
+    auto x = result->Get<uint8_t*>(knowhere::meta::TENSOR);
+    for (auto i = 0; i < 1; i++) {
+        auto id = ids[i];
+        for (auto j = 0; j < dim; j++) {
+            EXPECT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+        }
     }
 }
 
@@ -169,6 +307,8 @@ PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
+// not used
+#if 0
 void
 Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph, const char* filename) {
     std::vector<std::vector<unsigned>> knng;
@@ -237,3 +377,4 @@ int*  // not very clean, but works as long as sizeof(int) == sizeof(float)
 ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
     return (int*)fvecs_read(fname, d_out, n_out);
 }
+#endif

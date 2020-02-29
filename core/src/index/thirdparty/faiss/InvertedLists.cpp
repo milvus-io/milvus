@@ -14,6 +14,8 @@
 
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
+
+#ifndef USE_CPU
 #include "gpu/utils/DeviceUtils.h"
 #include "cuda.h"
 #include "cuda_runtime.h"
@@ -47,6 +49,7 @@ PageLockMemory::PageLockMemory(PageLockMemory &&other) {
     other.nbytes = 0;
 }
 }
+#endif
 
 namespace faiss {
 
@@ -257,6 +260,11 @@ ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(size_t nlist,
     auto total_size = std::accumulate(readonly_length.begin(), readonly_length.end(), 0);
     readonly_offset.reserve(nlist);
 
+#ifdef USE_CPU
+    readonly_codes.reserve(total_size * code_size);
+    readonly_ids.reserve(total_size);
+#endif
+
     size_t offset = 0;
     for (auto i=0; i<readonly_length.size(); ++i) {
         readonly_offset.emplace_back(offset);
@@ -266,8 +274,10 @@ ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(size_t nlist,
 
 ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ArrayInvertedLists& other)
         : InvertedLists (other.nlist, other.code_size) {
+#ifndef USE_CPU
     std::vector <uint8_t> readonly_codes;
     std::vector <idx_t> readonly_ids;
+#endif
     readonly_length.reserve(nlist);
     size_t offset = 0;
     for (auto& list_ids : other.ids) {
@@ -281,6 +291,7 @@ ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ArrayInvertedLists&
         readonly_codes.insert(readonly_codes.end(), list_codes.begin(), list_codes.end());
     }
 
+#ifndef USE_CPU
     // convert to page-lock memory
     {
         size_t size = readonly_codes.size() * sizeof(uint8_t);
@@ -292,6 +303,7 @@ ReadOnlyArrayInvertedLists::ReadOnlyArrayInvertedLists(const ArrayInvertedLists&
         pin_readonly_ids = std::make_shared<PageLockMemory>(size);
         memcpy(pin_readonly_ids->data, readonly_ids.data(), size);
     }
+#endif
 
     valid = true;
 }
@@ -352,25 +364,41 @@ size_t ReadOnlyArrayInvertedLists::list_size(size_t list_no) const
 const uint8_t * ReadOnlyArrayInvertedLists::get_codes (size_t list_no) const
 {
     FAISS_ASSERT(list_no < nlist && valid);
+#ifdef USE_CPU
+    return readonly_codes.data() + readonly_offset[list_no] * code_size;
+#else
     uint8_t *pcodes = (uint8_t *)(pin_readonly_codes->data);
     return pcodes + readonly_offset[list_no] * code_size;
+#endif
 }
 
 const InvertedLists::idx_t* ReadOnlyArrayInvertedLists::get_ids (size_t list_no) const
 {
     FAISS_ASSERT(list_no < nlist && valid);
+#ifdef USE_CPU
+    return readonly_ids.data() + readonly_offset[list_no];
+#else
     idx_t *pids = (idx_t *)pin_readonly_ids->data;
     return pids + readonly_offset[list_no];
+#endif
 }
 
 const InvertedLists::idx_t* ReadOnlyArrayInvertedLists::get_all_ids() const {
     FAISS_ASSERT(valid);
+#ifdef USE_CPU
+    return readonly_ids.data();
+#else
     return (idx_t *)(pin_readonly_ids->data);
+#endif
 }
 
 const uint8_t* ReadOnlyArrayInvertedLists::get_all_codes() const {
     FAISS_ASSERT(valid);
+#ifdef USE_CPU
+    return readonly_codes.data();
+#else
     return (uint8_t *)(pin_readonly_codes->data);
+#endif
 }
 
 const std::vector<size_t>& ReadOnlyArrayInvertedLists::get_list_length() const {

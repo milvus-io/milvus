@@ -1,30 +1,28 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
+#include <faiss/utils/ConcurrentBitset.h>
 
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/Quantizer.h"
+#include "segment/Types.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
 
@@ -50,6 +48,9 @@ enum class IndexType {
     NSG_MIX,
     FAISS_IVFPQ_MIX,
     SPTAG_BKT_RNT_CPU,
+    HNSW,
+    FAISS_BIN_IDMAP = 100,
+    FAISS_BIN_IVFLAT_CPU = 101,
 };
 
 class VecIndex;
@@ -63,10 +64,29 @@ class VecIndex : public cache::DataObj {
              const float* xt = nullptr) = 0;
 
     virtual Status
+    BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg, const int64_t& nt = 0,
+             const uint8_t* xt = nullptr) {
+        ENGINE_LOG_ERROR << "BuildAll with uint8_t not support";
+        return Status::OK();
+    }
+
+    virtual Status
     Add(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg = Config()) = 0;
 
     virtual Status
+    Add(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "Add with uint8_t not support";
+        return Status::OK();
+    }
+
+    virtual Status
     Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg = Config()) = 0;
+
+    virtual Status
+    Search(const int64_t& nq, const uint8_t* xq, float* dist, int64_t* ids, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "Search with uint8_t not support";
+        return Status::OK();
+    }
 
     virtual VecIndexPtr
     CopyToGpu(const int64_t& device_id, const Config& cfg = Config()) = 0;
@@ -82,7 +102,7 @@ class VecIndex : public cache::DataObj {
     GetDeviceId() = 0;
 
     virtual IndexType
-    GetType() = 0;
+    GetType() const = 0;
 
     virtual int64_t
     Dimension() = 0;
@@ -130,6 +150,55 @@ class VecIndex : public cache::DataObj {
         return std::make_pair(nullptr, nullptr);
     }
     ////////////////
+
+    virtual Status
+    GetVectorById(const int64_t n, const int64_t* xid, float* x, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "GetVectorById not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    GetVectorById(const int64_t n, const int64_t* xid, uint8_t* x, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "GetVectorById not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg = Config()) {
+        ENGINE_LOG_ERROR << "SearchById not support";
+        return Status::OK();
+    }
+    //
+    //    virtual Status
+    //    SearchById(const int64_t& nq, const uint8_t * xq, faiss::ConcurrentBitsetPtr bitset, float* dist, int64_t*
+    //    ids, const Config& cfg = Config()){
+    //        ENGINE_LOG_ERROR << "SearchById with uint8_t not support";
+    //        return Status::OK();
+    //    }
+
+    virtual Status
+    SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+        ENGINE_LOG_ERROR << "SetBlacklist not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+        ENGINE_LOG_ERROR << "GetBlacklist not support";
+        return Status::OK();
+    }
+
+    virtual Status
+    SetUids(std::vector<segment::doc_id_t>& uids) {
+        ENGINE_LOG_ERROR << "SetUIDArray not support";
+        return Status::OK();
+    }
+
+    virtual const std::vector<segment::doc_id_t>&
+    GetUids() const {
+        ENGINE_LOG_ERROR << "GetUIDArray not support";
+    }
+
  private:
     int64_t size_ = 0;
 };

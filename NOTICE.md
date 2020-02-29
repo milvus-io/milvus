@@ -6,7 +6,6 @@
 
 | Name          | License                                                      |
 | ------------- | ------------------------------------------------------------ |
-| Apache Arrow  | [Apache License 2.0](https://github.com/apache/arrow/blob/master/LICENSE.txt)                                           |
 | Boost         | [Boost Software License](https://github.com/boostorg/boost/blob/master/LICENSE_1_0.txt)                                       |
 | FAISS         | [MIT](https://github.com/facebookresearch/faiss/blob/master/LICENSE)                                                          |
 | Gtest         | [BSD 3-Clause](https://github.com/google/googletest/blob/master/LICENSE)                                                 |
@@ -23,4 +22,7 @@
 | grpc          | [Apache 2.0](https://github.com/grpc/grpc/blob/master/LICENSE)                                                   |
 | EASYLOGGINGPP | [MIT](https://github.com/zuhd-org/easyloggingpp/blob/master/LICENSE)                                                          |
 | Json          | [MIT](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT)                                                          |
+| opentracing-cpp | [Apache License 2.0](https://github.com/opentracing/opentracing-cpp/blob/master/LICENSE)                                     |
+| libfiu        | [BOLA](https://github.com/albertito/libfiu/blob/master/LICENSE)                                                          |
+| aws-sdk-cpp   | [Apache License 2.0](https://github.com/aws/aws-sdk-cpp/blob/master/LICENSE)                                             |
 

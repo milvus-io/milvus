@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreateTableRequest.h"
 #include "server/DBWrapper.h"
@@ -22,6 +16,7 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
+#include <fiu-local.h>
 #include <memory>
 #include <string>
 
@@ -62,6 +57,8 @@ CreateTableRequest::OnExecute() {
         }
 
         status = ValidationUtil::ValidateTableIndexFileSize(index_file_size_);
+        fiu_do_on("CreateTableRequest.OnExecute.invalid_index_file_size",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
@@ -71,6 +68,8 @@ CreateTableRequest::OnExecute() {
             return status;
         }
 
+        rc.RecordSection("check validation");
+
         // step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
@@ -78,8 +77,21 @@ CreateTableRequest::OnExecute() {
         table_info.index_file_size_ = index_file_size_;
         table_info.metric_type_ = metric_type_;
 
+        // some metric type only support binary vector, adapt the index type
+        if (ValidationUtil::IsBinaryMetricType(metric_type_)) {
+            if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
+                table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
+            } else if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
+                table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            }
+        }
+
         // step 3: create table
         status = DBWrapper::DB()->CreateTable(table_info);
+        fiu_do_on("CreateTableRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
+        fiu_do_on("CreateTableRequest.OnExecute.create_table_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("CreateTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             // table could exist
             if (status.code() == DB_ALREADY_EXIST) {

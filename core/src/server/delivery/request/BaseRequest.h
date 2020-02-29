@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -39,12 +33,6 @@ namespace server {
 static const char* DQL_REQUEST_GROUP = "dql";
 static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
 static const char* INFO_REQUEST_GROUP = "info";
-
-using DB_DATE = milvus::engine::meta::DateT;
-
-Status
-ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array,
-                          std::vector<DB_DATE>& dates);
 
 struct TableSchema {
     std::string table_name_;
@@ -101,16 +89,32 @@ struct IndexParam {
 
 struct PartitionParam {
     std::string table_name_;
-    std::string partition_name_;
     std::string tag_;
 
     PartitionParam() = default;
 
-    PartitionParam(const std::string& table_name, const std::string& partition_name, const std::string& tag) {
+    PartitionParam(const std::string& table_name, const std::string& tag) {
         table_name_ = table_name;
-        partition_name_ = partition_name;
         tag_ = tag;
     }
+};
+
+struct SegmentStat {
+    std::string name_;
+    int64_t row_num_ = 0;
+    std::string index_name_;
+    int64_t data_size_ = 0;
+};
+
+struct PartitionStat {
+    std::string tag_;
+    int64_t total_row_num_ = 0;
+    std::vector<SegmentStat> segments_stat_;
+};
+
+struct TableInfo {
+    int64_t total_row_num_ = 0;
+    std::vector<PartitionStat> partitions_stat_;
 };
 
 class BaseRequest {
@@ -167,7 +171,6 @@ class BaseRequest {
 };
 
 using BaseRequestPtr = std::shared_ptr<BaseRequest>;
-using Range = std::pair<std::string, std::string>;
 
 }  // namespace server
 }  // namespace milvus

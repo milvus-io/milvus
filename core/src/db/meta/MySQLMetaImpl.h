@@ -1,31 +1,26 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
-#include "Meta.h"
-#include "MySQLConnectionPool.h"
-#include "db/Options.h"
-
 #include <mysql++/mysql++.h>
+
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include "Meta.h"
+#include "MySQLConnectionPool.h"
+#include "db/Options.h"
 
 namespace milvus {
 namespace engine {
@@ -58,16 +53,25 @@ class MySQLMetaImpl : public Meta {
     CreateTableFile(TableFileSchema& file_schema) override;
 
     Status
-    DropDataByDate(const std::string& table_id, const DatesT& dates) override;
+    GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
 
     Status
-    GetTableFiles(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& table_files) override;
+    GetTableFilesBySegmentId(const std::string& segment_id, TableFilesSchema& table_files) override;
 
     Status
     UpdateTableIndex(const std::string& table_id, const TableIndex& index) override;
 
     Status
     UpdateTableFlag(const std::string& table_id, int64_t flag) override;
+
+    Status
+    UpdateTableFlushLSN(const std::string& table_id, uint64_t flush_lsn) override;
+
+    Status
+    GetTableFlushLSN(const std::string& table_id, uint64_t& flush_lsn) override;
+
+    Status
+    GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& table_files) override;
 
     Status
     UpdateTableFile(TableFileSchema& file_schema) override;
@@ -85,7 +89,8 @@ class MySQLMetaImpl : public Meta {
     DropTableIndex(const std::string& table_id) override;
 
     Status
-    CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag) override;
+    CreatePartition(const std::string& table_id, const std::string& partition_name, const std::string& tag,
+                    uint64_t lsn) override;
 
     Status
     DropPartition(const std::string& partition_name) override;
@@ -97,11 +102,10 @@ class MySQLMetaImpl : public Meta {
     GetPartitionName(const std::string& table_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
-                  DatePartionedTableFilesSchema& files) override;
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, TableFilesSchema& files) override;
 
     Status
-    FilesToMerge(const std::string& table_id, DatePartionedTableFilesSchema& files) override;
+    FilesToMerge(const std::string& table_id, TableFilesSchema& files) override;
 
     Status
     FilesToIndex(TableFilesSchema&) override;
@@ -120,13 +124,19 @@ class MySQLMetaImpl : public Meta {
     CleanUpShadowFiles() override;
 
     Status
-    CleanUpFilesWithTTL(uint64_t seconds, CleanUpFilter* filter = nullptr) override;
+    CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter = nullptr*/) override;
 
     Status
     DropAll() override;
 
     Status
     Count(const std::string& table_id, uint64_t& result) override;
+
+    Status
+    SetGlobalLastLSN(uint64_t lsn) override;
+
+    Status
+    GetGlobalLastLSN(uint64_t& lsn) override;
 
  private:
     Status

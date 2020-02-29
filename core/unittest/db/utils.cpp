@@ -1,19 +1,13 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/utils.h"
 
@@ -25,21 +19,26 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <fiu-local.h>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
+
+
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+
 #include "utils/CommonUtil.h"
+
 
 INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-static const char* CONFIG_STR =
+static const char *CONFIG_STR =
     "# All the following configurations are default values.\n"
     "\n"
     "server_config:\n"
@@ -49,30 +48,29 @@ static const char* CONFIG_STR =
     "  time_zone: UTC+8\n"
     "\n"
     "db_config:\n"
-    "  primary_path: /tmp/milvus         # path used to store data and meta\n"
-    "  secondary_path:                   # path used to store data only, split by semicolon\n"
-    "\n"
     "  backend_url: sqlite://:@:/        \n"
     "                                    \n"
     "                                    # Replace 'dialect' with 'mysql' or 'sqlite'\n"
     "\n"
-    "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
+    "storage_config:\n"
+    "  primary_path: /tmp/milvus         # path used to store data and meta\n"
+    "  secondary_path:                   # path used to store data only, split by semicolon\n"
     "\n"
     "metric_config:\n"
     "  enable_monitor: false             # enable monitoring or not\n"
-    "  collector: prometheus             # prometheus\n"
-    "  prometheus_config:\n"
-    "    port: 8080                      # port prometheus used to fetch metrics\n"
+    "  address: 127.0.0.1\n"
+    "  port: 9091                        # port prometheus used to fetch metrics\n"
     "\n"
     "cache_config:\n"
-    "  cpu_mem_capacity: 16              # GB, CPU memory used for cache\n"
-    "  cpu_mem_threshold: 0.85           # percentage of data kept when cache cleanup triggered\n"
+    "  cpu_cache_capacity: 4             # GB, CPU memory used for cache\n"
+    "  cpu_cache_threshold: 0.85         # percentage of data kept when cache cleanup triggered\n"
+    "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
     "  cache_insert_data: false          # whether load inserted data into cache\n"
     "\n"
     "engine_config:\n"
     "  use_blas_threshold: 20\n"
     "\n"
-#ifdef MILVUS_GPU_VERSION
+    #ifdef MILVUS_GPU_VERSION
     "gpu_resource_config:\n"
     "  enable: true                      # whether to enable GPU resources\n"
     "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
@@ -80,11 +78,11 @@ static const char* CONFIG_STR =
     "    - gpu0\n"
     "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
     "    - gpu0\n"
-#endif
+    #endif
     "\n";
 
 void
-WriteToFile(const std::string& file_path, const char* content) {
+WriteToFile(const std::string &file_path, const char *content) {
     std::fstream fs(file_path.c_str(), std::ios_base::out);
 
     // write data to file
@@ -94,7 +92,7 @@ WriteToFile(const std::string& file_path, const char* content) {
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
-    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {
+    explicit DBTestEnvironment(const std::string &uri) : uri_(uri) {
     }
 
     std::string
@@ -111,7 +109,7 @@ class DBTestEnvironment : public ::testing::Environment {
     std::string uri_;
 };
 
-DBTestEnvironment* test_env = nullptr;
+DBTestEnvironment *test_env = nullptr;
 
 }  // namespace
 
@@ -212,6 +210,60 @@ DBTest2::GetOptions() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWAL::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
+    options.meta_.path_ = CONFIG_PATH;
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+
+    options.wal_enable_ = true;
+    options.recovery_error_ignore_ = true;
+    options.buffer_size_ = 128;
+    options.mxlog_path_ = "/tmp/milvus_test/wal/";
+
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWALRecovery::GetOptions() {
+    auto options = DBTestWAL::GetOptions();
+    //disable auto flush
+    options.auto_flush_interval_ = 10000;
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWALRecovery_Error::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
+    options.meta_.path_ = CONFIG_PATH;
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+
+    options.auto_flush_interval_ = 10000;
+    options.wal_enable_ = true;
+    options.recovery_error_ignore_ = false;
+    options.buffer_size_ = 128;
+    options.mxlog_path_ = "/tmp/milvus_test/wal/";
+
+    return options;
+}
+
+void
+DBTestWALRecovery_Error::TearDown() {
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+    BaseTest::TearDown();
+
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta_.path_);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 MetaTest::SetUp() {
     BaseTest::SetUp();
@@ -232,7 +284,7 @@ MetaTest::TearDown() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 milvus::engine::DBOptions
-MySqlDBTest::GetOptions() {
+MySqlDBTest:: GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = test_env->getURI();
@@ -270,7 +322,7 @@ MySqlMetaTest::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int
-main(int argc, char** argv) {
+main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     std::string uri;

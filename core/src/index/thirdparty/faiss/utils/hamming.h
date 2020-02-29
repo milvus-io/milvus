@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include <faiss/utils/Heap.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 
 /* The Hamming distance type */
@@ -138,7 +139,8 @@ void hammings_knn_hc (
         const uint8_t * b,
         size_t nb,
         size_t ncodes,
-        int ordered);
+        int ordered,
+        ConcurrentBitsetPtr bitset = nullptr);
 
 /* Legacy alias to hammings_knn_hc. */
 void hammings_knn (
@@ -169,7 +171,8 @@ void hammings_knn_mc (
   size_t k,
   size_t ncodes,
   int32_t *distances,
-  int64_t *labels);
+  int64_t *labels,
+  ConcurrentBitsetPtr bitset = nullptr);
 
 /* Counting the number of matches or of cross-matches (without returning them)
    For use with function that assume pre-allocated memory */

@@ -1,35 +1,31 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
-//   http://www.apache.org/licenses/LICENSE-2.0
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
 //
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/task/SearchTask.h"
-
-#include <src/scheduler/SchedInst.h>
-
+#include <fiu-local.h>
 #include <algorithm>
 #include <memory>
 #include <string>
 #include <thread>
 #include <utility>
 
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/task/SearchTask.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {
@@ -103,10 +99,23 @@ CollectFileMetrics(int file_type, size_t file_size) {
 XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableFileSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
-        if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
-            metric_l2 = false;
+        // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
+        // similarity -- infinity value means two vectors equal, descending reduce, IP
+        if (file_->metric_type_ == static_cast<int>(MetricType::IP)) {
+            ascending_reduce = false;
         }
-        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
+
+        EngineType engine_type;
+        if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                         : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file->engine_type_;
+        }
+
+        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                              (MetricType)file_->metric_type_, file_->nlist_);
     }
 }
@@ -121,6 +130,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     std::string type_str;
 
     try {
+        fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
             stat = index_engine_->Load();
             type_str = "DISK2CPU";
@@ -143,6 +153,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         error_msg = "Failed to load index file: " + std::string(ex.what());
         stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
+    fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
 
     if (!stat.ok()) {
         Status s;
@@ -207,7 +218,7 @@ XSearchTask::Execute() {
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
         uint64_t nprobe = search_job->nprobe();
-        const float* vectors = search_job->vectors();
+        const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
@@ -215,14 +226,27 @@ XSearchTask::Execute() {
             "job " + std::to_string(search_job->id()) + " nq " + std::to_string(nq) + " topk " + std::to_string(topk);
 
         try {
+            fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
             // step 2: search
             bool hybrid = false;
             if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
                 hybrid = true;
             }
-            Status s =
-                index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
+            Status s;
+            if (!vectors.float_data_.empty()) {
+                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
+            } else if (!vectors.binary_data_.empty()) {
+                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
+            } else if (!vectors.id_array_.empty()) {
+                s = index_engine_->Search(nq, vectors.id_array_, topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
+            }
+
+            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
+
             if (!s.ok()) {
                 search_job->GetStatus() = s;
                 search_job->SearchDone(index_id_);
@@ -233,10 +257,15 @@ XSearchTask::Execute() {
             //            search_job->AccumSearchCost(span);
 
             // step 3: pick up topk result
-            auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
+            auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
+            if (search_job->GetResultIds().front() == -1 && search_job->GetResultIds().size() > spec_k) {
+                // initialized results set
+                search_job->GetResultIds().resize(spec_k);
+                search_job->GetResultDistances().resize(spec_k);
+            }
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
-                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
+                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
 
@@ -286,7 +315,8 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
             tar_idx = tar_k_multi_i + tar_k_j;
             buf_idx = buf_k_multi_i + buf_k_j;
 
-            if ((ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
+            if ((tar_ids[tar_idx] == -1) ||  // initialized value
+                (ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
                 (!ascending && src_distances[src_idx] > tar_distances[tar_idx])) {
                 buf_ids[buf_idx] = src_ids[src_idx];
                 buf_distances[buf_idx] = src_distances[src_idx];
@@ -323,6 +353,16 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
     }
     tar_ids.swap(buf_ids);
     tar_distances.swap(buf_distances);
+}
+
+const std::string&
+XSearchTask::GetLocation() const {
+    return file_->location_;
+}
+
+size_t
+XSearchTask::GetIndexId() const {
+    return file_->id_;
 }
 
 // void
