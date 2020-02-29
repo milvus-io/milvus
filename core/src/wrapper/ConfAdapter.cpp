@@ -268,8 +268,21 @@ HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
 
-    conf->ef = 200;  // ef can be auto-configured by using sample data.
-    conf->M = 32;    // A reasonable range of M is from 5 to 48.
+    conf->ef = 500;  // ef can be auto-configured by using sample data.
+    conf->M = 24;    // A reasonable range of M is from 5 to 48.
+    return conf;
+}
+
+knowhere::Config
+HNSWConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
+    auto conf = std::make_shared<knowhere::HNSWCfg>();
+    conf->k = metaconf.k;
+
+    if (metaconf.nprobe < metaconf.k) {
+        conf->ef = metaconf.k + 32;
+    } else {
+        conf->ef = metaconf.nprobe;
+    }
     return conf;
 }
 

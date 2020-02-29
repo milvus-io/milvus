@@ -41,11 +41,17 @@ void Index::assign (idx_t n, const float * x, idx_t * labels, idx_t k)
   search (n, x, k, distances, labels);
 }
 
-void Index::add_with_ids(
-    idx_t /*n*/,
-    const float* /*x*/,
-    const idx_t* /*xids*/) {
+void Index::add_with_ids(idx_t n, const float* x, const idx_t* xids) {
   FAISS_THROW_MSG ("add_with_ids not implemented for this type of index");
+}
+
+void Index::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
+  FAISS_THROW_MSG ("get_vector_by_id not implemented for this type of index");
+}
+
+void Index::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
+                          ConcurrentBitsetPtr bitset) {
+  FAISS_THROW_MSG ("search_by_id not implemented for this type of index");
 }
 
 size_t Index::remove_ids(const IDSelector& /*sel*/) {

@@ -1382,19 +1382,21 @@ struct IVFSQScannerIP: InvertedListScanner {
                        const uint8_t *codes,
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         size_t nup = 0;
 
         for (size_t j = 0; j < list_size; j++) {
+            if(!bitset || !bitset->test(ids[j])){
+                float accu = accu0 + dc.query_to_code (codes);
 
-            float accu = accu0 + dc.query_to_code (codes);
-
-            if (accu > simi [0]) {
-                minheap_pop (k, simi, idxi);
-                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                minheap_push (k, simi, idxi, accu, id);
-                nup++;
+                if (accu > simi [0]) {
+                    minheap_pop (k, simi, idxi);
+                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    minheap_push (k, simi, idxi, accu, id);
+                    nup++;
+                }
             }
             codes += code_size;
         }
@@ -1471,18 +1473,20 @@ struct IVFSQScannerL2: InvertedListScanner {
                        const uint8_t *codes,
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
+            if(!bitset || !bitset->test(ids[j])){
+                float dis = dc.query_to_code (codes);
 
-            float dis = dc.query_to_code (codes);
-
-            if (dis < simi [0]) {
-                maxheap_pop (k, simi, idxi);
-                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                maxheap_push (k, simi, idxi, dis, id);
-                nup++;
+                if (dis < simi [0]) {
+                    maxheap_pop (k, simi, idxi);
+                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    maxheap_push (k, simi, idxi, dis, id);
+                    nup++;
+                }
             }
             codes += code_size;
         }

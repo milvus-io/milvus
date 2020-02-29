@@ -14,15 +14,15 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
-#include "scheduler/Utils.h"
-#include "server/Config.h"
-
 #include <fiu-local.h>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "scheduler/Utils.h"
+#include "server/Config.h"
 
 namespace milvus {
 namespace engine {

@@ -25,7 +25,8 @@ namespace faiss {
             const uint8_t * bs2,
             size_t n2,
             bool order = true,
-            bool init_heap = true)
+            bool init_heap = true,
+            ConcurrentBitsetPtr bitset = nullptr)
     {
         size_t k = ha->k;
         if (init_heap) ha->heapify ();
@@ -43,10 +44,12 @@ namespace faiss {
                 int64_t * __restrict bh_ids_ = ha->ids + i * k;
                 size_t j;
                 for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-                    dis = hc.jaccard (bs2_);
-                    if (dis < bh_val_[0]) {
-                        faiss::maxheap_pop<tadis_t> (k, bh_val_, bh_ids_);
-                        faiss::maxheap_push<tadis_t> (k, bh_val_, bh_ids_, dis, j);
+                    if(!bitset || !bitset->test(j)){
+                        dis = hc.jaccard (bs2_);
+                        if (dis < bh_val_[0]) {
+                            faiss::maxheap_pop<tadis_t> (k, bh_val_, bh_ids_);
+                            faiss::maxheap_push<tadis_t> (k, bh_val_, bh_ids_, dis, j);
+                        }
                     }
                 }
 
@@ -61,28 +64,29 @@ namespace faiss {
             const uint8_t * b,
             size_t nb,
             size_t ncodes,
-            int order)
+            int order,
+            ConcurrentBitsetPtr bitset)
     {
         switch (ncodes) {
             case 16:
                 jaccard_knn_hc<faiss::JaccardComputer16>
-                        (16, ha, a, b, nb, order, true);
+                        (16, ha, a, b, nb, order, true, bitset);
                 break;
             case 32:
                 jaccard_knn_hc<faiss::JaccardComputer32>
-                        (32, ha, a, b, nb, order, true);
+                        (32, ha, a, b, nb, order, true, bitset);
                 break;
             case 64:
                 jaccard_knn_hc<faiss::JaccardComputer64>
-                        (64, ha, a, b, nb, order, true);
+                        (64, ha, a, b, nb, order, true, bitset);
                 break;
             case 128:
                 jaccard_knn_hc<faiss::JaccardComputer128>
-                        (128, ha, a, b, nb, order, true);
+                        (128, ha, a, b, nb, order, true, bitset);
                 break;
             default:
                 jaccard_knn_hc<faiss::JaccardComputerDefault>
-                        (ncodes, ha, a, b, nb, order, true);
+                        (ncodes, ha, a, b, nb, order, true, bitset);
         }
     }
 

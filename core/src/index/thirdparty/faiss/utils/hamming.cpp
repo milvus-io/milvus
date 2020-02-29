@@ -273,7 +273,8 @@ void hammings_knn_hc (
         const uint8_t * bs2,
         size_t n2,
         bool order = true,
-        bool init_heap = true)
+        bool init_heap = true,
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = ha->k;
     if (init_heap) ha->heapify ();
@@ -291,11 +292,13 @@ void hammings_knn_hc (
         int64_t * __restrict bh_ids_ = ha->ids + i * k;
         size_t j;
         for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-          dis = hc.hamming (bs2_);
-          if (dis < bh_val_[0]) {
-            faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-            faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
-          }
+            if(!bitset || !bitset->test(j)){
+                dis = hc.hamming (bs2_);
+                if (dis < bh_val_[0]) {
+                    faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
+                    faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                }
+            }
         }
       }
     }
@@ -313,7 +316,8 @@ void hammings_knn_mc (
         size_t nb,
         size_t k,
         int32_t *distances,
-        int64_t *labels)
+        int64_t *labels,
+        ConcurrentBitsetPtr bitset = nullptr)
 {
   const int nBuckets = bytes_per_code * 8 + 1;
   std::vector<int> all_counters(na * nBuckets, 0);
@@ -336,7 +340,9 @@ void hammings_knn_mc (
 #pragma omp parallel for
     for (size_t i = 0; i < na; ++i) {
       for (size_t j = j0; j < j1; ++j) {
-        cs[i].update_counter(b + j * bytes_per_code, j);
+          if(!bitset || !bitset->test(j)){
+              cs[i].update_counter(b + j * bytes_per_code, j);
+          }
       }
     }
   }
@@ -370,7 +376,8 @@ void hammings_knn_hc_1 (
         const uint64_t * bs2,
         size_t n2,
         bool order = true,
-        bool init_heap = true)
+        bool init_heap = true,
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     const size_t nwords = 1;
     size_t k = ha->k;
@@ -390,11 +397,13 @@ void hammings_knn_hc_1 (
         int64_t * bh_ids_ = ha->ids + i * k;
         size_t j;
         for (j = 0; j < n2; j++, bs2_+= nwords) {
-            dis = popcount64 (bs1_ ^ *bs2_);
-            if (dis < bh_val_0) {
-                faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
-                faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
-                bh_val_0 = bh_val_[0];
+            if(!bitset || !bitset->test(j)){
+                dis = popcount64 (bs1_ ^ *bs2_);
+                if (dis < bh_val_0) {
+                    faiss::maxheap_pop<hamdis_t> (k, bh_val_, bh_ids_);
+                    faiss::maxheap_push<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
+                    bh_val_0 = bh_val_[0];
+                }
             }
         }
     }
@@ -536,33 +545,34 @@ void hammings_knn_hc (
         const uint8_t * b,
         size_t nb,
         size_t ncodes,
-        int order)
+        int order,
+        ConcurrentBitsetPtr bitset)
 {
     switch (ncodes) {
     case 4:
         hammings_knn_hc<faiss::HammingComputer4>
-            (4, ha, a, b, nb, order, true);
+            (4, ha, a, b, nb, order, true, bitset);
         break;
     case 8:
-        hammings_knn_hc_1 (ha, C64(a), C64(b), nb, order, true);
+        hammings_knn_hc_1 (ha, C64(a), C64(b), nb, order, true, bitset);
         // hammings_knn_hc<faiss::HammingComputer8>
         //      (8, ha, a, b, nb, order, true);
         break;
     case 16:
         hammings_knn_hc<faiss::HammingComputer16>
-            (16, ha, a, b, nb, order, true);
+            (16, ha, a, b, nb, order, true, bitset);
         break;
     case 32:
         hammings_knn_hc<faiss::HammingComputer32>
-            (32, ha, a, b, nb, order, true);
+            (32, ha, a, b, nb, order, true, bitset);
         break;
     default:
         if(ncodes % 8 == 0) {
             hammings_knn_hc<faiss::HammingComputerM8>
-                (ncodes, ha, a, b, nb, order, true);
+                (ncodes, ha, a, b, nb, order, true, bitset);
         } else {
             hammings_knn_hc<faiss::HammingComputerDefault>
-                (ncodes, ha, a, b, nb, order, true);
+                (ncodes, ha, a, b, nb, order, true, bitset);
 
         }
     }
@@ -576,39 +586,40 @@ void hammings_knn_mc(
     size_t k,
     size_t ncodes,
     int32_t *distances,
-    int64_t *labels)
+    int64_t *labels,
+    ConcurrentBitsetPtr bitset)
 {
     switch (ncodes) {
     case 4:
         hammings_knn_mc<faiss::HammingComputer4>(
-          4, a, b, na, nb, k, distances, labels
+          4, a, b, na, nb, k, distances, labels, bitset
         );
         break;
     case 8:
         // TODO(hoss): Write analog to hammings_knn_hc_1
-        // hammings_knn_hc_1 (ha, C64(a), C64(b), nb, order, true);
+        // hammings_knn_mc_1 (ha, C64(a), C64(b), nb, order, true, bitset);
         hammings_knn_mc<faiss::HammingComputer8>(
-          8, a, b, na, nb, k, distances, labels
+          8, a, b, na, nb, k, distances, labels, bitset
         );
         break;
     case 16:
         hammings_knn_mc<faiss::HammingComputer16>(
-          16, a, b, na, nb, k, distances, labels
+          16, a, b, na, nb, k, distances, labels, bitset
         );
         break;
     case 32:
         hammings_knn_mc<faiss::HammingComputer32>(
-          32, a, b, na, nb, k, distances, labels
+          32, a, b, na, nb, k, distances, labels, bitset
         );
         break;
     default:
         if(ncodes % 8 == 0) {
             hammings_knn_mc<faiss::HammingComputerM8>(
-              ncodes, a, b, na, nb, k, distances, labels
+              ncodes, a, b, na, nb, k, distances, labels, bitset
             );
         } else {
             hammings_knn_mc<faiss::HammingComputerDefault>(
-              ncodes, a, b, na, nb, k, distances, labels
+              ncodes, a, b, na, nb, k, distances, labels, bitset
             );
         }
     }

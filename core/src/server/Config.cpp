@@ -38,7 +38,7 @@ namespace server {
 
 constexpr int64_t GB = 1UL << 30;
 
-static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"}});
+static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.7.0", "0.1"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
@@ -136,6 +136,9 @@ Config::ValidateConfig() {
     int64_t db_archive_days_threshold;
     CONFIG_CHECK(GetDBConfigArchiveDaysThreshold(db_archive_days_threshold));
 
+    int auto_flush_interval;
+    CONFIG_CHECK(GetDBConfigAutoFlushInterval(auto_flush_interval));
+
     /* storage config */
     std::string storage_primary_path;
     CONFIG_CHECK(GetStorageConfigPrimaryPath(storage_primary_path));
@@ -221,6 +224,19 @@ Config::ValidateConfig() {
     /* tracing config */
     std::string tracing_config_path;
     CONFIG_CHECK(GetTracingConfigJsonConfigPath(tracing_config_path));
+
+    /* wal config */
+    bool enable;
+    CONFIG_CHECK(GetWalConfigEnable(enable));
+
+    bool recovery_error_ignore;
+    CONFIG_CHECK(GetWalConfigRecoveryErrorIgnore(recovery_error_ignore));
+
+    uint32_t buffer_size;
+    CONFIG_CHECK(GetWalConfigBufferSize(buffer_size));
+
+    std::string wal_path;
+    CONFIG_CHECK(GetWalConfigWalPath(wal_path));
 
     return Status::OK();
 }
@@ -722,6 +738,17 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::CheckDBConfigAutoFlushInterval(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid db configuration auto_flush_interval: " + value +
+                          ". Possible reason: db.auto_flush_interval is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
+    return Status::OK();
+}
+
 /* storage config */
 Status
 Config::CheckStorageConfigPrimaryPath(const std::string& value) {
@@ -991,6 +1018,36 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
                           ". Possible reason: engine_config.omp_thread_num exceeds system cpu cores.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigEnable(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg = "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid wal config: " + value + ". Possible reason: wal_config.recovery_error_ignore is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckWalConfigBufferSize(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid wal buffer size: " + value +
+                          ". Possible reason: wal_config.buffer_size is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+
     return Status::OK();
 }
 
@@ -1310,6 +1367,17 @@ Config::GetDBConfigPreloadTable(std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::GetDBConfigAutoFlushInterval(int& value) {
+    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT);
+    Status s = CheckDBConfigAutoFlushInterval(str);
+    if (!s.ok()) {
+        return s;
+    }
+    value = (int)std::stoi(str);
+    return Status::OK();
+}
+
 /* storage config */
 Status
 Config::GetStorageConfigPrimaryPath(std::string& value) {
@@ -1555,6 +1623,49 @@ Config::GetTracingConfigJsonConfigPath(std::string& value) {
         tracer_config.close();
         return s;
     }
+    return Status::OK();
+}
+
+/* wal config */
+Status
+Config::GetWalConfigEnable(bool& wal_enable) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_ENABLE, CONFIG_WAL_ENABLE_DEFAULT);
+    Status s = CheckWalConfigEnable(str);
+    if (!s.ok()) {
+        return s;
+    }
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    wal_enable = (str == "true" || str == "on" || str == "yes" || str == "1");
+    return Status::OK();
+}
+
+Status
+Config::GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore) {
+    std::string str =
+        GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
+    Status s = CheckWalConfigRecoveryErrorIgnore(str);
+    if (!s.ok()) {
+        return s;
+    }
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    recovery_error_ignore = (str == "true" || str == "on" || str == "yes" || str == "1");
+    return Status::OK();
+}
+
+Status
+Config::GetWalConfigBufferSize(uint32_t& buffer_size) {
+    std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
+    Status s = CheckWalConfigBufferSize(str);
+    if (!s.ok()) {
+        return s;
+    }
+    buffer_size = (uint32_t)std::stoul(str);
+    return Status::OK();
+}
+
+Status
+Config::GetWalConfigWalPath(std::string& wal_path) {
+    wal_path = GetConfigStr(CONFIG_WAL, CONFIG_WAL_WAL_PATH, "");
     return Status::OK();
 }
 

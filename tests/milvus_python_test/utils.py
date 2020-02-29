@@ -10,6 +10,7 @@ import numpy as np
 from milvus import Milvus, IndexType, MetricType
 
 port = 19530
+epsilon = 0.000001
 
 
 def get_milvus(handler=None):
@@ -421,42 +422,6 @@ def gen_invalid_vector_ids():
     return invalid_vector_ids
 
 
-
-def gen_invalid_query_ranges():
-    query_ranges = [
-            [(get_last_day(1), "")],
-            [(get_current_day(), "")],
-            [(get_next_day(1), "")],
-            [(get_current_day(), get_last_day(1))],
-            [(get_next_day(1), get_last_day(1))],
-            [(get_next_day(1), get_current_day())],
-            [(0, get_next_day(1))],
-            [(-1, get_next_day(1))],
-            [(1, get_next_day(1))],
-            [(100001, get_next_day(1))],
-            [(1000000000000001, get_next_day(1))],
-            [(None, get_next_day(1))],
-            [([1,2,3], get_next_day(1))],
-            [((1,2), get_next_day(1))],
-            [({"a": 1}, get_next_day(1))],
-            [(" ", get_next_day(1))],
-            [("", get_next_day(1))],
-            [("String", get_next_day(1))],
-            [("12-s", get_next_day(1))],
-            [("BB。A", get_next_day(1))],
-            [(" siede ", get_next_day(1))],
-            [("(mn)", get_next_day(1))],
-            [("#12s", get_next_day(1))],
-            [("pip+", get_next_day(1))],
-            [("=c", get_next_day(1))],
-            [("\n", get_next_day(1))],
-            [("\t", get_next_day(1))],
-            [("中文", get_next_day(1))],
-            [("a".join("a" for i in range(256)), get_next_day(1))]
-    ]
-    return query_ranges
-
-
 def gen_invalid_index_params():
     index_params = []
     for index_type in gen_invalid_index_types():
@@ -470,7 +435,7 @@ def gen_invalid_index_params():
 
 def gen_index_params():
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]
+    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ, IndexType.HNSW]
     nlists = [1, 16384, 50000]
 
     def gen_params(index_types, nlists):
@@ -483,7 +448,7 @@ def gen_index_params():
 
 def gen_simple_index_params():
     index_params = []
-    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]
+    index_types = [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ, IndexType.HNSW]
     nlists = [1024]
 
     def gen_params(index_types, nlists):
@@ -497,3 +462,10 @@ def gen_simple_index_params():
 def assert_has_table(conn, table_name):
     status, ok = conn.has_table(table_name)
     return status.OK() and ok
+
+
+def assert_equal_vector(v1, v2):
+    if len(v1) != len(v2):
+        assert False
+    for i in range(len(v1)):
+        assert abs(v1[i] - v2[i]) < epsilon
