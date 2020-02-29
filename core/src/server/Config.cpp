@@ -1021,7 +1021,6 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
     return Status::OK();
 }
 
-
 #ifdef MILVUS_GPU_VERSION
 
 Status
