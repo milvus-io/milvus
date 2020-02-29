@@ -445,7 +445,7 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
             mysqlpp::Query describeTableQuery = connectionPtr->query();
             describeTableQuery
                 << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, nlist, metric_type"
-                << " ,owner_table, partition_tag, version"
+                << " ,owner_table, partition_tag, version, flush_lsn"
                 << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_schema.table_id_
                 << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -468,6 +468,7 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
             resRow["owner_table"].to_string(table_schema.owner_table_);
             resRow["partition_tag"].to_string(table_schema.partition_tag_);
             resRow["version"].to_string(table_schema.version_);
+            table_schema.flush_lsn_ = resRow["flush_lsn"];
         } else {
             return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
@@ -532,7 +533,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
 
             mysqlpp::Query allTablesQuery = connectionPtr->query();
             allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type"
-                           << " ,owner_table, partition_tag, version"
+                           << " ,owner_table, partition_tag, version, flush_lsn"
                            << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(TableSchema::TO_DELETE)
                            << " AND owner_table = \"\";";
 
@@ -553,6 +554,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             resRow["owner_table"].to_string(table_schema.owner_table_);
             resRow["partition_tag"].to_string(table_schema.partition_tag_);
             resRow["version"].to_string(table_schema.version_);
+            table_schema.flush_lsn_ = resRow["flush_lsn"];
 
             table_schema_array.emplace_back(table_schema);
         }
