@@ -32,6 +32,7 @@ add_executable(test_storage
 target_link_libraries(test_storage
         stdc++
         knowhere
+        metrics
         ${unittest_libs}
         )
 

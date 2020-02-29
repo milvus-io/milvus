@@ -6,7 +6,6 @@
 
 | Name          | License                                                      |
 | ------------- | ------------------------------------------------------------ |
-| Apache Arrow  | [Apache License 2.0](https://github.com/apache/arrow/blob/master/LICENSE.txt)                                           |
 | Boost         | [Boost Software License](https://github.com/boostorg/boost/blob/master/LICENSE_1_0.txt)                                       |
 | FAISS         | [MIT](https://github.com/facebookresearch/faiss/blob/master/LICENSE)                                                          |
 | Gtest         | [BSD 3-Clause](https://github.com/google/googletest/blob/master/LICENSE)                                                 |

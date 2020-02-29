@@ -34,12 +34,6 @@ static const char* DQL_REQUEST_GROUP = "dql";
 static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
 static const char* INFO_REQUEST_GROUP = "info";
 
-using DB_DATE = milvus::engine::meta::DateT;
-
-Status
-ConvertTimeRangeToDBDates(const std::vector<std::pair<std::string, std::string>>& range_array,
-                          std::vector<DB_DATE>& dates);
-
 struct TableSchema {
     std::string table_name_;
     int64_t dimension_;
@@ -95,16 +89,32 @@ struct IndexParam {
 
 struct PartitionParam {
     std::string table_name_;
-    std::string partition_name_;
     std::string tag_;
 
     PartitionParam() = default;
 
-    PartitionParam(const std::string& table_name, const std::string& partition_name, const std::string& tag) {
+    PartitionParam(const std::string& table_name, const std::string& tag) {
         table_name_ = table_name;
-        partition_name_ = partition_name;
         tag_ = tag;
     }
+};
+
+struct SegmentStat {
+    std::string name_;
+    int64_t row_num_ = 0;
+    std::string index_name_;
+    int64_t data_size_ = 0;
+};
+
+struct PartitionStat {
+    std::string tag_;
+    int64_t total_row_num_ = 0;
+    std::vector<SegmentStat> segments_stat_;
+};
+
+struct TableInfo {
+    int64_t total_row_num_ = 0;
+    std::vector<PartitionStat> partitions_stat_;
 };
 
 class BaseRequest {
@@ -161,7 +171,6 @@ class BaseRequest {
 };
 
 using BaseRequestPtr = std::shared_ptr<BaseRequest>;
-using Range = std::pair<std::string, std::string>;
 
 }  // namespace server
 }  // namespace milvus

@@ -12,13 +12,6 @@ message TableName {
 }
 
 /**
- * @brief Partition name
- */
-message PartitionName {
-    string partition_name = 1;
-}
-
-/**
  * @brief Table name list
  */
 message TableNameList {
@@ -42,8 +35,7 @@ message TableSchema {
  */
 message PartitionParam {
     string table_name = 1;
-    string partition_name = 2;
-    string tag = 3;
+    string tag = 2;
 }
 
 /**
@@ -51,15 +43,7 @@ message PartitionParam {
  */
 message PartitionList {
     Status status = 1;
-    repeated PartitionParam partition_array = 2;
-}
-
-/**
- * @brief Range schema
- */
-message Range {
-    string start_value = 1;
-    string end_value = 2;
+    repeated string partition_tag_array = 2;
 }
 
 /**
@@ -94,10 +78,9 @@ message VectorIds {
 message SearchParam {
     string table_name = 1;
     repeated RowRecord query_record_array = 2;
-    repeated Range query_range_array = 3;
-    int64 topk = 4;
-    int64 nprobe = 5;
-    repeated string partition_tag_array = 6;
+    int64 topk = 3;
+    int64 nprobe = 4;
+    repeated string partition_tag_array = 5;
 }
 
 /**
@@ -106,6 +89,17 @@ message SearchParam {
 message SearchInFilesParam {
     repeated string file_id_array = 1;
     SearchParam search_param = 2;
+}
+
+/**
+ * @brief Params for searching vector by ID
+ */
+message SearchByIDParam {
+    string table_name = 1;
+    int64 id = 2;
+    int64 topk = 3;
+    int64 nprobe = 4;
+    repeated string partition_tag_array = 5;
 }
 
 /**
@@ -169,11 +163,70 @@ message IndexParam {
 }
 
 /**
- * @brief table name and range for DeleteByDate
+ * @brief Flush params
  */
-message DeleteByDateParam {
-    Range range = 1;
-    string table_name = 2;
+message FlushParam {
+    repeated string table_name_array = 1;
+}
+
+/**
+ * @brief Flush params
+ */
+message DeleteByIDParam {
+    string table_name = 1;
+    repeated int64 id_array = 2;
+}
+
+/**
+ * @brief segment statistics
+ */
+message SegmentStat {
+    string segment_name = 1;
+    int64 row_count = 2;
+    string index_name = 3;
+    int64 data_size = 4;
+}
+
+/**
+ * @brief table statistics
+ */
+message PartitionStat {
+    string tag = 1;
+    int64 total_row_count = 2;
+    repeated SegmentStat segments_stat = 3;
+}
+
+/**
+ * @brief table information
+ */
+message TableInfo {
+    Status status = 1;
+    int64 total_row_count = 2;
+    repeated PartitionStat partitions_stat = 3;
+}
+
+/**
+ * @brief vector identity
+ */
+message VectorIdentity {
+    string table_name = 1;
+    int64 id = 2;
+}
+
+/**
+ * @brief vector data
+ */
+message VectorData {
+    Status status = 1;
+    RowRecord vector_data = 2;
+}
+
+/**
+ * @brief get vector ids from a segment parameters
+ */
+message GetVectorIDsParam {
+    string table_name = 1;
+    string segment_name = 2;
 }
 
 service MilvusService {
@@ -221,6 +274,15 @@ service MilvusService {
      * @return TableNameList
      */
     rpc ShowTables(Command) returns (TableNameList) {}
+
+    /**
+     * @brief This method is used to get table detail information.
+     *
+     * @param TableName, target table name.
+     *
+     * @return TableInfo
+     */
+    rpc ShowTableInfo(TableName) returns (TableInfo) {}
 
     /**
      * @brief This method is used to delete table.
@@ -295,6 +357,24 @@ service MilvusService {
     rpc Insert(InsertParam) returns (VectorIds) {}
 
     /**
+     * @brief This method is used to get vector data by id.
+     *
+     * @param VectorIdentity, target vector id.
+     *
+     * @return VectorData
+     */
+    rpc GetVectorByID(VectorIdentity) returns (VectorData) {}
+
+    /**
+     * @brief This method is used to get vector ids from a segment
+     *
+     * @param GetVectorIDsParam, target table and segment
+     *
+     * @return VectorIds
+     */
+    rpc GetVectorIDs(GetVectorIDsParam) returns (VectorIds) {}
+
+    /**
      * @brief This method is used to query vector in table.
      *
      * @param SearchParam, search parameters.
@@ -302,6 +382,15 @@ service MilvusService {
      * @return TopKQueryResult
      */
     rpc Search(SearchParam) returns (TopKQueryResult) {}
+
+    /**
+     * @brief This method is used to query vector by id.
+     *
+     * @param SearchByIDParam, search parameters.
+     *
+     * @return TopKQueryResult
+     */
+    rpc SearchByID(SearchByIDParam) returns (TopKQueryResult) {}
 
     /**
      * @brief This method is used to query vector in specified files.
@@ -321,21 +410,39 @@ service MilvusService {
      */
     rpc Cmd(Command) returns (StringReply) {}
 
-     /**
-     * @brief This method is used to delete vector by date range
+    /**
+     * @brief This method is used to delete vector by id
      *
-     * @param DeleteByDateParam, delete parameters.
+     * @param DeleteByIDParam, delete parameters.
      *
      * @return status
      */
-     rpc DeleteByDate(DeleteByDateParam) returns (Status) {}
+    rpc DeleteByID(DeleteByIDParam) returns (Status) {}
 
-     /**
-      * @brief This method is used to preload table
-      *
-      * @param TableName, target table name.
-      *
-      * @return Status
-      */
-     rpc PreloadTable(TableName) returns (Status) {}
+    /**
+     * @brief This method is used to preload table
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc PreloadTable(TableName) returns (Status) {}
+
+    /**
+     * @brief This method is used to flush buffer into storage.
+     *
+     * @param FlushParam, flush parameters
+     *
+     * @return Status
+     */
+    rpc Flush(FlushParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to compact table
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc Compact(TableName) returns (Status) {}
 }

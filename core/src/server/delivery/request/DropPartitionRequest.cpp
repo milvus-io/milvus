@@ -23,76 +23,65 @@ namespace milvus {
 namespace server {
 
 DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                           const std::string& partition_name, const std::string& tag)
-    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), partition_name_(partition_name), tag_(tag) {
+                                           const std::string& tag)
+    : BaseRequest(context, DDL_DML_REQUEST_GROUP), table_name_(table_name), tag_(tag) {
 }
 
 BaseRequestPtr
 DropPartitionRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const std::string& partition_name, const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, table_name, partition_name, tag));
+                             const std::string& tag) {
+    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, table_name, tag));
 }
 
 Status
 DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(table=" + table_name_ + ", partition_name=" + partition_name_ +
-                      ", partition_tag=" + tag_ + ")";
+    std::string hdr = "DropPartitionRequest(table=" + table_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     std::string table_name = table_name_;
-    std::string partition_name = partition_name_;
     std::string partition_tag = tag_;
 
-    bool exists;
-    auto status = DBWrapper::DB()->HasTable(table_name, exists);
+    // step 1: check table name
+    auto status = ValidationUtil::ValidateTableName(table_name);
+    fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
+              status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
 
-    if (!exists) {
-        return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+    // step 2: check partition tag
+    if (partition_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+        std::string msg = "Default partition cannot be dropped.";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_TABLE_NAME, msg);
     }
 
-    if (!partition_name.empty()) {
-        status = ValidationUtil::ValidateTableName(partition_name);
-        fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
+    status = ValidationUtil::ValidatePartitionTags({partition_tag});
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 3: check table
+    // only process root table, ignore partition table
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_name_;
+    status = DBWrapper::DB()->DescribeTable(table_schema);
+    if (!status.ok()) {
+        if (status.code() == DB_NOT_FOUND) {
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+        } else {
             return status;
         }
-
-        // check partition existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = partition_name;
-        status = DBWrapper::DB()->DescribeTable(table_info);
-        fiu_do_on("DropPartitionRequest.OnExecute.describe_table_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST,
-                              "Table " + table_name + "'s partition " + partition_name + " not found");
-            } else {
-                return status;
-            }
-        }
-
-        return DBWrapper::DB()->DropPartition(partition_name);
     } else {
-        status = ValidationUtil::ValidateTableName(table_name);
-        fiu_do_on("DropPartitionRequest.OnExecute.invalid_table_name",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            return status;
+        if (!table_schema.owner_table_.empty()) {
+            return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
         }
-
-        status = ValidationUtil::ValidatePartitionTags({partition_tag});
-        fiu_do_on("DropPartitionRequest.OnExecute.invalid_partition_tags",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            return status;
-        }
-        return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
     }
+
+    rc.RecordSection("check validation");
+
+    // step 4: drop partition
+    return DBWrapper::DB()->DropPartitionByTag(table_name, partition_tag);
 }
 
 }  // namespace server

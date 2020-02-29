@@ -297,10 +297,8 @@ void IndexIVF::make_direct_map (bool new_maintain_direct_map)
     maintain_direct_map = new_maintain_direct_map;
 }
 
-
-void IndexIVF::search (idx_t n, const float *x, idx_t k,
-                         float *distances, idx_t *labels) const
-{
+void IndexIVF::search (idx_t n, const float *x, idx_t k, float *distances, idx_t *labels,
+                       ConcurrentBitsetPtr bitset) const {
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
 
@@ -312,18 +310,47 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
-                        distances, labels, false);
+                        distances, labels, false, nullptr,bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
+void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
 
+    if (!maintain_direct_map) {
+        make_direct_map(true);
+    }
+
+    /* only get vector by 1 id */
+    FAISS_ASSERT(n == 1);
+    if (!bitset || !bitset->test(xid[0])) {
+        reconstruct(xid[0], x + 0 * d);
+    } else {
+        memset(x, UINT8_MAX, d * sizeof(float));
+    }
+}
+
+void IndexIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
+                             ConcurrentBitsetPtr bitset) {
+    if (!maintain_direct_map) {
+        make_direct_map(true);
+    }
+
+    auto x = new float[n * d];
+    for (idx_t i = 0; i < n; ++i) {
+        reconstruct(xid[i], x + i * d);
+    }
+
+    search(n, x, k, distances, labels, bitset);
+    delete []x;
+}
 
 void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                                    const idx_t *keys,
                                    const float *coarse_dis ,
                                    float *distances, idx_t *labels,
                                    bool store_pairs,
-                                   const IVFSearchParameters *params) const
+                                   const IVFSearchParameters *params,
+                                   ConcurrentBitsetPtr bitset) const
 {
     long nprobe = params ? params->nprobe : this->nprobe;
     long max_codes = params ? params->max_codes : this->max_codes;
@@ -373,7 +400,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         // single list scan using the current scanner (with query
         // set porperly) and storing results in simi and idxi
         auto scan_one_list = [&] (idx_t key, float coarse_dis_i,
-                                  float *simi, idx_t *idxi) {
+                                  float *simi, idx_t *idxi, ConcurrentBitsetPtr bitset) {
 
             if (key < 0) {
                 // not enough centroids for multiprobe
@@ -405,7 +432,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
             }
 
             nheap += scanner->scan_codes (list_size, scodes.get(),
-                                          ids, simi, idxi, k);
+                                          ids, simi, idxi, k, bitset);
 
             return list_size;
         };
@@ -438,7 +465,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                     nscan += scan_one_list (
                          keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
-                         simi, idxi
+                         simi, idxi, bitset
                     );
 
                     if (max_codes && nscan >= max_codes) {
@@ -467,7 +494,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                     ndis += scan_one_list
                         (keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
-                         local_dis.data(), local_idx.data());
+                         local_dis.data(), local_idx.data(), bitset);
 
                     // can't do the test on max_codes
                 }

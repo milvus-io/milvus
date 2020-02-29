@@ -383,51 +383,6 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     }
     handler->Search(&context, &request, &response);
 
-    // test search with range
-    ::milvus::grpc::Range* range = request.mutable_query_range_array()->Add();
-    range->set_start_value(CurrentTmDate(-2));
-    range->set_end_value(CurrentTmDate(-3));
-    handler->Search(&context, &request, &response);
-    request.mutable_query_range_array()->Clear();
-
-    request.set_table_name("test2");
-    handler->Search(&context, &request, &response);
-    request.set_table_name(TABLE_NAME);
-    handler->Search(&context, &request, &response);
-
-    fiu_init(0);
-    fiu_enable("SearchRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.describe_table_fail");
-
-    fiu_enable("SearchRequest.OnExecute.invalod_rowrecord_array", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.invalod_rowrecord_array");
-
-    fiu_enable("SearchRequest.OnExecute.invalid_dim", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.invalid_dim");
-
-    fiu_enable("SearchRequest.OnExecute.invalid_partition_tags", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.invalid_partition_tags");
-
-    fiu_enable("SearchRequest.OnExecute.query_fail", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.query_fail");
-
-    fiu_enable("SearchRequest.OnExecute.empty_result_ids", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.empty_result_ids");
-
-    fiu_enable("SearchRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("SearchRequest.OnExecute.throw_std_exception");
-
-    fiu_enable("GrpcRequestHandler.Search.not_empty_file_ids", 1, NULL, 0);
-    handler->Search(&context, &request, &response);
-    fiu_disable("GrpcRequestHandler.Search.not_empty_file_ids");
-
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string* file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
@@ -518,6 +473,11 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::milvus::grpc::Command cmd;
     ::milvus::grpc::TableNameList table_name_list;
     status = handler->ShowTables(&context, &cmd, &table_name_list);
+    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+
+    // show table info
+    ::milvus::grpc::TableInfo table_info;
+    status = handler->ShowTableInfo(&context, &table_name, &table_info);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     fiu_init(0);
@@ -641,8 +601,6 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     ::milvus::grpc::PartitionParam partition_param;
     partition_param.set_table_name(str_table_name);
-    std::string partition_name = "tbl_partition_0";
-    partition_param.set_partition_name(partition_name);
     std::string partition_tag = "0";
     partition_param.set_tag(partition_tag);
     handler->CreatePartition(&context, &partition_param, &response);
@@ -653,7 +611,7 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
     ::milvus::grpc::PartitionList partition_list;
     handler->ShowPartitions(&context, &table_name, &partition_list);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-    ASSERT_EQ(partition_list.partition_array_size(), 1);
+    ASSERT_EQ(partition_list.partition_tag_array_size(), 2);
 
     fiu_init(0);
     fiu_enable("ShowPartitionsRequest.OnExecute.invalid_table_name", 1, NULL, 0);
@@ -706,32 +664,6 @@ TEST_F(RpcHandlerTest, PARTITION_TEST) {
 
     handler->DropPartition(&context, &partition_parm, &response);
     ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-
-    fiu_enable("DropPartitionRequest.OnExecute.invalid_partition_tags", 1, NULL, 0);
-    handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropPartitionRequest.OnExecute.invalid_partition_tags");
-
-    partition_parm.set_partition_name(partition_name);
-    fiu_enable("DropPartitionRequest.OnExecute.invalid_table_name", 1, NULL, 0);
-    handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropPartitionRequest.OnExecute.invalid_table_name");
-
-    fiu_enable("DropPartitionRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DropPartitionRequest.OnExecute.describe_table_fail");
-
-    handler->DropPartition(&context, &partition_parm, &response);
-    ASSERT_NE(response.error_code(), ::grpc::Status::OK.error_code());
-
-    sleep(2);
-    handler->CreatePartition(&context, &partition_param, &response);
-    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
-
-    handler->DropPartition(&context, &partition_param, &response);
-    ASSERT_EQ(response.error_code(), ::grpc::Status::OK.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {
@@ -761,53 +693,6 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
     command.set_cmd("get_config");
     handler->Cmd(&context, &command, &reply);
-}
-
-TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
-    ::grpc::ServerContext context;
-    handler->SetContext(&context, dummy_context);
-    handler->RegisterRequestHandler(milvus::server::RequestHandler());
-    ::milvus::grpc::DeleteByDateParam request;
-    ::milvus::grpc::Status status;
-    handler->DeleteByDate(&context, nullptr, &status);
-    handler->DeleteByDate(&context, &request, &status);
-
-    request.set_table_name(TABLE_NAME);
-    request.mutable_range()->set_start_value(CurrentTmDate(-3));
-    request.mutable_range()->set_end_value(CurrentTmDate(-2));
-
-    ::grpc::Status grpc_status = handler->DeleteByDate(&context, &request, &status);
-    int error_code = status.error_code();
-    //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
-
-    request.mutable_range()->set_start_value("test6");
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-    request.mutable_range()->set_start_value(CurrentTmDate(-2));
-    request.mutable_range()->set_end_value("test6");
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-    request.mutable_range()->set_end_value(CurrentTmDate(-2));
-    grpc_status = handler->DeleteByDate(&context, &request, &status);
-
-    fiu_init(0);
-    fiu_enable("DeleteByDateRequest.OnExecute.db_not_found", 1, NULL, 0);
-    handler->DeleteByDate(&context, &request, &status);
-    ASSERT_NE(status.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DeleteByDateRequest.OnExecute.db_not_found");
-
-    fiu_enable("DeleteByDateRequest.OnExecute.describe_table_fail", 1, NULL, 0);
-    handler->DeleteByDate(&context, &request, &status);
-    ASSERT_NE(status.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DeleteByDateRequest.OnExecute.describe_table_fail");
-
-    fiu_enable("DeleteByDateRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-    handler->DeleteByDate(&context, &request, &status);
-    ASSERT_NE(status.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DeleteByDateRequest.OnExecute.throw_std_exception");
-
-    fiu_enable("DeleteByDateRequest.OnExecute.drop_table_fail", 1, NULL, 0);
-    handler->DeleteByDate(&context, &request, &status);
-    ASSERT_NE(status.error_code(), ::grpc::Status::OK.error_code());
-    fiu_disable("DeleteByDateRequest.OnExecute.drop_table_fail");
 }
 
 //////////////////////////////////////////////////////////////////////

@@ -11,12 +11,12 @@
 
 #pragma once
 
-#include "db/Types.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <set>
 #include <string>
+
+#include "db/Types.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -24,10 +24,27 @@ namespace engine {
 class MemManager {
  public:
     virtual Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) = 0;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) = 0;
 
     virtual Status
-    Serialize(std::set<std::string>& table_ids) = 0;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) = 0;
+
+    virtual Status
+    DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) = 0;
+
+    virtual Status
+    DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
+
+    virtual Status
+    Flush(const std::string& table_id) = 0;
+
+    virtual Status
+    Flush(std::set<std::string>& table_ids) = 0;
+
+    //    virtual Status
+    //    Serialize(std::set<std::string>& table_ids) = 0;
 
     virtual Status
     EraseMemVector(const std::string& table_id) = 0;

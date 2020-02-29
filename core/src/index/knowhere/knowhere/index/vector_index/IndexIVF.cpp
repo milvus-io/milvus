@@ -217,8 +217,10 @@ IVF::GenGraph(const float* data, const int64_t& k, Graph& graph, const Config& c
 void
 IVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
     auto params = GenParams(cfg);
+    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    ivf_index->nprobe = params->nprobe;
     stdclock::time_point before = stdclock::now();
-    faiss::ivflib::search_with_parameters(index_.get(), n, (float*)data, k, distances, labels, params.get());
+    ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
@@ -269,6 +271,99 @@ IVF::Seal() {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
     SealImpl();
+}
+
+DatasetPtr
+IVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (search_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("not support this kind of config");
+    }
+
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
+
+    try {
+        size_t p_x_size = sizeof(float) * elems;
+        auto p_x = (float*)malloc(p_x_size);
+
+        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
+        index_ivf->get_vector_by_id(1, p_data, p_x, bitset_);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::TENSOR, p_x);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+DatasetPtr
+IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (search_cfg == nullptr) {
+        KNOWHERE_THROW_MSG("not support this kind of config");
+    }
+
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+
+    try {
+        auto elems = rows * search_cfg->k;
+
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
+
+        // todo: enable search by id (zhiru)
+        //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
+        index_ivf->search_by_id(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
+
+        //    std::stringstream ss_res_id, ss_res_dist;
+        //    for (int i = 0; i < 10; ++i) {
+        //        printf("%llu", res_ids[i]);
+        //        printf("\n");
+        //        printf("%.6f", res_dis[i]);
+        //        printf("\n");
+        //        ss_res_id << res_ids[i] << " ";
+        //        ss_res_dist << res_dis[i] << " ";
+        //    }
+        //    std::cout << std::endl << "after search: " << std::endl;
+        //    std::cout << ss_res_id.str() << std::endl;
+        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::IDS, p_id);
+        ret_ds->Set(meta::DISTANCE, p_dist);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+void
+IVF::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+    bitset_ = std::move(list);
+}
+
+void
+IVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    list = bitset_;
 }
 
 IVFIndexModel::IVFIndexModel(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {

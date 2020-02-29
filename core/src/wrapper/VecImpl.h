@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "VecIndex.h"
 #include "knowhere/index/vector_index/VectorIndex.h"
@@ -63,6 +64,24 @@ class VecIndexImpl : public VecIndex {
     Status
     Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg) override;
 
+    Status
+    GetVectorById(const int64_t n, const int64_t* xid, float* x, const Config& cfg) override;
+
+    Status
+    SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_t* ids, const Config& cfg) override;
+
+    Status
+    SetBlacklist(faiss::ConcurrentBitsetPtr list) override;
+
+    Status
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list) override;
+
+    Status
+    SetUids(std::vector<segment::doc_id_t>& uids) override;
+
+    const std::vector<segment::doc_id_t>&
+    GetUids() const override;
+
  protected:
     int64_t dim = 0;
 
@@ -89,6 +108,9 @@ class BFIndex : public VecIndexImpl {
 
     const int64_t*
     GetRawIds();
+
+    Status
+    AddWithoutIds(const int64_t& nb, const float* xb, const Config& cfg);
 };
 
 class ToIndexData : public cache::DataObj {

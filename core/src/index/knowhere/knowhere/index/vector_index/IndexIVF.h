@@ -19,6 +19,7 @@
 #include "FaissBaseIndex.h"
 #include "VectorIndex.h"
 #include "faiss/IndexIVF.h"
+#include "faiss/utils/ConcurrentBitset.h"
 
 namespace knowhere {
 
@@ -71,6 +72,18 @@ class IVF : public VectorIndex, public FaissBaseIndex {
     virtual VectorIndexPtr
     CopyCpuToGpu(const int64_t& device_id, const Config& config);
 
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
+
+    DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    SetBlacklist(faiss::ConcurrentBitsetPtr list);
+
+    void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
+
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config);
@@ -83,6 +96,9 @@ class IVF : public VectorIndex, public FaissBaseIndex {
 
  protected:
     std::mutex mutex_;
+
+ private:
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using IVFIndexPtr = std::shared_ptr<IVF>;

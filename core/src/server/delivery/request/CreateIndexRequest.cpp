@@ -46,16 +46,22 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
-        bool has_table = false;
-        status = DBWrapper::DB()->HasTable(table_name_, has_table);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("CreateIndexRequest.OnExecute.not_has_table", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
         if (!status.ok()) {
-            return status;
-        }
-
-        if (!has_table) {
-            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            } else {
+                return status;
+            }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         status = ValidationUtil::ValidateTableIndexType(index_type_);
@@ -97,6 +103,8 @@ CreateIndexRequest::OnExecute() {
             return Status(SERVER_UNEXPECTED_ERROR, "PQ not support IP in GPU version!");
         }
 #endif
+
+        rc.RecordSection("check validation");
 
         // step 3: create index
         engine::TableIndex index;

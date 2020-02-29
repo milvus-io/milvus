@@ -10,13 +10,20 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/insert/MemTableFile.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <string>
+#include <vector>
+
 #include "db/Constants.h"
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
-
-#include <cmath>
-#include <string>
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -26,9 +33,12 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
-        execution_engine_ = EngineFactory::Build(
+        /*execution_engine_ = EngineFactory::Build(
             table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
-            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);
+            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);*/
+        std::string directory;
+        utils::GetParentPath(table_file_schema_.location_, directory);
+        segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
 }
 
@@ -47,7 +57,7 @@ MemTableFile::CreateTableFile() {
 }
 
 Status
-MemTableFile::Add(VectorSourcePtr& source) {
+MemTableFile::Add(const VectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
@@ -61,12 +71,47 @@ MemTableFile::Add(VectorSourcePtr& source) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
+
+        auto status = source->Add(/*execution_engine_,*/ segment_writer_ptr_, table_file_schema_, num_vectors_to_add,
+                                  num_vectors_added);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
         return status;
     }
+    return Status::OK();
+}
+
+Status
+MemTableFile::Delete(segment::doc_id_t doc_id) {
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    auto found = std::find(uids.begin(), uids.end(), doc_id);
+    if (found != uids.end()) {
+        auto offset = std::distance(uids.begin(), found);
+        segment_ptr->vectors_ptr_->Erase(offset);
+    }
+
+    return Status::OK();
+}
+
+Status
+MemTableFile::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+    // Check wither the doc_id is present, if yes, delete it's corresponding buffer
+    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    for (auto& doc_id : doc_ids) {
+        auto found = std::find(uids.begin(), uids.end(), doc_id);
+        if (found != uids.end()) {
+            auto offset = std::distance(uids.begin(), found);
+            segment_ptr->vectors_ptr_->Erase(offset);
+            uids = segment_ptr->vectors_ptr_->GetUids();
+        }
+    }
+
     return Status::OK();
 }
 
@@ -87,15 +132,35 @@ MemTableFile::IsFull() {
 }
 
 Status
-MemTableFile::Serialize() {
+MemTableFile::Serialize(uint64_t wal_lsn) {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    execution_engine_->Serialize();
-    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
-    table_file_schema_.row_count_ = execution_engine_->Count();
+    auto status = segment_writer_ptr_->Serialize();
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to serialize segment: " << table_file_schema_.segment_id_;
 
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
+        /* Can't mark it as to_delete because data is stored in this mem table file. Any further flush
+         * will try to serialize the same mem table file and it won't be able to find the directory
+         * to write to or update the associated table file in meta.
+         *
+        table_file_schema_.file_type_ = meta::TableFileSchema::TO_DELETE;
+        meta_->UpdateTableFile(table_file_schema_);
+        ENGINE_LOG_DEBUG << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
+                         << " to to_delete";
+        */
+        return status;
+    }
+
+    //    execution_engine_->Serialize();
+
+    // TODO(zhiru):
+    //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
+    //    table_file_schema_.row_count_ = execution_engine_->Count();
+    table_file_schema_.file_size_ = segment_writer_ptr_->Size();
+    table_file_schema_.row_count_ = segment_writer_ptr_->VectorCount();
+
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
         table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
@@ -105,16 +170,31 @@ MemTableFile::Serialize() {
         table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
     }
 
-    auto status = meta_->UpdateTableFile(table_file_schema_);
+    // Set table file's flush_lsn so WAL can roll back and delete garbage files which can be obtained from
+    // GetTableFilesByFlushLSN() in meta.
+    table_file_schema_.flush_lsn_ = wal_lsn;
+
+    status = meta_->UpdateTableFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
+                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
 
+    // TODO(zhiru): cache
+    /*
+        if (options_.insert_cache_immediately_) {
+            execution_engine_->Cache();
+        }
+    */
     if (options_.insert_cache_immediately_) {
-        execution_engine_->Cache();
+        segment_writer_ptr_->Cache();
     }
 
     return status;
+}
+
+const std::string&
+MemTableFile::GetSegmentId() const {
+    return table_file_schema_.segment_id_;
 }
 
 }  // namespace engine

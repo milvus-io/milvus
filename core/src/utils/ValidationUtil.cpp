@@ -23,6 +23,7 @@
 #endif
 
 #include <fiu-local.h>
+#include <src/db/Types.h>
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -229,6 +230,13 @@ ValidationUtil::ValidatePartitionTags(const std::vector<std::string>& partition_
             std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
             SERVER_LOG_ERROR << msg;
             return Status(SERVER_INVALID_TABLE_NAME, msg);
+        }
+
+        // max length of partition tag
+        if (valid_tag.length() > 255) {
+            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
     }
 

@@ -16,6 +16,8 @@
 #include <string>
 #include <sstream>
 
+#include <faiss/utils/ConcurrentBitset.h>
+
 #define FAISS_VERSION_MAJOR 1
 #define FAISS_VERSION_MINOR 6
 #define FAISS_VERSION_PATCH 0
@@ -132,9 +134,34 @@ struct Index {
      * @param x           input vectors to search, size n * d
      * @param labels      output labels of the NNs, size n*k
      * @param distances   output pairwise distances, size n*k
+     * @param bitset      flags to check the validity of vectors
      */
-    virtual void search (idx_t n, const float *x, idx_t k,
-                         float *distances, idx_t *labels) const = 0;
+    virtual void search (idx_t n, const float *x, idx_t k, float *distances, idx_t *labels,
+                         ConcurrentBitsetPtr bitset = nullptr) const = 0;
+
+    /** query n raw vectors from the index by ids.
+     *
+     * return n raw vectors.
+     *
+     * @param n           input num of xid
+     * @param xid         input labels of the NNs, size n
+     * @param x           output raw vectors, size n * d
+     * @param bitset      flags to check the validity of vectors
+     */
+    virtual void get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset = nullptr);
+
+    /** query n vectors of dimension d to the index by ids.
+     *
+     * return at most k vectors. If there are not enough results for a
+     * query, the result array is padded with -1s.
+     *
+     * @param xid         input ids to search, size n
+     * @param labels      output labels of the NNs, size n*k
+     * @param distances   output pairwise distances, size n*k
+     * @param bitset      flags to check the validity of vectors
+     */
+    virtual void search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
+                               ConcurrentBitsetPtr bitset = nullptr);
 
     /** query n vectors of dimension d to the index.
      *

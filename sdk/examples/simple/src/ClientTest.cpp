@@ -10,14 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "examples/simple/src/ClientTest.h"
-#include "include/MilvusApi.h"
-#include "examples/utils/TimeRecorder.h"
-#include "examples/utils/Utils.h"
 
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
+
+#include "examples/utils/TimeRecorder.h"
+#include "examples/utils/Utils.h"
+#include "include/MilvusApi.h"
 
 namespace {
 
@@ -35,167 +36,225 @@ constexpr int64_t ADD_VECTOR_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t N_LIST = 16384;
 
-milvus::TableSchema
-BuildTableSchema() {
-    milvus::TableSchema tb_schema = {TABLE_NAME, TABLE_DIMENSION, TABLE_INDEX_FILE_SIZE, TABLE_METRIC_TYPE};
-    return tb_schema;
-}
-
-milvus::IndexParam
-BuildIndexParam() {
-    milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, N_LIST};
-    return index_param;
-}
-
 }  // namespace
 
+ClientTest::ClientTest(const std::string& address, const std::string& port) {
+    milvus::ConnectParam param = {address, port};
+    conn_ = milvus::Connection::Create();
+    milvus::Status stat = conn_->Connect(param);
+    std::cout << "Connect function call status: " << stat.message() << std::endl;
+}
+
+ClientTest::~ClientTest() {
+    milvus::Status stat = milvus::Connection::Destroy(conn_);
+    std::cout << "Destroy connection function call status: " << stat.message() << std::endl;
+}
+
 void
-ClientTest::Test(const std::string& address, const std::string& port) {
-    std::shared_ptr<milvus::Connection> conn = milvus::Connection::Create();
+ClientTest::ShowServerVersion() {
+    std::string version = conn_->ServerVersion();
+    std::cout << "Server version: " << version << std::endl;
+}
 
-    milvus::Status stat;
-    {  // connect server
-        milvus::ConnectParam param = {address, port};
-        stat = conn->Connect(param);
-        std::cout << "Connect function call status: " << stat.message() << std::endl;
-    }
+void
+ClientTest::ShowSdkVersion() {
+    std::string version = conn_->ClientVersion();
+    std::cout << "SDK version: " << version << std::endl;
+}
 
-    {  // server version
-        std::string version = conn->ServerVersion();
-        std::cout << "Server version: " << version << std::endl;
-    }
-
-    {  // sdk version
-        std::string version = conn->ClientVersion();
-        std::cout << "SDK version: " << version << std::endl;
-    }
-
-    {  // show tables
-        std::vector<std::string> tables;
-        stat = conn->ShowTables(tables);
-        std::cout << "ShowTables function call status: " << stat.message() << std::endl;
-        std::cout << "All tables: " << std::endl;
-        for (auto& table : tables) {
-            int64_t row_count = 0;
-            //            conn->DropTable(table);
-            stat = conn->CountTable(table, row_count);
-            std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
-        }
-    }
-
-    {  // create table
-        milvus::TableSchema tb_schema = BuildTableSchema();
-        stat = conn->CreateTable(tb_schema);
-        std::cout << "CreateTable function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintTableSchema(tb_schema);
-
-        bool has_table = conn->HasTable(tb_schema.table_name);
-        if (has_table) {
-            std::cout << "Table is created" << std::endl;
-        }
-    }
-
-    {  // describe table
-        milvus::TableSchema tb_schema;
-        stat = conn->DescribeTable(TABLE_NAME, tb_schema);
-        std::cout << "DescribeTable function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintTableSchema(tb_schema);
-    }
-
-    {  // insert vectors
-        for (int i = 0; i < ADD_VECTOR_LOOP; i++) {
-            std::vector<milvus::RowRecord> record_array;
-            std::vector<int64_t> record_ids;
-            int64_t begin_index = i * BATCH_ROW_COUNT;
-            {  // generate vectors
-                milvus_sdk::TimeRecorder rc("Build vectors No." + std::to_string(i));
-                milvus_sdk::Utils::BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array, record_ids,
-                                                TABLE_DIMENSION);
-            }
-
-            std::string title = "Insert " + std::to_string(record_array.size()) + " vectors No." + std::to_string(i);
-            milvus_sdk::TimeRecorder rc(title);
-            stat = conn->Insert(TABLE_NAME, "", record_array, record_ids);
-            std::cout << "InsertVector function call status: " << stat.message() << std::endl;
-            std::cout << "Returned id array count: " << record_ids.size() << std::endl;
-        }
-    }
-
-    std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
-    {  // build search vectors
-        for (int64_t i = 0; i < NQ; i++) {
-            std::vector<milvus::RowRecord> record_array;
-            std::vector<int64_t> record_ids;
-            int64_t index = i * BATCH_ROW_COUNT + SEARCH_TARGET;
-            milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, TABLE_DIMENSION);
-            search_record_array.push_back(std::make_pair(record_ids[0], record_array[0]));
-        }
-    }
-
-    milvus_sdk::Utils::Sleep(3);
-    {  // search vectors
-        std::vector<std::string> partition_tags;
-        milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result);
-    }
-
-    {  // wait unit build index finish
-        milvus_sdk::TimeRecorder rc("Create index");
-        std::cout << "Wait until create all index done" << std::endl;
-        milvus::IndexParam index1 = BuildIndexParam();
-        milvus_sdk::Utils::PrintIndexParam(index1);
-        stat = conn->CreateIndex(index1);
-        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-        milvus::IndexParam index2;
-        stat = conn->DescribeIndex(TABLE_NAME, index2);
-        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintIndexParam(index2);
-    }
-
-    {  // preload table
-        stat = conn->PreloadTable(TABLE_NAME);
-        std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
-    }
-
-    {  // search vectors
-        std::vector<std::string> partition_tags;
-        milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
-                                    topk_query_result);
-    }
-
-    {  // drop index
-        stat = conn->DropIndex(TABLE_NAME);
-        std::cout << "DropIndex function call status: " << stat.message() << std::endl;
-
+void
+ClientTest::ShowTables(std::vector<std::string>& tables) {
+    milvus::Status stat = conn_->ShowTables(tables);
+    std::cout << "ShowTables function call status: " << stat.message() << std::endl;
+    std::cout << "All tables: " << std::endl;
+    for (auto& table : tables) {
         int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+        stat = conn_->CountTable(table, row_count);
+        std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
+    }
+}
+
+void
+ClientTest::CreateTable(const std::string& table_name, int64_t dim, milvus::MetricType type) {
+    milvus::TableSchema tb_schema = {table_name, dim, TABLE_INDEX_FILE_SIZE, type};
+    milvus::Status stat = conn_->CreateTable(tb_schema);
+    std::cout << "CreateTable function call status: " << stat.message() << std::endl;
+    milvus_sdk::Utils::PrintTableSchema(tb_schema);
+
+    bool has_table = conn_->HasTable(tb_schema.table_name);
+    if (has_table) {
+        std::cout << "Table is created" << std::endl;
+    }
+}
+
+void
+ClientTest::DescribeTable(const std::string& table_name) {
+    milvus::TableSchema tb_schema;
+    milvus::Status stat = conn_->DescribeTable(table_name, tb_schema);
+    std::cout << "DescribeTable function call status: " << stat.message() << std::endl;
+    milvus_sdk::Utils::PrintTableSchema(tb_schema);
+}
+
+void
+ClientTest::InsertVectors(const std::string& table_name, int64_t dim) {
+    for (int i = 0; i < ADD_VECTOR_LOOP; i++) {
+        std::vector<milvus::RowRecord> record_array;
+        std::vector<int64_t> record_ids;
+        int64_t begin_index = i * BATCH_ROW_COUNT;
+        {  // generate vectors
+            milvus_sdk::TimeRecorder rc("Build vectors No." + std::to_string(i));
+            milvus_sdk::Utils::BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array, record_ids, dim);
+        }
+
+        std::string title = "Insert " + std::to_string(record_array.size()) + " vectors No." + std::to_string(i);
+        milvus_sdk::TimeRecorder rc(title);
+        milvus::Status stat = conn_->Insert(table_name, "", record_array, record_ids);
+        std::cout << "InsertVector function call status: " << stat.message() << std::endl;
+        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
+    }
+}
+
+void
+ClientTest::BuildSearchVectors(int64_t nq, int64_t dim) {
+    search_record_array_.clear();
+    search_id_array_.clear();
+    for (int64_t i = 0; i < nq; i++) {
+        std::vector<milvus::RowRecord> record_array;
+        std::vector<int64_t> record_ids;
+        int64_t index = i * BATCH_ROW_COUNT + SEARCH_TARGET;
+        milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, dim);
+        search_record_array_.push_back(std::make_pair(record_ids[0], record_array[0]));
+        search_id_array_.push_back(record_ids[0]);
+    }
+}
+
+void
+ClientTest::Flush(const std::string& table_name) {
+    milvus_sdk::TimeRecorder rc("Flush");
+    milvus::Status stat = conn_->FlushTable(table_name);
+    std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+}
+
+void
+ClientTest::ShowTableInfo(const std::string& table_name) {
+    milvus::TableInfo table_info;
+    milvus::Status stat = conn_->ShowTableInfo(table_name, table_info);
+    milvus_sdk::Utils::PrintTableInfo(table_info);
+    std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+}
+
+void
+ClientTest::GetVectorById(const std::string& table_name, int64_t id) {
+    milvus::RowRecord vector_data;
+    milvus::Status stat = conn_->GetVectorByID(table_name, id, vector_data);
+    std::cout << "The vector " << id << " has " << vector_data.float_data.size() << " float elements" << std::endl;
+    std::cout << "GetVectorByID function call status: " << stat.message() << std::endl;
+}
+
+void
+ClientTest::SearchVectors(const std::string& table_name, int64_t topk, int64_t nprobe) {
+    std::vector<std::string> partition_tags;
+    milvus::TopKQueryResult topk_query_result;
+    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_record_array_,
+                                topk_query_result);
+}
+
+void
+ClientTest::SearchVectorsByIds(const std::string& table_name, int64_t topk, int64_t nprobe) {
+    std::vector<std::string> partition_tags;
+    milvus::TopKQueryResult topk_query_result;
+    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_, topk_query_result);
+}
+
+void
+ClientTest::CreateIndex(const std::string& table_name, milvus::IndexType type, int64_t nlist) {
+    milvus_sdk::TimeRecorder rc("Create index");
+    std::cout << "Wait until create all index done" << std::endl;
+    milvus::IndexParam index1 = {table_name, type, nlist};
+    milvus_sdk::Utils::PrintIndexParam(index1);
+    milvus::Status stat = conn_->CreateIndex(index1);
+    std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
+
+    milvus::IndexParam index2;
+    stat = conn_->DescribeIndex(table_name, index2);
+    std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
+    milvus_sdk::Utils::PrintIndexParam(index2);
+}
+
+void
+ClientTest::PreloadTable(const std::string& table_name) {
+    milvus::Status stat = conn_->PreloadTable(table_name);
+    std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
+}
+
+void
+ClientTest::DeleteByIds(const std::string& table_name, const std::vector<int64_t>& id_array) {
+    milvus::Status stat = conn_->DeleteByID(table_name, id_array);
+    std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
+
+    {
+        milvus_sdk::TimeRecorder rc("Flush");
+        stat = conn_->FlushTable(table_name);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
     }
 
-    {  // delete by range
-        milvus::Range rg;
-        rg.start_value = milvus_sdk::Utils::CurrentTmDate(-3);
-        rg.end_value = milvus_sdk::Utils::CurrentTmDate(-2);
+    {
+        // compact table
+        milvus_sdk::TimeRecorder rc1("Compact");
+        stat = conn_->CompactTable(table_name);
+        std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+    }
+}
 
-        stat = conn->DeleteByDate(TABLE_NAME, rg);
-        std::cout << "DeleteByDate function call status: " << stat.message() << std::endl;
-    }
+void
+ClientTest::DropIndex(const std::string& table_name) {
+    milvus::Status stat = conn_->DropIndex(table_name);
+    std::cout << "DropIndex function call status: " << stat.message() << std::endl;
 
-    {  // drop table
-        stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DropTable function call status: " << stat.message() << std::endl;
-    }
+    int64_t row_count = 0;
+    stat = conn_->CountTable(table_name, row_count);
+    std::cout << table_name << "(" << row_count << " rows)" << std::endl;
+}
 
-    {  // server status
-        std::string status = conn->ServerStatus();
-        std::cout << "Server status before disconnect: " << status << std::endl;
-    }
-    milvus::Connection::Destroy(conn);
-    {  // server status
-        std::string status = conn->ServerStatus();
-        std::cout << "Server status after disconnect: " << status << std::endl;
-    }
+void
+ClientTest::DropTable(const std::string& table_name) {
+    milvus::Status stat = conn_->DropTable(table_name);
+    std::cout << "DropTable function call status: " << stat.message() << std::endl;
+}
+
+void
+ClientTest::Test() {
+    std::string table_name = TABLE_NAME;
+    int64_t dim = TABLE_DIMENSION;
+    milvus::MetricType metric_type = TABLE_METRIC_TYPE;
+
+    ShowServerVersion();
+    ShowSdkVersion();
+
+    std::vector<std::string> table_array;
+    ShowTables(table_array);
+
+    CreateTable(table_name, dim, metric_type);
+    DescribeTable(table_name);
+
+    InsertVectors(table_name, dim);
+    BuildSearchVectors(NQ, dim);
+    Flush(table_name);
+    ShowTableInfo(table_name);
+
+    GetVectorById(table_name, search_id_array_[0]);
+    SearchVectors(table_name, TOP_K, NPROBE);
+    SearchVectorsByIds(table_name, TOP_K, NPROBE);
+
+    CreateIndex(table_name, INDEX_TYPE, N_LIST);
+    ShowTableInfo(table_name);
+
+    PreloadTable(table_name);
+
+    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    DeleteByIds(table_name, delete_ids);
+    SearchVectors(table_name, TOP_K, NPROBE);
+
+    DropIndex(table_name);
+    DropTable(table_name);
 }

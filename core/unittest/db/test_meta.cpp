@@ -149,20 +149,6 @@ TEST_F(MetaTest, FALID_TEST) {
         fiu_disable("SqliteMetaImpl.DeleteTableFiles.throw_exception");
     }
     {
-        milvus::engine::meta::DatesT dates;
-        status = impl_->DropDataByDate(table.table_id_, dates);
-        ASSERT_TRUE(status.ok());
-
-        dates.push_back(1);
-        status = impl_->DropDataByDate("notexist", dates);
-        ASSERT_FALSE(status.ok());
-
-        FIU_ENABLE_FIU("SqliteMetaImpl.DropDataByDate.throw_exception");
-        status = impl_->DropDataByDate(table.table_id_, dates);
-        ASSERT_FALSE(status.ok());
-        fiu_disable("SqliteMetaImpl.DropDataByDate.throw_exception");
-    }
-    {
         milvus::engine::meta::TableFilesSchema schemas;
         std::vector<size_t> ids;
         status = impl_->GetTableFiles("notexist", ids, schemas);
@@ -241,19 +227,19 @@ TEST_F(MetaTest, FALID_TEST) {
     {
         std::string partition = "part0";
         std::string partition_tag = "tag0";
-        status = impl_->CreatePartition("notexist", partition, partition_tag);
+        status = impl_->CreatePartition("notexist", partition, partition_tag, 0);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
-        status = impl_->CreatePartition(table_id, partition, partition_tag);
+        status = impl_->CreatePartition(table_id, partition, partition_tag, 0);
         ASSERT_TRUE(status.ok());
 
         partition_tag = "tag1";
-        status = impl_->CreatePartition(table_id, partition, partition_tag);
+        status = impl_->CreatePartition(table_id, partition, partition_tag, 0);
         ASSERT_FALSE(status.ok());
 
         //create empty name partition
         partition = "";
-        status = impl_->CreatePartition(table_id, partition, partition_tag);
+        status = impl_->CreatePartition(table_id, partition, partition_tag, 0);
         ASSERT_TRUE(status.ok());
 
         std::vector<milvus::engine::meta::TableSchema> partions_schema;
@@ -275,39 +261,14 @@ TEST_F(MetaTest, FALID_TEST) {
     }
     {
         std::vector<size_t> ids;
-        milvus::engine::meta::DatesT dates;
-        milvus::engine::meta::DatePartionedTableFilesSchema schema;
-        status = impl_->FilesToSearch("notexist", ids, dates, schema);
+        milvus::engine::meta::TableFilesSchema table_files;
+        status = impl_->FilesToSearch("notexist", ids, table_files);
         ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-        status = impl_->FilesToSearch(table_id, ids, dates, schema);
+        status = impl_->FilesToSearch(table_id, ids, table_files);
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
-    }
-    {
-        milvus::engine::meta::TableFileSchema file;
-        file.table_id_ = table_id;
-        file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
-        status = impl_->CreateTableFile(file);
-        ASSERT_TRUE(status.ok());
-        file.file_size_ = std::numeric_limits<size_t>::max();
-        status = impl_->UpdateTableFile(file);
-        ASSERT_TRUE(status.ok());
-
-        milvus::engine::meta::DatePartionedTableFilesSchema schema;
-        status = impl_->FilesToMerge("notexist", schema);
-        ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
-
-        FIU_ENABLE_FIU("SqliteMetaImpl.FilesToMerge.throw_exception");
-        status = impl_->FilesToMerge(table_id, schema);
-        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl.FilesToMerge.throw_exception");
-
-        //skip large files
-        milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
-        status = impl_->FilesToMerge(table.table_id_, dated_files);
-        ASSERT_EQ(dated_files[file.date_].size(), 0);
     }
     {
         milvus::engine::meta::TableFileSchema file;
@@ -420,35 +381,6 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, new_file_type);
-
-    milvus::engine::meta::DatesT dates;
-    dates.push_back(milvus::engine::utils::GetDate());
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
-    dates.clear();
-    for (auto i = 2; i < 10; ++i) {
-        dates.push_back(milvus::engine::utils::GetDateWithDelta(-1 * i));
-    }
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
-    table_file.date_ = milvus::engine::utils::GetDateWithDelta(-2);
-    status = impl_->UpdateTableFile(table_file);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.date_, milvus::engine::utils::GetDateWithDelta(-2));
-    ASSERT_FALSE(table_file.file_type_ == milvus::engine::meta::TableFileSchema::TO_DELETE);
-
-    dates.clear();
-    dates.push_back(table_file.date_);
-    status = impl_->DropDataByDate(table_file.table_id_, dates);
-    ASSERT_TRUE(status.ok());
-
-    std::vector<size_t> ids = {table_file.id_};
-    milvus::engine::meta::TableFilesSchema files;
-    status = impl_->GetTableFiles(table_file.table_id_, ids, files);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(files.size(), 0UL);
 }
 
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
@@ -641,30 +573,25 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
-    status = impl_->FilesToMerge(table.table_id_, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
+    milvus::engine::meta::TableFilesSchema table_files;
+    status = impl_->FilesToMerge(table.table_id_, table_files);
+    ASSERT_EQ(table_files.size(), raw_files_cnt);
 
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    milvus::engine::meta::DatesT dates = {table_file.date_};
+    table_files.clear();
     std::vector<size_t> ids;
-    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
+    status = impl_->FilesToSearch(table_id, ids, table_files);
+    ASSERT_EQ(table_files.size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
-    status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
-
-    status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
-
+    table_files.clear();
     ids.push_back(size_t(9999999999));
-    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_EQ(dated_files[table_file.date_].size(), 0);
+    status = impl_->FilesToSearch(table_id, ids, table_files);
+    ASSERT_EQ(table_files.size(), 0);
 
+    table_files.clear();
     std::vector<int> file_types;
-    milvus::engine::meta::TableFilesSchema table_files;
     status = impl_->FilesByType(table.table_id_, file_types, table_files);
     ASSERT_TRUE(table_files.empty());
     ASSERT_FALSE(status.ok());
@@ -690,13 +617,10 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->CleanUpShadowFiles();
     ASSERT_TRUE(status.ok());
 
-    status = impl_->DropTable(table_id);
-    ASSERT_TRUE(status.ok());
+    table_file.table_id_ = table.table_id_;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
+    status = impl_->CreateTableFile(table_file);
 
-    status = impl_->CleanUpFilesWithTTL(1UL);
-    ASSERT_TRUE(status.ok());
-
-    sleep(1);
     std::vector<int> files_to_delete;
     milvus::engine::meta::TableFilesSchema files_schema;
     files_to_delete.push_back(milvus::engine::meta::TableFileSchema::TO_DELETE);
@@ -705,10 +629,12 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 
     table_file.table_id_ = table_id;
     table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_DELETE;
-    milvus::engine::OngoingFileChecker filter;
     table_file.file_id_ = files_schema.front().file_id_;
-    filter.MarkOngoingFile(table_file);
-    status = impl_->CleanUpFilesWithTTL(1UL, &filter);
+    milvus::engine::OngoingFileChecker::GetInstance().MarkOngoingFile(table_file);
+    status = impl_->CleanUpFilesWithTTL(1UL);
+    ASSERT_TRUE(status.ok());
+
+    status = impl_->DropTable(table_id);
     ASSERT_TRUE(status.ok());
 }
 
@@ -750,4 +676,27 @@ TEST_F(MetaTest, INDEX_TEST) {
 
     status = impl_->UpdateTableFilesToIndex(table_id);
     ASSERT_TRUE(status.ok());
+}
+
+TEST_F(MetaTest, LSN_TEST) {
+    auto table_id = "lsn_test";
+    uint64_t lsn = 42949672960;
+
+    milvus::engine::meta::TableSchema table;
+    table.table_id_ = table_id;
+    auto status = impl_->CreateTable(table);
+
+    status = impl_->UpdateTableFlushLSN(table_id, lsn);
+    ASSERT_TRUE(status.ok());
+
+    uint64_t temp_lsb = 0;
+    status = impl_->GetTableFlushLSN(table_id, temp_lsb);
+    ASSERT_EQ(temp_lsb, lsn);
+
+    status = impl_->SetGlobalLastLSN(lsn);
+    ASSERT_TRUE(status.ok());
+
+    temp_lsb = 0;
+    status = impl_->GetGlobalLastLSN(temp_lsb);
+    ASSERT_EQ(temp_lsb, lsn);
 }

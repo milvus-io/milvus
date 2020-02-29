@@ -38,30 +38,29 @@ void IndexFlat::reset() {
     ntotal = 0;
 }
 
-
-void IndexFlat::search (idx_t n, const float *x, idx_t k,
-                               float *distances, idx_t *labels) const
+void IndexFlat::search(idx_t n, const float* x, idx_t k, float* distances, idx_t* labels,
+                       ConcurrentBitsetPtr bitset) const
 {
     // we see the distances and labels as heaps
 
     if (metric_type == METRIC_INNER_PRODUCT) {
         float_minheap_array_t res = {
-            size_t(n), size_t(k), labels, distances};
-        knn_inner_product (x, xb.data(), d, n, ntotal, &res);
+                size_t(n), size_t(k), labels, distances};
+        knn_inner_product (x, xb.data(), d, n, ntotal, &res, bitset);
     } else if (metric_type == METRIC_L2) {
         float_maxheap_array_t res = {
-            size_t(n), size_t(k), labels, distances};
-        knn_L2sqr (x, xb.data(), d, n, ntotal, &res);
+                size_t(n), size_t(k), labels, distances};
+        knn_L2sqr (x, xb.data(), d, n, ntotal, &res, bitset);
     } else if (metric_type == METRIC_Jaccard) {
         float_maxheap_array_t res = {
                 size_t(n), size_t(k), labels, distances};
-        knn_jaccard (x, xb.data(), d, n, ntotal, &res);
+        knn_jaccard (x, xb.data(), d, n, ntotal, &res, bitset);
     } else {
         float_maxheap_array_t res = {
-            size_t(n), size_t(k), labels, distances};
+                size_t(n), size_t(k), labels, distances};
         knn_extra_metrics (x, xb.data(), d, n, ntotal,
                            metric_type, metric_arg,
-                           &res);
+                           &res, bitset);
     }
 }
 
@@ -245,7 +244,8 @@ void IndexFlatL2BaseShift::search (
             const float *x,
             idx_t k,
             float *distances,
-            idx_t *labels) const
+            idx_t *labels,
+            ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (shift.size() == ntotal);
 
@@ -328,7 +328,8 @@ static void reorder_2_heaps (
 
 void IndexRefineFlat::search (
               idx_t n, const float *x, idx_t k,
-              float *distances, idx_t *labels) const
+              float *distances, idx_t *labels,
+              ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     idx_t k_base = idx_t (k * k_factor);
@@ -421,7 +422,8 @@ void IndexFlat1D::search (
             const float *x,
             idx_t k,
             float *distances,
-            idx_t *labels) const
+            idx_t *labels,
+            ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (perm.size() == ntotal,
                     "Call update_permutation before search");

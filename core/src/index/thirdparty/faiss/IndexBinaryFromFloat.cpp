@@ -50,7 +50,7 @@ void IndexBinaryFromFloat::reset() {
 }
 
 void IndexBinaryFromFloat::search(idx_t n, const uint8_t *x, idx_t k,
-                                  int32_t *distances, idx_t *labels) const {
+                                  int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const {
   constexpr idx_t bs = 32768;
   std::unique_ptr<float[]> xf(new float[bs * d]);
   std::unique_ptr<float[]> df(new float[bs * k]);

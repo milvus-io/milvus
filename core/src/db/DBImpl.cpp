@@ -12,12 +12,15 @@
 #include "db/DBImpl.h"
 
 #include <assert.h>
+#include <fiu-local.h>
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <thread>
 #include <utility>
@@ -25,6 +28,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "db/IDGenerator.h"
 #include "engine/EngineFactory.h"
 #include "insert/MemMenagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -35,9 +39,14 @@
 #include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
+#include "segment/SegmentReader.h"
+#include "segment/SegmentWriter.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
+#include "wal/WalDefinations.h"
 
 namespace milvus {
 namespace engine {
@@ -50,21 +59,22 @@ constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 
-void
-TraverseFiles(const meta::DatePartionedTableFilesSchema& date_files, meta::TableFilesSchema& files_array) {
-    for (auto& day_files : date_files) {
-        for (auto& file : day_files.second) {
-            files_array.push_back(file);
-        }
-    }
-}
-
 }  // namespace
 
 DBImpl::DBImpl(const DBOptions& options)
-    : options_(options), initialized_(false), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
+    : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
+
+    if (options_.wal_enable_) {
+        wal::MXLogConfiguration mxlog_config;
+        mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
+        // 2 buffers in the WAL
+        mxlog_config.buffer_size = options_.buffer_size_ / 2;
+        mxlog_config.mxlog_path = options_.mxlog_path_;
+        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
+    }
+
     Start();
 }
 
@@ -84,10 +94,42 @@ DBImpl::Start() {
     // ENGINE_LOG_TRACE << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
-    // for distribute version, some nodes are read only
-    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-        // ENGINE_LOG_TRACE << "StartTimerTasks";
-        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
+    // wal
+    if (options_.wal_enable_) {
+        auto error_code = DB_ERROR;
+        if (wal_mgr_ != nullptr) {
+            error_code = wal_mgr_->Init(meta_ptr_);
+        }
+        if (error_code != WAL_SUCCESS) {
+            throw Exception(error_code, "Wal init error!");
+        }
+
+        // recovery
+        while (1) {
+            wal::MXLogRecord record;
+            auto error_code = wal_mgr_->GetNextRecovery(record);
+            if (error_code != WAL_SUCCESS) {
+                throw Exception(error_code, "Wal recovery error!");
+            }
+            if (record.type == wal::MXLogType::None) {
+                break;
+            }
+
+            ExecWalRecord(record);
+        }
+
+        // for distribute version, some nodes are read only
+        if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+            // background thread
+            bg_wal_thread_ = std::thread(&DBImpl::BackgroundWalTask, this);
+        }
+
+    } else {
+        // for distribute version, some nodes are read only
+        if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+            // ENGINE_LOG_TRACE << "StartTimerTasks";
+            bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
+        }
     }
 
     return Status::OK();
@@ -98,16 +140,25 @@ DBImpl::Stop() {
     if (!initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
+
     initialized_.store(false, std::memory_order_release);
 
-    // make sure all memory data serialized
-    std::set<std::string> sync_table_ids;
-    SyncMemData(sync_table_ids);
-
-    // wait compaction/buildindex finish
-    bg_timer_thread_.join();
-
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        if (options_.wal_enable_) {
+            // wait flush merge/buildindex finish
+            wal_task_swn_.Notify();
+            bg_wal_thread_.join();
+
+        } else {
+            // flush all
+            wal::MXLogRecord record;
+            record.type = wal::MXLogType::Flush;
+            ExecWalRecord(record);
+
+            // wait merge/buildindex finish
+            bg_timer_thread_.join();
+        }
+
         meta_ptr_->CleanUpShadowFiles();
     }
 
@@ -128,16 +179,24 @@ DBImpl::CreateTable(meta::TableSchema& table_schema) {
 
     meta::TableSchema temp_schema = table_schema;
     temp_schema.index_file_size_ *= ONE_MB;  // store as MB
+    if (options_.wal_enable_) {
+        temp_schema.flush_lsn_ = wal_mgr_->CreateTable(table_schema.table_id_);
+    }
+
     return meta_ptr_->CreateTable(temp_schema);
 }
 
 Status
-DBImpl::DropTable(const std::string& table_id, const meta::DatesT& dates) {
+DBImpl::DropTable(const std::string& table_id) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    return DropTableRecursively(table_id, dates);
+    if (options_.wal_enable_) {
+        wal_mgr_->DropTable(table_id);
+    }
+
+    return DropTableRecursively(table_id);
 }
 
 Status
@@ -161,6 +220,29 @@ DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
 }
 
 Status
+DBImpl::HasNativeTable(const std::string& table_id, bool& has_or_not_) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        has_or_not_ = false;
+        return status;
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            has_or_not_ = false;
+            return Status(DB_NOT_FOUND, "");
+        }
+
+        has_or_not_ = true;
+        return Status::OK();
+    }
+}
+
+Status
 DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -181,16 +263,79 @@ DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
 }
 
 Status
+DBImpl::GetTableInfo(const std::string& table_id, TableInfo& table_info) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // step1: get all partition ids
+    std::vector<std::pair<std::string, std::string>> name2tag = {{table_id, milvus::engine::DEFAULT_PARTITON_TAG}};
+    std::vector<meta::TableSchema> partition_array;
+    auto status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
+        name2tag.push_back(std::make_pair(schema.table_id_, schema.partition_tag_));
+    }
+
+    // step2: get native table info
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::INDEX};
+
+    static std::map<int32_t, std::string> index_type_name = {
+        {(int32_t)engine::EngineType::FAISS_IDMAP, "IDMAP"},
+        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
+        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
+        {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
+        {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
+        {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
+        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
+        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
+    };
+
+    for (auto& name_tag : name2tag) {
+        meta::TableFilesSchema table_files;
+        status = meta_ptr_->FilesByType(name_tag.first, file_types, table_files);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to get table info: " + status.ToString();
+            ENGINE_LOG_ERROR << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+
+        std::vector<SegmentStat> segments_stat;
+        for (auto& file : table_files) {
+            SegmentStat seg_stat;
+            seg_stat.name_ = file.segment_id_;
+            seg_stat.row_count_ = (int64_t)file.row_count_;
+            seg_stat.index_name_ = index_type_name[file.engine_type_];
+            seg_stat.data_size_ = (int64_t)file.file_size_;
+            segments_stat.emplace_back(seg_stat);
+        }
+
+        PartitionStat partition_stat;
+        if (name_tag.first == table_id) {
+            partition_stat.tag_ = milvus::engine::DEFAULT_PARTITON_TAG;
+        } else {
+            partition_stat.tag_ = name_tag.second;
+        }
+
+        partition_stat.segments_stat_.swap(segments_stat);
+        table_info.partitions_stat_.emplace_back(partition_stat);
+    }
+
+    return Status::OK();
+}
+
+Status
 DBImpl::PreloadTable(const std::string& table_id) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     // step 1: get all table files from parent table
-    meta::DatesT dates;
     std::vector<size_t> ids;
     meta::TableFilesSchema files_array;
-    auto status = GetFilesToSearch(table_id, ids, dates, files_array);
+    auto status = GetFilesToSearch(table_id, ids, files_array);
     if (!status.ok()) {
         return status;
     }
@@ -199,7 +344,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
+        status = GetFilesToSearch(schema.table_id_, ids, files_array);
     }
 
     int64_t size = 0;
@@ -212,7 +357,16 @@ DBImpl::PreloadTable(const std::string& table_id) {
                      << " files need to be pre-loaded";
     TimeRecorderAuto rc("Pre-load table:" + table_id);
     for (auto& file : files_array) {
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+        EngineType engine_type;
+        if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
+            file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                        : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file.engine_type_;
+        }
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
                                                          (MetricType)file.metric_type_, file.nlist_);
         fiu_do_on("DBImpl.PreloadTable.null_engine", engine = nullptr);
         if (engine == nullptr) {
@@ -267,7 +421,9 @@ DBImpl::CreatePartition(const std::string& table_id, const std::string& partitio
         return SHUTDOWN_ERROR;
     }
 
-    return meta_ptr_->CreatePartition(table_id, partition_name, partition_tag);
+    uint64_t lsn = 0;
+    meta_ptr_->GetTableFlushLSN(table_id, lsn);
+    return meta_ptr_->CreatePartition(table_id, partition_name, partition_tag, lsn);
 }
 
 Status
@@ -320,23 +476,494 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         return SHUTDOWN_ERROR;
     }
 
-    // if partition is specified, use partition as target table
+    // insert vectors into target table
+    // (zhiru): generate ids
+    if (vectors.id_array_.empty()) {
+        auto id_generator = std::make_shared<SimpleIDGenerator>();
+        id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+    }
+
     Status status;
-    std::string target_table_name = table_id;
-    if (!partition_tag.empty()) {
-        std::string partition_name;
-        status = meta_ptr_->GetPartitionName(table_id, partition_tag, target_table_name);
+    if (options_.wal_enable_) {
+        std::string target_table_name;
+        status = GetPartitionByTag(table_id, partition_tag, target_table_name);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
             return status;
+        }
+
+        if (!vectors.float_data_.empty()) {
+            wal_mgr_->Insert(table_id, partition_tag, vectors.id_array_, vectors.float_data_);
+        } else if (!vectors.binary_data_.empty()) {
+            wal_mgr_->Insert(table_id, partition_tag, vectors.id_array_, vectors.binary_data_);
+        }
+        wal_task_swn_.Notify();
+
+    } else {
+        wal::MXLogRecord record;
+        record.lsn = 0;  // need to get from meta ?
+        record.table_id = table_id;
+        record.partition_tag = partition_tag;
+        record.ids = vectors.id_array_.data();
+        record.length = vectors.vector_count_;
+        if (vectors.binary_data_.empty()) {
+            record.type = wal::MXLogType::InsertVector;
+            record.data = vectors.float_data_.data();
+            record.data_size = vectors.float_data_.size() * sizeof(float);
+        } else {
+            record.type = wal::MXLogType::InsertBinary;
+            record.ids = vectors.id_array_.data();
+            record.length = vectors.vector_count_;
+            record.data = vectors.binary_data_.data();
+            record.data_size = vectors.binary_data_.size() * sizeof(uint8_t);
+        }
+
+        status = ExecWalRecord(record);
+    }
+
+    return status;
+}
+
+Status
+DBImpl::DeleteVector(const std::string& table_id, IDNumber vector_id) {
+    IDNumbers ids;
+    ids.push_back(vector_id);
+    return DeleteVectors(table_id, ids);
+}
+
+Status
+DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    if (options_.wal_enable_) {
+        wal_mgr_->DeleteById(table_id, vector_ids);
+        wal_task_swn_.Notify();
+
+    } else {
+        wal::MXLogRecord record;
+        record.lsn = 0;  // need to get from meta ?
+        record.type = wal::MXLogType::Delete;
+        record.table_id = table_id;
+        record.ids = vector_ids.data();
+        record.length = vector_ids.size();
+
+        status = ExecWalRecord(record);
+    }
+
+    return status;
+}
+
+Status
+DBImpl::Flush(const std::string& table_id) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    bool has_table;
+    status = HasTable(table_id, has_table);
+    if (!status.ok()) {
+        return status;
+    }
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table to flush does not exist: " << table_id;
+        return Status(DB_NOT_FOUND, "Table to flush does not exist");
+    }
+
+    ENGINE_LOG_DEBUG << "Begin flush table: " << table_id;
+
+    if (options_.wal_enable_) {
+        ENGINE_LOG_DEBUG << "WAL flush";
+        auto lsn = wal_mgr_->Flush(table_id);
+        ENGINE_LOG_DEBUG << "wal_mgr_->Flush";
+        if (lsn != 0) {
+            wal_task_swn_.Notify();
+            flush_task_swn_.Wait();
+            ENGINE_LOG_DEBUG << "flush_task_swn_.Wait()";
+        }
+
+    } else {
+        ENGINE_LOG_DEBUG << "MemTable flush";
+        wal::MXLogRecord record;
+        record.type = wal::MXLogType::Flush;
+        record.table_id = table_id;
+        status = ExecWalRecord(record);
+    }
+
+    ENGINE_LOG_DEBUG << "End flush table: " << table_id;
+
+    return status;
+}
+
+Status
+DBImpl::Flush() {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    ENGINE_LOG_DEBUG << "Begin flush all tables";
+
+    Status status;
+    if (options_.wal_enable_) {
+        ENGINE_LOG_DEBUG << "WAL flush";
+        auto lsn = wal_mgr_->Flush();
+        if (lsn != 0) {
+            wal_task_swn_.Notify();
+            flush_task_swn_.Wait();
+        }
+    } else {
+        ENGINE_LOG_DEBUG << "MemTable flush";
+        wal::MXLogRecord record;
+        record.type = wal::MXLogType::Flush;
+        status = ExecWalRecord(record);
+    }
+
+    ENGINE_LOG_DEBUG << "End flush all tables";
+
+    return status;
+}
+
+Status
+DBImpl::Compact(const std::string& table_id) {
+    // TODO: WAL???
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    engine::meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    auto status = DescribeTable(table_schema);
+    if (!status.ok()) {
+        if (status.code() == DB_NOT_FOUND) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
+        } else {
+            return status;
+        }
+    } else {
+        if (!table_schema.owner_table_.empty()) {
+            ENGINE_LOG_ERROR << "Table to compact does not exist: " << table_id;
+            return Status(DB_NOT_FOUND, "Table to compact does not exist");
         }
     }
 
-    // insert vectors into target table
-    milvus::server::CollectInsertMetrics metrics(vectors.vector_count_, status);
-    status = mem_mgr_->InsertVectors(target_table_name, vectors);
+    ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
+    // Drop all index
+    status = DropIndex(table_id);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to drop index in compact: " + status.message();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    // Get files to compact from meta.
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX};
+    meta::TableFilesSchema files_to_compact;
+    status = meta_ptr_->FilesByType(table_id, file_types, files_to_compact);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get files to compact: " + status.message();
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
+
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
+    for (auto& file : files_to_compact) {
+        status = CompactFile(table_id, file);
+
+        if (!status.ok()) {
+            OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
+            return status;
+        }
+    }
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
+
+    ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
 
     return status;
+}
+
+Status
+DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file) {
+    ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for table: " << table_id;
+
+    // Create new table file
+    meta::TableFileSchema compacted_file;
+    compacted_file.table_id_ = table_id;
+    // compacted_file.date_ = date;
+    compacted_file.file_type_ = meta::TableFileSchema::NEW_MERGE;  // TODO: use NEW_MERGE for now
+    Status status = meta_ptr_->CreateTableFile(compacted_file);
+
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to create table file: " << status.message();
+        return status;
+    }
+
+    // Compact (merge) file to the newly created table file
+    meta::TableFilesSchema updated;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(compacted_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
+
+    std::string segment_dir_to_merge;
+    utils::GetParentPath(file.location_, segment_dir_to_merge);
+
+    ENGINE_LOG_DEBUG << "Compacting begin...";
+    segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
+
+    auto file_to_compact = file;
+    file_to_compact.file_type_ = meta::TableFileSchema::TO_DELETE;
+    updated.emplace_back(file_to_compact);
+
+    // Serialize
+    ENGINE_LOG_DEBUG << "Serializing compacted segment...";
+    status = segment_writer_ptr->Serialize();
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to serialize compacted segment: " << status.message();
+        compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        auto mark_status = meta_ptr_->UpdateTableFile(compacted_file);
+        if (mark_status.ok()) {
+            ENGINE_LOG_DEBUG << "Mark file: " << compacted_file.file_id_ << " to to_delete";
+        }
+        return status;
+    }
+
+    // Drop index again, in case some files were in the index building process during merging
+    // TODO: might be too frequent?
+    DropIndex(table_id);
+
+    // Update table files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
+                                        ? meta::TableFileSchema::TO_INDEX
+                                        : meta::TableFileSchema::RAW;
+    } else {
+        compacted_file.file_type_ = meta::TableFileSchema::RAW;
+    }
+    compacted_file.file_size_ = segment_writer_ptr->Size();
+    compacted_file.row_count_ = segment_writer_ptr->VectorCount();
+
+    if (compacted_file.row_count_ == 0) {
+        ENGINE_LOG_DEBUG << "Compacted segment is empty. Mark it as TO_DELETE";
+        compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+    }
+
+    updated.emplace_back(compacted_file);
+    status = meta_ptr_->UpdateTableFiles(updated);
+
+    ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
+                     << std::to_string(file_to_compact.file_size_) << " bytes to "
+                     << std::to_string(compacted_file.file_size_) << " bytes";
+
+    if (options_.insert_cache_immediately_) {
+        segment_writer_ptr->Cache();
+    }
+
+    return status;
+}
+
+Status
+DBImpl::GetVectorByID(const std::string& table_id, const IDNumber& vector_id, VectorsData& vector) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    bool has_table;
+    auto status = HasTable(table_id, has_table);
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table " << table_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Table does not exist");
+    }
+    if (!status.ok()) {
+        return status;
+    }
+
+    meta::TableFilesSchema files_to_query;
+
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::BACKUP};
+    meta::TableFilesSchema table_files;
+    status = meta_ptr_->FilesByType(table_id, file_types, files_to_query);
+    if (!status.ok()) {
+        std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
+        ENGINE_LOG_ERROR << err_msg;
+        return status;
+    }
+
+    std::vector<meta::TableSchema> partition_array;
+    status = meta_ptr_->ShowPartitions(table_id, partition_array);
+    for (auto& schema : partition_array) {
+        meta::TableFilesSchema files;
+        status = meta_ptr_->FilesByType(schema.table_id_, file_types, files);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
+            ENGINE_LOG_ERROR << err_msg;
+            return status;
+        }
+        files_to_query.insert(files_to_query.end(), std::make_move_iterator(files.begin()),
+                              std::make_move_iterator(files.end()));
+    }
+
+    if (files_to_query.empty()) {
+        ENGINE_LOG_DEBUG << "No files to get vector by id from";
+        return Status::OK();
+    }
+
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();
+    OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_query);
+
+    status = GetVectorByIdHelper(table_id, vector_id, vector, files_to_query);
+
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_query);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo();
+
+    return status;
+}
+
+Status
+DBImpl::GetVectorIDs(const std::string& table_id, const std::string& segment_id, IDNumbers& vector_ids) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    // step 1: check table existence
+    bool has_table;
+    auto status = HasTable(table_id, has_table);
+    if (!has_table) {
+        ENGINE_LOG_ERROR << "Table " << table_id << " does not exist: ";
+        return Status(DB_NOT_FOUND, "Table does not exist");
+    }
+    if (!status.ok()) {
+        return status;
+    }
+
+    //  step 2: find segment
+    meta::TableFilesSchema table_files;
+    status = meta_ptr_->GetTableFilesBySegmentId(segment_id, table_files);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (table_files.empty()) {
+        return Status(DB_NOT_FOUND, "Segment does not exist");
+    }
+
+    // check the segment is belong to this table
+    if (table_files[0].table_id_ != table_id) {
+        // the segment could be in a partition under this table
+        meta::TableSchema table_schema;
+        table_schema.table_id_ = table_files[0].table_id_;
+        status = DescribeTable(table_schema);
+        if (table_schema.owner_table_ != table_id) {
+            return Status(DB_NOT_FOUND, "Segment does not belong to this table");
+        }
+    }
+
+    // step 3: load segment ids and delete offset
+    std::string segment_dir;
+    engine::utils::GetParentPath(table_files[0].location_, segment_dir);
+    segment::SegmentReader segment_reader(segment_dir);
+
+    std::vector<segment::doc_id_t> uids;
+    status = segment_reader.LoadUids(uids);
+    if (!status.ok()) {
+        return status;
+    }
+
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 4: construct id array
+    // avoid duplicate offset and erase from max offset to min offset
+    auto& deleted_offset = deleted_docs_ptr->GetDeletedDocs();
+    std::set<segment::offset_t, std::greater<segment::offset_t>> ordered_offset;
+    for (segment::offset_t offset : deleted_offset) {
+        ordered_offset.insert(offset);
+    }
+    for (segment::offset_t offset : ordered_offset) {
+        uids.erase(uids.begin() + offset);
+    }
+    vector_ids.swap(uids);
+
+    return status;
+}
+
+Status
+DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,
+                            const meta::TableFilesSchema& files) {
+    ENGINE_LOG_DEBUG << "Getting vector by id in " << files.size() << " files";
+
+    for (auto& file : files) {
+        // Load bloom filter
+        std::string segment_dir;
+        engine::utils::GetParentPath(file.location_, segment_dir);
+        segment::SegmentReader segment_reader(segment_dir);
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+        // Check if the id is present in bloom filter.
+        if (id_bloom_filter_ptr->Check(vector_id)) {
+            // Load uids and check if the id is indeed present. If yes, find its offset.
+            std::vector<int64_t> offsets;
+            std::vector<segment::doc_id_t> uids;
+            auto status = segment_reader.LoadUids(uids);
+            if (!status.ok()) {
+                return status;
+            }
+
+            auto found = std::find(uids.begin(), uids.end(), vector_id);
+            if (found != uids.end()) {
+                auto offset = std::distance(uids.begin(), found);
+
+                // Check whether the id has been deleted
+                segment::DeletedDocsPtr deleted_docs_ptr;
+                status = segment_reader.LoadDeletedDocs(deleted_docs_ptr);
+                if (!status.ok()) {
+                    return status;
+                }
+                auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+                auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+                if (deleted == deleted_docs.end()) {
+                    // Load raw vector
+                    bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
+                    size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
+                    std::vector<uint8_t> raw_vector;
+                    status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                    if (!status.ok()) {
+                        return status;
+                    }
+
+                    vector.vector_count_ = 1;
+                    if (is_binary) {
+                        vector.binary_data_ = std::move(raw_vector);
+                    } else {
+                        std::vector<float> float_vector;
+                        float_vector.resize(file.dimension_);
+                        memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
+                        vector.float_data_ = std::move(float_vector);
+                    }
+                    return Status::OK();
+                }
+            }
+        } else {
+            continue;
+        }
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -346,8 +973,9 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     }
 
     // serialize memory data
-    std::set<std::string> sync_table_ids;
-    auto status = SyncMemData(sync_table_ids);
+    //    std::set<std::string> sync_table_ids;
+    //    auto status = SyncMemData(sync_table_ids);
+    auto status = Flush();
 
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
@@ -402,29 +1030,29 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-              ResultIds& result_ids, ResultDistances& result_distances) {
+DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, IDNumber vector_id,
+                  ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
-    meta::DatesT dates = {utils::GetDate()};
-    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors, dates, result_ids, result_distances);
+    VectorsData vectors_data = VectorsData();
+    vectors_data.id_array_.emplace_back(vector_id);
+    vectors_data.vector_count_ = 1;
+    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors_data, result_ids, result_distances);
     return result;
 }
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
               const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-              const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
+              ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
-
-    ENGINE_LOG_DEBUG << "Query by dates for table: " << table_id << " date range count: " << dates.size();
 
     Status status;
     std::vector<size_t> ids;
@@ -433,7 +1061,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     if (partition_tags.empty()) {
         // no partition tag specified, means search in whole table
         // get all table files from parent table
-        status = GetFilesToSearch(table_id, ids, dates, files_array);
+        status = GetFilesToSearch(table_id, ids, files_array);
         if (!status.ok()) {
             return status;
         }
@@ -441,7 +1069,11 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         std::vector<meta::TableSchema> partition_array;
         status = meta_ptr_->ShowPartitions(table_id, partition_array);
         for (auto& schema : partition_array) {
-            status = GetFilesToSearch(schema.table_id_, ids, dates, files_array);
+            status = GetFilesToSearch(schema.table_id_, ids, files_array);
+        }
+
+        if (files_array.empty()) {
+            return Status::OK();
         }
     } else {
         // get files from specified partitions
@@ -449,7 +1081,11 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         GetPartitionsByTags(table_id, partition_tags, partition_name_array);
 
         for (auto& partition_name : partition_name_array) {
-            status = GetFilesToSearch(partition_name, ids, dates, files_array);
+            status = GetFilesToSearch(partition_name, ids, files_array);
+        }
+
+        if (files_array.empty()) {
+            return Status::OK();
         }
     }
 
@@ -465,14 +1101,12 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
                       const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                      const meta::DatesT& dates, ResultIds& result_ids, ResultDistances& result_distances) {
+                      ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
-
-    ENGINE_LOG_DEBUG << "Query by file ids for table: " << table_id << " date range count: " << dates.size();
 
     // get specified files
     std::vector<size_t> ids;
@@ -484,7 +1118,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     }
 
     meta::TableFilesSchema files_array;
-    auto status = GetFilesToSearch(table_id, ids, dates, files_array);
+    auto status = GetFilesToSearch(table_id, ids, files_array);
     if (!status.ok()) {
         return status;
     }
@@ -526,7 +1160,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     TimeRecorder rc("");
 
     // step 1: construct search job
-    auto status = ongoing_files_checker_.MarkOngoingFiles(files);
+    auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nprobe, vectors);
@@ -539,7 +1173,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitResult();
 
-    status = ongoing_files_checker_.UnmarkOngoingFiles(files);
+    status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files);
     if (!job->GetStatus().ok()) {
         return job->GetStatus();
     }
@@ -556,7 +1190,6 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
 
 void
 DBImpl::BackgroundTimerTask() {
-    Status status;
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -567,28 +1200,32 @@ DBImpl::BackgroundTimerTask() {
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(options_.auto_flush_interval_));
 
         StartMetricTask();
-        StartCompactionTask();
+        StartMergeTask();
         StartBuildIndexTask();
     }
 }
 
 void
 DBImpl::WaitMergeFileFinish() {
-    std::lock_guard<std::mutex> lck(compact_result_mutex_);
-    for (auto& iter : compact_thread_results_) {
+    ENGINE_LOG_DEBUG << "Begin WaitMergeFileFinish";
+    std::lock_guard<std::mutex> lck(merge_result_mutex_);
+    for (auto& iter : merge_thread_results_) {
         iter.wait();
     }
+    ENGINE_LOG_DEBUG << "End WaitMergeFileFinish";
 }
 
 void
 DBImpl::WaitBuildIndexFinish() {
+    ENGINE_LOG_DEBUG << "Begin WaitBuildIndexFinish";
     std::lock_guard<std::mutex> lck(index_result_mutex_);
     for (auto& iter : index_thread_results_) {
         iter.wait();
     }
+    ENGINE_LOG_DEBUG << "End WaitBuildIndexFinish";
 }
 
 void
@@ -627,75 +1264,64 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().PushToGateway();
 }
 
-Status
-DBImpl::SyncMemData(std::set<std::string>& sync_table_ids) {
-    std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
-    std::set<std::string> temp_table_ids;
-    mem_mgr_->Serialize(temp_table_ids);
-    for (auto& id : temp_table_ids) {
-        sync_table_ids.insert(id);
-    }
-
-    if (!temp_table_ids.empty()) {
-        SERVER_LOG_DEBUG << "Insert cache serialized";
-    }
-
-    return Status::OK();
-}
-
 void
-DBImpl::StartCompactionTask() {
+DBImpl::StartMergeTask() {
     static uint64_t compact_clock_tick = 0;
     ++compact_clock_tick;
     if (compact_clock_tick % COMPACT_ACTION_INTERVAL != 0) {
         return;
     }
 
-    // serialize memory data
-    SyncMemData(compact_table_ids_);
+    if (!options_.wal_enable_) {
+        Flush();
+    }
 
-    // compactiong has been finished?
+    // ENGINE_LOG_DEBUG << "Begin StartMergeTask";
+    // merge task has been finished?
     {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (!compact_thread_results_.empty()) {
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        if (!merge_thread_results_.empty()) {
             std::chrono::milliseconds span(10);
-            if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
-                compact_thread_results_.pop_back();
+            if (merge_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                merge_thread_results_.pop_back();
             }
         }
     }
 
-    // add new compaction task
+    // add new merge task
     {
-        std::lock_guard<std::mutex> lck(compact_result_mutex_);
-        if (compact_thread_results_.empty()) {
-            // collect merge files for all tables(if compact_table_ids_ is empty) for two reasons:
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        if (merge_thread_results_.empty()) {
+            // collect merge files for all tables(if merge_table_ids_ is empty) for two reasons:
             // 1. other tables may still has un-merged files
             // 2. server may be closed unexpected, these un-merge files need to be merged when server restart
-            if (compact_table_ids_.empty()) {
+            if (merge_table_ids_.empty()) {
                 std::vector<meta::TableSchema> table_schema_array;
                 meta_ptr_->AllTables(table_schema_array);
                 for (auto& schema : table_schema_array) {
-                    compact_table_ids_.insert(schema.table_id_);
+                    merge_table_ids_.insert(schema.table_id_);
                 }
             }
 
             // start merge file thread
-            compact_thread_results_.push_back(
-                compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
-            compact_table_ids_.clear();
+            merge_thread_results_.push_back(
+                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, merge_table_ids_));
+            merge_table_ids_.clear();
         }
     }
+
+    // ENGINE_LOG_DEBUG << "End StartMergeTask";
 }
 
 Status
-DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
+DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files) {
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
     // step 1: create table file
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
-    table_file.date_ = date;
     table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateTableFile(table_file);
 
@@ -705,35 +1331,36 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
     }
 
     // step 2: merge files
+    /*
     ExecutionEnginePtr index =
         EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
                              (MetricType)table_file.metric_type_, table_file.nlist_);
-
+*/
     meta::TableFilesSchema updated;
-    int64_t index_size = 0;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(table_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
 
     for (auto& file : files) {
         server::CollectMergeFilesMetrics metrics;
-
-        index->Merge(file.location_);
+        std::string segment_dir_to_merge;
+        utils::GetParentPath(file.location_, segment_dir_to_merge);
+        segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
         auto file_schema = file;
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
-        index_size = index->Size();
-
-        if (index_size >= file_schema.index_file_size_) {
+        auto size = segment_writer_ptr->Size();
+        if (size >= file_schema.index_file_size_) {
             break;
         }
     }
 
     // step 3: serialize to disk
     try {
-        status = index->Serialize();
+        status = segment_writer_ptr->Serialize();
         fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
         fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << status.message();
-        }
     } catch (std::exception& ex) {
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
@@ -741,35 +1368,36 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
     }
 
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
+
         // if failed to serialize merge file to disk
-        // typical error: out of disk space, out of memory or permition denied
+        // typical error: out of disk space, out of memory or permission denied
         table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
         status = meta_ptr_->UpdateTableFile(table_file);
         ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-
-        ENGINE_LOG_ERROR << "Failed to persist merged file: " << table_file.location_
-                         << ", possible out of disk space or memory";
 
         return status;
     }
 
     // step 4: update table files state
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
     if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
-        table_file.file_type_ = (index->PhysicalSize() >= table_file.index_file_size_) ? meta::TableFileSchema::TO_INDEX
-                                                                                       : meta::TableFileSchema::RAW;
+        table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
+                                    ? meta::TableFileSchema::TO_INDEX
+                                    : meta::TableFileSchema::RAW;
     } else {
         table_file.file_type_ = meta::TableFileSchema::RAW;
     }
-    table_file.file_size_ = index->PhysicalSize();
-    table_file.row_count_ = index->Count();
+    table_file.file_size_ = segment_writer_ptr->Size();
+    table_file.row_count_ = segment_writer_ptr->VectorCount();
     updated.push_back(table_file);
     status = meta_ptr_->UpdateTableFiles(updated);
-    ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ << " of size " << index->PhysicalSize() << " bytes";
+    ENGINE_LOG_DEBUG << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
+                     << " bytes";
 
     if (options_.insert_cache_immediately_) {
-        index->Cache();
+        segment_writer_ptr->Cache();
     }
 
     return status;
@@ -777,36 +1405,34 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
-    meta::DatePartionedTableFilesSchema raw_files;
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
+    meta::TableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Failed to get merge files for table: " << table_id;
         return status;
     }
 
-    for (auto& kv : raw_files) {
-        meta::TableFilesSchema& files = kv.second;
-        if (files.size() < options_.merge_trigger_number_) {
-            ENGINE_LOG_TRACE << "Files number not greater equal than merge trigger number, skip merge action";
-            continue;
-        }
+    if (raw_files.size() < options_.merge_trigger_number_) {
+        ENGINE_LOG_TRACE << "Files number not greater equal than merge trigger number, skip merge action";
+        return Status::OK();
+    }
 
-        status = ongoing_files_checker_.MarkOngoingFiles(files);
-        MergeFiles(table_id, kv.first, kv.second);
-        status = ongoing_files_checker_.UnmarkOngoingFiles(files);
+    status = OngoingFileChecker::GetInstance().MarkOngoingFiles(raw_files);
+    MergeFiles(table_id, raw_files);
+    status = OngoingFileChecker::GetInstance().UnmarkOngoingFiles(raw_files);
 
-        if (!initialized_.load(std::memory_order_acquire)) {
-            ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table: " << table_id;
-            break;
-        }
+    if (!initialized_.load(std::memory_order_acquire)) {
+        ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table: " << table_id;
     }
 
     return Status::OK();
 }
 
 void
-DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    // ENGINE_LOG_TRACE << " Background compaction thread start";
+DBImpl::BackgroundMerge(std::set<std::string> table_ids) {
+    // ENGINE_LOG_TRACE << " Background merge thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -829,10 +1455,10 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
             ttl = meta::HOUR;
         }
 
-        meta_ptr_->CleanUpFilesWithTTL(ttl, &ongoing_files_checker_);
+        meta_ptr_->CleanUpFilesWithTTL(ttl);
     }
 
-    // ENGINE_LOG_TRACE << " Background compaction thread exit";
+    // ENGINE_LOG_TRACE << " Background merge thread exit";
 }
 
 void
@@ -872,7 +1498,7 @@ DBImpl::BackgroundBuildIndex() {
 
     if (!to_index_files.empty()) {
         ENGINE_LOG_DEBUG << "Background build index thread begin";
-        status = ongoing_files_checker_.MarkOngoingFiles(to_index_files);
+        status = OngoingFileChecker::GetInstance().MarkOngoingFiles(to_index_files);
 
         // step 2: put build index task to scheduler
         std::vector<std::pair<scheduler::BuildIndexJobPtr, scheduler::TableFileSchemaPtr>> job2file_map;
@@ -899,7 +1525,7 @@ DBImpl::BackgroundBuildIndex() {
 
                 index_failed_checker_.MarkSucceedIndexFile(file_schema);
             }
-            status = ongoing_files_checker_.UnmarkOngoingFile(file_schema);
+            status = OngoingFileChecker::GetInstance().UnmarkOngoingFile(file_schema);
         }
 
         ENGINE_LOG_DEBUG << "Background build index thread finished";
@@ -926,18 +1552,47 @@ DBImpl::GetFilesToBuildIndex(const std::string& table_id, const std::vector<int>
 }
 
 Status
-DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids, const meta::DatesT& dates,
+DBImpl::GetFilesToSearch(const std::string& table_id, const std::vector<size_t>& file_ids,
                          meta::TableFilesSchema& files) {
     ENGINE_LOG_DEBUG << "Collect files from table: " << table_id;
 
-    meta::DatePartionedTableFilesSchema date_files;
-    auto status = meta_ptr_->FilesToSearch(table_id, file_ids, dates, date_files);
+    meta::TableFilesSchema search_files;
+    auto status = meta_ptr_->FilesToSearch(table_id, file_ids, search_files);
     if (!status.ok()) {
         return status;
     }
 
-    TraverseFiles(date_files, files);
+    for (auto& file : search_files) {
+        files.push_back(file);
+    }
     return Status::OK();
+}
+
+Status
+DBImpl::GetPartitionByTag(const std::string& table_id, const std::string& partition_tag, std::string& partition_name) {
+    Status status;
+
+    if (partition_tag.empty()) {
+        partition_name = table_id;
+
+    } else {
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = partition_tag;
+        server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+        if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+            partition_name = table_id;
+            return status;
+        }
+
+        status = meta_ptr_->GetPartitionName(table_id, partition_tag, partition_name);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << status.message();
+        }
+    }
+
+    return status;
 }
 
 Status
@@ -951,6 +1606,12 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
         server::StringHelpFunctions::TrimStringBlank(valid_tag);
+
+        if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+            partition_name_array.insert(table_id);
+            return status;
+        }
+
         for (auto& schema : partition_array) {
             if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
                 partition_name_array.insert(schema.table_id_);
@@ -962,29 +1623,29 @@ DBImpl::GetPartitionsByTags(const std::string& table_id, const std::vector<std::
 }
 
 Status
-DBImpl::DropTableRecursively(const std::string& table_id, const meta::DatesT& dates) {
+DBImpl::DropTableRecursively(const std::string& table_id) {
     // dates partly delete files of the table but currently we don't support
     ENGINE_LOG_DEBUG << "Prepare to delete table " << table_id;
 
     Status status;
-    if (dates.empty()) {
-        status = mem_mgr_->EraseMemVector(table_id);  // not allow insert
-        status = meta_ptr_->DropTable(table_id);      // soft delete table
-        index_failed_checker_.CleanFailedIndexFileOfTable(table_id);
-
-        // scheduler will determine when to delete table files
-        auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
-        scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(table_id, meta_ptr_, nres);
-        scheduler::JobMgrInst::GetInstance()->Put(job);
-        job->WaitAndDelete();
-    } else {
-        status = meta_ptr_->DropDataByDate(table_id, dates);
+    if (options_.wal_enable_) {
+        wal_mgr_->DropTable(table_id);
     }
+
+    status = mem_mgr_->EraseMemVector(table_id);  // not allow insert
+    status = meta_ptr_->DropTable(table_id);      // soft delete table
+    index_failed_checker_.CleanFailedIndexFileOfTable(table_id);
+
+    // scheduler will determine when to delete table files
+    auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
+    scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(table_id, meta_ptr_, nres);
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitAndDelete();
 
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        status = DropTableRecursively(schema.table_id_, dates);
+        status = DropTableRecursively(schema.table_id_);
         fiu_do_on("DBImpl.DropTableRecursively.failed", status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -1127,6 +1788,212 @@ DBImpl::GetTableRowCountRecursively(const std::string& table_id, uint64_t& row_c
     }
 
     return Status::OK();
+}
+
+Status
+DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
+    fiu_return_on("DBImpl.ExexWalRecord.return", Status(););
+
+    auto tables_flushed = [&](const std::set<std::string>& table_ids) -> uint64_t {
+        if (table_ids.empty()) {
+            return 0;
+        }
+
+        uint64_t max_lsn = 0;
+        if (options_.wal_enable_) {
+            for (auto& table : table_ids) {
+                uint64_t lsn = 0;
+                meta_ptr_->GetTableFlushLSN(table, lsn);
+                wal_mgr_->TableFlushed(table, lsn);
+                if (lsn > max_lsn) {
+                    max_lsn = lsn;
+                }
+            }
+        }
+
+        std::lock_guard<std::mutex> lck(merge_result_mutex_);
+        for (auto& table : table_ids) {
+            merge_table_ids_.insert(table);
+        }
+        return max_lsn;
+    };
+
+    Status status;
+
+    switch (record.type) {
+        case wal::MXLogType::InsertBinary: {
+            std::string target_table_name;
+            status = GetPartitionByTag(record.table_id, record.partition_tag, target_table_name);
+            if (!status.ok()) {
+                return status;
+            }
+
+            std::set<std::string> flushed_tables;
+            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
+                                             (record.data_size / record.length / sizeof(uint8_t)),
+                                             (const u_int8_t*)record.data, record.lsn, flushed_tables);
+            // even though !status.ok, run
+            tables_flushed(flushed_tables);
+
+            // metrics
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
+
+        case wal::MXLogType::InsertVector: {
+            std::string target_table_name;
+            status = GetPartitionByTag(record.table_id, record.partition_tag, target_table_name);
+            if (!status.ok()) {
+                return status;
+            }
+
+            std::set<std::string> flushed_tables;
+            status = mem_mgr_->InsertVectors(target_table_name, record.length, record.ids,
+                                             (record.data_size / record.length / sizeof(float)),
+                                             (const float*)record.data, record.lsn, flushed_tables);
+            // even though !status.ok, run
+            tables_flushed(flushed_tables);
+
+            // metrics
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
+
+        case wal::MXLogType::Delete: {
+            std::vector<meta::TableSchema> partition_array;
+            status = meta_ptr_->ShowPartitions(record.table_id, partition_array);
+            if (!status.ok()) {
+                return status;
+            }
+
+            std::vector<std::string> table_ids{record.table_id};
+            for (auto& partition : partition_array) {
+                auto& partition_table_id = partition.table_id_;
+                table_ids.emplace_back(partition_table_id);
+            }
+
+            if (record.length == 1) {
+                for (auto& table_id : table_ids) {
+                    status = mem_mgr_->DeleteVector(table_id, *record.ids, record.lsn);
+                    if (!status.ok()) {
+                        return status;
+                    }
+                }
+            } else {
+                for (auto& table_id : table_ids) {
+                    status = mem_mgr_->DeleteVectors(table_id, record.length, record.ids, record.lsn);
+                    if (!status.ok()) {
+                        return status;
+                    }
+                }
+            }
+            break;
+        }
+
+        case wal::MXLogType::Flush: {
+            if (!record.table_id.empty()) {
+                // flush one table
+                std::vector<meta::TableSchema> partition_array;
+                status = meta_ptr_->ShowPartitions(record.table_id, partition_array);
+                if (!status.ok()) {
+                    return status;
+                }
+
+                std::vector<std::string> table_ids{record.table_id};
+                for (auto& partition : partition_array) {
+                    auto& partition_table_id = partition.table_id_;
+                    table_ids.emplace_back(partition_table_id);
+                }
+
+                std::set<std::string> flushed_tables;
+                for (auto& table_id : table_ids) {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_id);
+                    if (!status.ok()) {
+                        break;
+                    }
+                    flushed_tables.insert(table_id);
+                }
+
+                tables_flushed(flushed_tables);
+
+            } else {
+                // flush all tables
+                std::set<std::string> table_ids;
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(table_ids);
+                }
+
+                uint64_t lsn = tables_flushed(table_ids);
+                if (options_.wal_enable_) {
+                    wal_mgr_->RemoveOldFiles(lsn);
+                }
+            }
+            break;
+        }
+    }
+
+    return status;
+}
+
+void
+DBImpl::BackgroundWalTask() {
+    server::SystemInfo::GetInstance().Init();
+
+    auto get_next_auto_flush_time = [&]() {
+        return std::chrono::system_clock::now() + std::chrono::milliseconds(options_.auto_flush_interval_);
+    };
+    auto next_auto_flush_time = get_next_auto_flush_time();
+
+    wal::MXLogRecord record;
+
+    auto auto_flush = [&]() {
+        record.type = wal::MXLogType::Flush;
+        record.table_id.clear();
+        ExecWalRecord(record);
+
+        StartMetricTask();
+        StartMergeTask();
+        StartBuildIndexTask();
+    };
+
+    while (true) {
+        if (std::chrono::system_clock::now() >= next_auto_flush_time) {
+            auto_flush();
+            next_auto_flush_time = get_next_auto_flush_time();
+        }
+
+        auto error_code = wal_mgr_->GetNextRecord(record);
+        if (error_code != WAL_SUCCESS) {
+            ENGINE_LOG_ERROR << "WAL background GetNextRecord error";
+            break;
+        }
+
+        if (record.type != wal::MXLogType::None) {
+            ExecWalRecord(record);
+            if (record.type == wal::MXLogType::Flush) {
+                // user req flush
+                flush_task_swn_.Notify();
+
+                // if user flush all manually, update auto flush also
+                if (record.table_id.empty()) {
+                    next_auto_flush_time = get_next_auto_flush_time();
+                }
+            }
+
+        } else {
+            if (!initialized_.load(std::memory_order_acquire)) {
+                auto_flush();
+                WaitMergeFileFinish();
+                WaitBuildIndexFinish();
+                ENGINE_LOG_DEBUG << "WAL background thread exit";
+                break;
+            }
+
+            wal_task_swn_.Wait_Until(next_auto_flush_time);
+        }
+    }
 }
 
 }  // namespace engine

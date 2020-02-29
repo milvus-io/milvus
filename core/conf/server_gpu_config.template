@@ -106,9 +106,7 @@ metric_config:
 #                      | The sum of 'insert_buffer_size' and 'cpu_cache_capacity'   |            |                 |
 #                      | must be less than system memory size.                      |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# cache_insert_data    | Whether to load inserted data into cache immediately for   | Boolean    | false           |
-#                      | hot query. If want to simultaneously insert and query      |            |                 |
-#                      | vectors, it's recommended to enable this config.           |            |                 |
+# cache_insert_data    | Whether to load data to cache for hot query                | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 cache_config:
   cpu_cache_capacity: 4
@@ -167,3 +165,24 @@ gpu_resource_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 tracing_config:
   json_config_path:
+
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Wal Config           | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# enable               | Switch of function wal.                                    | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# recovery_error_ignore| Whether ignore the error which happens during wal recovery | Boolean    | true            |
+#                      | stage.                                                     |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# buffer_size          | The size of the wal buffer. Unit is MB.                    | Integer    | 256             |
+#                      | It should be in range [64, 4096]. If the value set out of |            |                 |
+#                      | the range, the system will use the boundary value.         |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# wal_path             | The root path of wal relative files, include wal meta      | String     | NULL            |
+#                      | files.                                                     |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+wal_config:
+  enable: true
+  recovery_error_ignore: true
+  buffer_size: 256   # MB
+  wal_path: /tmp/milvus/wal

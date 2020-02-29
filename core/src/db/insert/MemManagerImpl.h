@@ -11,12 +11,6 @@
 
 #pragma once
 
-#include "MemManager.h"
-#include "MemTable.h"
-#include "db/meta/Meta.h"
-#include "server/Config.h"
-#include "utils/Status.h"
-
 #include <ctime>
 #include <map>
 #include <memory>
@@ -25,12 +19,20 @@
 #include <string>
 #include <vector>
 
+#include "MemManager.h"
+#include "MemTable.h"
+#include "db/meta/Meta.h"
+#include "server/Config.h"
+#include "utils/Status.h"
+
 namespace milvus {
 namespace engine {
 
 class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
+    using MemIdMap = std::map<std::string, MemTablePtr>;
+    using MemList = std::vector<MemTablePtr>;
 
     MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
         server::Config& config = server::Config::GetInstance();
@@ -56,10 +58,27 @@ class MemManagerImpl : public MemManager {
     }
 
     Status
-    InsertVectors(const std::string& table_id, VectorsData& vectors) override;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
 
     Status
-    Serialize(std::set<std::string>& table_ids) override;
+    InsertVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) override;
+
+    Status
+    DeleteVector(const std::string& table_id, IDNumber vector_id, uint64_t lsn) override;
+
+    Status
+    DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
+
+    Status
+    Flush(const std::string& table_id) override;
+
+    Status
+    Flush(std::set<std::string>& table_ids) override;
+
+    //    Status
+    //    Serialize(std::set<std::string>& table_ids) override;
 
     Status
     EraseMemVector(const std::string& table_id) override;
@@ -78,12 +97,17 @@ class MemManagerImpl : public MemManager {
     GetMemByTable(const std::string& table_id);
 
     Status
-    InsertVectorsNoLock(const std::string& table_id, VectorsData& vectors);
+    InsertVectorsNoLock(const std::string& table_id, const VectorSourcePtr& source, uint64_t lsn);
+
     Status
     ToImmutable();
 
-    using MemIdMap = std::map<std::string, MemTablePtr>;
-    using MemList = std::vector<MemTablePtr>;
+    Status
+    ToImmutable(const std::string& table_id);
+
+    uint64_t
+    GetMaxLSN(const MemList& tables);
+
     std::string identity_;
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
