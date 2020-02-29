@@ -188,4 +188,4 @@ wal_config:
   enable: true
   recovery_error_ignore: true
   buffer_size: 256
-  wal_path: /tmp/milvus/wal
+  wal_path: @MILVUS_DB_PATH@/wal
