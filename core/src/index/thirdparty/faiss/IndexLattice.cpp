@@ -128,7 +128,7 @@ void IndexLattice::add(idx_t , const float* )
 
 
 void  IndexLattice::search(idx_t , const float* , idx_t ,
-                           float* , idx_t* ) const
+                           float* , idx_t* , ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_MSG("not implemented");
 }

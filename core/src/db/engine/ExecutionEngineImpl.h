@@ -11,11 +11,14 @@
 
 #pragma once
 
-#include "ExecutionEngine.h"
-#include "wrapper/VecIndex.h"
+#include <src/segment/SegmentReader.h>
 
 #include <memory>
 #include <string>
+#include <vector>
+
+#include "ExecutionEngine.h"
+#include "wrapper/VecIndex.h"
 
 namespace milvus {
 namespace engine {
@@ -64,8 +67,14 @@ class ExecutionEngineImpl : public ExecutionEngine {
     //    ExecutionEnginePtr
     //    Clone() override;
 
+    //    Status
+    //    Merge(const std::string& location) override;
+
     Status
-    Merge(const std::string& location) override;
+    GetVectorByID(const int64_t& id, float* vector, bool hybrid) override;
+
+    Status
+    GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) override;
 
     Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
@@ -74,6 +83,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
            bool hybrid = false) override;
+
+    Status
+    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+           bool hybrid) override;
 
     ExecutionEnginePtr
     BuildIndex(const std::string& location, EngineType engine_type) override;

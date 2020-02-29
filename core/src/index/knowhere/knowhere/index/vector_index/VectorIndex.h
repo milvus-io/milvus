@@ -12,12 +12,14 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "knowhere/common/Config.h"
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/preprocessor/Preprocessor.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "segment/Types.h"
 
 namespace knowhere {
 
@@ -36,6 +38,16 @@ class VectorIndex : public Index {
         return nullptr;
     }
 
+    virtual DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
+
+    virtual DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
+
     virtual void
     Add(const DatasetPtr& dataset, const Config& config) = 0;
 
@@ -51,6 +63,20 @@ class VectorIndex : public Index {
 
     virtual int64_t
     Dimension() = 0;
+
+    virtual const std::vector<milvus::segment::doc_id_t>&
+    GetUids() const {
+        return uids_;
+    }
+
+    virtual void
+    SetUids(std::vector<milvus::segment::doc_id_t>& uids) {
+        uids_.clear();
+        uids_.swap(uids);
+    }
+
+ private:
+    std::vector<milvus::segment::doc_id_t> uids_;
 };
 
 }  // namespace knowhere

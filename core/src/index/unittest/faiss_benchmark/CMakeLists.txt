@@ -47,4 +47,7 @@ if (KNOWHERE_GPU_VERSION)
     target_link_libraries(test_faiss_benchmark ${depend_libs} ${unittest_libs} ${basic_libs})
     install(TARGETS test_faiss_benchmark DESTINATION unittest)
 
+    add_executable(test_faiss_bitset faiss_bitset_test.cpp)
+    target_link_libraries(test_faiss_bitset ${depend_libs} ${unittest_libs} ${basic_libs})
+    install(TARGETS test_faiss_bitset DESTINATION unittest)
 endif ()

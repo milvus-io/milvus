@@ -23,7 +23,6 @@ namespace web {
 class PartitionRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(PartitionRequestDto, Object)
 
-    DTO_FIELD(String, partition_name);
     DTO_FIELD(String, partition_tag);
 };
 

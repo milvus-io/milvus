@@ -16,13 +16,16 @@
 #include <thread>
 #include <utility>
 
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
 #include "scheduler/task/SearchTask.h"
+#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {
@@ -101,7 +104,18 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
         if (file_->metric_type_ == static_cast<int>(MetricType::IP)) {
             ascending_reduce = false;
         }
-        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
+
+        EngineType engine_type;
+        if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                         : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file->engine_type_;
+        }
+
+        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                              (MetricType)file_->metric_type_, file_->nlist_);
     }
 }
@@ -226,7 +240,11 @@ XSearchTask::Execute() {
             } else if (!vectors.binary_data_.empty()) {
                 s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
                                           output_ids.data(), hybrid);
+            } else if (!vectors.id_array_.empty()) {
+                s = index_engine_->Search(nq, vectors.id_array_, topk, nprobe, output_distance.data(),
+                                          output_ids.data(), hybrid);
             }
+
             fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
 
             if (!s.ok()) {
@@ -239,7 +257,12 @@ XSearchTask::Execute() {
             //            search_job->AccumSearchCost(span);
 
             // step 3: pick up topk result
-            auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
+            auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
+            if (search_job->GetResultIds().front() == -1 && search_job->GetResultIds().size() > spec_k) {
+                // initialized results set
+                search_job->GetResultIds().resize(spec_k);
+                search_job->GetResultDistances().resize(spec_k);
+            }
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
@@ -292,7 +315,8 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
             tar_idx = tar_k_multi_i + tar_k_j;
             buf_idx = buf_k_multi_i + buf_k_j;
 
-            if ((ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
+            if ((tar_ids[tar_idx] == -1) ||  // initialized value
+                (ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
                 (!ascending && src_distances[src_idx] > tar_distances[tar_idx])) {
                 buf_ids[buf_idx] = src_ids[src_idx];
                 buf_distances[buf_idx] = src_distances[src_idx];
@@ -329,6 +353,16 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
     }
     tar_ids.swap(buf_ids);
     tar_distances.swap(buf_distances);
+}
+
+const std::string&
+XSearchTask::GetLocation() const {
+    return file_->location_;
+}
+
+size_t
+XSearchTask::GetIndexId() const {
+    return file_->id_;
 }
 
 // void

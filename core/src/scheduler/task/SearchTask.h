@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "Task.h"
@@ -42,6 +43,12 @@ class XSearchTask : public Task {
     //    MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& tar_distance, uint64_t& tar_input_k,
     //                   const std::vector<int64_t>& src_ids, const std::vector<float>& src_distance, uint64_t
     //                   src_input_k, uint64_t nq, uint64_t topk, bool ascending);
+
+    const std::string&
+    GetLocation() const;
+
+    size_t
+    GetIndexId() const;
 
  public:
     const std::shared_ptr<server::Context> context_;

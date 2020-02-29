@@ -47,7 +47,7 @@ milvus::PartitionParam
 BuildPartitionParam(int32_t index) {
     std::string tag = std::to_string(index);
     std::string partition_name = std::string(TABLE_NAME) + "_" + tag;
-    milvus::PartitionParam partition_param = {TABLE_NAME, partition_name, tag};
+    milvus::PartitionParam partition_param = {TABLE_NAME, tag};
     return partition_param;
 }
 
@@ -86,12 +86,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
 
         // show partitions
-        milvus::PartitionList partition_array;
+        milvus::PartitionTagList partition_array;
         stat = conn->ShowPartitions(TABLE_NAME, partition_array);
 
         std::cout << partition_array.size() << " partitions created:" << std::endl;
-        for (auto& partition : partition_array) {
-            std::cout << "\t" << partition.partition_name << "\t tag = " << partition.partition_tag << std::endl;
+        for (auto& partition_tag : partition_array) {
+            std::cout << "\t tag = " << partition_tag << std::endl;
         }
     }
 
@@ -113,6 +113,24 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
     }
 
+    {  // flush buffer
+        stat = conn->FlushTable(TABLE_NAME);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    }
+
+    {  // table row count
+        int64_t row_count = 0;
+        stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+    }
+
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+    }
+
     std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
     {  // build search vectors
         std::vector<milvus::RowRecord> record_array;
@@ -120,14 +138,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t index = TARGET_PARTITION * BATCH_ROW_COUNT + SEARCH_TARGET;
         milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, TABLE_DIMENSION);
         search_record_array.push_back(std::make_pair(record_ids[0], record_array[0]));
-    }
-
-    milvus_sdk::Utils::Sleep(3);
-
-    {  // table row count
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
     {  // search vectors
@@ -167,8 +177,15 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
+    {  // get table information
+        milvus::TableInfo table_info;
+        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
+        milvus_sdk::Utils::PrintTableInfo(table_info);
+        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+    }
+
     {  // drop partition
-        milvus::PartitionParam param1 = {TABLE_NAME, "", std::to_string(TARGET_PARTITION)};
+        milvus::PartitionParam param1 = {TABLE_NAME, std::to_string(TARGET_PARTITION)};
         milvus_sdk::Utils::PrintPartitionParam(param1);
         stat = conn->DropPartition(param1);
         std::cout << "DropPartition function call status: " << stat.message() << std::endl;

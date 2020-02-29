@@ -52,9 +52,21 @@ class ClientProxy : public Connection {
            std::vector<int64_t>& id_array) override;
 
     Status
+    GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) override;
+
+    Status
+    GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
+                    std::vector<int64_t>& id_array) override;
+
+    Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
-           int64_t nprobe, TopKQueryResult& topk_query_result) override;
+           const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+           TopKQueryResult& topk_query_result) override;
+
+    Status
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
+               int64_t query_id, int64_t topk,
+               int64_t nprobe, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
@@ -64,6 +76,9 @@ class ClientProxy : public Connection {
 
     Status
     ShowTables(std::vector<std::string>& table_array) override;
+
+    Status
+    ShowTableInfo(const std::string& table_name, TableInfo& table_info) override;
 
     std::string
     ClientVersion() const override;
@@ -78,7 +93,7 @@ class ClientProxy : public Connection {
     DumpTaskTables() const override;
 
     Status
-    DeleteByDate(const std::string& table_name, const Range& range) override;
+    DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) override;
 
     Status
     PreloadTable(const std::string& table_name) const override;
@@ -93,7 +108,7 @@ class ClientProxy : public Connection {
     CreatePartition(const PartitionParam& partition_param) override;
 
     Status
-    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const override;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const override;
 
     Status
     DropPartition(const PartitionParam& partition_param) override;
@@ -103,6 +118,15 @@ class ClientProxy : public Connection {
 
     Status
     SetConfig(const std::string& node_name, const std::string& value) const override;
+
+    Status
+    FlushTable(const std::string& table_name) override;
+
+    Status
+    Flush() override;
+
+    Status
+    CompactTable(const std::string& table_name) override;
 
  private:
     std::shared_ptr<::grpc::Channel> channel_;

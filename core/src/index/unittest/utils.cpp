@@ -13,6 +13,7 @@
 #include "knowhere/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
+#include <math.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -43,12 +44,15 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     this->nq = nq;
     this->dim = dim;
 
-    GenAll(dim, nb, xb, ids, nq, xq);
+    GenAll(dim, nb, xb, ids, xids, nq, xq);
     assert(xb.size() == (size_t)dim * nb);
     assert(xq.size() == (size_t)dim * nq);
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
+    id_dataset = generate_id_dataset(nq, ids.data());
+    xid_dataset = generate_id_dataset(nq, xids.data());
+    xid_dataset->Set(knowhere::meta::DIM, (int64_t)dim);
 }
 
 void
@@ -58,12 +62,14 @@ BinaryDataGen::Generate(const int& dim, const int& nb, const int& nq) {
     this->dim = dim;
 
     int64_t dim_x = dim / 8;
-    GenBinaryAll(dim_x, nb, xb, ids, nq, xq);
+    GenBinaryAll(dim_x, nb, xb, ids, xids, nq, xq);
     assert(xb.size() == (size_t)dim_x * nb);
     assert(xq.size() == (size_t)dim_x * nq);
 
     base_dataset = generate_binary_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_binary_query_dataset(nq, dim, xq.data());
+    id_dataset = generate_id_dataset(nq, ids.data());
+    xid_dataset = generate_id_dataset(nq, xids.data());
 }
 
 // not used
@@ -79,37 +85,42 @@ DataGen::GenQuery(const int& nq) {
 #endif
 
 void
-GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
-       std::vector<float>& xq) {
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids, const int64_t& nq, std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    GenAll(dim, nb, xb.data(), ids.data(), nq, xq.data());
+    xids.resize(1);
+    GenAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
 }
 
 void
-GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq) {
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, int64_t* xids, const int64_t& nq, float* xq) {
     GenBase(dim, nb, xb, ids);
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
+    xids[0] = 3;  // pseudo random
 }
 
 void
 GenBinaryAll(const int64_t dim, const int64_t& nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-             const int64_t& nq, std::vector<uint8_t>& xq) {
+             std::vector<int64_t>& xids, const int64_t& nq, std::vector<uint8_t>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    GenBinaryAll(dim, nb, xb.data(), ids.data(), nq, xq.data());
+    xids.resize(1);
+    GenBinaryAll(dim, nb, xb.data(), ids.data(), xids.data(), nq, xq.data());
 }
 
 void
-GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, const int64_t& nq, uint8_t* xq) {
+GenBinaryAll(const int64_t& dim, const int64_t& nb, uint8_t* xb, int64_t* ids, int64_t* xids, const int64_t& nq,
+             uint8_t* xq) {
     GenBinaryBase(dim, nb, xb, ids);
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
+    xids[0] = 3;  // pseudo random
 }
 
 void
@@ -195,6 +206,14 @@ generate_query_dataset(int64_t nb, int64_t dim, const float* xb) {
 }
 
 knowhere::DatasetPtr
+generate_id_dataset(int64_t nb, const int64_t* ids) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    ret_ds->Set(knowhere::meta::ROWS, nb);
+    ret_ds->Set(knowhere::meta::IDS, ids);
+    return ret_ds;
+}
+
+knowhere::DatasetPtr
 generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
     auto ret_ds = std::make_shared<knowhere::Dataset>();
     ret_ds->Set(knowhere::meta::ROWS, nb);
@@ -204,11 +223,66 @@ generate_binary_query_dataset(int64_t nb, int64_t dim, const uint8_t* xb) {
 }
 
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
     auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
     for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *((int64_t*)(ids) + i * k));
-        //        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
+        switch (check_mode) {
+            case CheckMode::CHECK_EQUAL:
+                ASSERT_EQ(i, *((int64_t*)(ids) + i * k));
+                break;
+            case CheckMode::CHECK_NOT_EQUAL:
+                ASSERT_NE(i, *((int64_t*)(ids) + i * k));
+                break;
+            default:
+                ASSERT_TRUE(false);
+                break;
+        }
+    }
+}
+
+void
+AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+          const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
+    auto base = base_dataset->Get<const float*>(knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
+    auto x = result->Get<float*>(knowhere::meta::TENSOR);
+    for (auto i = 0; i < n; i++) {
+        auto id = ids[i];
+        for (auto j = 0; j < dim; j++) {
+            switch (check_mode) {
+                case CheckMode::CHECK_EQUAL: {
+                    ASSERT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+                    break;
+                }
+                case CheckMode::CHECK_NOT_EQUAL: {
+                    ASSERT_NE(*(base + id * dim + j), *(x + i * dim + j));
+                    break;
+                }
+                case CheckMode::CHECK_APPROXIMATE_EQUAL: {
+                    float a = *(base + id * dim + j);
+                    float b = *(x + i * dim + j);
+                    ASSERT_TRUE((std::fabs(a - b) / std::fabs(a)) < 0.1);
+                    break;
+                }
+                default:
+                    ASSERT_TRUE(false);
+                    break;
+            }
+        }
+    }
+}
+
+void
+AssertBinVeceq(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
+               const knowhere::DatasetPtr& id_dataset, const int n, const int dim) {
+    auto base = base_dataset->Get<const uint8_t*>(knowhere::meta::TENSOR);
+    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
+    auto x = result->Get<uint8_t*>(knowhere::meta::TENSOR);
+    for (auto i = 0; i < 1; i++) {
+        auto id = ids[i];
+        for (auto j = 0; j < dim; j++) {
+            EXPECT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+        }
     }
 }
 

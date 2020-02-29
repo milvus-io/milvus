@@ -16,6 +16,7 @@
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss {
 
@@ -184,7 +185,8 @@ void knn_extra_metrics_template (
         const float * x,
         const float * y,
         size_t nx, size_t ny,
-        float_maxheap_array_t * res)
+        float_maxheap_array_t * res,
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
     size_t d = vd.d;
@@ -204,11 +206,13 @@ void knn_extra_metrics_template (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                float disij = vd (x_i, y_j);
+                if(!bitset || !bitset->test(j)){
+                    float disij = vd (x_i, y_j);
 
-                if (disij < simi[0]) {
-                    maxheap_pop (k, simi, idxi);
-                    maxheap_push (k, simi, idxi, disij, j);
+                    if (disij < simi[0]) {
+                        maxheap_pop (k, simi, idxi);
+                        maxheap_push (k, simi, idxi, disij, j);
+                    }
                 }
                 y_j += d;
             }
@@ -318,14 +322,15 @@ void knn_extra_metrics (
         const float * y,
         size_t d, size_t nx, size_t ny,
         MetricType mt, float metric_arg,
-        float_maxheap_array_t * res)
+        float_maxheap_array_t * res,
+        ConcurrentBitsetPtr bitset)
 {
 
     switch(mt) {
 #define HANDLE_VAR(kw)                                          \
      case METRIC_ ## kw: {                                      \
         VectorDistance ## kw vd({(size_t)d});                   \
-        knn_extra_metrics_template (vd, x, y, nx, ny, res);     \
+        knn_extra_metrics_template (vd, x, y, nx, ny, res, bitset);     \
         break;                                                  \
     }
         HANDLE_VAR(L2);
@@ -337,19 +342,20 @@ void knn_extra_metrics (
 #undef HANDLE_VAR
     case METRIC_Lp: {
         VectorDistanceLp vd({(size_t)d, metric_arg});
-        knn_extra_metrics_template (vd, x, y, nx, ny, res);
+        knn_extra_metrics_template (vd, x, y, nx, ny, res, bitset);
         break;
     }
     case METRIC_Jaccard: {
         VectorDistanceJaccard vd({(size_t) d});
-        knn_extra_metrics_template(vd, x, y, nx, ny, res);
+        knn_extra_metrics_template(vd, x, y, nx, ny, res, bitset);
         break;
     }
     case METRIC_Tanimoto: {
         VectorDistanceTanimoto vd({(size_t) d});
-        knn_extra_metrics_template(vd, x, y, nx, ny, res);
+        knn_extra_metrics_template(vd, x, y, nx, ny, res, bitset);
         break;
     }
+
     default:
         FAISS_THROW_MSG ("metric type not implemented");
     }
