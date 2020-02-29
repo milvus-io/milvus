@@ -46,7 +46,7 @@ server_config:
 #                      | loaded when Milvus server starts up.                       |            |                 |
 #                      | '*' means preload all existing tables.                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# auto_flush_interval  | Interval of auto flush. Unit is millisecond.               | Integer    | 1000            |
+# auto_flush_interval  | Interval of auto flush. Unit is millisecond.               | Integer    | 1000 (ms)       |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: sqlite://:@:/
@@ -170,22 +170,22 @@ tracing_config:
   json_config_path:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# Wal Config           | Description                                                | Type       | Default         |
+# WAL Config           | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | Switch of function wal.                                    | Boolean    | false           |
+# enable               | Switch of function WAL.                                    | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# recovery_error_ignore| Whether ignore the error which happens during wal recovery | Boolean    | true            |
+# recovery_error_ignore| Whether ignore the error which happens during WAL recovery | Boolean    | true            |
 #                      | stage.                                                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# buffer_size          | The size of the wal buffer. Unit is MB.                    | Integer    | 256             |
-#                      | It should be in range [64, 4096]. If the value set out of |            |                 |
+# buffer_size          | The size of the WAL buffer. Unit is MB.                    | Integer    | 256 (MB)        |
+#                      | It should be in range [64, 4096]. If the value set out of  |            |                 |
 #                      | the range, the system will use the boundary value.         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# wal_path             | The root path of wal relative files, include wal meta      | String     | NULL            |
+# wal_path             | The root path of WAL relative files, include WAL meta      | String     | NULL            |
 #                      | files.                                                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 wal_config:
   enable: true
   recovery_error_ignore: true
-  buffer_size: 256   # MB
+  buffer_size: 256
   wal_path: /tmp/milvus/wal
