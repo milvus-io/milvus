@@ -12,6 +12,7 @@
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/distances.h>
+#include <faiss/FaissHook.h>
 
 #include <cstring>
 

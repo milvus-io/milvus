@@ -37,7 +37,7 @@
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/Index2Layer.h>
 #include <faiss/impl/AuxIndexStructures.h>
-
+#include <faiss/FaissHook.h>
 
 extern "C" {
 
@@ -860,7 +860,7 @@ void IndexHNSWPQ::train(idx_t n, const float* x)
  **************************************************************/
 
 
-IndexHNSWSQ::IndexHNSWSQ(int d, ScalarQuantizer::QuantizerType qtype, int M):
+IndexHNSWSQ::IndexHNSWSQ(int d, QuantizerType qtype, int M):
     IndexHNSW (new IndexScalarQuantizer (d, qtype), M)
 {
     is_trained = false;

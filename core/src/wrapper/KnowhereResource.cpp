@@ -14,15 +14,16 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
+#include "faiss/FaissHook.h"
+#include "scheduler/Utils.h"
+#include "server/Config.h"
+
 #include <fiu-local.h>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "scheduler/Utils.h"
-#include "server/Config.h"
 
 namespace milvus {
 namespace engine {
@@ -31,13 +32,15 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
 KnowhereResource::Initialize() {
-#ifdef MILVUS_GPU_VERSION
-    Status s;
-    bool enable_gpu = false;
     server::Config& config = server::Config::GetInstance();
-    s = config.GetGpuResourceConfigEnable(enable_gpu);
-    if (!s.ok())
-        return s;
+    bool use_avx512 = true;
+    CONFIG_CHECK(config.GetEngineConfigUseAVX512(use_avx512));
+    faiss::faiss_use_avx512 = use_avx512;
+    faiss::hook_init();
+
+#ifdef MILVUS_GPU_VERSION
+    bool enable_gpu = false;
+    CONFIG_CHECK(config.GetGpuResourceConfigEnable(enable_gpu));
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
     if (not enable_gpu)
         return Status::OK();
@@ -52,9 +55,7 @@ KnowhereResource::Initialize() {
 
     // get build index gpu resource
     std::vector<int64_t> build_index_gpus;
-    s = config.GetGpuResourceConfigBuildIndexResources(build_index_gpus);
-    if (!s.ok())
-        return s;
+    CONFIG_CHECK(config.GetGpuResourceConfigBuildIndexResources(build_index_gpus));
 
     for (auto gpu_id : build_index_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
@@ -62,9 +63,7 @@ KnowhereResource::Initialize() {
 
     // get search gpu resource
     std::vector<int64_t> search_gpus;
-    s = config.GetGpuResourceConfigSearchResources(search_gpus);
-    if (!s.ok())
-        return s;
+    CONFIG_CHECK(config.GetGpuResourceConfigSearchResources(search_gpus));
 
     for (auto& gpu_id : search_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
