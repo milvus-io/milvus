@@ -99,36 +99,6 @@ class TestTableInfoBase:
         assert info.count == nb - 2
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_table_row_count_no_flush(self, connect, table):
-        '''
-        target: get row count with table_info
-        method: add and delete vectors, check count in table info (without flush)
-        expected: status ok, count as expected
-        '''
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
-        assert status.OK()
-        status, info = connect.table_info(table)
-        assert status.OK()
-        assert info.count == 0 # no flush, table still empty
-        status = connect.flush([table])
-        assert status.OK()
-        status, info = connect.table_info(table)
-        assert status.OK()
-        assert info.count == nb
-        # delete vectors
-        status = connect.delete_by_id(table, ids)
-        assert status.OK()
-        status, info = connect.table_info(table)
-        assert status.OK()
-        assert info.count == nb # no flush, vectors not deleted
-        status = connect.flush([table])
-        assert status.OK()
-        status, info = connect.table_info(table)
-        assert status.OK()
-        assert info.count == 0
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
     def test_get_table_info_partition_stats_A(self, connect, table):
         '''
         target: get partition info in a table
