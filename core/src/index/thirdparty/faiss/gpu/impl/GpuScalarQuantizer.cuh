@@ -14,14 +14,14 @@
 
 namespace faiss { namespace gpu {
 
-inline bool isSQSupported(ScalarQuantizer::QuantizerType qtype) {
+inline bool isSQSupported(QuantizerType qtype) {
   switch (qtype) {
-    case ScalarQuantizer::QuantizerType::QT_8bit:
-    case ScalarQuantizer::QuantizerType::QT_8bit_uniform:
-    case ScalarQuantizer::QuantizerType::QT_8bit_direct:
-    case ScalarQuantizer::QuantizerType::QT_4bit:
-    case ScalarQuantizer::QuantizerType::QT_4bit_uniform:
-    case ScalarQuantizer::QuantizerType::QT_fp16:
+    case QuantizerType::QT_8bit:
+    case QuantizerType::QT_8bit_uniform:
+    case QuantizerType::QT_8bit_direct:
+    case QuantizerType::QT_4bit:
+    case QuantizerType::QT_4bit_uniform:
+    case QuantizerType::QT_fp16:
       return true;
     default:
       return false;
@@ -107,7 +107,7 @@ struct CodecFloat {
 
 // Arbitrary dimension fp16
 template <>
-struct Codec<ScalarQuantizer::QuantizerType::QT_fp16, 1> {
+struct Codec<(int)QuantizerType::QT_fp16, 1> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = 1;
 
@@ -145,7 +145,7 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_fp16, 1> {
 
 // dim % 2 == 0, ensures uint32 alignment
 template <>
-struct Codec<ScalarQuantizer::QuantizerType::QT_fp16, 2> {
+struct Codec<(int)QuantizerType::QT_fp16, 2> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = 2;
 
@@ -213,7 +213,7 @@ struct Get8BitType<4> { using T = uint32_t; };
 
 // Uniform quantization across all dimensions
 template <int DimMultiple>
-struct Codec<ScalarQuantizer::QuantizerType::QT_8bit_uniform, DimMultiple> {
+struct Codec<(int)QuantizerType::QT_8bit_uniform, DimMultiple> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = DimMultiple;
   using MemT = typename Get8BitType<DimMultiple>::T;
@@ -307,7 +307,7 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_8bit_uniform, DimMultiple> {
 
 // Uniform quantization per each dimension
 template <int DimMultiple>
-struct Codec<ScalarQuantizer::QuantizerType::QT_8bit, DimMultiple> {
+struct Codec<(int)QuantizerType::QT_8bit, DimMultiple> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = DimMultiple;
   using MemT = typename Get8BitType<DimMultiple>::T;
@@ -421,7 +421,7 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_8bit, DimMultiple> {
 };
 
 template <>
-struct Codec<ScalarQuantizer::QuantizerType::QT_8bit_direct, 1> {
+struct Codec<(int)QuantizerType::QT_8bit_direct, 1> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = 1;
 
@@ -465,7 +465,7 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_8bit_direct, 1> {
 
 // Uniform quantization across all dimensions
 template <>
-struct Codec<ScalarQuantizer::QuantizerType::QT_4bit_uniform, 1> {
+struct Codec<(int)QuantizerType::QT_4bit_uniform, 1> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = 2;
 
@@ -525,7 +525,7 @@ struct Codec<ScalarQuantizer::QuantizerType::QT_4bit_uniform, 1> {
 };
 
 template <>
-struct Codec<ScalarQuantizer::QuantizerType::QT_4bit, 1> {
+struct Codec<(int)QuantizerType::QT_4bit, 1> {
   /// How many dimensions per iteration we are handling for encoding or decoding
   static constexpr int kDimPerIter = 2;
 

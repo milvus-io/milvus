@@ -41,7 +41,9 @@ Please mark all change in change log and use the issue from GitHub
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#853 - Support HNSW
 - \#910 - Change Milvus c++ standard to c++17
+- \#1122 - Support AVX-512 in FAISS
 - \#1204 - Add api to get table data information
+- \#1250 - Support CPU profiling
 - \#1302 - Get all record IDs in a segment by given a segment id
 
 ## Improvement
