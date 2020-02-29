@@ -1167,7 +1167,6 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
 
     response = result_json.dump().c_str();
 
-
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
@@ -1267,7 +1266,7 @@ WebRequestHandler::Insert(const OString& table_name, const OString& body, Vector
         tag = body_json["partition_tag"];
     }
 
-// step 4: construct result
+    // step 4: construct result
     status = request_handler_.Insert(context_ptr_, table_name->std_str(), vectors, tag);
     if (status.ok()) {
         ids_dto->ids = ids_dto->ids->createShared();
