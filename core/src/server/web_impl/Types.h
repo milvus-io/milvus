@@ -65,6 +65,8 @@ enum StatusCode : int {
     PATH_PARAM_LOSS = 31,
     QUERY_PARAM_LOSS = 32,
     BODY_FIELD_LOSS = 33,
+    ILLEGAL_BODY = 34,
+    BODY_PARSE_FAIL = 35,
     ILLEGAL_QUERY_PARAM = 36,
 };
 

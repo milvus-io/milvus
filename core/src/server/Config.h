@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -21,6 +22,8 @@
 
 namespace milvus {
 namespace server {
+
+using ConfigCallBackF = std::function<Status(const std::string&)>;
 
 #define CONFIG_CHECK(func) \
     do {                   \
@@ -141,6 +144,9 @@ static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
 static const char* CONFIG_WAL_WAL_PATH = "wal_path";
 
 class Config {
+ private:
+    Config();
+
  public:
     static Config&
     GetInstance();
@@ -154,6 +160,16 @@ class Config {
     GetConfigJsonStr(std::string& result);
     Status
     ProcessConfigCli(std::string& result, const std::string& cmd);
+
+    Status
+    GenUniqueIdentityID(const std::string& identity, std::string& uid);
+
+    Status
+    RegisterCallBack(const std::string& node, const std::string& sub_node, const std::string& key,
+                     ConfigCallBackF& callback);
+
+    Status
+    CancelCallBack(const std::string& node, const std::string& sub_node, const std::string& key);
 
  private:
     ConfigNode&
@@ -170,6 +186,9 @@ class Config {
     GetConfigCli(std::string& value, const std::string& parent_key, const std::string& child_key);
     Status
     SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
+
+    Status
+    UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key);
 
     ///////////////////////////////////////////////////////////////////////////
     Status
@@ -272,6 +291,9 @@ class Config {
     Status
     GetConfigVersion(std::string& value);
 
+    Status
+    ExecCallBacks(const std::string& node, const std::string& sub_node, const std::string& value);
+
  public:
     /* server config */
     Status
@@ -373,6 +395,9 @@ class Config {
     Status
     GetWalConfigWalPath(std::string& wal_path);
 
+    Status
+    GetServerRestartRequired(bool& required);
+
  public:
     /* server config */
     Status
@@ -454,7 +479,10 @@ class Config {
 #endif
 
  private:
+    bool restart_required_ = false;
+    std::string config_file_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
+    std::unordered_map<std::string, std::unordered_map<std::string, ConfigCallBackF>> config_callback_;
     std::mutex mutex_;
 };
 

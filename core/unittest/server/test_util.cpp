@@ -479,6 +479,21 @@ TEST(ValidationUtilTest, VALIDATE_DBURI_TEST) {
               milvus::SERVER_SUCCESS);
 }
 
+TEST(ValidationUtilTest, VALIDATE_PATH_TEST) {
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/home/milvus").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp/milvus").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp/milvus/").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/_tmp/milvus12345").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp-/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/-tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/****tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp--/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("./tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp space/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("../tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp//milvus").ok());
+}
+
 TEST(UtilTest, ROLLOUTHANDLER_TEST) {
     std::string dir1 = "/tmp/milvus_test";
     std::string dir2 = "/tmp/milvus_test/log_test";
