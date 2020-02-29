@@ -106,8 +106,6 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    stdclock::time_point t0 = stdclock::now();
-
     auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
     if (search_cfg == nullptr) {
         KNOWHERE_THROW_MSG("not support this kind of config");
@@ -125,15 +123,7 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        stdclock::time_point t1 = stdclock::now();
-        double prepare_cost = (std::chrono::duration<double, std::micro>(t1 - t0)).count();
-        KNOWHERE_LOG_DEBUG << "IndexIVF prepare: " << prepare_cost/1000 << " ms";
-
         search_impl(rows, (float*)p_data, search_cfg->k, p_dist, p_id, config);
-
-        stdclock::time_point t2 = stdclock::now();
-        double search_cost = (std::chrono::duration<double, std::micro>(t2 - t1)).count();
-        KNOWHERE_LOG_DEBUG << "IndexIVF search cost: " << search_cost/1000 << " ms";
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -151,10 +141,6 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
         ret_ds->Set(meta::DISTANCE, p_dist);
-
-        stdclock::time_point t3 = stdclock::now();
-        double make_data_cost = (std::chrono::duration<double, std::micro>(t3 - t2)).count();
-        KNOWHERE_LOG_DEBUG << "IndexIVF make dataset: " << make_data_cost/1000 << " ms";
         return ret_ds;
     } catch (faiss::FaissException& e) {
         KNOWHERE_THROW_MSG(e.what());
