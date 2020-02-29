@@ -77,6 +77,9 @@ class WebRequestHandler {
     }
 
  private:
+    void
+    AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg);
+
     Status
     ParseSegmentStat(const SegmentStat& seg_stat, nlohmann::json& json);
 

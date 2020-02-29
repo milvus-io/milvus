@@ -77,6 +77,12 @@ WebErrorMap(ErrorCode code) {
 }
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
+void
+WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
+    json["code"] = (int64_t)code;
+    json["message"] = msg;
+}
+
 Status
 WebRequestHandler::ParseSegmentStat(const milvus::server::SegmentStat& seg_stat, nlohmann::json& json) {
     json["segment_name"] = seg_stat.name_;
@@ -223,8 +229,10 @@ WebRequestHandler::GetSegmentVectors(const std::string& table_name, const std::s
         json_out["vectors"] = vectors_json;
     }
     json_out["count"] = vector_ids.size();
-    json_out["code"] = status.code();
-    json_out["message"] = status.message();
+
+    AddStatusToJson(json_out, status.code(), status.message());
+//    json_out["code"] = status.code();
+//    json_out["message"] = status.message();
 
     return Status::OK();
 }
@@ -262,8 +270,9 @@ WebRequestHandler::Cmd(const std::string& cmd, std::string& result_str) {
 
     if (status.ok()) {
         nlohmann::json result;
-        result["code"] = status.code();
-        result["message"] = status.message();
+        AddStatusToJson(result, status.code(), status.message());
+//        result["code"] = status.code();
+//        result["message"] = status.message();
         result["reply"] = reply;
         result_str = result.dump();
     }
@@ -281,8 +290,9 @@ WebRequestHandler::PreLoadTable(const nlohmann::json& json, std::string& result_
     auto status = request_handler_.PreloadTable(context_ptr_, table_name.get<std::string>());
     if (status.ok()) {
         nlohmann::json result;
-        result["code"] = status.code();
-        result["message"] = status.message();
+        AddStatusToJson(result, status.code(), status.message());
+//        result["code"] = status.code();
+//        result["message"] = status.message();
         result_str = result.dump();
     }
 
@@ -308,8 +318,9 @@ WebRequestHandler::Flush(const nlohmann::json& json, std::string& result_str) {
     auto status = request_handler_.Flush(context_ptr_, names);
     if (status.ok()) {
         nlohmann::json result;
-        result["code"] = status.code();
-        result["message"] = status.message();
+        AddStatusToJson(result, status.code(), status.message());
+//        result["code"] = status.code();
+//        result["message"] = status.message();
         result_str = result.dump();
     }
 
@@ -1151,8 +1162,9 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
 
         segs_json.push_back(seg_json);
     }
-    result_json["code"] = status.code();
-    result_json["message"] = status.message();
+    AddStatusToJson(result_json, status.code(), status.message());
+//    result_json["code"] = status.code();
+//    result_json["message"] = status.message();
     result_json["segments"] = segs_json;
     result_json["count"] = size;
 
@@ -1395,6 +1407,8 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
             }
         } else if (op->equals("config")) {
             SetConfig(j, result_str);
+        } else {
+
         }
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
