@@ -63,6 +63,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1234 - Do S3 server validation check when Milvus startup
 - \#1263 - Allow system conf modifiable and some take effect directly
 - \#1320 - Remove debug logging from faiss
+- \#1437 - Update config template
 
 
 ## Task
