@@ -313,10 +313,9 @@ VecIndexImpl::SetUids(std::vector<segment::doc_id_t>& uids) {
     return Status::OK();
 }
 
-Status
-VecIndexImpl::GetUids(std::vector<segment::doc_id_t>& uids) {
-    uids = index_->GetUids();
-    return Status::OK();
+const std::vector<segment::doc_id_t>&
+VecIndexImpl::GetUids() const {
+    return index_->GetUids();
 }
 
 const float*

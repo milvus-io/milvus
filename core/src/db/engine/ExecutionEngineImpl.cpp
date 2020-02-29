@@ -28,6 +28,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 #include "wrapper/BinVecImpl.h"
 #include "wrapper/ConfAdapter.h"
@@ -797,6 +798,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
         }
     }
 #endif
+    TimeRecorder rc("ExecutionEngineImpl::Search");
 
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
@@ -817,17 +819,20 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
         HybridLoad();
     }
 
+    rc.RecordSection("search prepare");
     auto status = index_->Search(n, data, distances, labels, conf);
+    rc.RecordSection("search done");
 
     // map offsets to ids
-    std::vector<segment::doc_id_t> uids;
-    index_->GetUids(uids);
+    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
     for (int64_t i = 0; i < n * k; i++) {
         int64_t offset = labels[i];
         if (offset != -1) {
             labels[i] = uids[offset];
         }
     }
+
+    rc.RecordSection("map uids");
 
     if (hybrid) {
         HybridUnset();
@@ -842,6 +847,8 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 Status
 ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances,
                             int64_t* labels, bool hybrid) {
+    TimeRecorder rc("ExecutionEngineImpl::Search");
+
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
@@ -861,17 +868,20 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
         HybridLoad();
     }
 
+    rc.RecordSection("search prepare");
     auto status = index_->Search(n, data, distances, labels, conf);
+    rc.RecordSection("search done");
 
     // map offsets to ids
-    std::vector<segment::doc_id_t> uids;
-    index_->GetUids(uids);
+    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
     for (int64_t i = 0; i < n * k; i++) {
         int64_t offset = labels[i];
         if (offset != -1) {
             labels[i] = uids[offset];
         }
     }
+
+    rc.RecordSection("map uids");
 
     if (hybrid) {
         HybridUnset();
@@ -886,6 +896,8 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
 Status
 ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances,
                             int64_t* labels, bool hybrid) {
+    TimeRecorder rc("ExecutionEngineImpl::Search");
+
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
@@ -905,6 +917,8 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         HybridLoad();
     }
 
+    rc.RecordSection("search prepare");
+
     // std::string segment_dir;
     // utils::GetParentPath(location_, segment_dir);
     // segment::SegmentReader segment_reader(segment_dir);
@@ -912,8 +926,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     //    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
 
     // Check if the id is present. If so, find its offset
-    std::vector<segment::doc_id_t> uids;
-    index_->GetUids(uids);
+    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
 
     std::vector<int64_t> offsets;
     /*
@@ -943,17 +956,21 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         }
     }
 
+    rc.RecordSection("get offset");
+
     auto status = Status::OK();
     if (!offsets.empty()) {
         status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
+        rc.RecordSection("search by id done");
 
         // map offsets to ids
-        for (int64_t i = 0; i < n * k; i++) {
+        for (int64_t i = 0; i < offsets.size() * k; i++) {
             int64_t offset = labels[i];
             if (offset != -1) {
                 labels[i] = uids[offset];
             }
         }
+        rc.RecordSection("map uids");
     }
 
     if (hybrid) {

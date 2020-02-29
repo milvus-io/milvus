@@ -9,44 +9,40 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <gtest/gtest.h>
-#include <opentracing/mocktracer/tracer.h>
-
-#include <boost/filesystem.hpp>
-#include <thread>
-#include <random>
 #include <unistd.h>
 
-#include <oatpp/web/client/HttpRequestExecutor.hpp>
-#include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
+#include <random>
+#include <thread>
+
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
 #include <oatpp/core/macro/component.hpp>
+#include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/web/client/ApiClient.hpp>
-
-#include "wrapper/VecIndex.h"
-
-#include "server/Server.h"
-#include "server/delivery/RequestScheduler.h"
-#include "server/delivery/request/BaseRequest.h"
-#include "server/delivery/RequestHandler.h"
-#include "src/version.h"
-
-#include "server/web_impl/handler/WebRequestHandler.h"
-#include "server/web_impl/dto/TableDto.hpp"
-#include "server/web_impl/dto/StatusDto.hpp"
-#include "server/web_impl/dto/VectorDto.hpp"
-#include "server/web_impl/dto/IndexDto.hpp"
-#include "server/web_impl/component/AppComponent.hpp"
-#include "server/web_impl/controller/WebController.hpp"
-#include "server/web_impl/Types.h"
-#include "server/web_impl/WebServer.h"
+#include <oatpp/web/client/HttpRequestExecutor.hpp>
 
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
-#include "utils/CommonUtil.h"
-
+#include "server/delivery/RequestHandler.h"
+#include "server/delivery/RequestScheduler.h"
+#include "server/delivery/request/BaseRequest.h"
+#include "server/Server.h"
+#include "src/version.h"
+#include "server/web_impl/Types.h"
+#include "server/web_impl/WebServer.h"
+#include "server/web_impl/component/AppComponent.hpp"
+#include "server/web_impl/controller/WebController.hpp"
+#include "server/web_impl/dto/IndexDto.hpp"
+#include "server/web_impl/dto/StatusDto.hpp"
+#include "server/web_impl/dto/TableDto.hpp"
+#include "server/web_impl/dto/VectorDto.hpp"
+#include "server/web_impl/handler/WebRequestHandler.h"
 #include "unittest/server/utils.h"
+#include "utils/CommonUtil.h"
+#include "wrapper/VecIndex.h"
+
 
 static const char* TABLE_NAME = "test_web";
 static constexpr int64_t TABLE_DIM = 256;
@@ -62,7 +58,7 @@ using OChunkedBuffer = oatpp::data::stream::ChunkedBuffer;
 using OOutputStream = oatpp::data::stream::BufferOutputStream;
 using OFloat32 = milvus::server::web::OFloat32;
 using OInt64 = milvus::server::web::OInt64;
-template<class T>
+template <class T>
 using OList = milvus::server::web::OList<T>;
 
 using StatusCode = milvus::server::web::StatusCode;
@@ -493,47 +489,104 @@ namespace {
 static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "# Default values are used when you make no changes to the following parameters.\n"
     "\n"
-    "version: 0.1"
+    "version: 0.1\n"
     "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# Server Config        | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "server_config:\n"
-    "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
-    "  port: 19530                       # port range: 1025 ~ 65534\n"
-    "  deploy_mode: single               \n"
+    "  address: 0.0.0.0\n"
+    "  port: 19530\n"
+    "  deploy_mode: single\n"
     "  time_zone: UTC+8\n"
+    "  web_port: 19121\n"
     "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# DataBase Config      | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "db_config:\n"
-    "  backend_url: sqlite://:@:/        \n"
+    "  backend_url: sqlite://:@:/\n"
+    "  preload_table:\n"
     "\n"
-    "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
-    "  preload_table:                    \n"
-    "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# Storage Config       | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "storage_config:\n"
-    "  primary_path: /tmp/milvus_web_controller_test        # path used to store data and meta\n"
-    "  secondary_path:                   # path used to store data only, split by semicolon\n"
+    "  primary_path: /tmp/milvus\n"
+    "  secondary_path:\n"
+    "  s3_enable: false\n"
+    "  s3_address: 127.0.0.1\n"
+    "  s3_port: 9000\n"
+    "  s3_access_key: minioadmin\n"
+    "  s3_secret_key: minioadmin\n"
+    "  s3_bucket: milvus-bucket\n"
     "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# Metric Config        | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "metric_config:\n"
-    "  enable_monitor: false             # enable monitoring or not\n"
+    "  enable_monitor: false\n"
     "  address: 127.0.0.1\n"
-    "  port: 8080                        # port prometheus uses to fetch metrics\n"
+    "  port: 9091\n"
     "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# Cache Config         | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "cache_config:\n"
-    "  cpu_cache_capacity: 4             # GB, CPU memory used for cache\n"
-    "  cpu_cache_threshold: 0.85         \n"
-    "  cache_insert_data: false          # whether to load inserted data into cache\n"
+    "  cpu_cache_capacity: 4\n"
+    "  insert_buffer_size: 1\n"
+    "  cache_insert_data: false\n"
     "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# Engine Config        | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "engine_config:\n"
-    "  use_blas_threshold: 20            \n"
+    "  use_blas_threshold: 1100\n"
+#ifdef MILVUS_GPU_VERSION
+    "  gpu_search_threshold: 1000\n"
     "\n"
-    #ifdef MILVUS_GPU_VERSION
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# GPU Resource Config  | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
     "gpu_resource_config:\n"
-    "  enable: true                      # whether to enable GPU resources\n"
-    "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
-    "  search_resources:                 # define the GPU devices used for search computation, must be in format gpux\n"
+    "  enable: true\n"
+    "  cache_capacity: 1\n"
+    "  search_resources:\n"
     "    - gpu0\n"
-    "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
+    "  build_index_resources:\n"
     "    - gpu0\n"
-    #endif
-    "\n";
+#endif
+    "\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "# Tracing Config       | Description                                                | Type       | Default        "
+    " |\n"
+    "#----------------------+------------------------------------------------------------+------------+----------------"
+    "-+\n"
+    "tracing_config:\n"
+    " json_config_path:\n"
+    "";
 
 static const char* CONTROLLER_TEST_TABLE_NAME = "controller_unit_test";
 static const char* CONTROLLER_TEST_CONFIG_DIR = "/tmp/milvus_web_controller_test/";
@@ -542,7 +595,7 @@ static const char* CONTROLLER_TEST_CONFIG_FILE = "config.yaml";
 class TestClient : public oatpp::web::client::ApiClient {
  public:
 #include OATPP_CODEGEN_BEGIN(ApiClient)
- API_CLIENT_INIT(TestClient)
+    API_CLIENT_INIT(TestClient)
 
     API_CALL("GET", "/", root)
 
@@ -580,8 +633,8 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/tables/{table_name}/indexes", optionsIndexes, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST", "/tables/{table_name}/indexes", createIndex,
-             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/indexes", createIndex, PATH(String, table_name, "table_name"),
+             BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
 
     API_CALL("GET", "/tables/{table_name}/indexes", getIndex, PATH(String, table_name, "table_name"))
 
@@ -589,11 +642,11 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/tables/{table_name}/partitions", optionsPartitions, PATH(String, table_name, "table_name"))
 
-    API_CALL("POST", "/tables/{table_name}/partitions", createPartition,
-             PATH(String, table_name, "table_name"), BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/partitions", createPartition, PATH(String, table_name, "table_name"),
+             BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
 
-    API_CALL("GET", "/tables/{table_name}/partitions", showPartitions,
-             PATH(String, table_name, "table_name"), QUERY(String, offset), QUERY(String, page_size))
+    API_CALL("GET", "/tables/{table_name}/partitions", showPartitions, PATH(String, table_name, "table_name"),
+             QUERY(String, offset), QUERY(String, page_size))
 
     API_CALL("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", optionsParTag,
              PATH(String, table_name, "table_name"), PATH(String, partition_tag, "partition_tag"))
@@ -628,10 +681,12 @@ class WebControllerTest : public testing::Test {
  protected:
     static void
     SetUpTestCase() {
+        mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
         // Basic config
         std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
         std::fstream fs(config_path.c_str(), std::ios_base::out);
         fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+        fs.flush();
         fs.close();
 
         milvus::server::Config& config = milvus::server::Config::GetInstance();
@@ -763,6 +818,14 @@ class WebControllerTest : public testing::Test {
 
     void
     SetUp() override {
+        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+        std::fstream fs(config_path.c_str(), std::ios_base::out);
+        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+        fs.close();
+
+        milvus::server::Config& config = milvus::server::Config::GetInstance();
+        config.LoadConfigFile(std::string(CONTROLLER_TEST_CONFIG_DIR) + CONTROLLER_TEST_CONFIG_FILE);
+
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
         object_mapper = objectMapper;
@@ -774,8 +837,7 @@ class WebControllerTest : public testing::Test {
     }
 
     void
-    TearDown() override {
-    };
+    TearDown() override{};
 
  protected:
     std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
@@ -783,7 +845,8 @@ class WebControllerTest : public testing::Test {
     std::shared_ptr<TestClient> client_ptr;
 
  protected:
-    void GenTable(const std::string& table_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
+    void
+    GenTable(const std::string& table_name, int64_t dim, int64_t index_file_size, int64_t metric_type) {
         auto table_dto = milvus::server::web::TableRequestDto::createShared();
         table_dto->table_name = OString(table_name.c_str());
         table_dto->dimension = dim;
@@ -794,7 +857,7 @@ class WebControllerTest : public testing::Test {
     }
 };
 
-} // namespace
+}  // namespace
 TEST_F(WebControllerTest, OPTIONS) {
     auto response = client_ptr->root(conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -922,7 +985,7 @@ TEST_F(WebControllerTest, SHOW_TABLES) {
     auto response = client_ptr->showTables("1", "1", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::TableListFieldsDto>(object_mapper.get());
-    ASSERT_TRUE(result_dto->count->getValue() >= 0);
+    ASSERT_GE(result_dto->count->getValue(), 0);
 
     // test query table empty
     response = client_ptr->showTables("0", "0", conncetion_ptr);
@@ -1225,7 +1288,7 @@ TEST_F(WebControllerTest, SEARCH) {
     auto status = InsertData(table_name, 64, 200);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    //Create partition and insert 200 vectors into it
+    // Create partition and insert 200 vectors into it
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     par_param->partition_tag = "tag" + OString(RandomName().c_str());
     auto response = client_ptr->createPartition(table_name, par_param);
@@ -1290,7 +1353,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     auto status = InsertData(table_name, 64, 200, "", true);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    //Create partition and insert 200 vectors into it
+    // Create partition and insert 200 vectors into it
     auto par_param = milvus::server::web::PartitionRequestDto::createShared();
     par_param->partition_tag = "tag" + OString(RandomName().c_str());
     auto response = client_ptr->createPartition(table_name, par_param);
@@ -1467,6 +1530,16 @@ TEST_F(WebControllerTest, CMD) {
 }
 
 TEST_F(WebControllerTest, ADVANCED_CONFIG) {
+    std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+    std::fstream fs(config_path.c_str(), std::ios_base::out);
+    fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+    fs.flush();
+    fs.close();
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.LoadConfigFile(config_path);
+    ASSERT_TRUE(status.ok()) << status.message();
+
     auto response = client_ptr->getAdvanced(conncetion_ptr);
 
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
@@ -1501,16 +1574,22 @@ TEST_F(WebControllerTest, ADVANCED_CONFIG) {
 
 #ifdef MILVUS_GPU_VERSION
 TEST_F(WebControllerTest, GPU_CONFIG) {
-    auto &config  = milvus::server::Config::GetInstance();
-    auto status = config.SetGpuResourceConfigEnable("true");
+    std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+    std::fstream fs(config_path.c_str(), std::ios_base::out);
+    fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+    fs.flush();
+    fs.close();
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.LoadConfigFile(config_path);
     ASSERT_TRUE(status.ok()) << status.message();
 
+    status = config.SetGpuResourceConfigEnable("true");
+    ASSERT_TRUE(status.ok()) << status.message();
     status = config.SetGpuResourceConfigCacheCapacity("1");
     ASSERT_TRUE(status.ok()) << status.message();
-
     status = config.SetGpuResourceConfigBuildIndexResources("gpu0");
     ASSERT_TRUE(status.ok()) << status.message();
-
     status = config.SetGpuResourceConfigSearchResources("gpu0");
     ASSERT_TRUE(status.ok()) << status.message();
 

@@ -51,10 +51,6 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
 #include OATPP_CODEGEN_BEGIN(ApiController)
 
-    ENDPOINT_INFO(root) {
-        info->summary = "Index.html page";
-    }
-
     ADD_CORS(root)
 
     ENDPOINT("GET", "/", root) {
@@ -612,6 +608,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
+
     ADD_CORS(Insert)
 
     ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
@@ -642,7 +639,6 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(VectorsOp)
-
     /*************
      * Search
      * Delete by ID

@@ -418,6 +418,11 @@ TEST(ValidationUtilTest, VALIDATE_PARTITION_TAGS) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);
     partition_tags.push_back("");
     ASSERT_NE(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);
+    std::string ss;
+    ss.assign(256, 'a');
+    partition_tags = {ss};
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(),
+              milvus::SERVER_INVALID_PARTITION_TAG);
 }
 
 #ifdef MILVUS_GPU_VERSION
@@ -477,6 +482,21 @@ TEST(ValidationUtilTest, VALIDATE_DBURI_TEST) {
               milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateDbURI("mysql://root:123456@127.0.0.1:port/milvus").code(),
               milvus::SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, VALIDATE_PATH_TEST) {
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/home/milvus").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp/milvus").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp/milvus/").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/_tmp/milvus12345").ok());
+    ASSERT_TRUE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp-/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/-tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/****tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp--/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("./tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp space/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("../tmp/milvus").ok());
+    ASSERT_FALSE(milvus::server::ValidationUtil::ValidateStoragePath("/tmp//milvus").ok());
 }
 
 TEST(UtilTest, ROLLOUTHANDLER_TEST) {

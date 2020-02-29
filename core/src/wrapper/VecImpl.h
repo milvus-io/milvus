@@ -79,8 +79,8 @@ class VecIndexImpl : public VecIndex {
     Status
     SetUids(std::vector<segment::doc_id_t>& uids) override;
 
-    Status
-    GetUids(std::vector<segment::doc_id_t>& uids) override;
+    const std::vector<segment::doc_id_t>&
+    GetUids() const override;
 
  protected:
     int64_t dim = 0;

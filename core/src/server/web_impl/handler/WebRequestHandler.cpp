@@ -1077,6 +1077,7 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    partition_list_dto->count = partitions.size();
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
     if (offset_value < partitions.size()) {
