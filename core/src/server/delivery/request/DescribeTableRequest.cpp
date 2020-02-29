@@ -45,20 +45,29 @@ DescribeTableRequest::OnExecute() {
         }
 
         // step 2: get table info
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DescribeTableRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("DescribeTableRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
-            return status;
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            } else {
+                return status;
+            }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
-        schema_.table_name_ = table_info.table_id_;
-        schema_.dimension_ = static_cast<int64_t>(table_info.dimension_);
-        schema_.index_file_size_ = table_info.index_file_size_;
-        schema_.metric_type_ = table_info.metric_type_;
+        schema_.table_name_ = table_schema.table_id_;
+        schema_.dimension_ = static_cast<int64_t>(table_schema.dimension_);
+        schema_.index_file_size_ = table_schema.index_file_size_;
+        schema_.metric_type_ = table_schema.metric_type_;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

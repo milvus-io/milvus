@@ -46,6 +46,7 @@ add_executable(test_wrapper
 
 target_link_libraries(test_wrapper
         knowhere
+        metrics
         ${unittest_libs})
 
 install(TARGETS test_wrapper DESTINATION unittest)

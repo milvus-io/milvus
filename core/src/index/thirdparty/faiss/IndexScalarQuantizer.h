@@ -59,7 +59,8 @@ struct IndexScalarQuantizer: Index {
         const float* x,
         idx_t k,
         float* distances,
-        idx_t* labels) const override;
+        idx_t* labels,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void reset() override;
 

@@ -10,10 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/Utils.h"
-#include "server/Config.h"
-#include "storage/s3/S3ClientWrapper.h"
-#include "utils/CommonUtil.h"
-#include "utils/Log.h"
 
 #include <fiu-local.h>
 #include <boost/filesystem.hpp>
@@ -21,6 +17,11 @@
 #include <mutex>
 #include <regex>
 #include <vector>
+
+#include "server/Config.h"
+#include "storage/s3/S3ClientWrapper.h"
+#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
@@ -36,7 +37,7 @@ std::mutex index_file_counter_mutex;
 static std::string
 ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
-    std::string partition_path = table_path + "/" + std::to_string(table_file.date_);
+    std::string partition_path = table_path + "/" + table_file.segment_id_;
     return partition_path;
 }
 
@@ -163,7 +164,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
         return Status::OK();
     }
 
-    if (boost::filesystem::exists(file_path)) {
+    if (boost::filesystem::exists(parent_path)) {
         table_file.location_ = file_path;
         return Status::OK();
     }
@@ -171,7 +172,7 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
     for (auto& path : options.slave_paths_) {
         parent_path = ConstructParentFolder(path, table_file);
         file_path = parent_path + "/" + table_file.file_id_;
-        if (boost::filesystem::exists(file_path)) {
+        if (boost::filesystem::exists(parent_path)) {
             table_file.location_ = file_path;
             return Status::OK();
         }
@@ -189,6 +190,22 @@ Status
 DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
     utils::GetTableFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
+    return Status::OK();
+}
+
+Status
+DeleteSegment(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
+    utils::GetTableFilePath(options, table_file);
+    std::string segment_dir;
+    GetParentPath(table_file.location_, segment_dir);
+    boost::filesystem::remove_all(segment_dir);
+    return Status::OK();
+}
+
+Status
+GetParentPath(const std::string& path, std::string& parent_path) {
+    boost::filesystem::path p(path);
+    parent_path = p.parent_path().string();
     return Status::OK();
 }
 

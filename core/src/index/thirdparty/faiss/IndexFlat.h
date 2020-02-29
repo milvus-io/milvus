@@ -33,7 +33,8 @@ struct IndexFlat: Index {
         const float* x,
         idx_t k,
         float* distances,
-        idx_t* labels) const override;
+        idx_t* labels,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 
     void range_search(
         idx_t n,
@@ -103,7 +104,8 @@ struct IndexFlatL2BaseShift: IndexFlatL2 {
         const float* x,
         idx_t k,
         float* distances,
-        idx_t* labels) const override;
+        idx_t* labels,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 };
 
 
@@ -138,7 +140,8 @@ struct IndexRefineFlat: Index {
         const float* x,
         idx_t k,
         float* distances,
-        idx_t* labels) const override;
+        idx_t* labels,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 
     ~IndexRefineFlat() override;
 };
@@ -166,7 +169,8 @@ struct IndexFlat1D:IndexFlatL2 {
         const float* x,
         idx_t k,
         float* distances,
-        idx_t* labels) const override;
+        idx_t* labels,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 };
 
 

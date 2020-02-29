@@ -69,9 +69,10 @@ InsertRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("InsertRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("InsertRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -80,23 +81,27 @@ InsertRequest::OnExecute() {
             } else {
                 return status;
             }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         // step 3: check table flag
         // all user provide id, or all internal id
         bool user_provide_ids = !vectors_data_.id_array_.empty();
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
-                  table_info.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
+                  table_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
-        if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
+        if ((table_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
                           "Table vector IDs are user-defined. Please provide IDs for all vectors of this table.");
         }
 
         fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
-                  table_info.flag_ = engine::meta::FLAG_MASK_NO_USERID);
+                  table_schema.flag_ = engine::meta::FLAG_MASK_NO_USERID);
         // user didn't provided id before, no need to provide user id
-        if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
+        if ((table_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
                 SERVER_ILLEGAL_VECTOR_ID,
                 "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
@@ -110,7 +115,7 @@ InsertRequest::OnExecute() {
 #endif
         // step 4: some metric type doesn't support float vectors
         if (!vectors_data_.float_data_.empty()) {  // insert float vectors
-            if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+            if (ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float vectors.");
             }
 
@@ -120,13 +125,13 @@ InsertRequest::OnExecute() {
                               "The vector dimension must be equal to the table dimension.");
             }
 
-            fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
-            if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
+            fiu_do_on("InsertRequest.OnExecute.invalid_dim", table_schema.dimension_ = -1);
+            if (vectors_data_.float_data_.size() / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }
         } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
-            if (!ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+            if (!ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary vectors.");
             }
 
@@ -136,7 +141,7 @@ InsertRequest::OnExecute() {
                               "The vector dimension must be equal to the table dimension.");
             }
 
-            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_info.dimension_) {
+            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }
@@ -161,9 +166,9 @@ InsertRequest::OnExecute() {
         }
 
         // step 6: update table flag
-        user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
-                         : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
-        status = DBWrapper::DB()->UpdateTableFlag(table_name_, table_info.flag_);
+        user_provide_ids ? table_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
+                         : table_schema.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
+        status = DBWrapper::DB()->UpdateTableFlag(table_name_, table_schema.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();

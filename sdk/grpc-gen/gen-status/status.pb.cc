@@ -61,21 +61,21 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 const char descriptor_table_protodef_status_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\014status.proto\022\013milvus.grpc\"D\n\006Status\022*\n"
   "\nerror_code\030\001 \001(\0162\026.milvus.grpc.ErrorCod"
-  "e\022\016\n\006reason\030\002 \001(\t*\253\004\n\tErrorCode\022\013\n\007SUCCE"
+  "e\022\016\n\006reason\030\002 \001(\t*\230\004\n\tErrorCode\022\013\n\007SUCCE"
   "SS\020\000\022\024\n\020UNEXPECTED_ERROR\020\001\022\022\n\016CONNECT_FA"
   "ILED\020\002\022\025\n\021PERMISSION_DENIED\020\003\022\024\n\020TABLE_N"
-  "OT_EXISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\021\n\rILL"
-  "EGAL_RANGE\020\006\022\025\n\021ILLEGAL_DIMENSION\020\007\022\026\n\022I"
-  "LLEGAL_INDEX_TYPE\020\010\022\026\n\022ILLEGAL_TABLE_NAM"
-  "E\020\t\022\020\n\014ILLEGAL_TOPK\020\n\022\025\n\021ILLEGAL_ROWRECO"
-  "RD\020\013\022\025\n\021ILLEGAL_VECTOR_ID\020\014\022\031\n\025ILLEGAL_S"
-  "EARCH_RESULT\020\r\022\022\n\016FILE_NOT_FOUND\020\016\022\017\n\013ME"
-  "TA_FAILED\020\017\022\020\n\014CACHE_FAILED\020\020\022\030\n\024CANNOT_"
-  "CREATE_FOLDER\020\021\022\026\n\022CANNOT_CREATE_FILE\020\022\022"
-  "\030\n\024CANNOT_DELETE_FOLDER\020\023\022\026\n\022CANNOT_DELE"
-  "TE_FILE\020\024\022\025\n\021BUILD_INDEX_ERROR\020\025\022\021\n\rILLE"
-  "GAL_NLIST\020\026\022\027\n\023ILLEGAL_METRIC_TYPE\020\027\022\021\n\r"
-  "OUT_OF_MEMORY\020\030b\006proto3"
+  "OT_EXISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\025\n\021ILL"
+  "EGAL_DIMENSION\020\007\022\026\n\022ILLEGAL_INDEX_TYPE\020\010"
+  "\022\026\n\022ILLEGAL_TABLE_NAME\020\t\022\020\n\014ILLEGAL_TOPK"
+  "\020\n\022\025\n\021ILLEGAL_ROWRECORD\020\013\022\025\n\021ILLEGAL_VEC"
+  "TOR_ID\020\014\022\031\n\025ILLEGAL_SEARCH_RESULT\020\r\022\022\n\016F"
+  "ILE_NOT_FOUND\020\016\022\017\n\013META_FAILED\020\017\022\020\n\014CACH"
+  "E_FAILED\020\020\022\030\n\024CANNOT_CREATE_FOLDER\020\021\022\026\n\022"
+  "CANNOT_CREATE_FILE\020\022\022\030\n\024CANNOT_DELETE_FO"
+  "LDER\020\023\022\026\n\022CANNOT_DELETE_FILE\020\024\022\025\n\021BUILD_"
+  "INDEX_ERROR\020\025\022\021\n\rILLEGAL_NLIST\020\026\022\027\n\023ILLE"
+  "GAL_METRIC_TYPE\020\027\022\021\n\rOUT_OF_MEMORY\020\030b\006pr"
+  "oto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_status_2eproto_deps[1] = {
 };
@@ -85,7 +85,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sta
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_status_2eproto_once;
 static bool descriptor_table_status_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_status_2eproto = {
-  &descriptor_table_status_2eproto_initialized, descriptor_table_protodef_status_2eproto, "status.proto", 663,
+  &descriptor_table_status_2eproto_initialized, descriptor_table_protodef_status_2eproto, "status.proto", 644,
   &descriptor_table_status_2eproto_once, descriptor_table_status_2eproto_sccs, descriptor_table_status_2eproto_deps, 1, 0,
   schemas, file_default_instances, TableStruct_status_2eproto::offsets,
   file_level_metadata_status_2eproto, 1, file_level_enum_descriptors_status_2eproto, file_level_service_descriptors_status_2eproto,
@@ -107,7 +107,6 @@ bool ErrorCode_IsValid(int value) {
     case 3:
     case 4:
     case 5:
-    case 6:
     case 7:
     case 8:
     case 9:

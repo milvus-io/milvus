@@ -9,14 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "knowhere/index/vector_index/IndexBinaryIVF.h"
+
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/IndexBinaryIVF.h>
 
+#include <chrono>
+
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexBinaryIVF.h"
-
-#include <chrono>
 
 namespace knowhere {
 
@@ -91,7 +92,10 @@ BinaryIVF::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distanc
     ivf_index->nprobe = params->nprobe;
     int32_t* pdistances = (int32_t*)distances;
     stdclock::time_point before = stdclock::now();
-    ivf_index->search(n, (uint8_t*)data, k, pdistances, labels);
+
+    // todo: remove static cast (zhiru)
+    static_cast<faiss::IndexBinary*>(index_.get())->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
+
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost
@@ -151,6 +155,94 @@ BinaryIVF::Add(const DatasetPtr& dataset, const Config& config) {
 void
 BinaryIVF::Seal() {
     // do nothing
+}
+
+DatasetPtr
+BinaryIVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    //    GETBINARYTENSOR(dataset)
+    // auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset->Get<int64_t>(meta::DIM);
+
+    try {
+        size_t p_x_size = sizeof(uint8_t) * elems;
+        auto p_x = (uint8_t*)malloc(p_x_size);
+
+        index_->get_vector_by_id(1, p_data, p_x, bitset_);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::TENSOR, p_x);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+DatasetPtr
+BinaryIVF::SearchById(const DatasetPtr& dataset, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    //    auto search_cfg = std::dynamic_pointer_cast<IVFBinCfg>(config);
+    //    if (search_cfg == nullptr) {
+    //        KNOWHERE_THROW_MSG("not support this kind of config");
+    //    }
+
+    //    GETBINARYTENSOR(dataset)
+    auto rows = dataset->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+
+    try {
+        auto elems = rows * config->k;
+
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        auto p_id = (int64_t*)malloc(p_id_size);
+        auto p_dist = (float*)malloc(p_dist_size);
+
+        int32_t* pdistances = (int32_t*)p_dist;
+        //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
+        //        index_->searchById(rows, (uint8_t*)p_data, config->k, pdistances, p_id, blacklist);
+        index_->search_by_id(rows, p_data, config->k, pdistances, p_id, bitset_);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        if (index_->metric_type == faiss::METRIC_Hamming) {
+            auto pf_dist = (float*)malloc(p_dist_size);
+            int32_t* pi_dist = (int32_t*)p_dist;
+            for (int i = 0; i < elems; i++) {
+                *(pf_dist + i) = (float)(*(pi_dist + i));
+            }
+            ret_ds->Set(meta::IDS, p_id);
+            ret_ds->Set(meta::DISTANCE, pf_dist);
+            free(p_dist);
+        } else {
+            ret_ds->Set(meta::IDS, p_id);
+            ret_ds->Set(meta::DISTANCE, p_dist);
+        }
+
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+void
+BinaryIVF::SetBlacklist(faiss::ConcurrentBitsetPtr list) {
+    bitset_ = std::move(list);
+}
+
+void
+BinaryIVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
+    list = bitset_;
 }
 
 }  // namespace knowhere

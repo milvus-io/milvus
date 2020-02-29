@@ -11,20 +11,22 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
-
 #include <faiss/Index.h>
-#include <stdint.h>
+
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "db/engine/ExecutionEngine.h"
+#include "segment/Types.h"
+
 namespace milvus {
 namespace engine {
 
-typedef int64_t IDNumber;
+typedef segment::doc_id_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
@@ -48,6 +50,24 @@ using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 using File2RefCount = std::map<std::string, int64_t>;
 using Table2FileRef = std::map<std::string, File2RefCount>;
+
+struct SegmentStat {
+    std::string name_;
+    int64_t row_count_ = 0;
+    std::string index_name_;
+    int64_t data_size_ = 0;
+};
+
+struct PartitionStat {
+    std::string tag_;
+    std::vector<SegmentStat> segments_stat_;
+};
+
+struct TableInfo {
+    std::vector<PartitionStat> partitions_stat_;
+};
+
+static const char* DEFAULT_PARTITON_TAG = "_default";
 
 }  // namespace engine
 }  // namespace milvus

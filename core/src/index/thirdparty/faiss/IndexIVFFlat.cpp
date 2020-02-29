@@ -148,19 +148,22 @@ struct IVFFlatScanner: InvertedListScanner {
                        const uint8_t *codes,
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         const float *list_vecs = (const float*)codes;
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
-            const float * yj = list_vecs + d * j;
-            float dis = metric == METRIC_INNER_PRODUCT ?
-                fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
-            if (C::cmp (simi[0], dis)) {
-                heap_pop<C> (k, simi, idxi);
-                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                heap_push<C> (k, simi, idxi, dis, id);
-                nup++;
+            if(!bitset || !bitset->test(ids[j])){
+                const float * yj = list_vecs + d * j;
+                float dis = metric == METRIC_INNER_PRODUCT ?
+                            fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
+                if (C::cmp (simi[0], dis)) {
+                    heap_pop<C> (k, simi, idxi);
+                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    heap_push<C> (k, simi, idxi, dis, id);
+                    nup++;
+                }
             }
         }
         return nup;
@@ -351,7 +354,8 @@ void IndexIVFFlatDedup::search_preassigned (
            const float *centroid_dis,
            float *distances, idx_t *labels,
            bool store_pairs,
-           const IVFSearchParameters *params) const
+           const IVFSearchParameters *params,
+           ConcurrentBitsetPtr bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (
            !store_pairs, "store_pairs not supported in IVFDedup");

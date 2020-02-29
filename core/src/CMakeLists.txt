@@ -36,6 +36,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -65,9 +66,11 @@ set(scheduler_files
 
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
 aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
+aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
 set(thirdparty_files
         ${thirdparty_easyloggingpp_files}
         ${thirdparty_nlohmann_files}
+        ${thirdparty_dablooms_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
@@ -113,9 +116,17 @@ set(storage_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/store store_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -124,11 +135,16 @@ set(engine_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
+        ${db_wal_files}
         ${metrics_files}
         ${storage_files}
         ${thirdparty_files}
         ${utils_files}
         ${wrapper_files}
+        ${codecs_files}
+        ${codecs_default_files}
+        ${segment_files}
+        ${store_files}
         )
 
 if (MILVUS_WITH_PROMETHEUS)
