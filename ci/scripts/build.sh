@@ -144,7 +144,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 fi
 
 # compile and build
-make -j6 || exit 1
+make -j8 || exit 1
 
 if [[ ${PRIVILEGES} == "ON" ]];then
     sudo make install || exit 1
