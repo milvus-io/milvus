@@ -38,6 +38,12 @@ DBWrapper::StartService() {
         return s;
     }
 
+    s = config.GetDBConfigAutoFlushInterval(opt.auto_flush_interval_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
     std::string path;
     s = config.GetStorageConfigPrimaryPath(path);
     if (!s.ok()) {
@@ -80,6 +86,37 @@ DBWrapper::StartService() {
         std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
                   << "single, cluster_readonly, and cluster_writable." << std::endl;
         kill(0, SIGUSR1);
+    }
+
+    // get wal configurations
+    s = config.GetWalConfigEnable(opt.wal_enable_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get wal_enable configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    if (opt.wal_enable_) {
+        s = config.GetWalConfigRecoveryErrorIgnore(opt.recovery_error_ignore_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get recovery_error_ignore configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        s = config.GetWalConfigBufferSize(opt.buffer_size_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get buffer_size configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        s = config.GetWalConfigWalPath(opt.mxlog_path_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get mxlog_path configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
     }
 
     // engine config

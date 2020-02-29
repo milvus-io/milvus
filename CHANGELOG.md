@@ -22,9 +22,11 @@ Please mark all change in change log and use the issue from GitHub
 - \#1075 - improve error message when page size or offset is illegal
 - \#1082 - check page_size or offset value to avoid float
 - \#1115 - http server support load table into memory
+- \#1152 - Error log output continuously after server start
 - \#1211 - Server down caused by searching with index_type: HNSW
 - \#1240 - Update license declaration
 - \#1298 - Unittest failed when on CPU2GPU case
+- \#1359 - Negative distance value returned when searching with HNSW index type
 
 ## Feature
 - \#216 - Add CLI to get server info
@@ -39,6 +41,8 @@ Please mark all change in change log and use the issue from GitHub
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#853 - Support HNSW
 - \#910 - Change Milvus c++ standard to c++17
+- \#1204 - Add api to get table data information
+- \#1302 - Get all record IDs in a segment by given a segment id
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
@@ -53,10 +57,13 @@ Please mark all change in change log and use the issue from GitHub
 - \#1002 - Rename minio to s3 in Storage Config section
 - \#1078 - Move 'insert_buffer_size' to Cache Config section
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
+- \#1297 - Hide partition_name parameter, avid user directly access partition table
+- \#1310 - Add default partition tag for a table
 - \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1303, #1304, #1324, #1388 - Various fixes and improvements for Milvus documentation.
 - \#1234 - Do S3 server validation check when Milvus startup
 - \#1263 - Allow system conf modifiable and some take effect directly
 - \#1320 - Remove debug logging from faiss
+
 
 ## Task
 - \#1327 - Exclude third-party code from codebeat

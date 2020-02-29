@@ -10,6 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/JobMgr.h"
+
+#include <src/db/Utils.h>
+#include <src/segment/SegmentReader.h>
+
+#include <limits>
+#include <utility>
+
 #include "SchedInst.h"
 #include "TaskCreator.h"
 #include "optimizer/Optimizer.h"
@@ -17,8 +24,6 @@
 #include "scheduler/optimizer/Optimizer.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "task/Task.h"
-
-#include <utility>
 
 namespace milvus {
 namespace scheduler {
@@ -74,6 +79,55 @@ JobMgr::worker_function() {
         }
 
         auto tasks = build_task(job);
+
+        // TODO(zhiru): if the job is search by ids, pass any task where the ids don't exist
+        auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
+        if (search_job != nullptr) {
+            scheduler::ResultIds ids(search_job->nq() * search_job->topk(), -1);
+            scheduler::ResultDistances distances(search_job->nq() * search_job->topk(),
+                                                 std::numeric_limits<float>::max());
+            search_job->GetResultIds() = ids;
+            search_job->GetResultDistances() = distances;
+
+            if (search_job->vectors().float_data_.empty() && search_job->vectors().binary_data_.empty() &&
+                !search_job->vectors().id_array_.empty()) {
+                for (auto task = tasks.begin(); task != tasks.end();) {
+                    auto search_task = std::static_pointer_cast<XSearchTask>(*task);
+                    auto location = search_task->GetLocation();
+
+                    // Load bloom filter
+                    std::string segment_dir;
+                    engine::utils::GetParentPath(location, segment_dir);
+                    segment::SegmentReader segment_reader(segment_dir);
+                    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+                    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+                    // Check if the id is present.
+                    bool pass = true;
+                    for (auto& id : search_job->vectors().id_array_) {
+                        if (id_bloom_filter_ptr->Check(id)) {
+                            pass = false;
+                            break;
+                        }
+                    }
+
+                    if (pass) {
+                        //                        std::cout << search_task->GetIndexId() << std::endl;
+                        search_job->SearchDone(search_task->GetIndexId());
+                        task = tasks.erase(task);
+                    } else {
+                        task++;
+                    }
+                }
+            }
+        }
+
+        //        for (auto &task : tasks) {
+        //            if ...
+        //            search_job->SearchDone(task->id);
+        //            tasks.erase(task);
+        //        }
+
         for (auto& task : tasks) {
             OptimizerInst::GetInstance()->Run(task);
         }

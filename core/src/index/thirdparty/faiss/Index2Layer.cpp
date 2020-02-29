@@ -166,7 +166,8 @@ void Index2Layer::search(
     const float* /*x*/,
     idx_t /*k*/,
     float* /*distances*/,
-    idx_t* /*labels*/) const {
+    idx_t* /*labels*/,
+    ConcurrentBitsetPtr bitset) const {
   FAISS_THROW_MSG("not implemented");
 }
 

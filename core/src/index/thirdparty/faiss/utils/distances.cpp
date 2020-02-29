@@ -18,7 +18,7 @@
 
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
-
+#include <faiss/utils/ConcurrentBitset.h>
 
 
 #ifndef FINTEGER
@@ -147,7 +147,8 @@ void fvec_renorm_L2 (size_t d, size_t nx, float * __restrict x)
 static void knn_inner_product_sse (const float * x,
                         const float * y,
                         size_t d, size_t nx, size_t ny,
-                        float_minheap_array_t * res)
+                        float_minheap_array_t * res,
+                        ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
     size_t check_period = InterruptCallback::get_period_hint (ny * d);
@@ -168,11 +169,13 @@ static void knn_inner_product_sse (const float * x,
             minheap_heapify (k, simi, idxi);
 
             for (size_t j = 0; j < ny; j++) {
-                float ip = fvec_inner_product (x_i, y_j, d);
+                if(!bitset || !bitset->test(j)){
+                    float ip = fvec_inner_product (x_i, y_j, d);
 
-                if (ip > simi[0]) {
-                    minheap_pop (k, simi, idxi);
-                    minheap_push (k, simi, idxi, ip, j);
+                    if (ip > simi[0]) {
+                        minheap_pop (k, simi, idxi);
+                        minheap_push (k, simi, idxi, ip, j);
+                    }
                 }
                 y_j += d;
             }
@@ -187,7 +190,8 @@ static void knn_L2sqr_sse (
                 const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
-                float_maxheap_array_t * res)
+                float_maxheap_array_t * res,
+                ConcurrentBitsetPtr bitset = nullptr)
 {
     size_t k = res->k;
 
@@ -207,11 +211,13 @@ static void knn_L2sqr_sse (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                float disij = fvec_L2sqr (x_i, y_j, d);
+                if(!bitset || !bitset->test(j)){
+                    float disij = fvec_L2sqr (x_i, y_j, d);
 
-                if (disij < simi[0]) {
-                    maxheap_pop (k, simi, idxi);
-                    maxheap_push (k, simi, idxi, disij, j);
+                    if (disij < simi[0]) {
+                        maxheap_pop (k, simi, idxi);
+                        maxheap_push (k, simi, idxi, disij, j);
+                    }
                 }
                 y_j += d;
             }
@@ -228,17 +234,21 @@ static void knn_inner_product_blas (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_minheap_array_t * res)
+        float_minheap_array_t * res,
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
     // BLAS does not like empty matrices
     if (nx == 0 || ny == 0) return;
 
+    size_t k = res->k;
+
     /* block sizes */
     const size_t bs_x = 4096, bs_y = 1024;
     // const size_t bs_x = 16, bs_y = 16;
-    std::unique_ptr<float[]> ip_block(new float[bs_x * bs_y]);
+    float *ip_block = new float[bs_x * bs_y];
+    ScopeDeleter<float> del1(ip_block);;
 
     for (size_t i0 = 0; i0 < nx; i0 += bs_x) {
         size_t i1 = i0 + bs_x;
@@ -254,11 +264,28 @@ static void knn_inner_product_blas (
                 sgemm_ ("Transpose", "Not transpose", &nyi, &nxi, &di, &one,
                         y + j0 * d, &di,
                         x + i0 * d, &di, &zero,
-                        ip_block.get(), &nyi);
+                        ip_block, &nyi);
             }
 
             /* collect maxima */
-            res->addn (j1 - j0, ip_block.get(), j0, i0, i1 - i0);
+#pragma omp parallel for
+            for(size_t i = i0; i < i1; i++){
+                float * __restrict simi = res->get_val(i);
+                int64_t * __restrict idxi = res->get_ids (i);
+                const float *ip_line = ip_block + (i - i0) * (j1 - j0);
+
+                for(size_t j = j0; j < j1; j++){
+                    if(!bitset || !bitset->test(j)){
+                        float dis = *ip_line;
+
+                        if(dis > simi[0]){
+                            minheap_pop(k, simi, idxi);
+                            minheap_push(k, simi, idxi, dis, j);
+                        }
+                    }
+                    ip_line++;
+                }
+            }
         }
         InterruptCallback::check ();
     }
@@ -272,7 +299,8 @@ static void knn_L2sqr_blas (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const DistanceCorrection &corr)
+        const DistanceCorrection &corr,
+        ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -318,19 +346,22 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    float ip = *ip_line++;
-                    float dis = x_norms[i] + y_norms[j] - 2 * ip;
+                    if(!bitset || !bitset->test(j)){
+                        float ip = *ip_line;
+                        float dis = x_norms[i] + y_norms[j] - 2 * ip;
 
-                    // negative values can occur for identical vectors
-                    // due to roundoff errors
-                    if (dis < 0) dis = 0;
+                        // negative values can occur for identical vectors
+                        // due to roundoff errors
+                        if (dis < 0) dis = 0;
 
-                    dis = corr (dis, i, j);
+                        dis = corr (dis, i, j);
 
-                    if (dis < simi[0]) {
-                        maxheap_pop (k, simi, idxi);
-                        maxheap_push (k, simi, idxi, dis, j);
+                        if (dis < simi[0]) {
+                            maxheap_pop (k, simi, idxi);
+                            maxheap_push (k, simi, idxi, dis, j);
+                        }
                     }
+                    ip_line++;
                 }
             }
         }
@@ -345,7 +376,8 @@ static void knn_jaccard_blas (const float * x,
                               const float * y,
                               size_t d, size_t nx, size_t ny,
                               float_maxheap_array_t * res,
-                              const DistanceCorrection &corr)
+                              const DistanceCorrection &corr,
+                              ConcurrentBitsetPtr bitset = nullptr)
 {
     res->heapify ();
 
@@ -391,26 +423,28 @@ static void knn_jaccard_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    float ip = *ip_line++;
-                    float dis = 1.0 - ip / (x_norms[i] + y_norms[j] - ip);
+                    if(!bitset || !bitset->test(j)){
+                        float ip = *ip_line;
+                        float dis = 1.0 - ip / (x_norms[i] + y_norms[j] - ip);
 
-                    // negative values can occur for identical vectors
-                    // due to roundoff errors
-                    if (dis < 0) dis = 0;
+                        // negative values can occur for identical vectors
+                        // due to roundoff errors
+                        if (dis < 0) dis = 0;
 
-                    dis = corr (dis, i, j);
+                        dis = corr (dis, i, j);
 
-                    if (dis < simi[0]) {
-                        maxheap_pop (k, simi, idxi);
-                        maxheap_push (k, simi, idxi, dis, j);
+                        if (dis < simi[0]) {
+                            maxheap_pop (k, simi, idxi);
+                            maxheap_push (k, simi, idxi, dis, j);
+                        }
                     }
+                    ip_line++;
                 }
             }
         }
         InterruptCallback::check ();
     }
     res->reorder ();
-
 }
 
 
@@ -428,12 +462,13 @@ int distance_compute_blas_threshold = 20;
 void knn_inner_product (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
-        float_minheap_array_t * res)
+        float_minheap_array_t * res,
+        ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-        knn_inner_product_sse (x, y, d, nx, ny, res);
+        knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
     } else {
-        knn_inner_product_blas (x, y, d, nx, ny, res);
+        knn_inner_product_blas (x, y, d, nx, ny, res, bitset);
     }
 }
 
@@ -448,13 +483,29 @@ struct NopDistanceCorrection {
 void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
-                float_maxheap_array_t * res)
+                float_maxheap_array_t * res,
+                ConcurrentBitsetPtr bitset)
 {
     if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-        knn_L2sqr_sse (x, y, d, nx, ny, res);
+        knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
     } else {
         NopDistanceCorrection nop;
-        knn_L2sqr_blas (x, y, d, nx, ny, res, nop);
+        knn_L2sqr_blas (x, y, d, nx, ny, res, nop, bitset);
+    }
+}
+
+void knn_jaccard (const float * x,
+                  const float * y,
+                  size_t d, size_t nx, size_t ny,
+                  float_maxheap_array_t * res,
+                  ConcurrentBitsetPtr bitset)
+{
+    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+//        knn_jaccard_sse (x, y, d, nx, ny, res);
+        printf("jaccard sse not implemented!\n");
+    } else {
+        NopDistanceCorrection nop;
+        knn_jaccard_blas (x, y, d, nx, ny, res, nop, bitset);
     }
 }
 

@@ -37,8 +37,8 @@ struct IndexBinaryFlat : IndexBinary {
 
   void reset() override;
 
-  void search(idx_t n, const uint8_t *x, idx_t k,
-              int32_t *distances, idx_t *labels) const override;
+  void search (idx_t n, const uint8_t *x, idx_t k,
+               int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
   void reconstruct(idx_t key, uint8_t *recons) const override;
 

@@ -43,18 +43,26 @@ DropIndexRequest::OnExecute() {
             return status;
         }
 
-        bool has_table = false;
-        status = DBWrapper::DB()->HasTable(table_name_, has_table);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DropIndexRequest.OnExecute.table_not_exist", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
-            return status;
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
+            } else {
+                return status;
+            }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
-        if (!has_table) {
-            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
-        }
+        rc.RecordSection("check validation");
 
-        // step 2: check table existence
+        // step 2: drop index
         status = DBWrapper::DB()->DropIndex(table_name_);
         fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

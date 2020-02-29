@@ -83,11 +83,27 @@ ConnectionImpl::Insert(const std::string& table_name, const std::string& partiti
 }
 
 Status
+ConnectionImpl::GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) {
+    return client_proxy_->GetVectorByID(table_name, vector_id, vector_data);
+}
+
+Status
+ConnectionImpl::GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
+                std::vector<int64_t>& id_array) {
+    return client_proxy_->GetIDsInSegment(table_name, segment_name, id_array);
+}
+
+Status
 ConnectionImpl::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                       const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array,
-                       int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(table_name, partition_tags, query_record_array, query_range_array, topk, nprobe,
-                                 topk_query_result);
+                       const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+                       TopKQueryResult& topk_query_result) {
+    return client_proxy_->Search(table_name, partition_tags, query_record_array, topk, nprobe, topk_query_result);
+}
+
+Status
+ConnectionImpl::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
+                           int64_t query_id, int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
+    return client_proxy_->SearchByID(table_name, partition_tags, query_id, topk, nprobe, topk_query_result);
 }
 
 Status
@@ -103,6 +119,11 @@ ConnectionImpl::CountTable(const std::string& table_name, int64_t& row_count) {
 Status
 ConnectionImpl::ShowTables(std::vector<std::string>& table_array) {
     return client_proxy_->ShowTables(table_array);
+}
+
+Status
+ConnectionImpl::ShowTableInfo(const std::string& table_name, TableInfo& table_info) {
+    return client_proxy_->ShowTableInfo(table_name, table_info);
 }
 
 std::string
@@ -121,8 +142,8 @@ ConnectionImpl::DumpTaskTables() const {
 }
 
 Status
-ConnectionImpl::DeleteByDate(const std::string& table_name, const Range& range) {
-    return client_proxy_->DeleteByDate(table_name, range);
+ConnectionImpl::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) {
+    return client_proxy_->DeleteByID(table_name, id_array);
 }
 
 Status
@@ -146,7 +167,7 @@ ConnectionImpl::CreatePartition(const PartitionParam& param) {
 }
 
 Status
-ConnectionImpl::ShowPartitions(const std::string& table_name, PartitionList& partition_array) const {
+ConnectionImpl::ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const {
     return client_proxy_->ShowPartitions(table_name, partition_array);
 }
 
@@ -164,4 +185,20 @@ Status
 ConnectionImpl::SetConfig(const std::string& node_name, const std::string& value) const {
     return client_proxy_->SetConfig(node_name, value);
 }
+
+Status
+ConnectionImpl::FlushTable(const std::string& Status) {
+    return client_proxy_->FlushTable(Status);
+}
+
+Status
+ConnectionImpl::Flush() {
+    return client_proxy_->Flush();
+}
+
+Status
+ConnectionImpl::CompactTable(const std::string& table_name) {
+    return client_proxy_->CompactTable(table_name);
+}
+
 }  // namespace milvus

@@ -70,6 +70,14 @@ struct DBOptions {
 
     size_t insert_buffer_size_ = 4 * ONE_GB;
     bool insert_cache_immediately_ = false;
+
+    int auto_flush_interval_ = 1000;
+
+    // wal relative configurations
+    bool wal_enable_ = true;
+    bool recovery_error_ignore_ = true;
+    uint32_t buffer_size_ = 256;
+    std::string mxlog_path_ = "/tmp/milvus/wal/";
 };  // Options
 
 }  // namespace engine

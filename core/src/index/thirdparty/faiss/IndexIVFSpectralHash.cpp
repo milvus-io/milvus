@@ -261,18 +261,20 @@ struct IVFScanner: InvertedListScanner {
                        const uint8_t *codes,
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
-                       size_t k) const override
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
     {
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
+            if(!bitset || !bitset->test(ids[j])){
+                float dis = hc.hamming (codes);
 
-            float dis = hc.hamming (codes);
-
-            if (dis < simi [0]) {
-                maxheap_pop (k, simi, idxi);
-                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
-                maxheap_push (k, simi, idxi, dis, id);
-                nup++;
+                if (dis < simi [0]) {
+                    maxheap_pop (k, simi, idxi);
+                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    maxheap_push (k, simi, idxi, dis, id);
+                    nup++;
+                }
             }
             codes += code_size;
         }

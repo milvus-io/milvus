@@ -13,27 +13,38 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 
-#include "server/delivery/request/BaseRequest.h"
+#include "db/meta/Meta.h"
+#include "db/meta/MetaFactory.h"
+#include "db/meta/MetaTypes.h"
+#include "db/wal/WalDefinations.h"
+#include "db/wal/WalFileHandler.h"
 
 namespace milvus {
-namespace server {
+namespace engine {
+namespace wal {
 
-class DeleteByDateRequest : public BaseRequest {
+static const char* WAL_META_FILE_NAME = "mxlog.meta";
+
+class MXLogMetaHandler {
  public:
-    static BaseRequestPtr
-    Create(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
+    explicit MXLogMetaHandler(const std::string& internal_meta_file_path);
+    ~MXLogMetaHandler();
 
- protected:
-    DeleteByDateRequest(const std::shared_ptr<Context>& context, const std::string& table_name, const Range& range);
+    bool
+    GetMXLogInternalMeta(uint64_t& wal_lsn);
 
-    Status
-    OnExecute() override;
+    bool
+    SetMXLogInternalMeta(uint64_t wal_lsn);
 
  private:
-    const std::string table_name_;
-    const Range& range_;
+    FILE* wal_meta_fp_;
+    uint64_t latest_wal_lsn_ = 0;
 };
 
-}  // namespace server
+using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;
+
+}  // namespace wal
+}  // namespace engine
 }  // namespace milvus

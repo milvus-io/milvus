@@ -56,6 +56,7 @@ class IndexHNSW : public VectorIndex {
     Dimension() override;
 
  private:
+    bool normalize = false;
     std::mutex mutex_;
     std::shared_ptr<hnswlib::HierarchicalNSW<float>> index_;
 };
