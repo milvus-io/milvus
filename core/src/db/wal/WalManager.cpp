@@ -90,9 +90,10 @@ WalManager::Init(const meta::MetaPtr& meta) {
         }
     }
 
-    // globalFlushedLsn <= max_flused_lsn is always true,
-    // so recovery_start <= applied_lsn is always true.
-    __glibcxx_assert(recovery_start <= applied_lsn);
+    // all tables are droped and a new wal path?
+    if (applied_lsn < recovery_start) {
+        applied_lsn = recovery_start;
+    }
 
     ErrorCode error_code = WAL_ERROR;
     p_buffer_ = std::make_shared<MXLogBuffer>(mxlog_config_.mxlog_path, mxlog_config_.buffer_size);
