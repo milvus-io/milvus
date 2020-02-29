@@ -86,7 +86,7 @@ INSTANTIATE_TEST_CASE_P(
 #endif
     // std::make_tuple(milvus::engine::IndexType::SPTAG_KDT_RNT_CPU, "Default", 128, 100, 10, 10),
     // std::make_tuple(milvus::engine::IndexType::SPTAG_BKT_RNT_CPU, "Default", 128, 100, 10, 10),
-	std::make_tuple(milvus::engine::IndexType::HNSW, "Default", 64, 10000, 10, 10),
+	std::make_tuple(milvus::engine::IndexType::HNSW, "Default", 64, 10000, 5, 10),
 	std::make_tuple(milvus::engine::IndexType::FAISS_IDMAP, "Default", 64, 1000, 10, 10),
 	std::make_tuple(milvus::engine::IndexType::FAISS_IVFFLAT_CPU, "Default", 64, 1000, 10, 10),
 	std::make_tuple(milvus::engine::IndexType::FAISS_IVFSQ8_CPU, "Default", DIM, NB, 10, 10)));
@@ -154,6 +154,9 @@ TEST_P(KnowhereWrapperTest, BASE_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
 TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
+	if (index_type == milvus::engine::IndexType::HNSW) {
+		return;
+	}
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
