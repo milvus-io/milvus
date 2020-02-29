@@ -65,7 +65,6 @@ class TestIndexBase:
         index_params = get_simple_index_params
         logging.getLogger().info(index_params)
         if index_params["index_type"] == IndexType.IVF_SQ8:
-            pdb.set_trace()
             status, ids = connect.add_vectors(table, vectors)
             status = connect.create_index(table, index_params)
             assert status.OK()
