@@ -1224,7 +1224,7 @@ TEST_F(WebControllerTest, SHOW_SEGMENTS) {
 
     GenTable(table_name, 256, 1, "L2");
 
-    auto status = InsertData(table_name, 256, 20000);
+    auto status = InsertData(table_name, 256, 2000);
     ASSERT_TRUE(status.ok()) << status.message();
 
     auto response = client_ptr->showSegments(table_name, "0", "10", conncetion_ptr);
