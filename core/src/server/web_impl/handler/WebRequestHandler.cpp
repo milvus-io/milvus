@@ -250,6 +250,7 @@ WebRequestHandler::GetSegmentIds(const std::string& table_name, const std::strin
                 json_out["ids"].push_back(std::to_string(vector_ids.at(i)));
             }
         }
+        json_out["count"] = vector_ids.size();
     }
 
     return status;
