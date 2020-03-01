@@ -51,7 +51,8 @@ struct IndexPreTransform: Index {
         const float* x,
         idx_t k,
         float* distances,
-        idx_t* labels) const override;
+        idx_t* labels,
+        ConcurrentBitsetPtr bitset = nullptr) const override;
 
 
     /* range search, no attempt is done to change the radius */

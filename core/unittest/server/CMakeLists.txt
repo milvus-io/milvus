@@ -61,6 +61,7 @@ set(grpc_lib
 
 target_link_libraries(test_server
         knowhere
+        metrics
         stdc++
         ${grpc_lib}
         ${unittest_libs}

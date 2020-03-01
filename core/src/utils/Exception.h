@@ -24,12 +24,12 @@ class Exception : public std::exception {
     }
 
     ErrorCode
-    code() const throw() {
+    code() const noexcept {
         return code_;
     }
 
-    virtual const char*
-    what() const throw() {
+    const char*
+    what() const noexcept override {
         if (message_.empty()) {
             return "Default Exception.";
         } else {
@@ -37,8 +37,7 @@ class Exception : public std::exception {
         }
     }
 
-    virtual ~Exception() throw() {
-    }
+    ~Exception() noexcept override = default;
 
  protected:
     ErrorCode code_;

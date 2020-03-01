@@ -10,12 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/task/BuildIndexTask.h"
-#include "db/engine/EngineFactory.h"
-#include "metrics/Metrics.h"
-#include "scheduler/job/BuildIndexJob.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
-#include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
 #include <memory>
@@ -23,13 +17,31 @@
 #include <thread>
 #include <utility>
 
+#include "db/engine/EngineFactory.h"
+#include "metrics/Metrics.h"
+#include "scheduler/job/BuildIndexJob.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
+
 namespace milvus {
 namespace scheduler {
 
 XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)), file_(file) {
     if (file_) {
-        to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
+        EngineType engine_type;
+        if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
+            file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
+            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                         : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file->engine_type_;
+        }
+
+        to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                                 (MetricType)file_->metric_type_, file_->nlist_);
     }
 }
@@ -109,6 +121,7 @@ XBuildIndexTask::Execute() {
         // step 2: create table file
         engine::meta::TableFileSchema table_file;
         table_file.table_id_ = file_->table_id_;
+        table_file.segment_id_ = file_->file_id_;
         table_file.date_ = file_->date_;
         table_file.file_type_ = engine::meta::TableFileSchema::NEW_INDEX;
 

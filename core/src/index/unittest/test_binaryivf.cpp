@@ -77,6 +77,21 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     // PrintResult(result, nq, k);
+
+    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
+    for (int64_t i = 0; i < nq; ++i) {
+        concurrent_bitset_ptr->set(i);
+    }
+    index_->SetBlacklist(concurrent_bitset_ptr);
+
+    auto result2 = index_->Search(query_dataset, conf);
+    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+
+    auto result3 = index_->SearchById(id_dataset, conf);
+    AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
+
+    //    auto result4 = index_->GetVectorById(xid_dataset, conf);
+    //    AssertBinVeceq(result4, base_dataset, xid_dataset, nq, dim/8);
 }
 
 TEST_P(BinaryIVFTest, binaryivf_serialize) {

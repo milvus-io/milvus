@@ -151,20 +151,6 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
 #endif
 
-    //merge self
-    status = engine_ptr->Merge(file_path);
-    ASSERT_FALSE(status.ok());
-
-//    FIU_ENABLE_FIU("VecIndexImpl.Add.throw_knowhere_exception");
-//    status = engine_ptr->Merge("/tmp/milvus_index_2");
-//    ASSERT_FALSE(status.ok());
-//    fiu_disable("VecIndexImpl.Add.throw_knowhere_exception");
-
-    FIU_ENABLE_FIU("vecIndex.throw_read_exception");
-    status = engine_ptr->Merge("dummy");
-    ASSERT_FALSE(status.ok());
-    fiu_disable("vecIndex.throw_read_exception");
-
     //CPU version invoke CopyToCpu will fail
     status = engine_ptr->CopyToCpu();
     ASSERT_FALSE(status.ok());
@@ -204,9 +190,6 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     auto dim = engine_ptr->Dimension();
     ASSERT_EQ(dim, dimension);
 
-    auto status = engine_ptr->Merge("/tmp/milvus_index_2");
-    ASSERT_FALSE(status.ok());
-
     auto build_index = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IDMAP);
     ASSERT_EQ(build_index, nullptr);
 
@@ -217,7 +200,7 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     float* distances = nullptr;
     int64_t* labels = nullptr;
     bool hybrid = false;
-    status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
+    auto status = engine_ptr->Search(n, data, k, nprobe, distances, labels, hybrid);
     ASSERT_FALSE(status.ok());
 
     fiu_disable("read_null_index");

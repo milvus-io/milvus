@@ -25,16 +25,20 @@
 #include "cache/GpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
+
+
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+
 #include "utils/CommonUtil.h"
+
 
 INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-static const char* CONFIG_STR =
+static const char *CONFIG_STR =
     "# All the following configurations are default values.\n"
     "\n"
     "server_config:\n"
@@ -66,7 +70,7 @@ static const char* CONFIG_STR =
     "engine_config:\n"
     "  use_blas_threshold: 20\n"
     "\n"
-#ifdef MILVUS_GPU_VERSION
+    #ifdef MILVUS_GPU_VERSION
     "gpu_resource_config:\n"
     "  enable: true                      # whether to enable GPU resources\n"
     "  cache_capacity: 4                 # GB, size of GPU memory per card used for cache, must be a positive integer\n"
@@ -74,11 +78,11 @@ static const char* CONFIG_STR =
     "    - gpu0\n"
     "  build_index_resources:            # define the GPU devices used for index building, must be in format gpux\n"
     "    - gpu0\n"
-#endif
+    #endif
     "\n";
 
 void
-WriteToFile(const std::string& file_path, const char* content) {
+WriteToFile(const std::string &file_path, const char *content) {
     std::fstream fs(file_path.c_str(), std::ios_base::out);
 
     // write data to file
@@ -88,7 +92,7 @@ WriteToFile(const std::string& file_path, const char* content) {
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
-    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {
+    explicit DBTestEnvironment(const std::string &uri) : uri_(uri) {
     }
 
     std::string
@@ -105,7 +109,7 @@ class DBTestEnvironment : public ::testing::Environment {
     std::string uri_;
 };
 
-DBTestEnvironment* test_env = nullptr;
+DBTestEnvironment *test_env = nullptr;
 
 }  // namespace
 
@@ -206,6 +210,60 @@ DBTest2::GetOptions() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWAL::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
+    options.meta_.path_ = CONFIG_PATH;
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+
+    options.wal_enable_ = true;
+    options.recovery_error_ignore_ = true;
+    options.buffer_size_ = 128;
+    options.mxlog_path_ = "/tmp/milvus_test/wal/";
+
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWALRecovery::GetOptions() {
+    auto options = DBTestWAL::GetOptions();
+    //disable auto flush
+    options.auto_flush_interval_ = 10000;
+    return options;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+DBTestWALRecovery_Error::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
+    options.meta_.path_ = CONFIG_PATH;
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+
+    options.auto_flush_interval_ = 10000;
+    options.wal_enable_ = true;
+    options.recovery_error_ignore_ = false;
+    options.buffer_size_ = 128;
+    options.mxlog_path_ = "/tmp/milvus_test/wal/";
+
+    return options;
+}
+
+void
+DBTestWALRecovery_Error::TearDown() {
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+    BaseTest::TearDown();
+
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta_.path_);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 MetaTest::SetUp() {
     BaseTest::SetUp();
@@ -264,7 +322,7 @@ MySqlMetaTest::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int
-main(int argc, char** argv) {
+main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     std::string uri;

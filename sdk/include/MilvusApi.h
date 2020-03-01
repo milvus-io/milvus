@@ -11,11 +11,11 @@
 
 #pragma once
 
-#include "Status.h"
-
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "Status.h"
 
 /** \brief Milvus SDK namespace
  */
@@ -38,11 +38,11 @@ enum class IndexType {
 };
 
 enum class MetricType {
-    L2 = 1,         // Euclidean Distance
-    IP = 2,         // Cosine Similarity
-    HAMMING = 3,    // Hamming Distance
-    JACCARD = 4,    // Jaccard Distance
-    TANIMOTO = 5,   // Tanimoto Distance
+    L2 = 1,        // Euclidean Distance
+    IP = 2,        // Cosine Similarity
+    HAMMING = 3,   // Hamming Distance
+    JACCARD = 4,   // Jaccard Distance
+    TANIMOTO = 5,  // Tanimoto Distance
 };
 
 /**
@@ -76,7 +76,7 @@ struct Range {
  * @brief Record inserted
  */
 struct RowRecord {
-    std::vector<float> float_data;  ///< Vector raw float data
+    std::vector<float> float_data;     ///< Vector raw float data
     std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
@@ -103,11 +103,37 @@ struct IndexParam {
  */
 struct PartitionParam {
     std::string table_name;
-    std::string partition_name;
     std::string partition_tag;
 };
 
-using PartitionList = std::vector<PartitionParam>;
+using PartitionTagList = std::vector<std::string>;
+
+/**
+ * @brief segment statistics
+ */
+struct SegmentStat {
+    std::string segment_name;    ///< Segment name
+    int64_t row_count;           ///< Segment row count
+    std::string index_name;      ///< Segment index name
+    int64_t data_size;           ///< Segment data size
+};
+
+/**
+ * @brief partition statistics
+ */
+struct PartitionStat {
+    std::string tag;                          ///< Partition tag
+    int64_t row_count;                        ///< Partition row count
+    std::vector<SegmentStat> segments_stat;   ///< Partition's segments statistics
+};
+
+/**
+ * @brief table info
+ */
+struct TableInfo {
+    int64_t total_row_count;                  ///< Table total row count
+    std::vector<PartitionStat> partitions_stat;   ///< Table's partitions statistics
+};
 
 /**
  * @brief SDK main class
@@ -257,13 +283,43 @@ class Connection {
            std::vector<int64_t>& id_array) = 0;
 
     /**
+     * @brief Get vector data by id
+     *
+     * This method is used to get vector data by id from a table.
+     * Return the first found vector if there are vectors with duplicated id
+     *
+     * @param table_name, target table's name.
+     * @param vector_id, target vector id.
+     * @param vector_data, returned vector data.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) = 0;
+
+    /**
+     * @brief Get vector ids from a segment
+     *
+     * This method is used to get vector ids from a segment
+     * Return all vector(not deleted) ids
+     *
+     * @param table_name, target table's name.
+     * @param segment_name, target segment name.
+     * @param id_array, returned vector id array.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetIDsInSegment(const std::string& table_name, const std::string& segment_name, std::vector<int64_t>& id_array) = 0;
+
+    /**
      * @brief Search vector
      *
      * This method is used to query vector in table.
      *
      * @param table_name, target table's name.
      * @param partition_tags, target partitions, keep empty if no partition.
-     * @param query_record_array, all vector are going to be queried.
+     * @param query_record_array, vectors to be queried.
      * @param query_range_array, [deprecated] time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
      * @param nprobe, the number of centroids choose to search.
@@ -273,8 +329,26 @@ class Connection {
      */
     virtual Status
     Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, const std::vector<Range>& query_range_array, int64_t topk,
+           const std::vector<RowRecord>& query_record_array, int64_t topk,
            int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
+
+    /**
+     * @brief Search vector by ID
+     *
+     * This method is used to query vector in table.
+     *
+     * @param table_name, target table's name.
+     * @param partition_tags, target partitions, keep empty if no partition.
+     * @param query_id_array, vector ids to be queried.
+     * @param topk, how many similarity vectors will be searched.
+     * @param nprobe, the number of centroids choose to search.
+     * @param topk_query_result_array, result array.
+     *
+     * @return Indicate if query is successful.
+     */
+    virtual Status
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
+               int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show table description
@@ -313,6 +387,19 @@ class Connection {
      */
     virtual Status
     ShowTables(std::vector<std::string>& table_array) = 0;
+
+    /**
+     * @brief Show table information
+     *
+     * This method is used to get detail information of a table.
+     *
+     * @param table_name, target table's name.
+     * @param table_info, target table's information
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    ShowTableInfo(const std::string& table_name, TableInfo& table_info) = 0;
 
     /**
      * @brief Give the client version
@@ -356,17 +443,17 @@ class Connection {
 
     /**
      * [deprecated]
-     * @brief delete tables by date range
+     * @brief delete tables by vector id
      *
      * This method is used to delete table data by date range.
      *
      * @param table_name, target table's name.
-     * @param Range, table range to delete.
+     * @param id_array, vector ids to deleted.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteByDate(const std::string& table_name, const Range& range) = 0;
+    DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief preload table
@@ -423,12 +510,12 @@ class Connection {
      * This method is used to create table
      *
      * @param table_name, table name is going to be tested.
-     * @param partition_array, partition array of the table.
+     * @param partition_array, partition tag array of the table.
      *
      * @return Indicate if this operation is successful
      */
     virtual Status
-    ShowPartitions(const std::string& table_name, PartitionList& partition_array) const = 0;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const = 0;
 
     /**
      * @brief Delete partition method
@@ -469,6 +556,40 @@ class Connection {
      */
     virtual Status
     SetConfig(const std::string& node_name, const std::string& value) const = 0;
+
+    /**
+     * @brief flush table buffer into storage
+     *
+     * This method is used to flush table buffer into storage
+     *
+     * @param table_name, target table's name.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    FlushTable(const std::string& table_name) = 0;
+
+    /**
+     * @brief flush all buffer into storage
+     *
+     * This method is used to all table buffer into storage
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    Flush() = 0;
+
+    /**
+     * @brief compact table, remove deleted vectors
+     *
+     * This method is used to compact table
+     *
+     * @param table_name, target table's name.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    CompactTable(const std::string& table_name) = 0;
 };
 
 }  // namespace milvus

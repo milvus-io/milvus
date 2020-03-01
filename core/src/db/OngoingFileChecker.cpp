@@ -17,6 +17,12 @@
 namespace milvus {
 namespace engine {
 
+OngoingFileChecker&
+OngoingFileChecker::GetInstance() {
+    static OngoingFileChecker instance;
+    return instance;
+}
+
 Status
 OngoingFileChecker::MarkOngoingFile(const meta::TableFileSchema& table_file) {
     std::lock_guard<std::mutex> lck(mutex_);

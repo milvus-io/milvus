@@ -26,13 +26,12 @@ namespace milvus {
 namespace server {
 
 SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const engine::VectorsData& vectors, const std::vector<Range>& range_list, int64_t topk,
-                             int64_t nprobe, const std::vector<std::string>& partition_list,
+                             const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                             const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
       vectors_data_(vectors),
-      range_list_(range_list),
       topk_(topk),
       nprobe_(nprobe),
       partition_list_(partition_list),
@@ -42,11 +41,11 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std:
 
 BaseRequestPtr
 SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const engine::VectorsData& vectors, const std::vector<Range>& range_list, int64_t topk,
-                      int64_t nprobe, const std::vector<std::string>& partition_list,
-                      const std::vector<std::string>& file_id_list, TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context, table_name, vectors, range_list, topk, nprobe,
-                                                          partition_list, file_id_list, result));
+                      const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                      const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
+                      TopKQueryResult& result) {
+    return std::shared_ptr<BaseRequest>(
+        new SearchRequest(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result));
 }
 
 Status
@@ -68,9 +67,10 @@ SearchRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
@@ -78,15 +78,19 @@ SearchRequest::OnExecute() {
             } else {
                 return status;
             }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         // step 3: check search parameter
-        status = ValidationUtil::ValidateSearchTopk(topk_, table_info);
+        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateSearchNprobe(nprobe_, table_info);
+        status = ValidationUtil::ValidateSearchNprobe(nprobe_, table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -96,23 +100,17 @@ SearchRequest::OnExecute() {
                           "The vector array is empty. Make sure you have entered vector records.");
         }
 
-        // step 4: check date range, and convert to db dates
-        std::vector<DB_DATE> dates;
-        status = ConvertTimeRangeToDBDates(range_list_, dates);
-        if (!status.ok()) {
-            return status;
-        }
-
         rc.RecordSection("check validation");
 
-        if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {
+        // step 4: check metric type
+        if (ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
             // check prepared binary data
             if (vectors_data_.binary_data_.size() % vector_count != 0) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                               "The vector dimension must be equal to the table dimension.");
             }
 
-            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_info.dimension_) {
+            if (vectors_data_.binary_data_.size() * 8 / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }
@@ -124,8 +122,8 @@ SearchRequest::OnExecute() {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                               "The vector dimension must be equal to the table dimension.");
             }
-            fiu_do_on("SearchRequest.OnExecute.invalid_dim", table_info.dimension_ = -1);
-            if (vectors_data_.float_data_.size() / vector_count != table_info.dimension_) {
+            fiu_do_on("SearchRequest.OnExecute.invalid_dim", table_schema.dimension_ = -1);
+            if (vectors_data_.float_data_.size() / vector_count != table_schema.dimension_) {
                 return Status(SERVER_INVALID_VECTOR_DIMENSION,
                               "The vector dimension must be equal to the table dimension.");
             }
@@ -133,7 +131,7 @@ SearchRequest::OnExecute() {
 
         rc.RecordSection("prepare vector data");
 
-        // step 6: search vectors
+        // step 5: search vectors
         engine::ResultIds result_ids;
         engine::ResultDistances result_distances;
 
@@ -153,10 +151,10 @@ SearchRequest::OnExecute() {
             }
 
             status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, nprobe_,
-                                            vectors_data_, dates, result_ids, result_distances);
+                                            vectors_data_, result_ids, result_distances);
         } else {
             status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, nprobe_,
-                                                    vectors_data_, dates, result_ids, result_distances);
+                                                    vectors_data_, result_ids, result_distances);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING

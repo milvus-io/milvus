@@ -44,9 +44,10 @@ DropTableRequest::OnExecute() {
         }
 
         // step 2: check table existence
-        engine::meta::TableSchema table_info;
-        table_info.table_id_ = table_name_;
-        status = DBWrapper::DB()->DescribeTable(table_info);
+        // only process root table, ignore partition table
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id_ = table_name_;
+        status = DBWrapper::DB()->DescribeTable(table_schema);
         fiu_do_on("DropTableRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("DropTableRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -57,13 +58,16 @@ DropTableRequest::OnExecute() {
             } else {
                 return status;
             }
+        } else {
+            if (!table_schema.owner_table_.empty()) {
+                return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
+            }
         }
 
         rc.RecordSection("check validation");
 
         // step 3: Drop table
-        std::vector<DB_DATE> dates;
-        status = DBWrapper::DB()->DropTable(table_name_, dates);
+        status = DBWrapper::DB()->DropTable(table_name_);
         fiu_do_on("DropTableRequest.OnExecute.drop_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

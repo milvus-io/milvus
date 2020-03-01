@@ -418,6 +418,11 @@ TEST(ValidationUtilTest, VALIDATE_PARTITION_TAGS) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);
     partition_tags.push_back("");
     ASSERT_NE(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);
+    std::string ss;
+    ss.assign(256, 'a');
+    partition_tags = {ss};
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(),
+              milvus::SERVER_INVALID_PARTITION_TAG);
 }
 
 #ifdef MILVUS_GPU_VERSION

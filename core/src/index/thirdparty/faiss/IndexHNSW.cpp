@@ -37,7 +37,7 @@
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/Index2Layer.h>
 #include <faiss/impl/AuxIndexStructures.h>
-
+#include <faiss/FaissHook.h>
 
 extern "C" {
 
@@ -242,7 +242,7 @@ void IndexHNSW::train(idx_t n, const float* x)
 }
 
 void IndexHNSW::search (idx_t n, const float *x, idx_t k,
-                        float *distances, idx_t *labels) const
+                        float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
 
 {
     FAISS_THROW_IF_NOT_MSG(storage,
@@ -860,7 +860,7 @@ void IndexHNSWPQ::train(idx_t n, const float* x)
  **************************************************************/
 
 
-IndexHNSWSQ::IndexHNSWSQ(int d, ScalarQuantizer::QuantizerType qtype, int M):
+IndexHNSWSQ::IndexHNSWSQ(int d, QuantizerType qtype, int M):
     IndexHNSW (new IndexScalarQuantizer (d, qtype), M)
 {
     is_trained = false;
@@ -961,7 +961,7 @@ int search_from_candidates_2(const HNSW & hnsw,
 }  // namespace
 
 void IndexHNSW2Level::search (idx_t n, const float *x, idx_t k,
-                              float *distances, idx_t *labels) const
+                              float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
 {
     if (dynamic_cast<const Index2Layer*>(storage)) {
         IndexHNSW::search (n, x, k, distances, labels);

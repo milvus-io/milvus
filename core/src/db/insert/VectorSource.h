@@ -11,23 +11,26 @@
 
 #pragma once
 
+#include <memory>
+
 #include "db/IDGenerator.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/meta/Meta.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Status.h"
-
-#include <memory>
 
 namespace milvus {
 namespace engine {
 
+// TODO(zhiru): this class needs to be refactored once attributes are added
+
 class VectorSource {
  public:
-    explicit VectorSource(VectorsData& vectors);
+    explicit VectorSource(VectorsData vectors);
 
     Status
-    Add(const ExecutionEnginePtr& execution_engine, const meta::TableFileSchema& table_file_schema,
-        const size_t& num_vectors_to_add, size_t& num_vectors_added);
+    Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment::SegmentWriterPtr& segment_writer_ptr,
+        const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
 
     size_t
     GetNumVectorsAdded();
@@ -42,7 +45,7 @@ class VectorSource {
     GetVectorIds();
 
  private:
-    VectorsData& vectors_;
+    VectorsData vectors_;
     IDNumbers vector_ids_;
 
     size_t current_num_vectors_added;

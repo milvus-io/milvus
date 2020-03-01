@@ -59,6 +59,8 @@ static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
+static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
+static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1000";
 
 /* storage config */
 static const char* CONFIG_STORAGE = "storage_config";
@@ -105,6 +107,8 @@ static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
 static const char* CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "1100";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
+static const char* CONFIG_ENGINE_USE_AVX512 = "use_avx512";
+static const char* CONFIG_ENGINE_USE_AVX512_DEFAULT = "true";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD = "gpu_search_threshold";
 static const char* CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT = "1000";
 
@@ -126,10 +130,20 @@ static const char* CONFIG_GPU_RESOURCE_SEARCH_RESOURCES_DEFAULT = "gpu0";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES = "build_index_resources";
 static const char* CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT = "gpu0";
 
-// TODO:
 /* tracing config */
 static const char* CONFIG_TRACING = "tracing_config";
 static const char* CONFIG_TRACING_JSON_CONFIG_PATH = "json_config_path";
+
+/* wal config */
+static const char* CONFIG_WAL = "wal_config";
+static const char* CONFIG_WAL_ENABLE = "enable";
+static const char* CONFIG_WAL_ENABLE_DEFAULT = "true";
+static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
+static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
+static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
+static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
+static const char* CONFIG_WAL_WAL_PATH = "wal_path";
+static const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
 class Config {
  private:
@@ -201,6 +215,8 @@ class Config {
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
+    Status
+    CheckDBConfigAutoFlushInterval(const std::string& value);
 
     /* storage config */
     Status
@@ -243,6 +259,8 @@ class Config {
     CheckEngineConfigUseBlasThreshold(const std::string& value);
     Status
     CheckEngineConfigOmpThreadNum(const std::string& value);
+    Status
+    CheckEngineConfigUseAVX512(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -260,6 +278,14 @@ class Config {
     Status
     CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>& value);
 #endif
+
+    /* wal config */
+    Status
+    CheckWalConfigEnable(const std::string& value);
+    Status
+    CheckWalConfigRecoveryErrorIgnore(const std::string& value);
+    Status
+    CheckWalConfigBufferSize(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -294,6 +320,8 @@ class Config {
     GetDBConfigArchiveDaysThreshold(int64_t& value);
     Status
     GetDBConfigPreloadTable(std::string& value);
+    Status
+    GetDBConfigAutoFlushInterval(int64_t& value);
 
     /* storage config */
     Status
@@ -336,6 +364,8 @@ class Config {
     GetEngineConfigUseBlasThreshold(int64_t& value);
     Status
     GetEngineConfigOmpThreadNum(int64_t& value);
+    Status
+    GetEngineConfigUseAVX512(bool& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
@@ -357,6 +387,16 @@ class Config {
     /* tracing config */
     Status
     GetTracingConfigJsonConfigPath(std::string& value);
+
+    /* wal config */
+    Status
+    GetWalConfigEnable(bool& wal_enable);
+    Status
+    GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore);
+    Status
+    GetWalConfigBufferSize(int64_t& buffer_size);
+    Status
+    GetWalConfigWalPath(std::string& wal_path);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -423,6 +463,8 @@ class Config {
     SetEngineConfigUseBlasThreshold(const std::string& value);
     Status
     SetEngineConfigOmpThreadNum(const std::string& value);
+    Status
+    SetEngineConfigUseAVX512(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status

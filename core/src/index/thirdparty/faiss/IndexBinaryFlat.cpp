@@ -39,57 +39,57 @@ void IndexBinaryFlat::reset() {
 }
 
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
-                             int32_t *distances, idx_t *labels) const {
-  const idx_t block_size = query_batch_size;
-  if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
-      float *D = new float[k * n];
-      for (idx_t s = 0; s < n; s += block_size) {
-          idx_t nn = block_size;
-          if (s + block_size > n) {
-              nn = n - s;
-          }
+                             int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const {
+    const idx_t block_size = query_batch_size;
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
+        float *D = new float[k * n];
+        for (idx_t s = 0; s < n; s += block_size) {
+            idx_t nn = block_size;
+            if (s + block_size > n) {
+                nn = n - s;
+            }
 
-          if (use_heap) {
-              // We see the distances and labels as heaps.
+            if (use_heap) {
+                // We see the distances and labels as heaps.
 
-              float_maxheap_array_t res = {
-                      size_t(nn), size_t(k), labels + s * k, D + s * k
-              };
+                float_maxheap_array_t res = {
+                        size_t(nn), size_t(k), labels + s * k, D + s * k
+                };
 
-              jaccard_knn_hc(&res, x + s * code_size, xb.data(), ntotal, code_size,
-                        /* ordered = */ true);
+                jaccard_knn_hc(&res, x + s * code_size, xb.data(), ntotal, code_size,
+                        /* ordered = */ true, bitset);
 
-          } else {
-              FAISS_THROW_MSG("tanimoto_knn_mc not implemented");
-          }
-      }
-      if (metric_type == METRIC_Tanimoto) {
-          for (int i = 0; i < k * n; i++) {
-              D[i] = -log2(1-D[i]);
-          }
-      }
-      memcpy(distances, D, sizeof(float) * n * k);
-      delete [] D;
-  } else {
-      for (idx_t s = 0; s < n; s += block_size) {
-          idx_t nn = block_size;
-          if (s + block_size > n) {
-              nn = n - s;
-          }
-          if (use_heap) {
-              // We see the distances and labels as heaps.
-              int_maxheap_array_t res = {
-                      size_t(nn), size_t(k), labels + s * k, distances + s * k
-              };
+            } else {
+                FAISS_THROW_MSG("tanimoto_knn_mc not implemented");
+            }
+        }
+        if (metric_type == METRIC_Tanimoto) {
+            for (int i = 0; i < k * n; i++) {
+                D[i] = -log2(1-D[i]);
+            }
+        }
+        memcpy(distances, D, sizeof(float) * n * k);
+        delete [] D;
+    } else {
+        for (idx_t s = 0; s < n; s += block_size) {
+            idx_t nn = block_size;
+            if (s + block_size > n) {
+                nn = n - s;
+            }
+            if (use_heap) {
+                // We see the distances and labels as heaps.
+                int_maxheap_array_t res = {
+                        size_t(nn), size_t(k), labels + s * k, distances + s * k
+                };
 
-              hammings_knn_hc(&res, x + s * code_size, xb.data(), ntotal, code_size,
-                      /* ordered = */ true);
-          } else {
-              hammings_knn_mc(x + s * code_size, xb.data(), nn, ntotal, k, code_size,
-                                distances + s * k, labels + s * k);
-          }
-      }
-  }
+                hammings_knn_hc(&res, x + s * code_size, xb.data(), ntotal, code_size,
+                        /* ordered = */ true, bitset);
+            } else {
+                hammings_knn_mc(x + s * code_size, xb.data(), nn, ntotal, k, code_size,
+                                distances + s * k, labels + s * k, bitset);
+            }
+        }
+    }
 }
 
 size_t IndexBinaryFlat::remove_ids(const IDSelector& sel) {
