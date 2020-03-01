@@ -13,6 +13,7 @@
 
 #include "ExecutionEngine.h"
 #include "utils/Status.h"
+#include "utils/Json.h"
 
 #include <string>
 
@@ -23,7 +24,7 @@ class EngineFactory {
  public:
     static ExecutionEnginePtr
     Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-          int32_t nlist);
+          const milvus::json& index_params);
 };
 
 }  // namespace engine

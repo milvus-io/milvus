@@ -56,6 +56,8 @@ namespace grpc {
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code);
 
+static const char* EXTRA_PARAM_KEY = "params";
+
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, public GrpcInterceptorHookHandler {
  public:
     explicit GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer);

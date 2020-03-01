@@ -40,7 +40,7 @@ class TableFieldsDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, metric_type);
     DTO_FIELD(Int64, count);
     DTO_FIELD(String, index);
-    DTO_FIELD(Int64, nlist);
+    DTO_FIELD(String, index_params);
 };
 
 class TableListDto : public OObject {

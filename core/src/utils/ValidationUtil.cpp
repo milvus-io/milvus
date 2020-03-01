@@ -172,7 +172,7 @@ ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchem
 
 Status
 ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema) {
-    if (nprobe <= 0 || nprobe > table_schema.nlist_) {
+    if (nprobe <= 0) {
         std::string msg = "Invalid nprobe: " + std::to_string(nprobe) + ". " +
                           "The nprobe must be within the range of 1 ~ index nlist.";
         SERVER_LOG_ERROR << msg;

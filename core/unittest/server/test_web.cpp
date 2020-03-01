@@ -316,7 +316,7 @@ TEST_F(WebHandlerTest, INDEX) {
 
     auto index_request_dto = milvus::server::web::IndexRequestDto::createShared();
     index_request_dto->index_type = "FLAT";
-    index_request_dto->nlist = 10;
+    index_request_dto->extra_params = "{ \"nlist\": 10 }";
 
     milvus::server::web::StatusDto::createShared();
 
@@ -334,7 +334,7 @@ TEST_F(WebHandlerTest, INDEX) {
 
     // invalid nlist
     index_request_dto->index_type = "FLAT";
-    index_request_dto->nlist = -1;
+    index_request_dto->extra_params = "{ \"nlist\": -1 }";
     status_dto = handler->CreateIndex(table_name, index_request_dto);
     ASSERT_NE(0, status_dto->code->getValue());
     ASSERT_EQ(StatusCode::ILLEGAL_NLIST, status_dto->code->getValue());
@@ -968,7 +968,7 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_INDEX_TYPE, result_dto->code);
 
     index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
-    index_dto->nlist = 10;
+    index_dto->extra_params = "{ \"nlist\": 10 }";
 
     response = client_ptr->createIndex(table_name, index_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
@@ -1002,7 +1002,8 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_index_dto = response->readBodyToDto<milvus::server::web::IndexDto>(object_mapper.get());
     ASSERT_EQ("FLAT", result_index_dto->index_type->std_str());
-    ASSERT_EQ(10, result_index_dto->nlist->getValue());
+    milvus::json json = milvus::json::parse(result_index_dto->extra_params->std_str());
+    ASSERT_EQ(10, json["nlist"]);
     // get index of table which not exists
     response = client_ptr->getIndex(table_name + "dfaedXXXdfdfet4t343aa4", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());

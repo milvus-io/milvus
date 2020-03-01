@@ -405,14 +405,6 @@ TEST(ValidationUtilTest, VALIDATE_TOPK_TEST) {
     ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchTopk(0, schema).code(), milvus::SERVER_SUCCESS);
 }
 
-TEST(ValidationUtilTest, VALIDATE_NPROBE_TEST) {
-    milvus::engine::meta::TableSchema schema;
-    schema.nlist_ = 100;
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateSearchNprobe(10, schema).code(), milvus::SERVER_SUCCESS);
-    ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchNprobe(0, schema).code(), milvus::SERVER_SUCCESS);
-    ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchNprobe(101, schema).code(), milvus::SERVER_SUCCESS);
-}
-
 TEST(ValidationUtilTest, VALIDATE_PARTITION_TAGS) {
     std::vector<std::string> partition_tags = {"abc"};
     ASSERT_EQ(milvus::server::ValidationUtil::ValidatePartitionTags(partition_tags).code(), milvus::SERVER_SUCCESS);

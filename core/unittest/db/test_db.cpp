@@ -734,7 +734,7 @@ TEST_F(DBTest, INDEX_TEST) {
     stat = db_->DescribeIndex(table_info.table_id_, index_out);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(index.engine_type_, index_out.engine_type_);
-    ASSERT_EQ(index.nlist_, index_out.nlist_);
+    ASSERT_EQ(index.extra_params_, index_out.extra_params_);
     ASSERT_EQ(table_info.metric_type_, index_out.metric_type_);
 
     stat = db_->DropIndex(table_info.table_id_);
