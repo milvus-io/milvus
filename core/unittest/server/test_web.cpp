@@ -394,15 +394,23 @@ TEST_F(WebHandlerTest, PARTITION) {
     ASSERT_EQ(0, status_dto->code->getValue());
 
     auto partitions_dto = milvus::server::web::PartitionListDto::createShared();
-    status_dto = handler->ShowPartitions("0", "10", table_name, partitions_dto);
+    OQueryParams query_params;
+    query_params.put("offset", "0");
+    query_params.put("page_size", "10");
+    status_dto = handler->ShowPartitions(table_name, query_params, partitions_dto);
+    ASSERT_EQ(milvus::server::web::SUCCESS, status_dto->code->getValue());
     ASSERT_EQ(2, partitions_dto->partitions->count());
 
-    status_dto = handler->DropPartition(table_name, "test");
+    status_dto = handler->DropPartition(table_name, "{\"partition_tag\": \"test\"}");
     ASSERT_EQ(0, status_dto->code->getValue());
 
     // Show all partitions
-    partitions_dto = milvus::server::web::PartitionListDto::createShared();
-    status_dto = handler->ShowPartitions("0", "10", table_name, partitions_dto);
+    status_dto = handler->ShowPartitions(table_name, query_params, partitions_dto);
+    ASSERT_EQ(milvus::server::web::SUCCESS, status_dto->code->getValue());
+
+    query_params.put("all_required", "true");
+    status_dto = handler->ShowPartitions(table_name, query_params, partitions_dto);
+    ASSERT_EQ(milvus::server::web::SUCCESS, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, SEARCH) {
@@ -648,11 +656,8 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/tables/{table_name}/partitions", showPartitions, PATH(String, table_name, "table_name"),
              QUERY(String, offset), QUERY(String, page_size))
 
-    API_CALL("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", optionsParTag,
-             PATH(String, table_name, "table_name"), PATH(String, partition_tag, "partition_tag"))
-
-    API_CALL("DELETE", "/tables/{table_name}/partitions/{partition_tag}", dropPartition,
-             PATH(String, table_name, "table_name"), PATH(String, partition_tag))
+    API_CALL("DELETE", "/tables/{table_name}/partitions", dropPartition,
+             PATH(String, table_name, "table_name"), BODY_STRING(String, body))
 
     API_CALL("GET", "/tables/{table_name}/segments", showSegments, PATH(String, table_name, "table_name"), QUERY(String, offset), QUERY(String, page_size))
 
@@ -874,9 +879,6 @@ TEST_F(WebControllerTest, OPTIONS) {
 #endif
 
     response = client_ptr->optionsIndexes("test", conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-
-    response = client_ptr->optionsParTag("test", "tag", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsPartitions("table_name", conncetion_ptr);
@@ -1211,11 +1213,11 @@ TEST_F(WebControllerTest, PARTITION) {
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::TABLE_NOT_EXISTS, error_dto->code->getValue());
 
-    response = client_ptr->dropPartition(table_name, "tag01", conncetion_ptr);
+    response = client_ptr->dropPartition(table_name, "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     // drop without existing tables
-    response = client_ptr->dropPartition(table_name + "565755682353464aaasafdsfagagqq1223", "tag01", conncetion_ptr);
+    response = client_ptr->dropPartition(table_name + "565755682353464aaasafdsfagagqq1223", "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
@@ -1408,7 +1410,7 @@ TEST_F(WebControllerTest, SEARCH_BY_ID) {
     const OString table_name = "test_search_by_id_table_test_" + OString(RandomName().c_str());
     GenTable(table_name, 64, 100, "L2");
 
-    // Insert 200 vectors into table
+    // Insert 100 vectors into table
     std::vector<int64_t> ids;
     for (size_t i = 0; i < 100; i++) {
         ids.emplace_back(i);
@@ -1422,7 +1424,7 @@ TEST_F(WebControllerTest, SEARCH_BY_ID) {
     search_json["search"]["nprobe"] = 1;
     search_json["search"]["vector_id"] = ids.at(0);
 
-    auto response = client_ptr->cmd("config", "", "", conncetion_ptr);
+    auto response = client_ptr->vectorsOp(table_name, search_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate search result

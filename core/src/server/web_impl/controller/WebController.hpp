@@ -248,7 +248,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto page_size = query_params.get("page_size");
 
         String result;
-        auto status_dto = handler.ShowTables(offset, page_size, result);
+        auto status_dto = handler.ShowTables(query_params, result);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
@@ -471,7 +471,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
+        auto status_dto = handler.ShowPartitions(table_name, query_params, partition_list_dto);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, partition_list_dto);
@@ -488,24 +488,18 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(PartitionOptions)
-
-    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", PartitionOptions) {
-        return createResponse(Status::CODE_204, "No Content");
-    }
-
     ADD_CORS(DropPartition)
 
-    ENDPOINT("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition,
-             PATH(String, table_name), PATH(String, partition_tag)) {
+    ENDPOINT("DELETE", "/tables/{table_name}/partitions", DropPartition,
+             PATH(String, table_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) +
-                        "DELETE \'/tables/" + table_name->std_str() + "/partitions/" + partition_tag->std_str() + "\'");
+                        "DELETE \'/tables/" + table_name->std_str() + "/partitions\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.DropPartition(table_name, partition_tag);
+        auto status_dto = handler.DropPartition(table_name, body);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);
@@ -532,7 +526,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         auto handler = WebRequestHandler();
         String response;
-        auto status_dto = handler.ShowSegments(table_name, page_size, offset, response);
+        auto status_dto = handler.ShowSegments(table_name, query_params, response);
 
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:{

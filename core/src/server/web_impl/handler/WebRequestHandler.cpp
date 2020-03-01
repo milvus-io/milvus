@@ -891,10 +891,9 @@ WebRequestHandler::CreateTable(const TableRequestDto::ObjectWrapper& table_schem
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowTables(const OString& offset, const OString& page_size, OString& result) {
+WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result) {
     int64_t offset_value = 0;
-    int64_t page_size_value = 10;
-
+    auto offset = query_params.get("offset");
     if (nullptr != offset.get()) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
@@ -904,6 +903,8 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size, O
         offset_value = std::stol(offset_str);
     }
 
+    int64_t page_size_value = 10;
+    auto page_size = query_params.get("page_size");
     if (nullptr != page_size.get()) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
@@ -917,19 +918,36 @@ WebRequestHandler::ShowTables(const OString& offset, const OString& page_size, O
         RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param 'offset' or 'page_size' should equal or bigger than 0");
     }
 
+    bool all_required = false;
+    auto required = query_params.get("all_required");
+    if (nullptr != required.get()) {
+        auto required_str = required->std_str();
+        if (!ValidationUtil::ValidateStringIsBool(required_str).ok()) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool")
+        }
+        all_required = required_str == "True" || required_str == "true";
+    }
+
     std::vector<std::string> tables;
     auto status = request_handler_.ShowTables(context_ptr_, tables);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    if (all_required) {
+        offset_value = 0;
+        page_size_value = tables.size();
+    } else {
+        offset_value = std::min((size_t)offset_value, tables.size());
+        page_size_value = std::min(tables.size() - offset_value, (size_t)page_size_value);
+    }
+
     if (offset_value >= tables.size()) {
         ASSIGN_RETURN_STATUS_DTO(Status::OK());
     }
 
-    int64_t size = page_size_value + offset_value > tables.size() ? tables.size() - offset_value : page_size_value;
     nlohmann::json tables_json;
-    for (int64_t i = offset_value; i < size + offset_value; i++) {
+    for (int64_t i = offset_value; i < page_size_value + offset_value; i++) {
         nlohmann::json table_json;
         status = GetTableMetaInfo(tables.at(i), table_json);
         if (!status.ok()) {
@@ -1046,11 +1064,10 @@ WebRequestHandler::CreatePartition(const OString& table_name, const PartitionReq
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
+WebRequestHandler::ShowPartitions(const OString& table_name, const OQueryParams& query_params,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
     int64_t offset_value = 0;
-    int64_t page_size_value = 10;
-
+    auto offset = query_params.get("offset");
     if (nullptr != offset.get()) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
@@ -1060,6 +1077,8 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
         offset_value = std::stol(offset_str);
     }
 
+    int64_t page_size_value = 10;
+    auto page_size = query_params.get("page_size");
     if (nullptr != page_size.get()) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
@@ -1074,19 +1093,35 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
     }
 
+    bool all_required = false;
+    auto required = query_params.get("all_required");
+    if (nullptr != required.get()) {
+        auto required_str = required->std_str();
+        if (!ValidationUtil::ValidateStringIsBool(required_str).ok()) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool")
+        }
+        all_required = required_str == "True" || required_str == "true";
+    }
+
     std::vector<PartitionParam> partitions;
     auto status = request_handler_.ShowPartitions(context_ptr_, table_name->std_str(), partitions);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
+    if (all_required) {
+        offset_value = 0;
+        page_size_value = partitions.size();
+    } else {
+        offset_value = std::min((size_t)offset_value, partitions.size());
+        page_size_value = std::min(partitions.size() - offset_value, (size_t)page_size_value);
+    }
+
     partition_list_dto->count = partitions.size();
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
     if (offset_value < partitions.size()) {
-        int64_t size =
-            offset_value + page_size_value > partitions.size() ? partitions.size() - offset_value : page_size_value;
-        for (int64_t i = offset_value; i < size + offset_value; i++) {
+        for (int64_t i = offset_value; i < page_size_value + offset_value; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
             partition_dto->partition_tag = partitions.at(i).tag_.c_str();
             partition_list_dto->partitions->pushBack(partition_dto);
@@ -1097,8 +1132,17 @@ WebRequestHandler::ShowPartitions(const OString& offset, const OString& page_siz
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) {
-    auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), tag->std_str());
+WebRequestHandler::DropPartition(const OString& table_name, const OString& body) {
+    std::string tag;
+    try {
+        auto json = nlohmann::json::parse(body->std_str());
+        tag = json["partition_tag"].get<std::string>();
+    } catch (nlohmann::detail::parse_error & e) {
+        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
+    } catch (nlohmann::detail::type_error & e) {
+        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
+    }
+    auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), tag);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1108,11 +1152,10 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& tag) 
  * Segment {
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_size, const OString& offset,
+WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& query_params,
                                 OString& response) {
     int64_t offset_value = 0;
-    int64_t page_size_value = 10;
-
+    auto offset = query_params.get("offset");
     if (nullptr != offset.get()) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
@@ -1122,6 +1165,8 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
         offset_value = std::stol(offset_str);
     }
 
+    int64_t page_size_value = 10;
+    auto page_size = query_params.get("page_size");
     if (nullptr != page_size.get()) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
@@ -1135,33 +1180,55 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OString& page_s
         RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param 'offset' or 'page_size' should equal or bigger than 0");
     }
 
+    std::string tag;
+    if (nullptr != query_params.get("partition_tag").get()) {
+        tag = query_params.get("partition_tag")->std_str();
+    }
+
     struct TableInfo info;
     auto status = request_handler_.ShowTableInfo(context_ptr_, table_name->std_str(), info);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    std::vector<std::pair<std::string, SegmentStat>> segments;
+    typedef  std::pair<std::string, SegmentStat> Pair;
+    std::vector<Pair> segments;
     for (auto& par_stat : info.partitions_stat_) {
-        for (auto& seg_stat : par_stat.segments_stat_) {
+        if (!tag.empty() && tag != par_stat.tag_) {
+            continue;
+        }
+            for (auto& seg_stat : par_stat.segments_stat_) {
             auto segment_stat = std::pair<std::string, SegmentStat>(par_stat.tag_, seg_stat);
             segments.push_back(segment_stat);
         }
     }
 
     int64_t size = segments.size();
-    offset_value = std::min(size, offset_value);
-    page_size_value = std::min(size - offset_value, page_size_value);
-    nlohmann::json result_json;
-    nlohmann::json segs_json;
-    for (int64_t i = offset_value; i < page_size_value + offset_value; i++) {
-        nlohmann::json seg_json;
-        ParseSegmentStat(segments.at(i).second, seg_json);
-        seg_json["partition_tag"] = segments.at(i).first;
+    auto iter_begin = std::min(size, offset_value);
+    auto iter_end = std::min(size, offset_value + page_size_value);
 
-        segs_json.push_back(seg_json);
+    auto segments_out = std::vector<Pair>(segments.begin() + iter_begin, segments.begin() + iter_end);
+
+    // sort with segment name
+    auto compare = [](Pair& a, Pair& b) -> bool {
+        return a.second.name_ >= b.second.name_;
+    };
+    std::sort(segments_out.begin(), segments_out.end(), compare);
+
+    nlohmann::json result_json;
+    if (segments_out.empty()) {
+        result_json["segments"] = std::vector<int64_t>();
+    } else {
+        nlohmann::json segs_json;
+        for (auto & s : segments_out) {
+            nlohmann::json seg_json;
+            ParseSegmentStat(s.second, seg_json);
+            seg_json["partition_tag"] = s.first;
+            segs_json.push_back(seg_json);
+        }
+        result_json["segments"] = segs_json;
     }
-    result_json["segments"] = segs_json;
+
     result_json["count"] = size;
     AddStatusToJson(result_json, status.code(), status.message());
 

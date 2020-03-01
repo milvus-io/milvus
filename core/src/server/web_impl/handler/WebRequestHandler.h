@@ -177,7 +177,7 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
     StatusDto::ObjectWrapper
-    ShowTables(const OString& offset, const OString& page_size, OString& result);
+    ShowTables(const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     GetTable(const OString& table_name, const OQueryParams& query_params, OString& result);
@@ -206,18 +206,18 @@ class WebRequestHandler {
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
+    ShowPartitions(const OString& table_name, const OQueryParams& query_params,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper
-    DropPartition(const OString& table_name, const OString& tag);
+    DropPartition(const OString& table_name, const OString& body);
 
     /***********
      *
      * Segment
      */
     StatusDto::ObjectWrapper
-    ShowSegments(const OString& table_name, const OString& page_size, const OString& offset, OString& response);
+    ShowSegments(const OString& table_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
     GetSegmentInfo(const OString& table_name, const OString& segment_name, const OString& info,
