@@ -1135,9 +1135,9 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& body)
     try {
         auto json = nlohmann::json::parse(body->std_str());
         tag = json["partition_tag"].get<std::string>();
-    } catch (nlohmann::detail::parse_error & e) {
+    } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
-    } catch (nlohmann::detail::type_error & e) {
+    } catch (nlohmann::detail::type_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
     }
     auto status = request_handler_.DropPartition(context_ptr_, table_name->std_str(), tag);
@@ -1150,8 +1150,7 @@ WebRequestHandler::DropPartition(const OString& table_name, const OString& body)
  * Segment {
  */
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& query_params,
-                                OString& response) {
+WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& query_params, OString& response) {
     int64_t offset_value = 0;
     auto offset = query_params.get("offset");
     if (nullptr != offset.get()) {
@@ -1189,13 +1188,13 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    typedef  std::pair<std::string, SegmentStat> Pair;
+    typedef std::pair<std::string, SegmentStat> Pair;
     std::vector<Pair> segments;
     for (auto& par_stat : info.partitions_stat_) {
         if (!tag.empty() && tag != par_stat.tag_) {
             continue;
         }
-            for (auto& seg_stat : par_stat.segments_stat_) {
+        for (auto& seg_stat : par_stat.segments_stat_) {
             auto segment_stat = std::pair<std::string, SegmentStat>(par_stat.tag_, seg_stat);
             segments.push_back(segment_stat);
         }
@@ -1208,9 +1207,7 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
     auto segments_out = std::vector<Pair>(segments.begin() + iter_begin, segments.begin() + iter_end);
 
     // sort with segment name
-    auto compare = [](Pair& a, Pair& b) -> bool {
-        return a.second.name_ >= b.second.name_;
-    };
+    auto compare = [](Pair& a, Pair& b) -> bool { return a.second.name_ >= b.second.name_; };
     std::sort(segments_out.begin(), segments_out.end(), compare);
 
     nlohmann::json result_json;
@@ -1218,7 +1215,7 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
         result_json["segments"] = std::vector<int64_t>();
     } else {
         nlohmann::json segs_json;
-        for (auto & s : segments_out) {
+        for (auto& s : segments_out) {
             nlohmann::json seg_json;
             ParseSegmentStat(s.second, seg_json);
             seg_json["partition_tag"] = s.first;
