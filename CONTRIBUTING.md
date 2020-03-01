@@ -26,7 +26,7 @@ Contributions to Milvus fall into the following categories.
 
 ### Contributing code
 
-If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in your pull request's comment and update CHANGELOG.md.
+If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in your pull request's comment and update [CHANGELOG.md](CHANGELOG.md).
 
 The Milvus team members will review your pull requests, and once it is accepted, the status of the projects to which it is associated will be changed to **Reviewer approved**. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
 
@@ -37,7 +37,7 @@ Please create a new branch from an up-to-date master on your fork.
 1. Fork the repository on GitHub.
 2. Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus-io/milvus.git`.
 3. Create a branch with `git checkout -b my-topic-branch`.
-4. Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`.
+4. Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`. You must record your changes in [CHANGELOG.md](CHANGELOG.md) with issue numbers and descriptions.
 5. Visit GitHub and make your pull request.
 
 If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
