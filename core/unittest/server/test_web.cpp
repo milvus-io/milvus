@@ -662,13 +662,14 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/tables/{table_name}/segments", showSegments, PATH(String, table_name, "table_name"),
         QUERY(String, offset), QUERY(String, page_size), QUERY(String, partition_tag))
 
-    API_CALL("GET", "/tables/{table_name}/segments/{segment_name}/{info}",
-             getSegmentInfo, PATH(String, table_name, "table_name"), PATH(String, segment_name, "segment_name"), PATH(String, info, "info"),
-             QUERY(String, offset), QUERY(String, page_size))
+    API_CALL("GET", "/tables/{table_name}/segments/{segment_name}/{info}", getSegmentInfo,
+             PATH(String, table_name, "table_name"), PATH(String, segment_name, "segment_name"),
+             PATH(String, info, "info"), QUERY(String, offset), QUERY(String, page_size))
 
     API_CALL("OPTIONS", "/tables/{table_name}/vectors", optionsVectors, PATH(String, table_name, "table_name"))
 
-    API_CALL("GET", "/tables/{table_name}/vectors", getVectors, PATH(String, table_name, "table_name"), QUERY(String, id))
+    API_CALL("GET", "/tables/{table_name}/vectors", getVectors,
+        PATH(String, table_name, "table_name"), QUERY(String, id))
 
     API_CALL("POST", "/tables/{table_name}/vectors", insert,
              PATH(String, table_name, "table_name"), BODY_STRING(String, body))
@@ -798,7 +799,8 @@ class WebControllerTest : public testing::Test {
     }
 
     milvus::Status
-    InsertData(const OString& table_name, int64_t dim, int64_t count, const std::vector<int64_t>& ids, std::string tag = "", bool bin=false) {
+    InsertData(const OString& table_name, int64_t dim, int64_t count,
+               const std::vector<int64_t>& ids, std::string tag = "", bool bin = false) {
         nlohmann::json insert_json;
 
         if (bin)
@@ -1230,7 +1232,8 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     // drop without existing tables
-    response = client_ptr->dropPartition(table_name + "565755682353464aaasafdsfagagqq1223", "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
+    response = client_ptr->dropPartition(table_name + "565755682353464aaasafdsfagagqq1223",
+        "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
@@ -1451,9 +1454,11 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
 }
 
 TEST_F(WebControllerTest, SEARCH_BY_ID) {
+#ifdef MILVUS_GPU_VERSION
     auto &config  = milvus::server::Config::GetInstance();
     auto status = config.SetGpuResourceConfigEnable("false");
     ASSERT_TRUE(status.ok()) << status.message();
+#endif
 
     const OString table_name = "test_search_by_id_table_test_" + OString(RandomName().c_str());
     GenTable(table_name, 64, 100, "L2");
@@ -1591,6 +1596,7 @@ TEST_F(WebControllerTest, CONFIG) {
     auto status = config.LoadConfigFile(config_path);
     ASSERT_TRUE(status.ok()) << status.message();
 
+#ifdef MILVUS_GPU_VERSION
     status = config.SetGpuResourceConfigEnable("true");
     ASSERT_TRUE(status.ok()) << status.message();
     status = config.SetGpuResourceConfigCacheCapacity("1");
@@ -1599,6 +1605,7 @@ TEST_F(WebControllerTest, CONFIG) {
     ASSERT_TRUE(status.ok()) << status.message();
     status = config.SetGpuResourceConfigSearchResources("gpu0");
     ASSERT_TRUE(status.ok()) << status.message();
+#endif
 
     auto response = client_ptr->cmd("config", "", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
