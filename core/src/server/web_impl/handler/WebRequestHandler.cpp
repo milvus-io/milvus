@@ -268,8 +268,6 @@ WebRequestHandler::Cmd(const std::string& cmd, std::string& result_str) {
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
-        //        result["code"] = status.code();
-        //        result["message"] = status.message();
         result["reply"] = reply;
         result_str = result.dump();
     }

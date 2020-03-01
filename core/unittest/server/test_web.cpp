@@ -659,7 +659,8 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("DELETE", "/tables/{table_name}/partitions", dropPartition,
              PATH(String, table_name, "table_name"), BODY_STRING(String, body))
 
-    API_CALL("GET", "/tables/{table_name}/segments", showSegments, PATH(String, table_name, "table_name"), QUERY(String, offset), QUERY(String, page_size))
+    API_CALL("GET", "/tables/{table_name}/segments", showSegments, PATH(String, table_name, "table_name"),
+        QUERY(String, offset), QUERY(String, page_size), QUERY(String, partition_tag))
 
     API_CALL("GET", "/tables/{table_name}/segments/{segment_name}/{info}",
              getSegmentInfo, PATH(String, table_name, "table_name"), PATH(String, segment_name, "segment_name"), PATH(String, info, "info"),
@@ -819,6 +820,18 @@ class WebControllerTest : public testing::Test {
         }
 
         return FlushTable(table_name);
+    }
+
+    milvus::Status
+    GenPartition(const OString& table_name, const OString& tag) {
+        auto par_param = milvus::server::web::PartitionRequestDto::createShared();
+        par_param->partition_tag = tag;
+        auto response = client_ptr->createPartition(table_name, par_param);
+        if (OStatus::CODE_201.code != response->getStatusCode()) {
+            return milvus::Status(milvus::SERVER_UNEXPECTED_ERROR, response->readBodyToString()->c_str());
+        }
+
+        return milvus::Status::OK();
     }
 
     void
@@ -1229,7 +1242,7 @@ TEST_F(WebControllerTest, SHOW_SEGMENTS) {
     auto status = InsertData(table_name, 256, 2000);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    auto response = client_ptr->showSegments(table_name, "0", "10", conncetion_ptr);
+    auto response = client_ptr->showSegments(table_name, "0", "10", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate result
@@ -1251,7 +1264,7 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     auto status = InsertData(table_name, 16, 2000);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    auto response = client_ptr->showSegments(table_name, "0", "10", conncetion_ptr);
+    auto response = client_ptr->showSegments(table_name, "0", "10", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     // validate result
@@ -1280,6 +1293,41 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     auto vecs_json = vecs_result_json["vectors"];
     ASSERT_TRUE(ids_json.is_array());
     ASSERT_EQ(10, ids_json.size());
+}
+
+TEST_F(WebControllerTest, SEGMENT_FILTER) {
+    OString table_name = OString("test_milvus_web_segment_filter_test_") + RandomName().c_str();
+    GenTable(table_name, 16, 1, "L2");
+
+    auto status = InsertData(table_name, 16, 1000);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = GenPartition(table_name, "tag01");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = InsertData(table_name, 16, 1000, "tag01");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = GenPartition(table_name, "tag02");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = InsertData(table_name, 16, 1000, "tag02");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    // show segments filtering tag
+    auto response = client_ptr->showSegments(table_name, "0", "10", "_default", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("count"));
+
+    ASSERT_TRUE(result_json.contains("segments"));
+    auto segments_json = result_json["segments"];
+    ASSERT_TRUE(segments_json.is_array());
+    for (auto & s : segments_json) {
+        ASSERT_TRUE(s.contains("partition_tag"));
+        ASSERT_EQ("_default", s["partition_tag"].get<std::string>());
+    }
 }
 
 TEST_F(WebControllerTest, SEARCH) {
@@ -1532,6 +1580,30 @@ TEST_F(WebControllerTest, CMD) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
+TEST_F(WebControllerTest, CONFIG) {
+    std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+    std::fstream fs(config_path.c_str(), std::ios_base::out);
+    fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+    fs.flush();
+    fs.close();
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.LoadConfigFile(config_path);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = config.SetGpuResourceConfigEnable("true");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigCacheCapacity("1");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigBuildIndexResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigSearchResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto response = client_ptr->cmd("config", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+}
+
 TEST_F(WebControllerTest, ADVANCED_CONFIG) {
     std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
     std::fstream fs(config_path.c_str(), std::ios_base::out);
@@ -1569,7 +1641,7 @@ TEST_F(WebControllerTest, ADVANCED_CONFIG) {
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
-    //// test fault
+    // test fault
     // cpu cache capacity exceed total memory
     config_dto->cpu_cache_capacity = 10000000;
     response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
@@ -1639,7 +1711,6 @@ TEST_F(WebControllerTest, GPU_CONFIG) {
     response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
-
 #endif
 
 TEST_F(WebControllerTest, DEVICES_CONFIG) {
