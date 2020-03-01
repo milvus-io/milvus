@@ -371,7 +371,7 @@ WebRequestHandler::GetConfig(std::string& result_str) {
         // check if server require start
         Config& config = Config::GetInstance();
         bool required = false;
-        //        config.GetServerRestartRequired(required);
+        config.GetServerRestartRequired(required);
         j["restart_required"] = required;
         result_str = j.dump();
     }
@@ -421,9 +421,9 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
         msg += c + " successfully;";
     }
 
-    Config& config = Config::GetInstance();
     bool required = false;
-    //    config.GetServerRestartRequired(required);
+    Config& config = Config::GetInstance();
+    config.GetServerRestartRequired(required);
 
     nlohmann::json result;
     result["code"] = StatusCode::SUCCESS;
