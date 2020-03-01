@@ -94,20 +94,12 @@ class WebRequestHandler {
     CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin);
 
  protected:
-    /**
-     *
-     * Table
-     */
     Status
     GetTableMetaInfo(const std::string& table_name, nlohmann::json& json_out);
 
     Status
     GetTableStat(const std::string& table_name, nlohmann::json& json_out);
 
-    /**
-     *
-     * Segment
-     */
     Status
     GetSegmentVectors(const std::string& table_name, const std::string& segment_name, int64_t page_size, int64_t offset,
                       nlohmann::json& json_out);
