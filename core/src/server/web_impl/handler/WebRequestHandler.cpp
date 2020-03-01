@@ -897,7 +897,7 @@ StatusDto::ObjectWrapper
 WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result) {
     int64_t offset_value = 0;
     auto offset = query_params.get("offset");
-    if (nullptr != offset.get()) {
+    if (nullptr != offset.get() && offset->getSize() > 0) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
@@ -908,7 +908,7 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
 
     int64_t page_size_value = 10;
     auto page_size = query_params.get("page_size");
-    if (nullptr != page_size.get()) {
+    if (nullptr != page_size.get() && page_size->getSize() > 0) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
@@ -943,10 +943,6 @@ WebRequestHandler::ShowTables(const OQueryParams& query_params, OString& result)
     } else {
         offset_value = std::min((size_t)offset_value, tables.size());
         page_size_value = std::min(tables.size() - offset_value, (size_t)page_size_value);
-    }
-
-    if (offset_value >= tables.size()) {
-        ASSIGN_RETURN_STATUS_DTO(Status::OK());
     }
 
     nlohmann::json tables_json;
@@ -1071,7 +1067,7 @@ WebRequestHandler::ShowPartitions(const OString& table_name, const OQueryParams&
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
     int64_t offset_value = 0;
     auto offset = query_params.get("offset");
-    if (nullptr != offset.get()) {
+    if (nullptr != offset.get() && offset->getSize() > 0) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
@@ -1082,7 +1078,7 @@ WebRequestHandler::ShowPartitions(const OString& table_name, const OQueryParams&
 
     int64_t page_size_value = 10;
     auto page_size = query_params.get("page_size");
-    if (nullptr != page_size.get()) {
+    if (nullptr != page_size.get() && page_size->getSize() > 0) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
@@ -1158,7 +1154,7 @@ StatusDto::ObjectWrapper
 WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& query_params, OString& response) {
     int64_t offset_value = 0;
     auto offset = query_params.get("offset");
-    if (nullptr != offset.get()) {
+    if (nullptr != offset.get() && offset->getSize() > 0) {
         std::string offset_str = offset->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(offset_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,
@@ -1169,7 +1165,7 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
 
     int64_t page_size_value = 10;
     auto page_size = query_params.get("page_size");
-    if (nullptr != page_size.get()) {
+    if (nullptr != page_size.get() && page_size->getSize() > 0) {
         std::string page_size_str = page_size->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(page_size_str).ok()) {
             RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM,

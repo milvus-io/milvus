@@ -244,8 +244,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         WebRequestHandler handler = WebRequestHandler();
 
-        auto offset = query_params.get("offset");
-        auto page_size = query_params.get("page_size");
 
         String result;
         auto status_dto = handler.ShowTables(query_params, result);
