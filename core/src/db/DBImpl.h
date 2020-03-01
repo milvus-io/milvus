@@ -74,7 +74,7 @@ class DBImpl : public DB {
     PreloadTable(const std::string& table_id) override;
 
     Status
-    UpdateTableFlag(const std::string& table_id, int64_t flag);
+    UpdateTableFlag(const std::string& table_id, int64_t flag) override;
 
     Status
     GetTableRowCount(const std::string& table_id, uint64_t& row_count) override;
