@@ -45,23 +45,17 @@ namespace {
 Status
 MappingMetricType(MetricType metric_type, knowhere::METRICTYPE& kw_type) {
     switch (metric_type) {
-        case MetricType::IP:
-            kw_type = knowhere::METRICTYPE::IP;
+        case MetricType::IP:kw_type = knowhere::METRICTYPE::IP;
             break;
-        case MetricType::L2:
-            kw_type = knowhere::METRICTYPE::L2;
+        case MetricType::L2:kw_type = knowhere::METRICTYPE::L2;
             break;
-        case MetricType::HAMMING:
-            kw_type = knowhere::METRICTYPE::HAMMING;
+        case MetricType::HAMMING:kw_type = knowhere::METRICTYPE::HAMMING;
             break;
-        case MetricType::JACCARD:
-            kw_type = knowhere::METRICTYPE::JACCARD;
+        case MetricType::JACCARD:kw_type = knowhere::METRICTYPE::JACCARD;
             break;
-        case MetricType::TANIMOTO:
-            kw_type = knowhere::METRICTYPE::TANIMOTO;
+        case MetricType::TANIMOTO:kw_type = knowhere::METRICTYPE::TANIMOTO;
             break;
-        default:
-            return Status(DB_ERROR, "Unsupported metric type");
+        default:return Status(DB_ERROR, "Unsupported metric type");
     }
 
     return Status::OK();
@@ -94,11 +88,15 @@ class CachedQuantizer : public cache::DataObj {
 };
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, int32_t nlist)
-    : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
+                                         MetricType metric_type, const milvus::json& index_params)
+    : location_(location),
+      dim_(dimension),
+      index_type_(index_type),
+      metric_type_(metric_type),
+      index_params_(index_params) {
     EngineType tmp_index_type = server::ValidationUtil::IsBinaryMetricType((int32_t)metric_type)
-                                    ? EngineType::FAISS_BIN_IDMAP
-                                    : EngineType::FAISS_IDMAP;
+                                ? EngineType::FAISS_BIN_IDMAP
+                                : EngineType::FAISS_IDMAP;
     index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");
@@ -127,8 +125,12 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, int32_t nlist)
-    : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
+                                         MetricType metric_type, const milvus::json& index_params)
+    : index_(std::move(index)),
+      location_(location),
+      index_type_(index_type),
+      metric_type_(metric_type),
+      index_params_(index_params) {
 }
 
 VecIndexPtr
@@ -153,7 +155,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
             else
 #endif
-                index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
@@ -162,7 +164,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
             else
 #endif
-                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
             break;
         }
         case EngineType::NSG_MIX: {
@@ -187,7 +189,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
             else
 #endif
-                index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
+            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
             break;
         }
         case EngineType::SPTAG_KDT: {
@@ -718,7 +720,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     TempMetaConf temp_conf;
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = Dimension();
-    temp_conf.nlist = nlist_;
+    temp_conf.nlist = index_params_["nlist"];
     temp_conf.size = Count();
     auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
     if (!status.ok()) {
@@ -738,11 +740,16 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     }
 
     ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+ExecutionEngineImpl::Search(int64_t n,
+                            const float* data,
+                            int64_t k,
+                            const milvus::json& extra_params,
+                            float* distances,
+                            int64_t* labels,
                             bool hybrid) {
 #if 0
     if (index_type_ == EngineType::FAISS_IVFSQ8H) {
@@ -805,12 +812,12 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
+    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
 
     // TODO(linxj): remove here. Get conf from function
     TempMetaConf temp_conf;
     temp_conf.k = k;
-    temp_conf.nprobe = nprobe;
+    temp_conf.nprobe = extra_params["nprobe"];
 
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
@@ -845,8 +852,13 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances,
-                            int64_t* labels, bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n,
+                            const uint8_t* data,
+                            int64_t k,
+                            const milvus::json& extra_params,
+                            float* distances,
+                            int64_t* labels,
+                            bool hybrid) {
     TimeRecorder rc("ExecutionEngineImpl::Search");
 
     if (index_ == nullptr) {
@@ -854,12 +866,12 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
+    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
 
     // TODO(linxj): remove here. Get conf from function
     TempMetaConf temp_conf;
     temp_conf.k = k;
-    temp_conf.nprobe = nprobe;
+    temp_conf.nprobe = extra_params["nprobe"];
 
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
@@ -894,8 +906,13 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances,
-                            int64_t* labels, bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n,
+                            const std::vector<int64_t>& ids,
+                            int64_t k,
+                            const milvus::json& extra_params,
+                            float* distances,
+                            int64_t* labels,
+                            bool hybrid) {
     TimeRecorder rc("ExecutionEngineImpl::Search");
 
     if (index_ == nullptr) {
@@ -903,12 +920,12 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search by ids Params: [k]  " << k << " [nprobe] " << nprobe;
+    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
 
     // TODO(linxj): remove here. Get conf from function
     TempMetaConf temp_conf;
     temp_conf.k = k;
-    temp_conf.nprobe = nprobe;
+    temp_conf.nprobe = extra_params["nprobe"];
 
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->MatchSearch(temp_conf, index_->GetType());

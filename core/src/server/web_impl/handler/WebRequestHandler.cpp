@@ -100,7 +100,7 @@ WebRequestHandler::GetTableInfo(const std::string& table_name, TableFieldsDto::O
     table_fields->dimension = schema.dimension_;
     table_fields->index_file_size = schema.index_file_size_;
     table_fields->index = IndexMap.at(engine::EngineType(index_param.index_type_)).c_str();
-    table_fields->nlist = index_param.nlist_;
+    table_fields->index_params = index_param.extra_params_.c_str();
     table_fields->metric_type = MetricMap.at(engine::MetricType(schema.metric_type_)).c_str();
     table_fields->count = count;
 }
@@ -500,13 +500,15 @@ WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto:
         RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
     }
 
-    if (nullptr == index_param->nlist.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'nlist\' is required")
+    std::string extra_params = index_param->extra_params->std_str();
+    if (extra_params.empty()) {
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'extra_params\' is required")
     }
 
+    auto json = milvus::json::parse(extra_params);
     auto status =
         request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
-                                     static_cast<int64_t>(IndexNameMap.at(index_type)), index_param->nlist->getValue());
+                                     static_cast<int64_t>(IndexNameMap.at(index_type)), json);
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
@@ -517,7 +519,7 @@ WebRequestHandler::GetIndex(const OString& table_name, IndexDto::ObjectWrapper& 
 
     if (status.ok()) {
         index_dto->index_type = IndexMap.at(engine::EngineType(param.index_type_)).c_str();
-        index_dto->nlist = param.nlist_;
+        index_dto->extra_params = param.extra_params_.c_str();
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)

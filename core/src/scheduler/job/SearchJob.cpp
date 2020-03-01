@@ -16,9 +16,9 @@
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nprobe,
+SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
                      const engine::VectorsData& vectors)
-    : Job(JobType::SEARCH), context_(context), topk_(topk), nprobe_(nprobe), vectors_(vectors) {
+    : Job(JobType::SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
 }
 
 bool
@@ -72,7 +72,7 @@ SearchJob::Dump() const {
     json ret{
         {"topk", topk_},
         {"nq", vectors_.vector_count_},
-        {"nprobe", nprobe_},
+        {"extra_params", extra_params_.dump()},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());

@@ -90,16 +90,18 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
     // always enable 'create_table_success'
     fiu_enable("XBuildIndexTask.Execute.create_table_success", 1, NULL, 0);
+
+    milvus::json json = {{"nlist", 16384}};
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
 
     build_index_task.Execute();
 
     fiu_enable("XBuildIndexTask.Execute.build_index_fail", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.build_index_fail");
 
@@ -107,13 +109,13 @@ TEST(TaskTest, TEST_TASK) {
     fiu_enable("XBuildIndexTask.Execute.has_table", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
 
     fiu_enable("XBuildIndexTask.Execute.throw_std_exception", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.throw_std_exception");
 
@@ -121,13 +123,13 @@ TEST(TaskTest, TEST_TASK) {
     fiu_enable("XBuildIndexTask.Execute.save_index_file_success", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
 
     fiu_enable("XBuildIndexTask.Execute.update_table_file_fail", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.update_table_file_fail");
 
