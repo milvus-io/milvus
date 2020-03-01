@@ -38,7 +38,8 @@ namespace server {
 
 constexpr int64_t GB = 1UL << 30;
 
-static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.7.0", "0.1"}});
+static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"},
+                                                                                     {"0.7.0", "0.2"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
