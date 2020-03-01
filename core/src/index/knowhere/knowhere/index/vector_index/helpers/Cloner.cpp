@@ -32,27 +32,36 @@ CopyGpuToCpu(const VectorIndexPtr& index, const Config& config) {
 
 VectorIndexPtr
 CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config& config) {
+    VectorIndexPtr result;
+    auto uids = index->GetUids();
 #ifdef CUSTOMIZATION
     if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
-        return device_index->CopyCpuToGpu(device_id, config);
+        result = device_index->CopyCpuToGpu(device_id, config);
+        result->SetUids(uids);
+        return result;
     }
 #endif
 
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
-        return device_index->CopyGpuToGpu(device_id, config);
+        result = device_index->CopyGpuToGpu(device_id, config);
+        result->SetUids(uids);
+        return result;
     }
 
     if (auto cpu_index = std::dynamic_pointer_cast<IVFSQ>(index)) {
-        return cpu_index->CopyCpuToGpu(device_id, config);
+        result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFPQ>(index)) {
-        return cpu_index->CopyCpuToGpu(device_id, config);
+        result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVF>(index)) {
-        return cpu_index->CopyCpuToGpu(device_id, config);
+        result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IDMAP>(index)) {
-        return cpu_index->CopyCpuToGpu(device_id, config);
+        result = cpu_index->CopyCpuToGpu(device_id, config);
     } else {
         KNOWHERE_THROW_MSG("this index type not support tranfer to gpu");
     }
+
+    result->SetUids(uids);
+    return result;
 }
 
 }  // namespace cloner
