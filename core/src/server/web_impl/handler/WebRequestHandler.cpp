@@ -353,15 +353,20 @@ WebRequestHandler::GetConfig(std::string& result_str) {
     if (status.ok()) {
         nlohmann::json j = nlohmann::json::parse(reply);
 #ifdef MILVUS_GPU_VERSION
-        auto gpu_search_res = j["gpu_resource_config"]["search_resources"].get<std::string>();
-        std::vector<std::string> gpus;
-        StringHelpFunctions::SplitStringByDelimeter(gpu_search_res, ",", gpus);
-        j["gpu_resource_config"]["search_resources"] = gpus;
-
-        auto gpu_build_res = j["gpu_resource_config"]["build_index_resources"].get<std::string>();
-        gpus.clear();
-        StringHelpFunctions::SplitStringByDelimeter(gpu_build_res, ",", gpus);
-        j["gpu_resource_config"]["build_index_resources"] = gpus;
+        if (j.contains("gpu_resource_config")) {
+            std::vector<std::string> gpus;
+            if (j["gpu_resource_config"].contains("search_resources")) {
+                auto gpu_search_res = j["gpu_resource_config"]["search_resources"].get<std::string>();
+                StringHelpFunctions::SplitStringByDelimeter(gpu_search_res, ",", gpus);
+                j["gpu_resource_config"]["search_resources"] = gpus;
+            }
+            if (j["gpu_resource_config"].contains("build_index_resources")) {
+                auto gpu_build_res = j["gpu_resource_config"]["build_index_resources"].get<std::string>();
+                gpus.clear();
+                StringHelpFunctions::SplitStringByDelimeter(gpu_build_res, ",", gpus);
+                j["gpu_resource_config"]["build_index_resources"] = gpus;
+            }
+        }
 #endif
         // check if server require start
         Config& config = Config::GetInstance();
