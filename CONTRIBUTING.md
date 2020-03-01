@@ -62,13 +62,19 @@ Before sending your pull requests for review, make sure your changes are consist
 
 All contributions to this project must be accompanied by acknowledgment of, and agreement to, the [Developer Certificate of Origin](https://developercertificate.org/). Acknowledgment of and agreement to the Developer Certificate of Origin _must_ be included in the comment section of each contribution and _must_ take the form of `Signed-off-by: {{Full Name}} <{{email address}}>` (without the `{}`). Contributions without this acknowledgment will be required to add it before being accepted. If contributors are unable or unwilling to agree to the Developer Certificate of Origin, their contribution will not be included.
 
-The following text shows an example:
+Contributors sign-off that they adhere to DCO by adding the following Signed-off-by line to commit messages:
 
-```
-Signed-off-by: Contributor <contributor@example.com>
+```text
+This is my commit message
+
+Signed-off-by: Random J Developer <random@developer.example.org>
 ```
 
-You can also use the `--signoff` option to git commit.
+Git also has a `-s` command line option to append this automatically to your commit message:
+
+```shell
+$ git commit -s -m 'This is my commit message'
+```
 
 ## Coding Style
 The coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
