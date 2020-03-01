@@ -1456,8 +1456,8 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
 TEST_F(WebControllerTest, SEARCH_BY_ID) {
 #ifdef MILVUS_GPU_VERSION
     auto &config  = milvus::server::Config::GetInstance();
-    auto status = config.SetGpuResourceConfigEnable("false");
-    ASSERT_TRUE(status.ok()) << status.message();
+    auto config_status = config.SetGpuResourceConfigEnable("false");
+    ASSERT_TRUE(config_status.ok()) << config_status.message();
 #endif
 
     const OString table_name = "test_search_by_id_table_test_" + OString(RandomName().c_str());
@@ -1469,7 +1469,7 @@ TEST_F(WebControllerTest, SEARCH_BY_ID) {
         ids.emplace_back(i);
     }
 
-    status = InsertData(table_name, 64, 100, ids);
+    auto status = InsertData(table_name, 64, 100, ids);
     ASSERT_TRUE(status.ok()) << status.message();
 
     nlohmann::json search_json;
