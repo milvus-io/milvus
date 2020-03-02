@@ -18,6 +18,7 @@
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
 
 namespace knowhere {
 
@@ -113,7 +114,8 @@ BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
     GETBINARYTENSOR(dataset)
     auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
 
-    faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, GetMetricType(config[Metric::TYPE].get<std::string>()));
+    faiss::IndexBinary* coarse_quantizer =
+        new faiss::IndexBinaryFlat(dim, GetMetricType(config[Metric::TYPE].get<std::string>()));
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, config[IndexParams::nlist],
                                                          GetMetricType(config[Metric::TYPE].get<std::string>()));
     index->train(rows, (uint8_t*)p_data);

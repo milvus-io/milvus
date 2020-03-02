@@ -145,7 +145,8 @@ IDMAP::GetRawIds() {
 void
 IDMAP::Train(const Config& config) {
     const char* type = "IDMap,Flat";
-    auto index = faiss::index_factory(config[meta::DIM].get<int64_t>(), type, GetMetricType(config[Metric::TYPE].get<std::string>()));
+    auto index = faiss::index_factory(config[meta::DIM].get<int64_t>(), type,
+                                      GetMetricType(config[Metric::TYPE].get<std::string>()));
     index_.reset(index);
 }
 

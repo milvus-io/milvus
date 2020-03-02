@@ -27,11 +27,11 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIVFTest : public BinaryDataGen, public TestWithParam<char*> {
+class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
  protected:
     void
     SetUp() override {
-        char* MetricType = GetParam();
+        std::string MetricType = GetParam();
         Init_with_binary_default();
         //        nb = 1000000;
         //        nq = 1000;
@@ -40,10 +40,8 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<char*> {
         index_ = std::make_shared<knowhere::BinaryIVF>();
 
         knowhere::Config temp_conf{
-            {knowhere::meta::DIM, dim},
-            {knowhere::meta::TOPK, k},
-            {knowhere::IndexParams::nlist, 100},
-            {knowhere::IndexParams::nprobe, 10},
+            {knowhere::meta::DIM, dim},           {knowhere::meta::TOPK, k},
+            {knowhere::IndexParams::nlist, 100},  {knowhere::IndexParams::nprobe, 10},
             {knowhere::Metric::TYPE, MetricType},
         };
         conf = temp_conf;
@@ -60,8 +58,7 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<char*> {
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
-                        Values(knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO,
-                               knowhere::Metric::HAMMING));
+                        Values(std::string("JARCCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
 TEST_P(BinaryIVFTest, binaryivf_basic) {
     assert(!xb.empty());

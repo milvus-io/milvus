@@ -81,8 +81,8 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     }
     GETTENSOR(dataset)
 
-    size_t id_size = sizeof(int64_t) * config[meta::TOPK];
-    size_t dist_size = sizeof(float) * config[meta::TOPK];
+    size_t id_size = sizeof(int64_t) * config[meta::TOPK].get<int64_t>();
+    size_t dist_size = sizeof(float) * config[meta::TOPK].get<int64_t>();
     auto p_id = (int64_t*)malloc(id_size * rows);
     auto p_dist = (float*)malloc(dist_size * rows);
 
@@ -132,11 +132,6 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
 
 IndexModelPtr
 IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<HNSWCfg>(config);
-    if (build_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("build conf is null");
-    }
-
     GETTENSOR(dataset)
 
     hnswlib::SpaceInterface<float>* space;
@@ -146,7 +141,8 @@ IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
         space = new hnswlib::InnerProductSpace(dim);
         normalize = true;
     }
-    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(), config[IndexParams::efConstruction].get<int64_t>());
+    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
+                                                               config[IndexParams::efConstruction].get<int64_t>());
 
     return nullptr;
 }

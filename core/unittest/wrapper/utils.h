@@ -112,7 +112,7 @@ class ParamGenerator {
     }
 
     knowhere::Config
-    GenSearchConf(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
+    GenSearchConf(const milvus::engine::IndexType& type, const milvus::json& conf) {
         auto search_cfg = conf;
         switch (type) {
             case milvus::engine::IndexType::FAISS_IDMAP: {
@@ -136,17 +136,17 @@ class ParamGenerator {
                 break;
             }
             case milvus::engine::IndexType::HNSW: {
-                search_cfg[knowhere::IndexParams::ef] = conf[knowhere::meta::TOPK] + 10;
+                search_cfg[knowhere::IndexParams::ef] = conf[knowhere::meta::TOPK].get<int64_t>() + 10;
                 break;
             }
         }
         auto adapter = milvus::engine::AdapterMgr::GetInstance().GetAdapter(type);
-        adapter->CheckSearch(search_cfg);
+        adapter->CheckSearch(search_cfg, type);
         return search_cfg;
     }
 
     knowhere::Config
-    GenBuild(const milvus::engine::IndexType& type, const milvus::engine::TempMetaConf& conf) {
+    GenBuild(const milvus::engine::IndexType& type, const milvus::json& conf) {
         auto build_cfg = conf;
         switch (type) {
             case milvus::engine::IndexType::FAISS_IDMAP: {

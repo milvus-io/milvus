@@ -36,7 +36,8 @@ IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     std::stringstream index_type;
     index_type << "IVF" << config[IndexParams::nlist] << ","
                << "SQ8Hybrid";
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
+    auto build_index =
+        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
 
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {

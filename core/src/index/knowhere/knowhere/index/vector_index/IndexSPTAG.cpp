@@ -156,7 +156,8 @@ CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
 
 void
 CPUSPTAGRNG::SetParameters(const Config& config) {
-#define Assign(param_name, str_name) index_ptr_->SetParameter(str_name, std::to_string(build_cfg[param_name].get<int64_t>()))
+#define Assign(param_name, str_name) \
+    index_ptr_->SetParameter(str_name, std::to_string(build_cfg["param_name"].get<int64_t>()))
 
     if (index_type_ == SPTAG::IndexAlgoType::KDT) {
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetKDTParameters();

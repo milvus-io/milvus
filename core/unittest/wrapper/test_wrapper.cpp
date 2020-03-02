@@ -45,13 +45,13 @@ class KnowhereWrapperTest
         std::tie(index_type, generator_type, dim, nb, nq, k) = GetParam();
         GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
 
-        knowhere::Config temp_conf{
+        knowhere::Config tempconf{
             {knowhere::Metric::TYPE, knowhere::Metric::L2},
             {knowhere::meta::ROWS, nb},
             {knowhere::meta::DIM, dim},
             {knowhere::meta::TOPK, k},
             {"gpu_id", DEVICEID}
-        }
+        };
 
         index_ = GetVecIndexFactory(index_type);
         conf = ParamGenerator::GetInstance().GenBuild(index_type, tempconf);
@@ -104,7 +104,6 @@ TEST_P(KnowhereWrapperTest, WRAPPER_EXCEPTION_TEST) {
 
 TEST_P(KnowhereWrapperTest, BASE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);
-    //    conf->Dump();
 
     auto elems = nq * k;
     std::vector<int64_t> res_ids(elems);

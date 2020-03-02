@@ -46,10 +46,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
     knowhere::Config conf{
-        {knowhere::meta::DIM, dim},
-        {knowhere::meta::TOPK, k},
-        {knowhere::Metric::TYPE, knowhere::Metric::L2}
-    };
+        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
     // null faiss index
     {
@@ -109,10 +106,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
     };
 
     knowhere::Config conf{
-        {knowhere::meta::DIM, dim},
-        {knowhere::meta::TOPK, k},
-        {knowhere::Metric::TYPE, knowhere::Metric::L2}
-    };
+        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
     {
         // serialize index
@@ -149,10 +143,7 @@ TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
     knowhere::Config conf{
-        {knowhere::meta::DIM, dim},
-        {knowhere::meta::TOPK, k},
-        {knowhere::Metric::TYPE, knowhere::Metric::L2}
-    };
+        {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);

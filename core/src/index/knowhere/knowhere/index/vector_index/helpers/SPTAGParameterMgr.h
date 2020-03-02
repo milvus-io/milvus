@@ -18,6 +18,7 @@
 
 #include <SPTAG/AnnService/inc/Core/Common.h>
 #include "IndexParameter.h"
+#include "knowhere/common/Config.h"
 
 namespace knowhere {
 class SPTAGParameterMgr {

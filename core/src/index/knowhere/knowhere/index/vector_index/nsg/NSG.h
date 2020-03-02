@@ -41,8 +41,8 @@ using Graph = std::vector<std::vector<node_t>>;
 class NsgIndex {
  public:
     size_t dimension;
-    size_t ntotal;           // totabl nb of indexed vectors
-    METRICTYPE metric_type;  // L2 | IP
+    size_t ntotal;            // totabl nb of indexed vectors
+    std::string metric_type;  // todo(linxj) IP
     Distance* distance_;
 
     float* ori_data_;
@@ -62,7 +62,7 @@ class NsgIndex {
     size_t out_degree;
 
  public:
-    explicit NsgIndex(const size_t& dimension, const size_t& n, METRICTYPE metric = METRICTYPE::L2);
+    explicit NsgIndex(const size_t& dimension, const size_t& n, const std::string& metric = "L2");
 
     NsgIndex() = default;
 

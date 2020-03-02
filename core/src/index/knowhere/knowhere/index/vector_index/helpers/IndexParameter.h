@@ -22,14 +22,14 @@ constexpr const char* ROWS = "rows";
 constexpr const char* IDS = "ids";
 constexpr const char* DISTANCE = "distance";
 constexpr const char* TOPK = "k";
-};
+};  // namespace meta
 
-namespace IndexParams{
+namespace IndexParams {
 // IVF Params
 constexpr const char* nprobe = "nprobe";
 constexpr const char* nlist = "nlist";
-constexpr const char* m = "m"; // PQ
-constexpr const char* nbits = "nbits"; // pq
+constexpr const char* m = "m";          // PQ
+constexpr const char* nbits = "nbits";  // pq
 
 // NSG Params
 constexpr const char* knng = "knng";
@@ -41,18 +41,18 @@ constexpr const char* candidate = "candidate_pool_size";
 constexpr const char* efConstruction = "efConstruction";
 constexpr const char* M = "M";
 constexpr const char* ef = "ef";
-}
+}  // namespace IndexParams
 
-namespace Metric{
+namespace Metric {
 constexpr const char* TYPE = "metric_type";
 constexpr const char* IP = "IP";
 constexpr const char* L2 = "L2";
 constexpr const char* HAMMING = "HAMMING";
 constexpr const char* JACCARD = "JACCARD";
 constexpr const char* TANIMOTO = "TANIMOTO";
-}
+}  // namespace Metric
 
 extern faiss::MetricType
-GetMetricType(const char*& type);
+GetMetricType(const std::string& type);
 
 }  // namespace knowhere
