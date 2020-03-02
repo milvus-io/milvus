@@ -58,7 +58,7 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<std::string> {
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
-                        Values(std::string("JARCCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
+                        Values(std::string("JACCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
 TEST_P(BinaryIVFTest, binaryivf_basic) {
     assert(!xb.empty());

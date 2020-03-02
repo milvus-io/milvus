@@ -37,7 +37,7 @@ class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<std::string> 
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
-                        Values(std::string("JARCCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
+                        Values(std::string("JACCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
 TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(!xb.empty());

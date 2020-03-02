@@ -15,6 +15,8 @@
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_factory.h>
 
+#include <string>
+
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 

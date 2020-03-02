@@ -22,6 +22,7 @@
 
 #endif
 
+#include <string>
 #include <vector>
 
 #include "knowhere/adapter/VectorAdapter.h"

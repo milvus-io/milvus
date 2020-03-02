@@ -12,6 +12,7 @@
 #pragma once
 
 #include <faiss/Index.h>
+#include <string>
 
 namespace knowhere {
 

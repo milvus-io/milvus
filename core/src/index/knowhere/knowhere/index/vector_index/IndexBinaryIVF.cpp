@@ -15,6 +15,7 @@
 #include <faiss/IndexBinaryIVF.h>
 
 #include <chrono>
+#include <string>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"

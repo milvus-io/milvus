@@ -118,6 +118,7 @@ class ParamGenerator {
             case milvus::engine::IndexType::FAISS_IDMAP: {
                 break;
             }
+			case milvus::engine::IndexType::FAISS_BIN_IVFLAT_CPU:
             case milvus::engine::IndexType::FAISS_IVFFLAT_CPU:
             case milvus::engine::IndexType::FAISS_IVFFLAT_GPU:
             case milvus::engine::IndexType::FAISS_IVFFLAT_MIX:

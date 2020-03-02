@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "WrapperException.h"
@@ -24,7 +25,9 @@
 namespace milvus {
 namespace engine {
 
-using namespace knowhere;
+using knowhere::IndexParams;
+using knowhere::meta;
+using knowhere::Metric;
 
 #if CUDA_VERSION > 9000
 #define GPU_MAX_NRPOBE 2048

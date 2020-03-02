@@ -16,6 +16,7 @@
 #endif
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "knowhere/adapter/VectorAdapter.h"

@@ -19,6 +19,7 @@
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
 #include <fiu-local.h>
+#include <string>
 #include <utility>
 
 namespace knowhere {

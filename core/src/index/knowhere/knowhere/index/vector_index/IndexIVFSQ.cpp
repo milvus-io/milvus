@@ -16,6 +16,7 @@
 #include <faiss/index_factory.h>
 
 #include <memory>
+#include <string>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
