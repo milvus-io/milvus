@@ -36,6 +36,7 @@ TEST(TaskTest, INVALID_INDEX) {
     dummy_context->SetTraceContext(trace_context);
 
     TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
+    dummy_file->index_params_ = "{ \"nlist\": 16384 }";
     auto search_task =
         std::make_shared<XSearchTask>(dummy_context, dummy_file, nullptr);
     search_task->Load(LoadType::TEST, 10);
@@ -50,6 +51,7 @@ TEST(TaskTest, TEST_TASK) {
     auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 
     auto file = std::make_shared<TableFileSchema>();
+    file->index_params_ = "{ \"nlist\": 16384 }";
     auto label = std::make_shared<BroadcastLabel>();
 
     TestTask task(dummy_context, file, label);
