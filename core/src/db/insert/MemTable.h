@@ -47,7 +47,7 @@ class MemTable {
     GetTableFileCount();
 
     Status
-    Serialize(uint64_t wal_lsn);
+    Serialize(uint64_t wal_lsn, bool apply_delete = true);
 
     bool
     Empty();
