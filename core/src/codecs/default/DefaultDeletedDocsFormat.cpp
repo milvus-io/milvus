@@ -17,6 +17,9 @@
 
 #include "codecs/default/DefaultDeletedDocsFormat.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <boost/filesystem.hpp>
 #include <memory>
 #include <string>
@@ -35,8 +38,9 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
 
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
-    FILE* del_file = fopen(del_file_path.c_str(), "rb");
-    if (del_file == nullptr) {
+
+    int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
+    if (del_fd == -1) {
         std::string err_msg = "Failed to open file: " + del_file_path;
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
@@ -46,9 +50,20 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
     auto deleted_docs_size = file_size / sizeof(segment::offset_t);
     std::vector<segment::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
-    fread((void*)(deleted_docs_list.data()), sizeof(segment::offset_t), deleted_docs_size, del_file);
+
+    if (::read(del_fd, deleted_docs_list.data(), file_size) == -1) {
+        std::string err_msg = "Failed to read from file: " + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
-    fclose(del_file);
+
+    if (::close(del_fd) == -1) {
+        std::string err_msg = "Failed to close file: " + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
 }
 
 void
@@ -57,16 +72,28 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
 
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
-    FILE* del_file = fopen(del_file_path.c_str(), "ab");  // TODO(zhiru): append mode
-    if (del_file == nullptr) {
+
+    // TODO(zhiru): append mode
+    int del_fd = open(del_file_path.c_str(), O_WRONLY | O_APPEND | O_CREAT, 00664);
+    if (del_fd == -1) {
         std::string err_msg = "Failed to open file: " + del_file_path;
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-    fwrite((void*)(deleted_docs_list.data()), sizeof(segment::offset_t), deleted_docs->GetSize(), del_file);
-    fclose(del_file);
+
+    if (::write(del_fd, deleted_docs_list.data(), sizeof(segment::offset_t) * deleted_docs->GetSize()) == -1) {
+        std::string err_msg = "Failed to write to file" + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    if (::close(del_fd) == -1) {
+        std::string err_msg = "Failed to close file: " + del_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
 }
 
 }  // namespace codec
