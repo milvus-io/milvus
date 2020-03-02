@@ -22,6 +22,7 @@
 
 #endif
 
+#include <string>
 #include <vector>
 
 #include "knowhere/adapter/VectorAdapter.h"
@@ -61,13 +62,13 @@ IDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     }
     GETTENSOR(dataset)
 
-    auto elems = rows * config[meta::TOPK];
+    auto elems = rows * config[meta::TOPK].get<int64_t>();
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    search_impl(rows, (float*)p_data, config[meta::TOPK], p_dist, p_id, Config());
+    search_impl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, Config());
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -145,7 +146,8 @@ IDMAP::GetRawIds() {
 void
 IDMAP::Train(const Config& config) {
     const char* type = "IDMap,Flat";
-    auto index = faiss::index_factory(config[meta::DIM], type, GetMetricType(config[Metric::TYPE]));
+    auto index = faiss::index_factory(config[meta::DIM].get<int64_t>(), type,
+                                      GetMetricType(config[Metric::TYPE].get<std::string>()));
     index_.reset(index);
 }
 
@@ -212,7 +214,7 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
     auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
-    auto elems = rows * config[meta::TOPK];
+    auto elems = rows * config[meta::TOPK].get<int64_t>();
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
@@ -220,8 +222,8 @@ IDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
 
     // todo: enable search by id (zhiru)
     //    auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    //    index_->searchById(rows, (float*)p_data, config[meta::TOPK], p_dist, p_id, blacklist);
-    index_->search_by_id(rows, p_data, config[meta::TOPK], p_dist, p_id, bitset_);
+    //    index_->searchById(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, blacklist);
+    index_->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

@@ -16,6 +16,7 @@
 #include <faiss/index_factory.h>
 
 #include <memory>
+#include <string>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
@@ -35,7 +36,8 @@ IVFSQ::Train(const DatasetPtr& dataset, const Config& config) {
     std::stringstream index_type;
     index_type << "IVF" << config[IndexParams::nlist] << ","
                << "SQ" << config[IndexParams::nbits];
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE]));
+    auto build_index =
+        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
     build_index->train(rows, (float*)p_data);
 
     std::shared_ptr<faiss::Index> ret_index;

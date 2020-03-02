@@ -25,7 +25,7 @@ Status
 BinVecImpl::BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                      const uint8_t* xt) {
     try {
-        dim = cfg[meta::DIM];
+        dim = cfg[knowhere::meta::DIM];
 
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nb);
@@ -229,7 +229,7 @@ BinVecImpl::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
 ErrorCode
 BinBFIndex::Build(const Config& cfg) {
     try {
-        dim = cfg[meta::DIM];
+        dim = cfg[knowhere::meta::DIM];
         std::static_pointer_cast<knowhere::BinaryIDMAP>(index_)->Train(cfg);
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -245,7 +245,7 @@ Status
 BinBFIndex::BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                      const uint8_t* xt) {
     try {
-        dim = cfg[meta::DIM];
+        dim = cfg[knowhere::meta::DIM];
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nb);
         ret_ds->Set(knowhere::meta::DIM, dim);

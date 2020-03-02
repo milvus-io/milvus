@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "VecIndex.h"
+#include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
@@ -21,71 +22,70 @@ namespace engine {
 class ConfAdapter {
  public:
     virtual bool
-    CheckTrain(Json& oricfg);
+    CheckTrain(milvus::json& oricfg);
 
     virtual bool
-    CheckSearch(Json& oricfg, const IndexType& type);
+    CheckSearch(milvus::json& oricfg, const IndexType& type);
 
-   //  todo(linxj): refactor in next release.
-   //
-   //  virtual bool
-   //  CheckTrain(Json&, IndexMode&) = 0;
-   //
-   //  virtual bool
-   //  CheckSearch(Json&, const IndexType&, IndexMode&) = 0;
-
+    //  todo(linxj): refactor in next release.
+    //
+    //  virtual bool
+    //  CheckTrain(milvus::json&, IndexMode&) = 0;
+    //
+    //  virtual bool
+    //  CheckSearch(milvus::json&, const IndexType&, IndexMode&) = 0;
 };
 using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
 
 class IVFConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 
     bool
-    CheckSearch(Json& oricfg, const IndexType& type) override;
+    CheckSearch(milvus::json& oricfg, const IndexType& type) override;
 };
 
 class IVFSQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 
     bool
-    CheckSearch(Json& oricfg, const IndexType& type) override;
+    CheckSearch(milvus::json& oricfg, const IndexType& type) override;
 };
 
 class BinIDMAPConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class BinIVFConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class HNSWConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Json& oricfg) override;
+    CheckTrain(milvus::json& oricfg) override;
 
     bool
-    CheckSearch(Json& oricfg, const IndexType& type) override;
+    CheckSearch(milvus::json& oricfg, const IndexType& type) override;
 };
 
 }  // namespace engine

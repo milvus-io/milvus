@@ -156,49 +156,50 @@ CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
 
 void
 CPUSPTAGRNG::SetParameters(const Config& config) {
-#define Assign(param_name, str_name) index_ptr_->SetParameter(str_name, std::to_string(build_cfg->param_name))
+#define Assign(param_name, str_name) \
+    index_ptr_->SetParameter(str_name, std::to_string(build_cfg[param_name].get<int64_t>()))
 
     if (index_type_ == SPTAG::IndexAlgoType::KDT) {
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetKDTParameters();
 
-        Assign(kdtnumber, "KDTNumber");
-        Assign(numtopdimensionkdtsplit, "NumTopDimensionKDTSplit");
-        Assign(samples, "Samples");
-        Assign(tptnumber, "TPTNumber");
-        Assign(tptleafsize, "TPTLeafSize");
-        Assign(numtopdimensiontptsplit, "NumTopDimensionTPTSplit");
-        Assign(neighborhoodsize, "NeighborhoodSize");
-        Assign(graphneighborhoodscale, "GraphNeighborhoodScale");
-        Assign(graphcefscale, "GraphCEFScale");
-        Assign(refineiterations, "RefineIterations");
-        Assign(cef, "CEF");
-        Assign(maxcheckforrefinegraph, "MaxCheckForRefineGraph");
-        Assign(numofthreads, "NumberOfThreads");
-        Assign(maxcheck, "MaxCheck");
-        Assign(thresholdofnumberofcontinuousnobetterpropagation, "ThresholdOfNumberOfContinuousNoBetterPropagation");
-        Assign(numberofinitialdynamicpivots, "NumberOfInitialDynamicPivots");
-        Assign(numberofotherdynamicpivots, "NumberOfOtherDynamicPivots");
+        Assign("kdtnumber", "KDTNumber");
+        Assign("numtopdimensionkdtsplit", "NumTopDimensionKDTSplit");
+        Assign("samples", "Samples");
+        Assign("tptnumber", "TPTNumber");
+        Assign("tptleafsize", "TPTLeafSize");
+        Assign("numtopdimensiontptsplit", "NumTopDimensionTPTSplit");
+        Assign("neighborhoodsize", "NeighborhoodSize");
+        Assign("graphneighborhoodscale", "GraphNeighborhoodScale");
+        Assign("graphcefscale", "GraphCEFScale");
+        Assign("refineiterations", "RefineIterations");
+        Assign("cef", "CEF");
+        Assign("maxcheckforrefinegraph", "MaxCheckForRefineGraph");
+        Assign("numofthreads", "NumberOfThreads");
+        Assign("maxcheck", "MaxCheck");
+        Assign("thresholdofnumberofcontinuousnobetterpropagation", "ThresholdOfNumberOfContinuousNoBetterPropagation");
+        Assign("numberofinitialdynamicpivots", "NumberOfInitialDynamicPivots");
+        Assign("numberofotherdynamicpivots", "NumberOfOtherDynamicPivots");
     } else {
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetBKTParameters();
 
-        Assign(bktnumber, "BKTNumber");
-        Assign(bktkmeansk, "BKTKMeansK");
-        Assign(bktleafsize, "BKTLeafSize");
-        Assign(samples, "Samples");
-        Assign(tptnumber, "TPTNumber");
-        Assign(tptleafsize, "TPTLeafSize");
-        Assign(numtopdimensiontptsplit, "NumTopDimensionTPTSplit");
-        Assign(neighborhoodsize, "NeighborhoodSize");
-        Assign(graphneighborhoodscale, "GraphNeighborhoodScale");
-        Assign(graphcefscale, "GraphCEFScale");
-        Assign(refineiterations, "RefineIterations");
-        Assign(cef, "CEF");
-        Assign(maxcheckforrefinegraph, "MaxCheckForRefineGraph");
-        Assign(numofthreads, "NumberOfThreads");
-        Assign(maxcheck, "MaxCheck");
-        Assign(thresholdofnumberofcontinuousnobetterpropagation, "ThresholdOfNumberOfContinuousNoBetterPropagation");
-        Assign(numberofinitialdynamicpivots, "NumberOfInitialDynamicPivots");
-        Assign(numberofotherdynamicpivots, "NumberOfOtherDynamicPivots");
+        Assign("bktnumber", "BKTNumber");
+        Assign("bktkmeansk", "BKTKMeansK");
+        Assign("bktleafsize", "BKTLeafSize");
+        Assign("samples", "Samples");
+        Assign("tptnumber", "TPTNumber");
+        Assign("tptleafsize", "TPTLeafSize");
+        Assign("numtopdimensiontptsplit", "NumTopDimensionTPTSplit");
+        Assign("neighborhoodsize", "NeighborhoodSize");
+        Assign("graphneighborhoodscale", "GraphNeighborhoodScale");
+        Assign("graphcefscale", "GraphCEFScale");
+        Assign("refineiterations", "RefineIterations");
+        Assign("cef", "CEF");
+        Assign("maxcheckforrefinegraph", "MaxCheckForRefineGraph");
+        Assign("numofthreads", "NumberOfThreads");
+        Assign("maxcheck", "MaxCheck");
+        Assign("thresholdofnumberofcontinuousnobetterpropagation", "ThresholdOfNumberOfContinuousNoBetterPropagation");
+        Assign("numberofinitialdynamicpivots", "NumberOfInitialDynamicPivots");
+        Assign("numberofotherdynamicpivots", "NumberOfOtherDynamicPivots");
     }
 }
 

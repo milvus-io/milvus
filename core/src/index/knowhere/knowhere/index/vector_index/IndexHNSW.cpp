@@ -81,8 +81,8 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
     }
     GETTENSOR(dataset)
 
-    size_t id_size = sizeof(int64_t) * config[meta::TOPK];
-    size_t dist_size = sizeof(float) * config[meta::TOPK];
+    size_t id_size = sizeof(int64_t) * config[meta::TOPK].get<int64_t>();
+    size_t dist_size = sizeof(float) * config[meta::TOPK].get<int64_t>();
     auto p_id = (int64_t*)malloc(id_size * rows);
     auto p_dist = (float*)malloc(dist_size * rows);
 
@@ -98,11 +98,11 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
         // if (normalize) {
         //     std::vector<float> norm_vector(Dimension());
         //     normalize_vector((float*)(single_query), norm_vector.data(), Dimension());
-        //     ret = index_->searchKnn((float*)(norm_vector.data()), config[meta::TOPK], compare);
+        //     ret = index_->searchKnn((float*)(norm_vector.data()), config[meta::TOPK].get<int64_t>(), compare);
         // } else {
-        //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK], compare);
+        //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn((float*)single_query, config[meta::TOPK], compare);
+        ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
 
         while (ret.size() < config[meta::TOPK]) {
             ret.push_back(std::make_pair(-1, -1));
@@ -120,8 +120,8 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
-        memcpy(p_dist + i * config[meta::TOPK], dist.data(), dist_size);
-        memcpy(p_id + i * config[meta::TOPK], ids.data(), id_size);
+        memcpy(p_dist + i * config[meta::TOPK].get<int64_t>(), dist.data(), dist_size);
+        memcpy(p_id + i * config[meta::TOPK].get<int64_t>(), ids.data(), id_size);
     }
 
     auto ret_ds = std::make_shared<Dataset>();
@@ -132,11 +132,6 @@ IndexHNSW::Search(const DatasetPtr& dataset, const Config& config) {
 
 IndexModelPtr
 IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<HNSWCfg>(config);
-    if (build_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("build conf is null");
-    }
-
     GETTENSOR(dataset)
 
     hnswlib::SpaceInterface<float>* space;
@@ -146,7 +141,8 @@ IndexHNSW::Train(const DatasetPtr& dataset, const Config& config) {
         space = new hnswlib::InnerProductSpace(dim);
         normalize = true;
     }
-    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M], config[IndexParams::efConstruction]);
+    index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
+                                                               config[IndexParams::efConstruction].get<int64_t>());
 
     return nullptr;
 }

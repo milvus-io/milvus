@@ -51,13 +51,13 @@ class KnowhereHybrid : public DataGenBase, public ::testing::Test {
 TEST_F(KnowhereHybrid, test_interface) {
     assert(!xb.empty());
 
-    knowhere::Config temp_conf{
+    knowhere::Config tempconf{
         {knowhere::Metric::TYPE, knowhere::Metric::L2},
         {knowhere::meta::ROWS, nb},
         {knowhere::meta::DIM, dim},
         {knowhere::meta::TOPK, k},
         {"gpu_id", DEVICEID}
-    }
+    };
 
     index_type = milvus::engine::IndexType::FAISS_IVFSQ8_HYBRID;
     index_ = GetVecIndexFactory(index_type);
@@ -103,7 +103,7 @@ TEST_F(KnowhereHybrid, test_interface) {
         milvus::json quantizer_conf {
             {"mode", 2},
             {"gpu_id", DEVICEID}
-        }
+        };
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = GetVecIndexFactory(index_type);
             hybrid_idx->Load(binaryset);

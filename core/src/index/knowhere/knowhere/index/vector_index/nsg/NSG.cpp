@@ -29,16 +29,9 @@ namespace algo {
 
 unsigned int seed = 100;
 
-NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, METRICTYPE metric)
+NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, const std::string& metric)
     : dimension(dimension), ntotal(n), metric_type(metric) {
-    switch (metric) {
-        case METRICTYPE::L2:
-            distance_ = new DistanceL2;
-            break;
-        case METRICTYPE::IP:
-            distance_ = new DistanceIP;
-            break;
-    }
+    distance_ = new DistanceL2;  // hardcode here
 }
 
 NsgIndex::~NsgIndex() {

@@ -15,6 +15,7 @@
 #include <faiss/index_factory.h>
 
 #include <memory>
+#include <string>
 
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
@@ -31,9 +32,10 @@ GPUIVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {
         ResScope rs(temp_resource, gpu_id_, true);
-        auto device_index = new faiss::gpu::GpuIndexIVFPQ(temp_resource->faiss_res.get(), dim, config[IndexParams::nlist],
-                                                          config[IndexParams::m], config[IndexParams::nbits],
-                                                          GetMetricType(config[Metric::TYPE]));  // IP not support
+        auto device_index = new faiss::gpu::GpuIndexIVFPQ(
+            temp_resource->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m],
+            config[IndexParams::nbits],
+            GetMetricType(config[Metric::TYPE].get<std::string>()));  // IP not support
         device_index->train(rows, (float*)p_data);
         std::shared_ptr<faiss::Index> host_index = nullptr;
         host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));

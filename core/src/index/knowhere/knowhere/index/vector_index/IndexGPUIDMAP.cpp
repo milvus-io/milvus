@@ -16,6 +16,7 @@
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
 #include <fiu-local.h>
+#include <string>
 
 #ifdef MILVUS_GPU_VERSION
 

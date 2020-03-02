@@ -46,7 +46,6 @@ Status
 MappingMetricType(MetricType metric_type, milvus::json& conf) {
     switch (metric_type) {
         case MetricType::IP:
-            kw_type = knowhere::METRICTYPE::IP;
             conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
             break;
         case MetricType::L2:
@@ -109,10 +108,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    milvus::json conf {
-        {"gpu_id", gpu_num_},
-        {knowhere::meta::DIM, dimension}
-    };
+    milvus::json conf{{"gpu_id", gpu_num_}, {knowhere::meta::DIM, dimension}};
     MappingMetricType(metric_type, conf);
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     if (adapter->CheckTrain(conf)) {
@@ -281,7 +277,7 @@ ExecutionEngineImpl::HybridLoad() const {
         auto best_index = std::distance(all_free_mem.begin(), max_e);
         auto best_device_id = gpus[best_index];
 
-        milvus::Json quantizer_conf{{"gpu_id" : best_device_id}, {"mode" : 1}};
+        milvus::json quantizer_conf{{"gpu_id", best_device_id}, {"mode", 1}};
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
@@ -409,17 +405,14 @@ ExecutionEngineImpl::Load(bool to_cache) {
         if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
-            milvus::json conf {
-                {"gpu_id", gpu_num_},
-                {knowhere::meta::DIM, dim_}
-            };
+            milvus::json conf{{"gpu_id", gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
             auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
             if (adapter->CheckTrain(conf)) {
                 throw Exception(DB_ERROR, "Build Config illegal");
             }
 
-            status = segment_reader_ptr->Load();
+            auto status = segment_reader_ptr->Load();
             if (!status.ok()) {
                 std::string msg = "Failed to load segment from " + location_;
                 ENGINE_LOG_ERROR << msg;
@@ -727,6 +720,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, "Build Config illegal");
     }
 
+    auto status = Status::OK();
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
     } else if (bin_from_index) {
@@ -1054,7 +1048,7 @@ ExecutionEngineImpl::Init() {
     std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     if (!s.ok()) {
-        gpu_num_ = knowhere::INVALID_VALUE;
+        gpu_num_ = -1;
         return s;
     }
     for (auto id : gpu_ids) {

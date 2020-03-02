@@ -40,7 +40,7 @@ Status
 VecIndexImpl::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                        const float* xt) {
     try {
-        dim = cfg[meta::DIM];
+        dim = cfg[knowhere::meta::DIM];
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
         fiu_do_on("VecIndexImpl.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("VecIndexImpl.BuildAll.throw_std_exception", throw std::exception());
@@ -333,7 +333,7 @@ BFIndex::Build(const Config& cfg) {
     try {
         fiu_do_on("BFIndex.Build.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("BFIndex.Build.throw_std_exception", throw std::exception());
-        dim = cfg[meta::DIM];
+        dim = cfg[knowhere::meta::DIM];
         std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -349,7 +349,7 @@ Status
 BFIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                   const float* xt) {
     try {
-        dim = cfg[meta::DIM];
+        dim = cfg[knowhere::meta::DIM];
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
         fiu_do_on("BFIndex.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("BFIndex.BuildAll.throw_std_exception", throw std::exception());

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <memory>
+#include <string>
 
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
@@ -37,7 +38,7 @@ GPUIVF::Train(const DatasetPtr& dataset, const Config& config) {
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = gpu_id_;
         faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim, config[IndexParams::nlist],
-                                                 GetMetricType(config[Metric::TYPE]), idx_config);
+                                                 GetMetricType(config[Metric::TYPE].get<std::string>()), idx_config);
         device_index.train(rows, (float*)p_data);
 
         std::shared_ptr<faiss::Index> host_index = nullptr;
@@ -116,7 +117,7 @@ GPUIVF::LoadImpl(const BinarySet& index_binary) {
 }
 
 void
-GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
+GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);

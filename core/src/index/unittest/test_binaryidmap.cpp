@@ -21,7 +21,7 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<char*> {
+class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<std::string> {
  protected:
     void
     SetUp() override {
@@ -37,13 +37,12 @@ class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<char*> {
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
-                        Values(knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO,
-                               knowhere::Metric::HAMMING));
+                        Values(std::string("JACCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
 TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
-    char* MetricType = GetParam();
+    std::string MetricType = GetParam();
     knowhere::Config conf{
         {knowhere::meta::DIM, dim},
         {knowhere::meta::TOPK, k},
@@ -89,7 +88,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
         reader(ret, bin->size);
     };
 
-    char* MetricType = GetParam();
+    std::string MetricType = GetParam();
     knowhere::Config conf{
         {knowhere::meta::DIM, dim},
         {knowhere::meta::TOPK, k},

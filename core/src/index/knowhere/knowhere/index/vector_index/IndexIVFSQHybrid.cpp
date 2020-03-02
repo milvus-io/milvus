@@ -19,6 +19,7 @@
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
 #include <fiu-local.h>
+#include <string>
 #include <utility>
 
 namespace knowhere {
@@ -36,7 +37,8 @@ IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     std::stringstream index_type;
     index_type << "IVF" << config[IndexParams::nlist] << ","
                << "SQ8Hybrid";
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE]));
+    auto build_index =
+        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
 
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {
@@ -130,7 +132,7 @@ QuantizerPtr
 IVFSQHybrid::LoadQuantizer(const Config& config) {
     //    std::lock_guard<std::mutex> lk(g_mutex);
 
-    auto gpu_id = config["gpu_id"];
+    auto gpu_id = config["gpu_id"].get<int64_t>();
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
         ResScope rs(res, gpu_id, false);
         faiss::gpu::GpuClonerOptions option;
@@ -195,7 +197,7 @@ VectorIndexPtr
 IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& config) {
     //    std::lock_guard<std::mutex> lk(g_mutex);
 
-    auto gpu_id = config["gpu_id"];
+    int64_t gpu_id = config["gpu_id"];
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
         ResScope rs(res, gpu_id, false);
