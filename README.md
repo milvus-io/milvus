@@ -53,12 +53,12 @@ See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for
 
 ## Supported clients
 
-- [Go](https://github.com/milvus-io/milvus-sdk-go)
-- [Python](https://github.com/milvus-io/pymilvus)
-- [Java](https://github.com/milvus-io/milvus-sdk-java)
-- [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
-- [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
-- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Provided by [arkie](https://www.arkie.cn/))
+-   [Go](https://github.com/milvus-io/milvus-sdk-go)
+-   [Python](https://github.com/milvus-io/pymilvus)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java)
+-   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Provided by [arkie](https://www.arkie.cn/))
 
 ## Get started
 
@@ -85,9 +85,9 @@ See our [community](https://github.com/milvus-io/community) repository to learn 
 
 ## Mailing lists
 
-- [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
-- [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
-- [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
+-   [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
+-   [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
+-   [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
 
 ## Contributors
 
@@ -114,19 +114,19 @@ Below is a list of Milvus contributors. We greatly appreciate your contributions
 
 ## Resources
 
-- [Milvus.io](https://www.milvus.io)
+-   [Milvus.io](https://www.milvus.io)
 
-- [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
+-   [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
 
-- [Milvus Medium](https://medium.com/@milvusio)
+-   [Milvus Medium](https://medium.com/@milvusio)
 
-- [Milvus CSDN](https://zilliz.blog.csdn.net/)
+-   [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
-- [Milvus Twitter](https://twitter.com/milvusio)
+-   [Milvus Twitter](https://twitter.com/milvusio)
 
-- [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+-   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
-- [Milvus design docs](DESIGN.md)
+-   [Milvus design docs](DESIGN.md)
 
 ## License
 
