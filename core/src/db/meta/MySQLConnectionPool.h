@@ -24,8 +24,8 @@ namespace meta {
 class MySQLConnectionPool : public mysqlpp::ConnectionPool {
  public:
     // The object's only constructor
-    MySQLConnectionPool(std::string dbName, std::string userName, std::string passWord, std::string serverIp,
-                        int port = 0, int maxPoolSize = 8)
+    MySQLConnectionPool(const std::string& dbName, const std::string& userName, const std::string& passWord,
+                        const std::string& serverIp, int port = 0, int maxPoolSize = 8)
         : db_(dbName),
           user_(userName),
           password_(passWord),
