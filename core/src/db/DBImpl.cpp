@@ -432,8 +432,12 @@ DBImpl::DropPartition(const std::string& partition_name) {
         return SHUTDOWN_ERROR;
     }
 
-    auto status = mem_mgr_->EraseMemVector(partition_name);  // not allow insert
-    status = meta_ptr_->DropPartition(partition_name);       // soft delete table
+    mem_mgr_->EraseMemVector(partition_name);                // not allow insert
+    auto status = meta_ptr_->DropPartition(partition_name);  // soft delete table
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
+        return status;
+    }
 
     // scheduler will determine when to delete table files
     auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
