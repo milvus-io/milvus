@@ -119,7 +119,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#606 - No log generated during building index with CPU
 -   \#616 - IP search metric_type is not supported by IVF_PQ index
 -   \#631 - FAISS isn't compiled with O3 option
--   \#636 - [CPU] Create index PQ should be failed if table metric type set Inner Product
+-   \#636 - (CPU) Create index PQ should be failed if table metric type set Inner Product
 -   \#649 - Typo "partiton" should be "partition"
 -   \#654 - Random crash when frequently insert vector one by one
 -   \#658 - Milvus error out when building SQ8H index without GPU resources
