@@ -20,4 +20,8 @@ spec:
   - name: docker-sock
     hostPath:
       path: /var/run/docker.sock
-
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: milvus
+    effect: NoSchedule
