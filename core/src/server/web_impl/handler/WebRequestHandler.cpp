@@ -1264,21 +1264,21 @@ WebRequestHandler::GetSegmentInfo(const OString& table_name, const OString& segm
 
     std::string re = info->std_str();
     auto status = Status::OK();
+    nlohmann::json json;
     // Get vectors
     if (re == "vectors") {
-        nlohmann::json json;
         status = GetSegmentVectors(table_name->std_str(), segment_name->std_str(), page_size_value, offset_value, json);
-        if (status.ok()) {
-            result = json.dump().c_str();
-        }
         // Get vector ids
     } else if (re == "ids") {
-        nlohmann::json json;
         status = GetSegmentIds(table_name->std_str(), segment_name->std_str(), page_size_value, offset_value, json);
-        if (status.ok()) {
-            result = json.dump().c_str();
-        }
     }
+
+    if (status.ok()) {
+        result = json.dump().c_str();
+    } else {
+        result = "NULL";
+    }
+
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
@@ -1357,6 +1357,7 @@ WebRequestHandler::GetVector(const OString& table_name, const OQueryParams& quer
     nlohmann::json vectors_json;
     auto status = GetVectorsByIDs(table_name->std_str(), ids, vectors_json);
     if (!status.ok()) {
+        response = "NULL";
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
@@ -1389,12 +1390,6 @@ WebRequestHandler::VectorsOp(const OString& table_name, const OString& payload, 
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
         }
-
-        if (status.ok()) {
-            response = result_str.c_str();
-        }
-
-        ASSIGN_RETURN_STATUS_DTO(status)
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, emsg.c_str());
@@ -1403,6 +1398,12 @@ WebRequestHandler::VectorsOp(const OString& table_name, const OString& payload, 
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, emsg.c_str());
     } catch (std::exception& e) {
         RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
+    }
+
+    if (status.ok()) {
+        response = result_str.c_str();
+    } else {
+        response = "NULL";
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -1438,6 +1439,8 @@ WebRequestHandler::SystemInfo(const OString& cmd, const OQueryParams& query_para
 
     if (status.ok()) {
         response_str = result_str.c_str();
+    } else {
+        response_str = "NULL";
     }
 
     ASSIGN_RETURN_STATUS_DTO(status);
@@ -1465,6 +1468,7 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
         } else if (op->equals("config")) {
             SetConfig(j, result_str);
         } else {
+            status = Status(UNKNOWN_PATH, "Unknown path: /system/" + op->std_str());
         }
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
@@ -1476,6 +1480,8 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
 
     if (status.ok()) {
         response_str = result_str.c_str();
+    } else {
+        response_str = "NULL";
     }
 
     ASSIGN_RETURN_STATUS_DTO(status);
