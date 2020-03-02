@@ -11,64 +11,10 @@
 
 #pragma once
 
-#include <memory>
-#include <sstream>
-#include "Log.h"
-#include "knowhere/common/Exception.h"
+#include "src/utils/Json.h"
 
 namespace knowhere {
 
-enum class METRICTYPE {
-    INVALID = 0,
-    L2 = 1,
-    IP = 2,
-    HAMMING = 20,
-    JACCARD = 21,
-    TANIMOTO = 22,
-};
-
-// General Config
-constexpr int64_t INVALID_VALUE = -1;
-constexpr int64_t DEFAULT_K = INVALID_VALUE;
-constexpr int64_t DEFAULT_DIM = INVALID_VALUE;
-constexpr int64_t DEFAULT_GPUID = INVALID_VALUE;
-constexpr METRICTYPE DEFAULT_TYPE = METRICTYPE::INVALID;
-
-struct Cfg {
-    METRICTYPE metric_type = DEFAULT_TYPE;
-    int64_t k = DEFAULT_K;
-    int64_t gpu_id = DEFAULT_GPUID;
-    int64_t d = DEFAULT_DIM;
-
-    Cfg(const int64_t& dim, const int64_t& k, const int64_t& gpu_id, METRICTYPE type)
-        : metric_type(type), k(k), gpu_id(gpu_id), d(dim) {
-    }
-
-    Cfg() = default;
-
-    virtual bool
-    CheckValid() {
-        if (metric_type == METRICTYPE::IP || metric_type == METRICTYPE::L2) {
-            return true;
-        }
-        std::stringstream ss;
-        ss << "MetricType: " << int(metric_type) << " not support!";
-        KNOWHERE_THROW_MSG(ss.str());
-        return false;
-    }
-
-    void
-    Dump() {
-        KNOWHERE_LOG_DEBUG << DumpImpl().str();
-    }
-
-    virtual std::stringstream
-    DumpImpl() {
-        std::stringstream ss;
-        ss << "dim: " << d << ", metric: " << int(metric_type) << ", gpuid: " << gpu_id << ", k: " << k;
-        return ss;
-    }
-};
-using Config = std::shared_ptr<Cfg>;
+using Config = milvus::json;
 
 }  // namespace knowhere

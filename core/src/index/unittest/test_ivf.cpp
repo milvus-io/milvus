@@ -430,15 +430,6 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
     ASSERT_TRUE(index != nullptr);
     ASSERT_ANY_THROW(index->UnsetQuantizer());
 
-    knowhere::QuantizerConfig config = std::make_shared<knowhere::QuantizerCfg>();
-    config->gpu_id = knowhere::INVALID_VALUE;
-
-    // mode = -1
-    ASSERT_ANY_THROW(index->LoadQuantizer(config));
-    config->mode = 1;
-    ASSERT_ANY_THROW(index->LoadQuantizer(config));
-    config->gpu_id = DEVICEID;
-    //    index->LoadQuantizer(config);
     ASSERT_ANY_THROW(index->SetQuantizer(nullptr));
 }
 

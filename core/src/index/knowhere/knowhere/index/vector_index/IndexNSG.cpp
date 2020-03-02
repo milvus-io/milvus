@@ -72,26 +72,21 @@ NSG::Load(const BinarySet& index_binary) {
 
 DatasetPtr
 NSG::Search(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
-    //    if (build_cfg != nullptr) {
-    //        build_cfg->CheckValid();  // throw exception
-    //    }
-
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
     GETTENSOR(dataset)
 
-    auto elems = rows * build_cfg->k;
+    auto elems = rows * config[meta::TOPK];
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
     algo::SearchParams s_params;
-    s_params.search_length = build_cfg->search_length;
-    index_->Search((float*)p_data, rows, dim, build_cfg->k, p_dist, p_id, s_params);
+    s_params.search_length = config[IndexParams::search_length];
+    index_->Search((float*)p_data, rows, dim, config[meta::TOPK], p_dist, p_id, s_params);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -101,42 +96,36 @@ NSG::Search(const DatasetPtr& dataset, const Config& config) {
 
 IndexModelPtr
 NSG::Train(const DatasetPtr& dataset, const Config& config) {
-    config->Dump();
-    auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(config);
     idmap->AddWithoutId(dataset, config);
     Graph knng;
     const float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
-    if (build_cfg->gpu_id == knowhere::INVALID_VALUE) {
+    if (config["gpu_id"] == knowhere::INVALID_VALUE) {
         auto preprocess_index = std::make_shared<IVF>();
         auto model = preprocess_index->Train(dataset, config);
         preprocess_index->set_index_model(model);
         preprocess_index->Add(dataset, config);
-        preprocess_index->GenGraph(raw_data, build_cfg->knng, knng, config);
+        preprocess_index->GenGraph(raw_data, config[IndexParams::knng], knng, config);
     } else {
         // TODO(linxj): use ivf instead?
-        auto gpu_idx = cloner::CopyCpuToGpu(idmap, build_cfg->gpu_id, config);
+        auto gpu_idx = cloner::CopyCpuToGpu(idmap, config["gpu_id"], config);
         auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
-        gpu_idmap->GenGraph(raw_data, build_cfg->knng, knng, config);
+        gpu_idmap->GenGraph(raw_data, config[IndexParams::knng], knng, config);
     }
 #else
     auto preprocess_index = std::make_shared<IVF>();
     auto model = preprocess_index->Train(dataset, config);
     preprocess_index->set_index_model(model);
     preprocess_index->AddWithoutIds(dataset, config);
-    preprocess_index->GenGraph(raw_data, build_cfg->knng, knng, config);
+    preprocess_index->GenGraph(raw_data, config[IndexParams::knng], knng, config);
 #endif
 
     algo::BuildParams b_params;
-    b_params.candidate_pool_size = build_cfg->candidate_pool_size;
-    b_params.out_degree = build_cfg->out_degree;
-    b_params.search_length = build_cfg->search_length;
+    b_params.candidate_pool_size = config[IndexParams::candidate];
+    b_params.out_degree = config[IndexParams::out_degree];
+    b_params.search_length = config[IndexParams::search_length];
 
     auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
 

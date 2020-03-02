@@ -28,21 +28,16 @@ namespace knowhere {
 
 IndexModelPtr
 GPUIVF::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-    gpu_id_ = build_cfg->gpu_id;
-
     GETTENSOR(dataset)
+    gpu_id_ = config["gpu_id"];
 
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {
         ResScope rs(temp_resource, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = gpu_id_;
-        faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim, build_cfg->nlist,
-                                                 GetMetricType(build_cfg->metric_type), idx_config);
+        faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim, config[IndexParams::nlist],
+                                                 GetMetricType(config[Metric::TYPE]), idx_config);
         device_index.train(rows, (float*)p_data);
 
         std::shared_ptr<faiss::Index> host_index = nullptr;
@@ -127,9 +122,7 @@ GPUIVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, i
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
-        auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(cfg);
-        device_index->nprobe = search_cfg->nprobe;
-        // assert(device_index->getNumProbes() == search_cfg->nprobe);
+        device_index->nprobe = config[IndexParams::nprobe];
         ResScope rs(res_, gpu_id_);
         device_index->search(n, (float*)data, k, distances, labels);
     } else {

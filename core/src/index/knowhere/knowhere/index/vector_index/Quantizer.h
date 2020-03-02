@@ -23,9 +23,9 @@ struct Quantizer {
 };
 using QuantizerPtr = std::shared_ptr<Quantizer>;
 
-struct QuantizerCfg : Cfg {
-    int64_t mode = -1;  // 0: all data, 1: copy quantizer, 2: copy data
-};
-using QuantizerConfig = std::shared_ptr<QuantizerCfg>;
+// struct QuantizerCfg : Cfg {
+//     int64_t mode = -1;  // 0: all data, 1: copy quantizer, 2: copy data
+// };
+// using QuantizerConfig = std::shared_ptr<QuantizerCfg>;
 
 }  // namespace knowhere

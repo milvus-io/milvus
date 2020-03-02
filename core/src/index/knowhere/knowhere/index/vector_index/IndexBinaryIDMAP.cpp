@@ -43,13 +43,13 @@ BinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
     }
     GETBINARYTENSOR(dataset)
 
-    auto elems = rows * config->k;
+    auto elems = rows * config[meta::TOPK];
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    search_impl(rows, (uint8_t*)p_data, config->k, p_dist, p_id, Config());
+    search_impl(rows, (uint8_t*)p_data, config[meta::TOPK], p_dist, p_id, Config());
 
     auto ret_ds = std::make_shared<Dataset>();
     if (index_->metric_type == faiss::METRIC_Hamming) {
@@ -90,14 +90,8 @@ BinaryIDMAP::Add(const DatasetPtr& dataset, const Config& config) {
 
 void
 BinaryIDMAP::Train(const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
-    if (build_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("not support this kind of config");
-    }
-    config->CheckValid();
-
     const char* type = "BFlat";
-    auto index = faiss::index_binary_factory(config->d, type, GetMetricType(config->metric_type));
+    auto index = faiss::index_binary_factory(config[meta::DIM], type, GetMetricType(config[Metric::TYPE]));
     index_.reset(index);
 }
 
@@ -181,26 +175,18 @@ BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    //    auto search_cfg = std::dynamic_pointer_cast<BinIDMAPCfg>(config);
-    //    if (search_cfg == nullptr) {
-    //        KNOWHERE_THROW_MSG("not support this kind of config");
-    //    }
-
-    //    GETBINARYTENSOR(dataset)
     auto dim = dataset->Get<int64_t>(meta::DIM);
     auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
-    auto elems = rows * config->k;
+    auto elems = rows * config[meta::TOPK];
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
     auto* pdistances = (int32_t*)p_dist;
-    //    index_->searchById(rows, (uint8_t*)p_data, config->k, pdistances, p_id, bitset_);
-    //    auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    index_->search_by_id(rows, p_data, config->k, pdistances, p_id, bitset_);
+    index_->search_by_id(rows, p_data, config[meta::TOPK], pdistances, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     if (index_->metric_type == faiss::METRIC_Hamming) {

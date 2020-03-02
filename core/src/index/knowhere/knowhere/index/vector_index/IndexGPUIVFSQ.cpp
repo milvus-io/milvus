@@ -23,18 +23,13 @@ namespace knowhere {
 
 IndexModelPtr
 GPUIVFSQ::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-    gpu_id_ = build_cfg->gpu_id;
-
     GETTENSOR(dataset)
+    gpu_id_ = config["gpu_id"];
 
     std::stringstream index_type;
-    index_type << "IVF" << build_cfg->nlist << ","
-               << "SQ" << build_cfg->nbits;
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(build_cfg->metric_type));
+    index_type << "IVF" << config[IndexParams::nlist] << ","
+               << "SQ" << config[IndexParams::nbits];
+    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE]));
 
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {

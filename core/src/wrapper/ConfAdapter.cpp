@@ -8,8 +8,8 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-
 #include "wrapper/ConfAdapter.h"
+#include "knowhere/Index/vector_index/helpers/IndexParameter.h"
 
 #include <fiu-local.h>
 
@@ -23,6 +23,8 @@
 
 namespace milvus {
 namespace engine {
+
+using namespace knowhere;
 
 #if CUDA_VERSION > 9000
 #define GPU_MAX_NRPOBE 2048
@@ -67,17 +69,17 @@ namespace engine {
 
 bool
 ConfAdapter::CheckTrain(Json& oricfg) {
-    static std::vector<std::string> METRICS{"L2", "IP"};
+    static std::vector<std::string> METRICS{Metric::L2, Metric::IP};
 
-    checkint("dim", DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkstr("metric", METRICS);
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkstr(Metric::TYPE, METRICS);
 
     return true;
 }
 
 bool
 ConfAdapter::CheckSearch(Json& oricfg, const IndexType& type) {
-    checkint("k", DEFAULT_MIN_K, DEFAULT_MAX_K);
+    checkint(meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
 
     return true;
 }
@@ -87,7 +89,7 @@ IVFConfAdapter::CheckTrain(Json& oricfg) {
     static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
     static int64_t MIN_NLIST = 1;
 
-    checkint("nlist", MIN_NLIST, MAX_NLIST);
+    checkint(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -99,9 +101,9 @@ IVFConfAdapter::CheckSearch(Json& oricfg, const IndexType& type) {
 
     if (type == IndexType::FAISS_IVFPQ_GPU || IndexType::FAISS_IVFSQ8_GPU || IndexType::FAISS_IVFSQ8_HYBRID ||
         IndexType::FAISS_IVFFLAT_GPU) {
-        checkint("nprobe", MIN_NPROBE, GPU_MAX_NRPOBE);
+        checkint(IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
     } else {
-        checkint("nprobe", MIN_NPROBE, MAX_NPROBE);
+        checkint(IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
     }
 
     return ConfAdapter::CheckSearch(oricfg);
@@ -110,7 +112,7 @@ IVFConfAdapter::CheckSearch(Json& oricfg, const IndexType& type) {
 bool
 IVFSQConfAdapter::CheckTrain(Json& oricfg) {
     static int64_t DEFAULT_NBITS = 8;
-    oricfg["nbits"] = DEFAULT_NBITS;
+    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
 
     return IVFConfAdapter::CheckTrain(oricfg);
 }
@@ -118,10 +120,10 @@ IVFSQConfAdapter::CheckTrain(Json& oricfg) {
 bool
 IVFPQConfAdapter::CheckTrain(Json& oricfg) {
     static int64_t DEFAULT_NBITS = 8;
-    static std::vector<std::string> CPU_METRICS{"L2", "IP"};
-    static std::vector<std::string> GPU_METRICS{"L2"};
+    static std::vector<std::string> CPU_METRICS{Metric::L2, Metric::IP};
+    static std::vector<std::string> GPU_METRICS{Metric::L2};
 
-    oricfg["nbits"] = DEFAULT_NBITS;
+    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
 
 #ifdef MILVUS_GPU_VERSION
     Status s;
@@ -129,12 +131,12 @@ IVFPQConfAdapter::CheckTrain(Json& oricfg) {
     server::Config& config = server::Config::GetInstance();
     s = config.GetGpuResourceConfigEnable(enable_gpu);
     if (s.ok()) {
-        checkstr("metric", GPU_METRICS);
+        checkstr(Metric::TYPE, GPU_METRICS);
     } else {
-        checkstr("metric", CPU_METRICS);
+        checkstr(Metric::TYPE, CPU_METRICS);
     }
 #endif
-    checkint("dim", DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
 
     /*
      * Faiss 1.6
@@ -145,15 +147,15 @@ IVFPQConfAdapter::CheckTrain(Json& oricfg) {
     static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
     std::vector<int64_t> resset;
     for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(oricfg["dim"] % dimperquantizer)) {
-            auto subquantzier_num = oricfg["dim"] / dimperquantizer;
+        if (!(oricfg[meta::DIM] % dimperquantizer)) {
+            auto subquantzier_num = oricfg[meta::DIM] / dimperquantizer;
             auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
             if (finder != support_subquantizer.end()) {
                 resset.push_back(subquantzier_num);
             }
         }
     }
-    checkintbyvalue("m", resset);
+    checkintbyvalue(IndexParams::m, resset);
 
     return true;
 }
@@ -163,39 +165,41 @@ NSGConfAdapter::CheckTrain(Json& oricfg) {
     static int64_t MIN_KNNG = 5;
     static int64_t MAX_KNNG = 300;
     static int64_t MIN_SEARCH_LENGTH = 10;
-    static int64_t MAX_SEARCH_LENGTH = 200;
+    static int64_t MAX_SEARCH_LENGTH = 300;
     static int64_t MIN_OUT_DEGREE = 5;
     static int64_t MAX_OUT_DEGREE = 300;
     static int64_t MIN_CANDIDATE_POOL_SIZE = 50;
     static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
+    static std::vector<std::string> METRICS{Metric::L2};
 
-    checkint("knng", MIN_KNNG, MAX_KNNG);
-    checkint("search_length", MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
-    checkint("out_degree", MIN_OUT_DEGREE, MAX_OUT_DEGREE);
-    checkint("candidate_pool_size", MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
+    checkstr(Metric::TYPE, METRICS);
+    checkint(IndexParams::knng, MIN_KNNG, MAX_KNNG);
+    checkint(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    checkint(IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
+    checkint(IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
 
-    return ConfAdapter::CheckTrain(oricfg);
+    return true;
 }
 
 void
 NSGConfAdapter::CheckSearch(Json& oricfg, const IndexType& type) {
     static int64_t MIN_SEARCH_LENGTH = 1;
-    static int64_t MAX_SEARCH_LENGTH = 200;
+    static int64_t MAX_SEARCH_LENGTH = 300;
 
-    checkint("search_length", MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    checkint(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
 
     return ConfAdapter::CheckSearch(oricfg);
 }
 
 bool
 HNSWConfAdapter::CheckTrain(Json& oricfg) {
-    static int64_t MIN_EF_CONSTRUCT = 100;
-    static int64_t MAX_EF_CONSTRUCT = 500;
+    static int64_t MIN_EFCONSTRUCTION = 100;
+    static int64_t MAX_EFCONSTRUCTION = 500;
     static int64_t MIN_M = 5;
     static int64_t MAX_M = 48;
 
-    checkint("ef_construct", MIN_EF_CONSTRUCT, MAX_EF_CONSTRUCT);
-    checkint("M", MIN_M, MAX_M);
+    checkint(IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
+    checkint(IndexParams::M, MIN_M, MAX_M);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -204,30 +208,30 @@ bool
 HNSWConfAdapter::CheckSearch(Json& oricfg, const IndexType& type) {
     static int64_t MAX_EF = 4096;
 
-    checkint("ef", oricfg["k"], MAX_EF);
+    checkint(IndexParams::ef, oricfg[meta::TOPK], MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg);
 }
 
 bool
 BinIDMAPConfAdapter::CheckTrain(Json& oricfg) {
-    static std::vector<std::string> METRICS{"HAMMING", "JACCARD", "TANIMOTO"};
+    static std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD, Metric::TANIMOTO};
 
-    checkint("dim", DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkstr("metric", METRICS);
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkstr(Metric::TYPE, METRICS);
 
     return true;
 }
 
 bool
 BinIVFConfAdapter::CheckTrain(Json& oricfg) {
-    static std::vector<std::string> METRICS{"HAMMING", "JACCARD", "TANIMOTO"};
+    static std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD, Metric::TANIMOTO};
     static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
     static int64_t MIN_NLIST = 1;
 
-    checkint("dim", DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkint("nlist", MIN_NLIST, MAX_NLIST);
-    checkstr("metric", METRICS);
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkint(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    checkstr(Metric::TYPE, METRICS);
 
     return true;
 }

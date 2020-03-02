@@ -275,9 +275,7 @@ ExecutionEngineImpl::HybridLoad() const {
         auto best_index = std::distance(all_free_mem.begin(), max_e);
         auto best_device_id = gpus[best_index];
 
-        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-        quantizer_conf->mode = 1;
-        quantizer_conf->gpu_id = best_device_id;
+        milvus::Json quantizer_conf{{"gpu_id" : best_device_id}, {"mode" : 1}};
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
@@ -542,9 +540,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 
             if (device_id != NOT_FOUND) {
                 // cache hit
-                auto config = std::make_shared<knowhere::QuantizerCfg>();
-                config->gpu_id = device_id;
-                config->mode = 2;
+                milvus::json quantizer_conf{{"gpu_id" : device_id}, {"mode" : 2}};
                 auto new_index = index_->LoadData(quantizer, config);
                 index_ = new_index;
             }
@@ -774,9 +770,7 @@ ExecutionEngineImpl::Search(int64_t n,
 
                 if (device_id != NOT_FOUND) {
                     // cache hit
-                    auto config = std::make_shared<knowhere::QuantizerCfg>();
-                    config->gpu_id = device_id;
-                    config->mode = 2;
+                    milvus::json quantizer_conf{{"gpu_id" : device_id}, {"mode" : 2}};
                     auto new_index = index_->LoadData(quantizer, config);
                     index_ = new_index;
                 }
