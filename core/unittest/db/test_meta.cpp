@@ -671,9 +671,6 @@ TEST_F(MetaTest, INDEX_TEST) {
     ASSERT_TRUE(status.ok());
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
-    std::string out_str = index_out.extra_params_;
-    std::string in_str = index.extra_params_;
-    ASSERT_NE(out_str, in_str);
     ASSERT_NE(index_out.engine_type_, index.engine_type_);
 
     status = impl_->UpdateTableFilesToIndex(table_id);

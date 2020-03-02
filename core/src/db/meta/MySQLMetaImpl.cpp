@@ -405,10 +405,9 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
 
             createTableQuery << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote << table_id
                              << ", " << state << ", " << dimension << ", " << created_on << ", " << flag << ", "
-                             << index_file_size << ", " << engine_type << ", "
-                             << mysqlpp::quote << index_params << ", " << metric_type
-                             << ", " << mysqlpp::quote << owner_table << ", " << mysqlpp::quote << partition_tag
-                             << ", " << mysqlpp::quote << version << ", " << flush_lsn << ");";
+                             << index_file_size << ", " << engine_type << ", " << mysqlpp::quote << index_params << ", "
+                             << metric_type << ", " << mysqlpp::quote << owner_table << ", " << mysqlpp::quote
+                             << partition_tag << ", " << mysqlpp::quote << version << ", " << flush_lsn << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
@@ -1254,7 +1253,7 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index
             }
 
             mysqlpp::Query describeTableIndexQuery = connectionPtr->query();
-            describeTableIndexQuery << "SELECT engine_type, index_file_size, metric_type"
+            describeTableIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
                                     << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_id
                                     << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -1327,7 +1326,7 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
             // set table index type to raw
             dropTableIndexQuery << "UPDATE " << META_TABLES
                                 << " SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE)
-                                << " , index_params = " << mysqlpp::quote
+                                << " , index_params = '{}'"
                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();

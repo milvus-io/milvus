@@ -45,17 +45,23 @@ namespace {
 Status
 MappingMetricType(MetricType metric_type, knowhere::METRICTYPE& kw_type) {
     switch (metric_type) {
-        case MetricType::IP:kw_type = knowhere::METRICTYPE::IP;
+        case MetricType::IP:
+            kw_type = knowhere::METRICTYPE::IP;
             break;
-        case MetricType::L2:kw_type = knowhere::METRICTYPE::L2;
+        case MetricType::L2:
+            kw_type = knowhere::METRICTYPE::L2;
             break;
-        case MetricType::HAMMING:kw_type = knowhere::METRICTYPE::HAMMING;
+        case MetricType::HAMMING:
+            kw_type = knowhere::METRICTYPE::HAMMING;
             break;
-        case MetricType::JACCARD:kw_type = knowhere::METRICTYPE::JACCARD;
+        case MetricType::JACCARD:
+            kw_type = knowhere::METRICTYPE::JACCARD;
             break;
-        case MetricType::TANIMOTO:kw_type = knowhere::METRICTYPE::TANIMOTO;
+        case MetricType::TANIMOTO:
+            kw_type = knowhere::METRICTYPE::TANIMOTO;
             break;
-        default:return Status(DB_ERROR, "Unsupported metric type");
+        default:
+            return Status(DB_ERROR, "Unsupported metric type");
     }
 
     return Status::OK();
@@ -95,8 +101,8 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
       metric_type_(metric_type),
       index_params_(index_params) {
     EngineType tmp_index_type = server::ValidationUtil::IsBinaryMetricType((int32_t)metric_type)
-                                ? EngineType::FAISS_BIN_IDMAP
-                                : EngineType::FAISS_IDMAP;
+                                    ? EngineType::FAISS_BIN_IDMAP
+                                    : EngineType::FAISS_IDMAP;
     index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");
@@ -155,7 +161,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
             else
 #endif
-            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
+                index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
@@ -164,7 +170,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
             else
 #endif
-            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
+                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
             break;
         }
         case EngineType::NSG_MIX: {
@@ -189,7 +195,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
                 index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
             else
 #endif
-            index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
+                index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
             break;
         }
         case EngineType::SPTAG_KDT: {
@@ -744,13 +750,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n,
-                            const float* data,
-                            int64_t k,
-                            const milvus::json& extra_params,
-                            float* distances,
-                            int64_t* labels,
-                            bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances,
+                            int64_t* labels, bool hybrid) {
 #if 0
     if (index_type_ == EngineType::FAISS_IVFSQ8H) {
         if (!hybrid) {
@@ -852,13 +853,8 @@ ExecutionEngineImpl::Search(int64_t n,
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n,
-                            const uint8_t* data,
-                            int64_t k,
-                            const milvus::json& extra_params,
-                            float* distances,
-                            int64_t* labels,
-                            bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params,
+                            float* distances, int64_t* labels, bool hybrid) {
     TimeRecorder rc("ExecutionEngineImpl::Search");
 
     if (index_ == nullptr) {
@@ -906,13 +902,8 @@ ExecutionEngineImpl::Search(int64_t n,
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n,
-                            const std::vector<int64_t>& ids,
-                            int64_t k,
-                            const milvus::json& extra_params,
-                            float* distances,
-                            int64_t* labels,
-                            bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params,
+                            float* distances, int64_t* labels, bool hybrid) {
     TimeRecorder rc("ExecutionEngineImpl::Search");
 
     if (index_ == nullptr) {

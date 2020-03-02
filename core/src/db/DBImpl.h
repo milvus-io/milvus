@@ -129,48 +129,28 @@ class DBImpl : public DB {
     DropIndex(const std::string& table_id) override;
 
     Status
-    QueryByID(const std::shared_ptr<server::Context>& context,
-              const std::string& table_id,
-              const std::vector<std::string>& partition_tags,
-              uint64_t k,
-              const milvus::json& extra_params,
-              IDNumber vector_id,
-              ResultIds& result_ids,
-              ResultDistances& result_distances) override;
+    QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+              IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    Query(const std::shared_ptr<server::Context>& context,
-          const std::string& table_id,
-          const std::vector<std::string>& partition_tags,
-          uint64_t k,
-          const milvus::json& extra_params,
-          const VectorsData& vectors,
-          ResultIds& result_ids,
-          ResultDistances& result_distances) override;
+    Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
-    QueryByFileID(const std::shared_ptr<server::Context>& context,
-                  const std::string& table_id,
-                  const std::vector<std::string>& file_ids,
-                  uint64_t k,
-                  const milvus::json& extra_params,
-                  const VectorsData& vectors,
-                  ResultIds& result_ids,
-                  ResultDistances& result_distances) override;
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
+                  const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
 
  private:
     Status
-    QueryAsync(const std::shared_ptr<server::Context>& context,
-               const std::string& table_id,
-               const meta::TableFilesSchema& files,
-               uint64_t k,
-               const milvus::json& extra_params,
-               const VectorsData& vectors,
-               ResultIds& result_ids,
-               ResultDistances& result_distances);
+    QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+               const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
+               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,

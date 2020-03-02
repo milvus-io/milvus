@@ -368,8 +368,8 @@ DBImpl::PreloadTable(const std::string& table_id) {
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
-                                                         (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine =
+            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
         fiu_do_on("DBImpl.PreloadTable.null_engine", engine = nullptr);
         if (engine == nullptr) {
             ENGINE_LOG_ERROR << "Invalid engine type";
@@ -746,8 +746,8 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     // else set file type to RAW, no need to build index
     if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
-                                    ? meta::TableFileSchema::TO_INDEX
-                                    : meta::TableFileSchema::RAW;
+                                        ? meta::TableFileSchema::TO_INDEX
+                                        : meta::TableFileSchema::RAW;
     } else {
         compacted_file.file_type_ = meta::TableFileSchema::RAW;
     }
@@ -1032,14 +1032,9 @@ DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status
-DBImpl::QueryByID(const std::shared_ptr<server::Context>& context,
-                  const std::string& table_id,
-                  const std::vector<std::string>& partition_tags,
-                  uint64_t k,
-                  const milvus::json& extra_params,
-                  IDNumber vector_id,
-                  ResultIds& result_ids,
-                  ResultDistances& result_distances) {
+DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+                  const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+                  IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1047,20 +1042,15 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context,
     VectorsData vectors_data = VectorsData();
     vectors_data.id_array_.emplace_back(vector_id);
     vectors_data.vector_count_ = 1;
-    Status
-        result = Query(context, table_id, partition_tags, k, extra_params, vectors_data, result_ids, result_distances);
+    Status result =
+        Query(context, table_id, partition_tags, k, extra_params, vectors_data, result_ids, result_distances);
     return result;
 }
 
 Status
-DBImpl::Query(const std::shared_ptr<server::Context>& context,
-              const std::string& table_id,
-              const std::vector<std::string>& partition_tags,
-              uint64_t k,
-              const milvus::json& extra_params,
-              const VectorsData& vectors,
-              ResultIds& result_ids,
-              ResultDistances& result_distances) {
+DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
+              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1113,12 +1103,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context,
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids,
-                      uint64_t k,
-                      const milvus::json& extra_params,
-                      const VectorsData& vectors,
-                      ResultIds& result_ids,
-                      ResultDistances& result_distances) {
+                      const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
+                      const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1168,12 +1154,8 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const meta::TableFilesSchema& files,
-                   uint64_t k,
-                   const milvus::json& extra_params,
-                   const VectorsData& vectors,
-                   ResultIds& result_ids,
-                   ResultDistances& result_distances) {
+                   const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
+                   const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
     server::CollectQueryMetrics metrics(vectors.vector_count_);
@@ -1405,8 +1387,8 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
     // else set file type to RAW, no need to build index
     if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
-                                ? meta::TableFileSchema::TO_INDEX
-                                : meta::TableFileSchema::RAW;
+                                    ? meta::TableFileSchema::TO_INDEX
+                                    : meta::TableFileSchema::RAW;
     } else {
         table_file.file_type_ = meta::TableFileSchema::RAW;
     }

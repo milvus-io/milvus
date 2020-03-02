@@ -64,12 +64,8 @@ class RequestHandler {
            const std::vector<std::string>& file_id_list, TopKQueryResult& result);
 
     Status
-    SearchByID(const std::shared_ptr<Context>& context,
-               const std::string& table_name,
-               int64_t vector_id,
-               int64_t topk,
-               const milvus::json& extra_params,
-               const std::vector<std::string>& partition_list,
+    SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id, int64_t topk,
+               const milvus::json& extra_params, const std::vector<std::string>& partition_list,
                TopKQueryResult& result);
 
     Status

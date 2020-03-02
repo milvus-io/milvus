@@ -288,8 +288,8 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
         }
     }
 
-    Status status = request_handler_.CreateIndex(context_map_[context], request->table_name(),
-                                                 request->index_type(), json_params);
+    Status status =
+        request_handler_.CreateIndex(context_map_[context], request->table_name(), request->index_type(), json_params);
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -466,9 +466,8 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 
     // step 5: search vectors
     TopKQueryResult result;
-    Status status =
-        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, search_request->topk(),
-                                json_params, partitions, file_ids, result);
+    Status status = request_handler_.Search(context_map_[context], search_request->table_name(), vectors,
+                                            search_request->topk(), json_params, partitions, file_ids, result);
 
     // step 6: construct and return result
     ConstructResults(result, response);

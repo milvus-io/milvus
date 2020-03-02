@@ -134,13 +134,9 @@ RequestHandler::Search(const std::shared_ptr<Context>& context, const std::strin
 }
 
 Status
-RequestHandler::SearchByID(const std::shared_ptr<Context>& context,
-                           const std::string& table_name,
-                           int64_t vector_id,
-                           int64_t topk,
-                           const milvus::json& extra_params,
-                           const std::vector<std::string>& partition_list,
-                           TopKQueryResult& result) {
+RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
+                           int64_t topk, const milvus::json& extra_params,
+                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
         SearchByIDRequest::Create(context, table_name, vector_id, topk, extra_params, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);

@@ -306,12 +306,13 @@ TEST_F(DeleteTest, delete_single_vector) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, 0);
 
-    int topk = 1, nprobe = 1;
+    const int topk = 1, nprobe = 1;
+    milvus::json json_params = {{"nprobe", nprobe}};
 
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, xb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, xb, result_ids, result_distances);
     ASSERT_TRUE(result_ids.empty());
     ASSERT_TRUE(result_distances.empty());
     // ASSERT_EQ(result_ids[0], -1);
@@ -364,7 +365,8 @@ TEST_F(DeleteTest, delete_add_create_index) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * 2 - 1);
 
-    int topk = 10, nprobe = 10;
+    const int topk = 10, nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
 
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
@@ -373,14 +375,14 @@ TEST_F(DeleteTest, delete_add_create_index) {
     qb.float_data_.resize(TABLE_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
-    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, qb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, qb, result_ids, result_distances);
 
     ASSERT_EQ(result_ids[0], xb2.id_array_.front());
     ASSERT_LT(result_distances[0], 1e-4);
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_delete.front(), result_ids,
+    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, json_params, ids_to_delete.front(), result_ids,
                           result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
@@ -434,7 +436,8 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * 2 - 1);
 
-    int topk = 10, nprobe = 10;
+    const int topk = 10, nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
 
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
@@ -443,7 +446,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     qb.float_data_.resize(TABLE_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
-    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, qb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, qb, result_ids, result_distances);
 
     ASSERT_EQ(result_ids[0], xb2.id_array_.front());
     ASSERT_LT(result_distances[0], 1e-4);
@@ -493,7 +496,8 @@ TEST_F(DeleteTest, compact_basic) {
     stat = db_->Compact(GetTableName());
     ASSERT_TRUE(stat.ok());
 
-    int topk = 1, nprobe = 1;
+    const int topk = 1, nprobe = 1;
+    milvus::json json_params = {{"nprobe", nprobe}};
 
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
@@ -501,7 +505,8 @@ TEST_F(DeleteTest, compact_basic) {
     milvus::engine::VectorsData qb = xb;
 
     for (auto& id : ids_to_delete) {
-        stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, id, result_ids, result_distances);
+        stat =
+            db_->QueryByID(dummy_context_, GetTableName(), tags, topk, json_params, id, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], -1);
         ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
     }
@@ -573,14 +578,17 @@ TEST_F(DeleteTest, compact_with_index) {
     ASSERT_TRUE(stat.ok());
     // std::this_thread::sleep_for(std::chrono::seconds(5));  // wait for build index to finish
 
-    int topk = 10, nprobe = 10;
+    const int topk = 10, nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
+
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
 
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        stat =
+            db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
