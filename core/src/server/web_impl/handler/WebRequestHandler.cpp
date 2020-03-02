@@ -1214,8 +1214,8 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
     std::sort(segments.begin(), segments.end(), compare);
 
     int64_t size = segments.size();
-    int64_t iter_begin = 0; //std::min(size, offset_value);
-    int64_t iter_end = size; //std::min(size, offset_value + page_size_value);
+    int64_t iter_begin = 0;   // std::min(size, offset_value);
+    int64_t iter_end = size;  // std::min(size, offset_value + page_size_value);
     if (!all_required) {
         iter_begin = std::min(size, offset_value);
         iter_end = std::min(size, offset_value + page_size_value);

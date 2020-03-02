@@ -47,6 +47,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1250 - Support CPU profiling
 - \#1302 - Get all record IDs in a segment by given a segment id
 - \#1461 - Add crud APIs and segments APIs into http module
+- \#1476 - Fix vectors results bug when getting vectors from segments
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
