@@ -1294,8 +1294,8 @@ TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
     auto vecs_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_TRUE(vecs_result_json.contains("vectors"));
     auto vecs_json = vecs_result_json["vectors"];
-    ASSERT_TRUE(ids_json.is_array());
-    ASSERT_EQ(10, ids_json.size());
+    ASSERT_TRUE(vecs_json.is_array());
+    ASSERT_EQ(10, vecs_json.size());
 }
 
 TEST_F(WebControllerTest, SEGMENT_FILTER) {

@@ -529,7 +529,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:{
                 return createResponse(Status::CODE_200, response);
-                break;
             }
             default:{
                 return createDtoResponse(Status::CODE_400, status_dto);

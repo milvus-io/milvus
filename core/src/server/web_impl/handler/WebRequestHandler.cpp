@@ -409,14 +409,12 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
         }
     }
 
-    auto status = Status::OK();
     std::string msg;
 
     for (auto& c : cmds) {
         std::string reply;
-        status = CommandLine(c, reply);
+        auto status = CommandLine(c, reply);
         if (!status.ok()) {
-            msg += c + " failed: " + status.message();
             return status;
         }
         msg += c + " successfully;";
