@@ -46,9 +46,8 @@ IVF::Train(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
 
     faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
-	auto m = config[Metric::TYPE].get<std::string>();
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, config[IndexParams::nlist],
-                                                       GetMetricType(m));
+    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
+                                                       GetMetricType(config[Metric::TYPE].get<std::string>()));
     index->train(rows, (float*)p_data);
 
     // TODO(linxj): override here. train return model or not.
@@ -107,14 +106,14 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
         fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
-        auto elems = rows * config[meta::TOPK];
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        search_impl(rows, (float*)p_data, config[meta::TOPK], p_dist, p_id, config);
+        search_impl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, config);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -299,7 +298,7 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     try {
-        auto elems = rows * config[meta::TOPK];
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
@@ -309,7 +308,7 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
         // todo: enable search by id (zhiru)
         //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
         auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->search_by_id(rows, p_data, config[meta::TOPK], p_dist, p_id, bitset_);
+        index_ivf->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {

@@ -37,7 +37,7 @@ GPUIVF::Train(const DatasetPtr& dataset, const Config& config) {
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = gpu_id_;
         faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim, config[IndexParams::nlist],
-                                                 GetMetricType(config[Metric::TYPE]), idx_config);
+                                                 GetMetricType(config[Metric::TYPE].get<std::string>()), idx_config);
         device_index.train(rows, (float*)p_data);
 
         std::shared_ptr<faiss::Index> host_index = nullptr;

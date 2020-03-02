@@ -32,9 +32,9 @@ IndexModelPtr
 IVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
 
-    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(config[Metric::TYPE]));
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(config[Metric::TYPE].get<std::string>()));
     auto index =
-        std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, config[IndexParams::nlist], config[IndexParams::m], config[IndexParams::nbits]);
+        std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m].get<int64_t>(), config[IndexParams::nbits].get<int64_t>());
     index->train(rows, (float*)p_data);
 
     return std::make_shared<IVFIndexModel>(index);
