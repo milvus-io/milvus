@@ -26,4 +26,8 @@ spec:
   - name: kubeconf
     secret:
       secretName: test-cluster-config
-
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: milvus
+    effect: NoSchedule

@@ -41,11 +41,13 @@ Please mark all change in change log and use the issue from GitHub
 - \#815 - Support MinIO storage
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#853 - Support HNSW
+- \#861 - Support DeleteById / SearchByID / GetVectorById / Flush
 - \#910 - Change Milvus c++ standard to c++17
 - \#1122 - Support AVX-512 in FAISS
 - \#1204 - Add api to get table data information
 - \#1250 - Support CPU profiling
 - \#1302 - Get all record IDs in a segment by given a segment id
+- \#1461 - Add crud APIs and segments APIs into http module
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
@@ -66,7 +68,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1234 - Do S3 server validation check when Milvus startup
 - \#1263 - Allow system conf modifiable and some take effect directly
 - \#1320 - Remove debug logging from faiss
-
+- \#1444 - Improve delete
 
 ## Task
 - \#1327 - Exclude third-party code from codebeat
