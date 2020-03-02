@@ -97,10 +97,10 @@ MemTable::GetTableFileCount() {
 }
 
 Status
-MemTable::Serialize(uint64_t wal_lsn) {
+MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    if (!doc_ids_to_delete_.empty()) {
+    if (!doc_ids_to_delete_.empty() && apply_delete) {
         auto status = ApplyDeletes();
         if (!status.ok()) {
             return Status(DB_ERROR, status.message());
