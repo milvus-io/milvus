@@ -127,7 +127,6 @@ SegmentWriter::WriteBloomFilter() {
         end = std::chrono::high_resolution_clock::now();
         diff = end - start;
         ENGINE_LOG_DEBUG << "Writing bloom filter took " << diff.count() << " s";
-
     } catch (Exception& e) {
         std::string err_msg = "Failed to write vectors. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
