@@ -35,7 +35,9 @@ FileIOReader::seekg(size_t pos) {
 size_t
 FileIOReader::length() {
     fs_.seekg(0, fs_.end);
-    return fs_.tellg();
+    size_t file_size = fs_.tellg();
+    fs_.seekg(0, fs_.beg);
+    return file_size;
 }
 }  // namespace storage
 }  // namespace milvus

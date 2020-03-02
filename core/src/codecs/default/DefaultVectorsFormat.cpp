@@ -19,11 +19,16 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-
 #include <boost/filesystem.hpp>
 
+#include "server/Config.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
+#include "storage/file/FileIOReader.h"
+#include "storage/file/FileIOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
@@ -31,6 +36,10 @@ namespace codec {
 void
 DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
     const std::lock_guard<std::mutex> lock(mutex_);
+
+    bool s3_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigS3Enable(s3_enable);
 
     std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
@@ -47,51 +56,45 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            int rv_fd = open(path.c_str(), O_RDONLY, 00664);
-            if (rv_fd == -1) {
-                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-            }
-            size_t num_bytes = boost::filesystem::file_size(path);
-            std::vector<uint8_t> vector_list;
-            vector_list.resize(num_bytes);
-            if (::read(rv_fd, vector_list.data(), num_bytes) == -1) {
-                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_WRITE_ERROR, err_msg);
-            }
+            try {
+                std::shared_ptr<storage::IOReader> rv_reader_ptr;
+                if (s3_enable) {
+                    rv_reader_ptr = std::make_shared<storage::S3IOReader>(path.string());
+                } else {
+                    rv_reader_ptr = std::make_shared<storage::FileIOReader>(path.string());
+                }
 
-            vectors_read->AddData(vector_list);
-            vectors_read->SetName(path.stem().string());
+                size_t num_bytes = rv_reader_ptr->length();
+                std::vector<uint8_t> vector_list;
+                vector_list.resize(num_bytes);
+                rv_reader_ptr->read(vector_list.data(), num_bytes);
 
-            if (::close(rv_fd) == -1) {
-                std::string err_msg = "Failed to close file: " + path.string() + ", error: " + std::strerror(errno);
+                vectors_read->AddData(vector_list);
+                vectors_read->SetName(path.stem().string());
+            } catch (std::exception& e) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + e.what();
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
         }
+
         if (path.extension().string() == user_id_extension_) {
-            int uid_fd = open(path.c_str(), O_RDONLY, 00664);
-            if (uid_fd == -1) {
-                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-            }
-            auto file_size = boost::filesystem::file_size(path);
-            auto count = file_size / sizeof(segment::doc_id_t);
-            std::vector<segment::doc_id_t> uids;
-            uids.resize(count);
-            if (::read(uid_fd, uids.data(), file_size) == -1) {
-                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_WRITE_ERROR, err_msg);
-            }
+            try {
+                std::shared_ptr<storage::IOReader> uid_reader_ptr;
+                if (s3_enable) {
+                    uid_reader_ptr = std::make_shared<storage::S3IOReader>(path.string());
+                } else {
+                    uid_reader_ptr = std::make_shared<storage::FileIOReader>(path.string());
+                }
 
-            vectors_read->AddUids(uids);
+                size_t file_size = uid_reader_ptr->length();
+                std::vector<segment::doc_id_t> uids;
+                uids.resize(file_size / sizeof(segment::doc_id_t));
+                uid_reader_ptr->read(uids.data(), file_size);
 
-            if (::close(uid_fd) == -1) {
-                std::string err_msg = "Failed to close file: " + path.string() + ", error: " + std::strerror(errno);
+                vectors_read->AddUids(uids);
+            } catch (std::exception& e) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + e.what();
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
@@ -103,65 +106,39 @@ void
 DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
+    bool s3_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigS3Enable(s3_enable);
+
     std::string dir_path = directory_ptr->GetDirPath();
 
     const std::string rv_file_path = dir_path + "/" + vectors->GetName() + raw_vector_extension_;
     const std::string uid_file_path = dir_path + "/" + vectors->GetName() + user_id_extension_;
 
-    /*
-    FILE* rv_file = fopen(rv_file_path.c_str(), "wb");
-    if (rv_file == nullptr) {
-        std::string err_msg = "Failed to open file: " + rv_file_path;
-        ENGINE_LOG_ERROR << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-    }
-
-    fwrite((void*)(it.second->GetData()), sizeof(char), it.second->GetNumBytes(), rv_file);
-    fclose(rv_file);
-
-
-    FILE* uid_file = fopen(uid_file_path.c_str(), "wb");
-    if (uid_file == nullptr) {
-        std::string err_msg = "Failed to open file: " + uid_file_path;
-        ENGINE_LOG_ERROR << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-    }
-
-    fwrite((void*)(it.second->GetUids()), sizeof it.second->GetUids()[0], it.second->GetCount(), uid_file);
-    fclose(rv_file);
-    */
-
-    int rv_fd = open(rv_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
-    if (rv_fd == -1) {
-        std::string err_msg = "Failed to open file: " + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-    }
-    int uid_fd = open(uid_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
-    if (uid_fd == -1) {
-        std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-    }
-
-    if (::write(rv_fd, vectors->GetData().data(), vectors->GetData().size()) == -1) {
-        std::string err_msg = "Failed to write to file" + rv_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-    if (::close(rv_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + rv_file_path + ", error: " + std::strerror(errno);
+    try {
+        std::shared_ptr<storage::IOWriter> rv_writer_ptr;
+        if (s3_enable) {
+            rv_writer_ptr = std::make_shared<storage::S3IOWriter>(rv_file_path);
+        } else {
+            rv_writer_ptr = std::make_shared<storage::FileIOWriter>(rv_file_path);
+        }
+        rv_writer_ptr->write((void*)(vectors->GetData().data()), vectors->GetData().size());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write rv file: " + rv_file_path + ", error: " + e.what();
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
-    if (::write(uid_fd, vectors->GetUids().data(), sizeof(segment::doc_id_t) * vectors->GetCount()) == -1) {
-        std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
-        ENGINE_LOG_ERROR << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-    if (::close(uid_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + uid_file_path + ", error: " + std::strerror(errno);
+    try {
+        std::shared_ptr<storage::IOWriter> uid_writer_ptr;
+        if (s3_enable) {
+            uid_writer_ptr = std::make_shared<storage::S3IOWriter>(uid_file_path);
+        } else {
+            uid_writer_ptr = std::make_shared<storage::FileIOWriter>(uid_file_path);
+        }
+        uid_writer_ptr->write((void*)(vectors->GetUids().data()), sizeof(segment::doc_id_t) * vectors->GetCount());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write uid file: " + uid_file_path + ", error: " + e.what();
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
@@ -170,6 +147,10 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
 void
 DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
     const std::lock_guard<std::mutex> lock(mutex_);
+
+    bool s3_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigS3Enable(s3_enable);
 
     std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
@@ -186,22 +167,19 @@ DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::v
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
-            int uid_fd = open(path.c_str(), O_RDONLY, 00664);
-            if (uid_fd == -1) {
-                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-            }
-            auto file_size = boost::filesystem::file_size(path);
-            auto count = file_size / sizeof(segment::doc_id_t);
-            uids.resize(count);
-            if (::read(uid_fd, uids.data(), file_size) == -1) {
-                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_WRITE_ERROR, err_msg);
-            }
-            if (::close(uid_fd) == -1) {
-                std::string err_msg = "Failed to close file: " + path.string() + ", error: " + std::strerror(errno);
+            try {
+                std::shared_ptr<storage::IOReader> uid_reader_ptr;
+                if (s3_enable) {
+                    uid_reader_ptr = std::make_shared<storage::S3IOReader>(path.string());
+                } else {
+                    uid_reader_ptr = std::make_shared<storage::FileIOReader>(path.string());
+                }
+
+                size_t file_size = uid_reader_ptr->length();
+                uids.resize(file_size / sizeof(segment::doc_id_t));
+                uid_reader_ptr->read(uids.data(), file_size);
+            } catch (std::exception& e) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + e.what();
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
@@ -214,6 +192,10 @@ DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off
                                    std::vector<uint8_t>& raw_vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
+    bool s3_enable = false;
+    server::Config& config = server::Config::GetInstance();
+    config.GetStorageConfigS3Enable(s3_enable);
+
     std::string dir_path = directory_ptr->GetDirPath();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -227,31 +209,22 @@ DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off
     d_it it(target_path);
     //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
     for (; it != it_end; ++it) {
-        const auto& path = it->path();
+        const auto &path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
-            int rv_fd = open(path.c_str(), O_RDONLY, 00664);
-            if (rv_fd == -1) {
-                std::string err_msg = "Failed to open file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-            }
-            int off = lseek(rv_fd, offset, SEEK_SET);
-            if (off == -1) {
-                std::string err_msg = "Failed to seek file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_WRITE_ERROR, err_msg);
-            }
-
-            raw_vectors.resize(num_bytes);
-
-            if (::read(rv_fd, raw_vectors.data(), num_bytes) == -1) {
-                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
-                ENGINE_LOG_ERROR << err_msg;
-                throw Exception(SERVER_WRITE_ERROR, err_msg);
-            }
-
-            if (::close(rv_fd) == -1) {
-                std::string err_msg = "Failed to close file: " + path.string() + ", error: " + std::strerror(errno);
+            try {
+                std::shared_ptr<storage::IOReader> rv_reader_ptr;
+                if (s3_enable) {
+                    rv_reader_ptr = std::make_shared<storage::S3IOReader>(path.string());
+                } else {
+                    rv_reader_ptr = std::make_shared<storage::FileIOReader>(path.string());
+                }
+                rv_reader_ptr->seekg(offset);
+                size_t file_size = rv_reader_ptr->length();
+                num_bytes = std::min(num_bytes, file_size);
+                raw_vectors.resize(num_bytes);
+                rv_reader_ptr->read(raw_vectors.data(), num_bytes);
+            } catch (std::exception& e) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + e.what();
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
