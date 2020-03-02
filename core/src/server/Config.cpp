@@ -610,12 +610,15 @@ Config::CancelCallBack(const std::string& node, const std::string& sub_node, con
 ////////////////////////////////////////////////////////////////////////////////
 Status
 Config::CheckConfigVersion(const std::string& value) {
-    bool exist_error = milvus_config_version_map.at(MILVUS_VERSION) != value;
-    fiu_do_on("check_config_version_fail", exist_error = true);
-    if (exist_error) {
-        std::string msg = "Invalid config version: " + value +
-                          ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+    if (milvus_config_version_map.find(MILVUS_VERSION) != milvus_config_version_map.end()) {
+        bool exist_error = milvus_config_version_map.at(MILVUS_VERSION) != value;
+        fiu_do_on("check_config_version_fail", exist_error = true);
+        if (exist_error) {
+            std::string msg = "Invalid config version: " + value +
+                              ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
+            SERVER_LOG_ERROR << msg;
+            // return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
     return Status::OK();
 }
