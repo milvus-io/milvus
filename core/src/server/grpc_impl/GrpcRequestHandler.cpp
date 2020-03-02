@@ -413,7 +413,7 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
     milvus::json json_params;
     for (int i = 0; i < request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
-        if (extra.key() == "param") {
+        if (extra.key() == EXTRA_PARAM_KEY) {
             json_params = json::parse(extra.value());
         }
     }
@@ -459,7 +459,7 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
     milvus::json json_params;
     for (int i = 0; i < search_request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = search_request->extra_params(i);
-        if (extra.key() == "param") {
+        if (extra.key() == EXTRA_PARAM_KEY) {
             json_params = json::parse(extra.value());
         }
     }
@@ -585,7 +585,7 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
     response->set_table_name(param.table_name_);
     response->set_index_type(param.index_type_);
     ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
-    kv->set_key("param");
+    kv->set_key(EXTRA_PARAM_KEY);
     kv->set_value(param.extra_params_);
     SET_RESPONSE(response->mutable_status(), status, context);
 
