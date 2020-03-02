@@ -405,8 +405,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
 
     if (status.ok()) {
         status = UpdateFileConfigFromMem(parent_key, child_key);
-        if (status.ok() && (parent_key == CONFIG_SERVER || parent_key == CONFIG_DB || parent_key == CONFIG_STORAGE ||
-                            parent_key == CONFIG_METRIC || parent_key == CONFIG_TRACING)) {
+        if (status.ok() &&
+            !(parent_key == CONFIG_CACHE || parent_key == CONFIG_ENGINE || parent_key == CONFIG_GPU_RESOURCE)) {
             restart_required_ = true;
         }
     }

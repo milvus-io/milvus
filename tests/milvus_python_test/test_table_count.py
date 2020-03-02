@@ -1,4 +1,3 @@
-import random
 import pdb
 import pytest
 import logging
@@ -35,7 +34,7 @@ class TestTableCount:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in cpu mode")
@@ -128,19 +127,20 @@ class TestTableCount:
         status, res = connect.get_table_row_count(table)
         assert res == nb * 2
 
-    def test_table_rows_count_after_index_created(self, connect, table, get_simple_index_params):
+    def test_table_rows_count_after_index_created(self, connect, table, get_simple_index):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params 
         expected: get_table_row_count raise exception
         '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         nb = 100
-        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=table, records=vectors)
         time.sleep(add_time_interval)
         # logging.getLogger().info(index_params)
-        connect.create_index(table, index_params)
+        connect.create_index(table, index_type, index_param)
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
@@ -252,7 +252,7 @@ class TestTableCountIP:
         scope="function",
         params=gen_simple_index_params()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
@@ -274,19 +274,19 @@ class TestTableCountIP:
         status, res = connect.get_table_row_count(ip_table)
         assert res == nb
 
-    def test_table_rows_count_after_index_created(self, connect, ip_table, get_simple_index_params):
+    def test_table_rows_count_after_index_created(self, connect, ip_table, get_simple_index):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params
         expected: get_table_row_count raise exception
         '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         nb = 100
-        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=ip_table, records=vectors)
         time.sleep(add_time_interval)
-        # logging.getLogger().info(index_params)
-        connect.create_index(ip_table, index_params)
+        connect.create_index(ip_table, index_type, index_param)
         status, res = connect.get_table_row_count(ip_table)
         assert res == nb
 

@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "include/MilvusApi.h"
+#include "examples/utils/TimeRecorder.h"
+#include "examples/utils/Utils.h"
 #include "examples/simple/src/ClientTest.h"
 
 #include <iostream>
@@ -16,9 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "examples/utils/TimeRecorder.h"
-#include "examples/utils/Utils.h"
-#include "include/MilvusApi.h"
 
 namespace {
 
@@ -34,7 +34,7 @@ constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
-constexpr int32_t N_LIST = 16384;
+constexpr int32_t NLIST = 16384;
 
 }  // namespace
 
@@ -170,7 +170,8 @@ void
 ClientTest::CreateIndex(const std::string& table_name, milvus::IndexType type, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
-    milvus::IndexParam index1 = {table_name, type, nlist};
+    JSON json_params = {{"nlist", nlist}};
+    milvus::IndexParam index1 = {table_name, type, json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
@@ -246,7 +247,7 @@ ClientTest::Test() {
     SearchVectors(table_name, TOP_K, NPROBE);
     SearchVectorsByIds(table_name, TOP_K, NPROBE);
 
-    CreateIndex(table_name, INDEX_TYPE, N_LIST);
+    CreateIndex(table_name, INDEX_TYPE, NLIST);
     ShowTableInfo(table_name);
 
     PreloadTable(table_name);
