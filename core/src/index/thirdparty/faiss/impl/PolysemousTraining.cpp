@@ -22,6 +22,7 @@
 #include <faiss/utils/hamming.h>
 
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/FaissHook.h>
 
 /*****************************************
  * Mixed PQ / Hamming

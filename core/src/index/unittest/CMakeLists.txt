@@ -117,6 +117,12 @@ if (KNOWHERE_GPU_VERSION)
     target_link_libraries(test_customized_index ${depend_libs} ${unittest_libs} ${basic_libs})
 endif ()
 
+#<INSTRUCTIONSET-TEST>
+if (NOT TARGET test_instructionset)
+    add_executable(test_instructionset test_instructionset.cpp)
+endif ()
+target_link_libraries(test_instructionset ${depend_libs} ${unittest_libs})
+
 if (NOT TARGET test_knowhere_common)
     add_executable(test_knowhere_common test_common.cpp ${util_srcs})
 endif ()

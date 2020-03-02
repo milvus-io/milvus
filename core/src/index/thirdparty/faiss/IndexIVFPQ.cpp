@@ -22,6 +22,7 @@
 
 #include <faiss/Clustering.h>
 #include <faiss/IndexFlat.h>
+#include <faiss/FaissHook.h>
 
 #include <faiss/utils/hamming.h>
 

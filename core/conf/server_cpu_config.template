@@ -46,7 +46,8 @@ server_config:
 #                      | loaded when Milvus server starts up.                       |            |                 |
 #                      | '*' means preload all existing tables.                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# auto_flush_interval  | Interval of auto flush. Unit is millisecond.               | Integer    | 1000            |
+# auto_flush_interval  | The interval, in milliseconds, at which Milvus             | Integer    | 1000 (ms)       |
+#                      | automatically flushes data to disk.                        |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: sqlite://:@:/
@@ -170,22 +171,31 @@ tracing_config:
   json_config_path:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# Wal Config           | Description                                                | Type       | Default         |
+# WAL Config           | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | Switch of function wal.                                    | Boolean    | false           |
+# enable               | Whether to enable write-ahead logging (WAL) in Milvus.     | Boolean    | true            |
+#                      | If WAL is enabled, Milvus writes all data changes to log   |            |                 |
+#                      | files in advance before implementing data changes. WAL     |            |                 |
+#                      | ensures the atomicity and durability for Milvus operations.|            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# recovery_error_ignore| Whether ignore the error which happens during wal recovery | Boolean    | true            |
-#                      | stage.                                                     |            |                 |
+# recovery_error_ignore| Whether to ignore logs with errors that happens during WAL | Boolean    | true            |
+#                      | recovery. If true, when Milvus restarts for recovery and   |            |                 |
+#                      | there are errors in WAL log files, log files with errors   |            |                 |
+#                      | are ignored. If false, Milvus does not restart when there  |            |                 |
+#                      | are errors in WAL log files.                               |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# buffer_size          | The size of the wal buffer. Unit is MB.                    | Integer    | 256             |
-#                      | It should be in range [64, 4096]. If the value set out of |            |                 |
-#                      | the range, the system will use the boundary value.         |            |                 |
+# buffer_size          | Sum total of the read buffer and the write buffer in MBs.  | Integer    | 256 (MB)        |
+#                      | buffer_size must be in range [64, 4096] (MB).              |            |                 |
+#                      | If the value you specified is out of range, Milvus         |            |                 |
+#                      | automatically uses the boundary value closest to the       |            |                 |
+#                      | specified value. It is recommended you set buffer_size to  |            |                 |
+#                      | a value greater than the inserted data size of a single    |            |                 |
+#                      | insert operation for better performance.                   |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# wal_path             | The root path of wal relative files, include wal meta      | String     | NULL            |
-#                      | files.                                                     |            |                 |
+# wal_path             | Location of WAL log files.                                 | String     |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 wal_config:
   enable: true
   recovery_error_ignore: true
-  buffer_size: 256   # MB
-  wal_path: /tmp/milvus/wal
+  buffer_size: 256
+  wal_path: @MILVUS_DB_PATH@/wal

@@ -27,6 +27,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1240 - Update license declaration
 - \#1298 - Unittest failed when on CPU2GPU case
 - \#1359 - Negative distance value returned when searching with HNSW index type
+- \#1429 - Server crashed when searching vectors using GPU
 
 ## Feature
 - \#216 - Add CLI to get server info
@@ -41,7 +42,9 @@ Please mark all change in change log and use the issue from GitHub
 - \#823 - Support binary vector tanimoto/jaccard/hamming metric
 - \#853 - Support HNSW
 - \#910 - Change Milvus c++ standard to c++17
+- \#1122 - Support AVX-512 in FAISS
 - \#1204 - Add api to get table data information
+- \#1250 - Support CPU profiling
 - \#1302 - Get all record IDs in a segment by given a segment id
 
 ## Improvement
@@ -57,9 +60,9 @@ Please mark all change in change log and use the issue from GitHub
 - \#1002 - Rename minio to s3 in Storage Config section
 - \#1078 - Move 'insert_buffer_size' to Cache Config section
 - \#1105 - Error message is not clear when creating IVFSQ8H index without gpu resources
+- \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1303, #1304, #1324, #1388, #1459 - Various fixes and improvements for Milvus documentation.
 - \#1297 - Hide partition_name parameter, avid user directly access partition table
 - \#1310 - Add default partition tag for a table
-- \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1303, #1304, #1324, #1388 - Various fixes and improvements for Milvus documentation.
 - \#1234 - Do S3 server validation check when Milvus startup
 - \#1263 - Allow system conf modifiable and some take effect directly
 - \#1320 - Remove debug logging from faiss
