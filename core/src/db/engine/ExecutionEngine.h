@@ -15,8 +15,8 @@
 #include <string>
 #include <vector>
 
-#include "utils/Status.h"
 #include "utils/Json.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
@@ -95,31 +95,16 @@ class ExecutionEngine {
     GetVectorByID(const int64_t& id, uint8_t* vector, bool hybrid) = 0;
 
     virtual Status
-    Search(int64_t n,
-           const float* data,
-           int64_t k,
-           const milvus::json& extra_params,
-           float* distances,
-           int64_t* labels,
+    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
            bool hybrid) = 0;
 
     virtual Status
-    Search(int64_t n,
-           const uint8_t* data,
-           int64_t k,
-           const milvus::json& extra_params,
-           float* distances,
-           int64_t* labels,
-           bool hybrid) = 0;
+    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) = 0;
 
     virtual Status
-    Search(int64_t n,
-           const std::vector<int64_t>& ids,
-           int64_t k,
-           const milvus::json& extra_params,
-           float* distances,
-           int64_t* labels,
-           bool hybrid) = 0;
+    Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
     BuildIndex(const std::string& location, EngineType engine_type) = 0;

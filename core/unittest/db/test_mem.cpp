@@ -285,7 +285,8 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
 
-    int topk = 10, nprobe = 10;
+    const int topk = 10, nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
     for (auto& pair : search_vectors) {
         auto& search = pair.second;
 
@@ -293,7 +294,8 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        stat =
+            db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, search, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], pair.first);
         ASSERT_LT(result_distances[0], 1e-4);
     }
@@ -388,6 +390,7 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
 //        std::stringstream ss;
 //        uint64_t count = 0;
 //        uint64_t prev_count = 0;
+//        milvus::json json_params = {{"nprobe", 10}};
 //
 //        for (auto j = 0; j < 10; ++j) {
 //            ss.str("");
@@ -397,7 +400,8 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
 //            START_TIMER;
 //
 //            std::vector<std::string> tags;
-//            stat = db_->Query(dummy_context_, GetTableName(), tags, k, 10, qxb, result_ids, result_distances);
+//            stat =
+//                db_->Query(dummy_context_, GetTableName(), tags, k, json_params, qxb, result_ids, result_distances);
 //            ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
 //            STOP_TIMER(ss.str());
 //

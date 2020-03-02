@@ -14,7 +14,7 @@ from utils import *
 
 dim = 128
 table_id = "test_search"
-add_interval_time = 2
+add_interval_time = 1.5
 vectors = gen_vectors(6000, dim)
 # vectors /= numpy.linalg.norm(vectors)
 # vectors = vectors.tolist()
@@ -99,8 +99,7 @@ class TestSearchBase:
         Add specified vectors to table
         '''
         status, ids = connect.add_vectors(table, vectors)
-        # sleep(add_interval_time)
-        sleep(10)
+        sleep(add_interval_time)
         return vectors, ids
 
     def add_data_ids(self, connect, table, vectors):
@@ -131,6 +130,7 @@ class TestSearchBase:
     def add_data_no_flush_ids(self, connect, table, vectors):
         my_ids = [i for i in range(len(vectors))]
         status, ids = connect.add_vectors(table, vectors, my_ids)
+        time.sleep(add_interval_time)
         return vectors, ids
 
     # delete data and auto flush - timeout due to the flush interval in config file
@@ -148,6 +148,7 @@ class TestSearchBase:
         delete vectors by id
         '''
         status = connect.delete_by_id(table, ids)
+        time.sleep(add_interval_time)
         return status
 
     # delete data and manual flush

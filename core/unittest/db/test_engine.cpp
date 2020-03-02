@@ -103,8 +103,9 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     fiu_init(0);
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
+    milvus::json index_params = {{"nlist", 1024}};
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
 
     std::vector<float> data;
     std::vector<int64_t> ids;
@@ -177,8 +178,9 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
+    milvus::json index_params = {{"nlist", 1024}};
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
 
     fiu_init(0); // init
     fiu_enable("read_null_index", 1, NULL, 0);
@@ -209,11 +211,13 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
 TEST_F(EngineTest, ENGINE_IMPL_THROW_EXCEPTION_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/invalid_file";
+    milvus::json index_params = {{"nlist", 1024}};
+
     fiu_init(0); // init
     fiu_enable("ValidateStringNotBool", 1, NULL, 0);
 
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, 1024);
+        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
 
     fiu_disable("ValidateStringNotBool");
 

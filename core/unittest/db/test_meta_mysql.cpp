@@ -747,7 +747,6 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     ASSERT_TRUE(status.ok());
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
-    ASSERT_NE(index_out.extra_params_, index.extra_params_);
     ASSERT_NE(index_out.engine_type_, index.engine_type_);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTableIndex.null_connection");

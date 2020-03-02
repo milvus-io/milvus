@@ -506,9 +506,8 @@ WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto:
     }
 
     auto json = milvus::json::parse(extra_params);
-    auto status =
-        request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
-                                     static_cast<int64_t>(IndexNameMap.at(index_type)), json);
+    auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
+                                               static_cast<int64_t>(IndexNameMap.at(index_type)), json);
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
