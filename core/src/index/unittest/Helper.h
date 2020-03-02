@@ -72,7 +72,7 @@ class ParamGenerator {
     knowhere::Config
     Gen(const ParameterType& type) {
         if (type == ParameterType::ivf) {
-            return knowhere::Config conf{
+            return knowhere::Config{
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
                 {knowhere::IndexParams::nlist, 100},
@@ -81,7 +81,7 @@ class ParamGenerator {
                 {"gpu_id", DEVICEID},
             };
         } else if (type == ParameterType::ivfpq) {
-            return knowhere::Config conf{
+            return knowhere::Config{
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
                 {knowhere::IndexParams::nlist, 100},
@@ -92,7 +92,7 @@ class ParamGenerator {
                 {"gpu_id", DEVICEID},
             };
         } else if (type == ParameterType::ivfsq) {
-            return knowhere::Config conf{
+            return knowhere::Config{
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
                 {knowhere::IndexParams::nlist, 100},

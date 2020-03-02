@@ -46,8 +46,9 @@ IVF::Train(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
 
     faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
+	auto m = config[Metric::TYPE].get<std::string>();
     auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, config[IndexParams::nlist],
-                                                       GetMetricType(config[Metric::TYPE]));
+                                                       GetMetricType(m));
     index->train(rows, (float*)p_data);
 
     // TODO(linxj): override here. train return model or not.
