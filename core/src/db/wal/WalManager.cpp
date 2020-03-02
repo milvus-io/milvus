@@ -341,7 +341,7 @@ WalManager::DeleteById(const std::string& table_id, const IDNumbers& vector_ids)
 }
 
 uint64_t
-WalManager::Flush(const std::string table_id) {
+WalManager::Flush(const std::string& table_id) {
     std::lock_guard<std::mutex> lck(mutex_);
     // At most one flush requirement is waiting at any time.
     // Otherwise, flush_info_ should be modified to a list.
