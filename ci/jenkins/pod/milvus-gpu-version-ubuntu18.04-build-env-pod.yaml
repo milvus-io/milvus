@@ -38,3 +38,8 @@ spec:
     ports:
     - containerPort: 3306
       name: mysql
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: milvus
+    effect: NoSchedule
