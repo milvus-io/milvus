@@ -1,9 +1,3 @@
-
-
-
-
-
-
 | Name          | License                                                      |
 | ------------- | ------------------------------------------------------------ |
 | Boost         | [Boost Software License](https://github.com/boostorg/boost/blob/master/LICENSE_1_0.txt)                                       |
@@ -26,5 +20,5 @@
 | libfiu        | [BOLA](https://github.com/albertito/libfiu/blob/master/LICENSE)                                                          |
 | aws-sdk-cpp   | [Apache License 2.0](https://github.com/aws/aws-sdk-cpp/blob/master/LICENSE)                                             |
 |  SPTAG        |   [MIT](https://github.com/microsoft/SPTAG/blob/master/LICENSE)                                                         |
-|  hnswlib      |  [Apache 2.0](https://github.com/nmslib/hnswlib/blob/master/LICENSE)                                                     |
+|  hnswlib    |  [Apache 2.0](https://github.com/nmslib/hnswlib/blob/master/LICENSE)                                                     |
 
