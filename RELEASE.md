@@ -9,9 +9,9 @@ Project versioning follows the specification of [Semantic Versioning 2.0.0](http
 
 ## Release criteria
 
-- Milvus core test code coverage must be at least 90%.
-- Reported bugs should not have any critical issues.
-- All bugs, new features, enhancements must be tested.
-- All documents need to be reviewed with no broken link.
-- Pressure testing, stability testing, accuracy testing and performance testing results should be evaluated.
+-   Milvus core test code coverage must be at least 90%.
+-   Reported bugs should not have any critical issues.
+-   All bugs, new features, enhancements must be tested.
+-   All documents need to be reviewed with no broken link.
+-   Pressure testing, stability testing, accuracy testing and performance testing results should be evaluated.
 

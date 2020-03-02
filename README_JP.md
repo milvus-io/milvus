@@ -53,12 +53,12 @@ Milvus [リリースノート](https://www.milvus.io/docs/v0.6.0/releases/v0.6.0
 
 ## サポートするクライアント
 
-- [Go](https://github.com/milvus-io/milvus-sdk-go)
-- [Python](https://github.com/milvus-io/pymilvus)
-- [Java](https://github.com/milvus-io/milvus-sdk-java)
-- [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
-- [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
-- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) ([arkie](https://www.arkie.cn/)が提供した)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go)
+-   [Python](https://github.com/milvus-io/pymilvus)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java)
+-   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) ([arkie](https://www.arkie.cn/)が提供した)
 
 ## はじめに
 
@@ -78,9 +78,9 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 
 ## メーリングリスト
 
-- [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
-- [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
-- [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
+-   [Milvus TSC](https://lists.lfai.foundation/g/milvus-tsc)
+-   [Milvus Technical Discuss](https://lists.lfai.foundation/g/milvus-technical-discuss)
+-   [Milvus Announce](https://lists.lfai.foundation/g/milvus-announce)
 
 ## Milvusコミュニティを参加する
 
@@ -89,23 +89,23 @@ Milvusをコンフィグするために、[Milvusコンフィグ](https://www.mi
 
 ## 参考情報
 
-- [Milvus.io](https://www.milvus.io)
+-   [Milvus.io](https://www.milvus.io)
 
-- [Milvus](https://github.com/milvus-io/bootcamp)
+-   [Milvus](https://github.com/milvus-io/bootcamp)
 
-- [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs)
+-   [Milvus テストレポート](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [Milvus のよくある質問](https://www.milvus.io/docs/faq/operational_faq.md)
+-   [Milvus のよくある質問](https://www.milvus.io/docs/faq/operational_faq.md)
 
-- [Milvus Medium](https://medium.com/@milvusio)
+-   [Milvus Medium](https://medium.com/@milvusio)
 
-- [Milvus CSDN](https://zilliz.blog.csdn.net/)
+-   [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
-- [Milvus ツイッター](https://twitter.com/milvusio)
+-   [Milvus ツイッター](https://twitter.com/milvusio)
 
-- [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+-   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
-- [Milvus デザイン文書](design.md)
+-   [Milvus デザイン文書](design.md)
 
 
 ## ライセンス
