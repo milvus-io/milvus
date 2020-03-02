@@ -37,7 +37,8 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
         ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
-        auto status = Flush(flushed_tables);
+        // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
+        auto status = Flush(flushed_tables, false);
         if (!status.ok()) {
             return status;
         }
@@ -62,7 +63,8 @@ MemManagerImpl::InsertVectors(const std::string& table_id, int64_t length, const
     flushed_tables.clear();
     if (GetCurrentMem() > options_.insert_buffer_size_) {
         ENGINE_LOG_DEBUG << "Insert buffer size exceeds limit. Performing force flush";
-        auto status = Flush(flushed_tables);
+        // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
+        auto status = Flush(flushed_tables, false);
         if (!status.ok()) {
             return status;
         }
@@ -126,7 +128,7 @@ MemManagerImpl::DeleteVectors(const std::string& table_id, int64_t length, const
 }
 
 Status
-MemManagerImpl::Flush(const std::string& table_id) {
+MemManagerImpl::Flush(const std::string& table_id, bool apply_delete) {
     ToImmutable(table_id);
     // TODO: There is actually only one memTable in the immutable list
     MemList temp_immutable_list;
@@ -139,7 +141,7 @@ MemManagerImpl::Flush(const std::string& table_id) {
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
-        auto status = mem->Serialize(max_lsn);
+        auto status = mem->Serialize(max_lsn, apply_delete);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
             return status;
@@ -151,7 +153,7 @@ MemManagerImpl::Flush(const std::string& table_id) {
 }
 
 Status
-MemManagerImpl::Flush(std::set<std::string>& table_ids) {
+MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
     ToImmutable();
 
     MemList temp_immutable_list;
@@ -165,7 +167,7 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids) {
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         ENGINE_LOG_DEBUG << "Flushing table: " << mem->GetTableId();
-        auto status = mem->Serialize(max_lsn);
+        auto status = mem->Serialize(max_lsn, apply_delete);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Flush table " << mem->GetTableId() << " failed";
             return status;
