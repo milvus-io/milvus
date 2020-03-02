@@ -69,6 +69,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1263 - Allow system conf modifiable and some take effect directly
 - \#1320 - Remove debug logging from faiss
 - \#1444 - Improve delete
+- \#1480 - Add return code for AVX512 selection
 
 ## Task
 - \#1327 - Exclude third-party code from codebeat
