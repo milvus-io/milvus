@@ -30,6 +30,7 @@
 #include "storage/file/FileIOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
@@ -46,6 +47,7 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     try {
+        TimeRecorder recorder("read " + del_file_path);
         std::shared_ptr<storage::IOReader> reader_ptr;
         if (s3_enable) {
             reader_ptr = std::make_shared<storage::S3IOReader>(del_file_path);
@@ -59,6 +61,10 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
         reader_ptr->read(deleted_docs_list.data(), file_size);
 
         deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
+
+        double span = recorder.RecordSection("done");
+        double rate = file_size * 1000000.0 / span / 1024 / 1024;
+        ENGINE_LOG_DEBUG << "read(" << del_file_path << ") rate " << rate << "MB/s";
     } catch (std::exception& e) {
         std::string err_msg = "Failed to read from file: " + del_file_path + ", error: " + e.what();
         ENGINE_LOG_ERROR << err_msg;
@@ -78,6 +84,7 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     try {
+        TimeRecorder recorder("write " + del_file_path);
         std::shared_ptr<storage::IOWriter> writer_ptr;
         if (s3_enable) {
             writer_ptr = std::make_shared<storage::S3IOWriter>(del_file_path);
@@ -85,7 +92,12 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
             writer_ptr = std::make_shared<storage::FileIOWriter>(del_file_path);
         }
         auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-        writer_ptr->write((void*)(deleted_docs_list.data()), sizeof(segment::offset_t) * deleted_docs->GetSize());
+        size_t num_bytes = sizeof(segment::offset_t) * deleted_docs->GetSize();
+        writer_ptr->write((void*)(deleted_docs_list.data()), num_bytes);
+
+        double span = recorder.RecordSection("done");
+        double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
+        ENGINE_LOG_DEBUG << "write(" << del_file_path << ") rate " << rate << "MB/s";
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write rv file: " + del_file_path + ", error: " + e.what();
         ENGINE_LOG_ERROR << err_msg;
