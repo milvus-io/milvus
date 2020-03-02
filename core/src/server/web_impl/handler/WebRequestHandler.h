@@ -15,12 +15,16 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <opentracing/mocktracer/tracer.h>
 #include <oatpp/core/data/mapping/type/Object.hpp>
 #include <oatpp/core/macro/codegen.hpp>
 #include <oatpp/web/server/api/ApiController.hpp>
 
+#include "db/Types.h"
+#include "server/context/Context.h"
+#include "server/delivery/RequestHandler.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/CmdDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
@@ -29,10 +33,7 @@
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/dto/TableDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
-
-#include "db/Types.h"
-#include "server/context/Context.h"
-#include "server/delivery/RequestHandler.h"
+#include "thirdparty/nlohmann/json.hpp"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -76,12 +77,66 @@ class WebRequestHandler {
         return context_ptr;
     }
 
+ private:
+    void
+    AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg);
+
+    Status
+    ParseSegmentStat(const SegmentStat& seg_stat, nlohmann::json& json);
+
+    Status
+    ParsePartitionStat(const PartitionStat& par_stat, nlohmann::json& json);
+
+    Status
+    IsBinaryTable(const std::string& table_name, bool& bin);
+
+    Status
+    CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin);
+
  protected:
     Status
-    GetTableInfo(const std::string& table_name, TableFieldsDto::ObjectWrapper& table_fields);
+    GetTableMetaInfo(const std::string& table_name, nlohmann::json& json_out);
+
+    Status
+    GetTableStat(const std::string& table_name, nlohmann::json& json_out);
+
+    Status
+    GetSegmentVectors(const std::string& table_name, const std::string& segment_name, int64_t page_size, int64_t offset,
+                      nlohmann::json& json_out);
+
+    Status
+    GetSegmentIds(const std::string& table_name, const std::string& segment_name, int64_t page_size, int64_t offset,
+                  nlohmann::json& json_out);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
+
+    Status
+    Cmd(const std::string& cmd, std::string& result_str);
+
+    Status
+    PreLoadTable(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    Flush(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    Compact(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    GetConfig(std::string& result_str);
+
+    Status
+    SetConfig(const nlohmann::json& json, std::string& result_str);
+
+    Status
+    Search(const std::string& table_name, const nlohmann::json& json, std::string& result_str);
+
+    Status
+    DeleteByIDs(const std::string& table_name, const nlohmann::json& json, std::string& result_str);
+
+    Status
+    GetVectorsByIDs(const std::string& table_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
 
  public:
     WebRequestHandler() {
@@ -89,6 +144,7 @@ class WebRequestHandler {
         request_handler_ = RequestHandler();
     }
 
+ public:
     StatusDto::ObjectWrapper
     GetDevices(DevicesDto::ObjectWrapper& devices);
 
@@ -106,18 +162,25 @@ class WebRequestHandler {
     SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
 #endif
 
+    /**********
+     *
+     * Table
+     */
     StatusDto::ObjectWrapper
     CreateTable(const TableRequestDto::ObjectWrapper& table_schema);
+    StatusDto::ObjectWrapper
+    ShowTables(const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
-    GetTable(const OString& table_name, const OQueryParams& query_params, TableFieldsDto::ObjectWrapper& schema_dto);
-
-    StatusDto::ObjectWrapper
-    ShowTables(const OString& offset, const OString& page_size, TableListFieldsDto::ObjectWrapper& table_list_dto);
+    GetTable(const OString& table_name, const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     DropTable(const OString& table_name);
 
+    /**********
+     *
+     * Index
+     */
     StatusDto::ObjectWrapper
     CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param);
 
@@ -127,26 +190,50 @@ class WebRequestHandler {
     StatusDto::ObjectWrapper
     DropIndex(const OString& table_name);
 
+    /***********
+     *
+     * Partition
+     */
     StatusDto::ObjectWrapper
     CreatePartition(const OString& table_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OString& offset, const OString& page_size, const OString& table_name,
+    ShowPartitions(const OString& table_name, const OQueryParams& query_params,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper
-    DropPartition(const OString& table_name, const OString& tag);
+    DropPartition(const OString& table_name, const OString& body);
+
+    /***********
+     *
+     * Segment
+     */
+    StatusDto::ObjectWrapper
+    ShowSegments(const OString& table_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
-    Insert(const OString& table_name, const InsertRequestDto::ObjectWrapper& param,
-           VectorIdsDto::ObjectWrapper& ids_dto);
+    GetSegmentInfo(const OString& table_name, const OString& segment_name, const OString& info,
+                   const OQueryParams& query_params, OString& result);
+
+    /**
+     *
+     * Vector
+     */
+    StatusDto::ObjectWrapper
+    Insert(const OString& table_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
-    Search(const OString& table_name, const SearchRequestDto::ObjectWrapper& search_request,
-           TopkResultsDto::ObjectWrapper& results_dto);
+    GetVector(const OString& table_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
-    SystemInfo(const OString& cmd, CommandDto::ObjectWrapper& cmd_dto);
+    VectorsOp(const OString& table_name, const OString& payload, OString& response);
+
+    /**
+     *
+     * System
+     */
+    StatusDto::ObjectWrapper
+    SystemInfo(const OString& cmd, const OQueryParams& query_params, OString& response_str);
 
     StatusDto::ObjectWrapper
     SystemOp(const OString& op, const OString& body_str, OString& response_str);
