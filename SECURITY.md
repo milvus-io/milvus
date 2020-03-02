@@ -4,10 +4,10 @@
 
 The following versions of Milvus are currently being supported with security updates.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.6.0   | ✔️                |
-| <= 0.5.3  | :x:              |
+| Version   | Supported          |
+| --------- | ------------------ |
+| 0.6.0     | ✔️                  |
+| <= 0.5.3  | :x:                |
 
 ## Reporting a vulnerability
 
