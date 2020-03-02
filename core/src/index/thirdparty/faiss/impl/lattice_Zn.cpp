@@ -20,6 +20,7 @@
 #include <algorithm>
 
 #include <faiss/utils/distances.h>
+#include <faiss/FaissHook.h>
 
 namespace faiss {
 
