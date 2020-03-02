@@ -28,9 +28,9 @@ class TestDeleteBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
@@ -173,7 +173,8 @@ class TestDeleteBase:
         method: add vectors and delete, then create index
         expected: status ok, vectors deleted, index created
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
@@ -184,7 +185,7 @@ class TestDeleteBase:
         status = connect.delete_by_id(table, delete_ids)
         assert status.OK()
         status = connect.flush([table])
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
         assert status.OK()
@@ -283,13 +284,14 @@ class TestDeleteIndexedVectors:
         method: add vector, create index and delete vector
         expected: status ok, vector deleted
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params) 
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         status = connect.delete_by_id(table, ids)
         assert status.OK()
@@ -305,13 +307,14 @@ class TestDeleteIndexedVectors:
         method: add vectors and delete
         expected: status ok, vectors deleted
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params) 
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         delete_ids = [ids[0], ids[-1]]
         query_vecs = [vectors[0], vectors[1], vectors[-1]]

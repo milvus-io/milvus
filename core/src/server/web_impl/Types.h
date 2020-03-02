@@ -63,11 +63,14 @@ enum StatusCode : int {
 
     // HTTP error code
     PATH_PARAM_LOSS = 31,
-    QUERY_PARAM_LOSS = 32,
-    BODY_FIELD_LOSS = 33,
-    ILLEGAL_BODY = 34,
-    BODY_PARSE_FAIL = 35,
-    ILLEGAL_QUERY_PARAM = 36,
+    UNKNOWN_PATH = 32,
+    QUERY_PARAM_LOSS = 33,
+    BODY_FIELD_LOSS = 34,
+    ILLEGAL_BODY = 35,
+    BODY_PARSE_FAIL = 36,
+    ILLEGAL_QUERY_PARAM = 37,
+
+    MAX = ILLEGAL_QUERY_PARAM
 };
 
 static const std::unordered_map<engine::EngineType, std::string> IndexMap = {
