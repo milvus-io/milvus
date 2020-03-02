@@ -4,31 +4,31 @@
 
 -   [Build from source](#build-from-source)
 
-  -   [Requirements](#requirements)
+  - [Requirements](#requirements)
 
-  -   [Compilation](#compilation)
+  - [Compilation](#compilation)
 
-  -   [Launch Milvus server](#launch-milvus-server)
+  - [Launch Milvus server](#launch-milvus-server)
 
 -   [Compile Milvus on Docker](#compile-milvus-on-docker)
 
-  -   [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
+  - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
 
-  -   [Step 2 Start the Docker container](#step-2-start-the-docker-container)
+  - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
 
-  -   [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
+  - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
 
-  -   [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
+  - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
 
 -   [Troubleshooting](#troubleshooting)
 
-  -   [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
+  - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
 
-  -   [Error message: `internal compiler error`](#error-message-internal-compiler-error)
+  - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
 
-  -   [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
+  - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
 
-  -   [CMake version is not supported](#cmake-version-is-not-supported)
+  - [CMake version is not supported](#cmake-version-is-not-supported)
 
 <!-- /TOC -->
 
@@ -38,9 +38,9 @@
 
 -   Operating system
 
-  -   Ubuntu 18.04 or higher
+  - Ubuntu 18.04 or higher
 
-  -   CentOS 7
+  - CentOS 7
 
   > Note: If your Linux operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
   
