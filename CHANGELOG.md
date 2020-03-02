@@ -46,6 +46,7 @@ Please mark all change in change log and use the issue from GitHub
 - \#1204 - Add api to get table data information
 - \#1250 - Support CPU profiling
 - \#1302 - Get all record IDs in a segment by given a segment id
+- \#1461 - Add crud APIs and segments APIs into http module
 
 ## Improvement
 - \#738 - Use Openblas / lapack from apt install
