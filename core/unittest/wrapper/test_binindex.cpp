@@ -28,12 +28,12 @@ class BinIndexTest : public BinDataGen,
         std::tie(index_type, dim, nb, nq, k) = GetParam();
         Generate(dim, nb, nq, k);
 
-        milvus::engine::TempMetaConf tempconf;
-        tempconf.metric_type = knowhere::METRICTYPE::TANIMOTO;
-        tempconf.size = nb;
-        tempconf.dim = dim;
-        tempconf.k = k;
-        tempconf.nprobe = 16;
+        knowhere::Config temp_conf{
+            {knowhere::Metric::TYPE, knowhere::Metric::TANIMOTO},
+            {knowhere::meta::ROWS, nb},
+            {knowhere::meta::DIM, dim},
+            {knowhere::meta::TOPK, k}
+        }
 
         index_ = GetVecIndexFactory(index_type);
         conf = ParamGenerator::GetInstance().GenBuild(index_type, tempconf);

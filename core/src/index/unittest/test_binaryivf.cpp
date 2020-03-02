@@ -27,25 +27,26 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIVFTest : public BinaryDataGen, public TestWithParam<knowhere::METRICTYPE> {
+class BinaryIVFTest : public BinaryDataGen, public TestWithParam<char*> {
  protected:
     void
     SetUp() override {
-        knowhere::METRICTYPE MetricType = GetParam();
+        char* MetricType = GetParam();
         Init_with_binary_default();
         //        nb = 1000000;
         //        nq = 1000;
         //        k = 1000;
         //        Generate(DIM, NB, NQ);
         index_ = std::make_shared<knowhere::BinaryIVF>();
-        auto x_conf = std::make_shared<knowhere::IVFBinCfg>();
-        x_conf->d = dim;
-        x_conf->k = k;
-        x_conf->metric_type = MetricType;
-        x_conf->nlist = 100;
-        x_conf->nprobe = 10;
-        conf = x_conf;
-        conf->Dump();
+
+        knowhere::Config temp_conf{
+            {knowhere::meta::DIM, dim},
+            {knowhere::meta::TOPK, k},
+            {knowhere::IndexParams::nlist, 100},
+            {knowhere::IndexParams::nprobe, 10},
+            {knowhere::Metric::TYPE, MetricType},
+        };
+        conf = temp_conf;
     }
 
     void
@@ -59,8 +60,8 @@ class BinaryIVFTest : public BinaryDataGen, public TestWithParam<knowhere::METRI
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIVFTest,
-                        Values(knowhere::METRICTYPE::JACCARD, knowhere::METRICTYPE::TANIMOTO,
-                               knowhere::METRICTYPE::HAMMING));
+                        Values(knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO,
+                               knowhere::Metric::HAMMING));
 
 TEST_P(BinaryIVFTest, binaryivf_basic) {
     assert(!xb.empty());
@@ -75,7 +76,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     EXPECT_EQ(index_->Dimension(), dim);
 
     auto result = index_->Search(query_dataset, conf);
-    AssertAnns(result, nq, conf->k);
+    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
@@ -123,7 +124,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
     //        index_->set_index_model(model);
     //        index_->Add(base_dataset, conf);
     //        auto result = index_->Search(query_dataset, conf);
-    //        AssertAnns(result, nq, conf->k);
+    //        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     //    }
 
     {
@@ -147,7 +148,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
         auto result = index_->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf->k);
+        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
     }
 }

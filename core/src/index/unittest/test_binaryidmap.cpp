@@ -21,7 +21,7 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<knowhere::METRICTYPE> {
+class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<char*> {
  protected:
     void
     SetUp() override {
@@ -37,17 +37,18 @@ class BinaryIDMAPTest : public BinaryDataGen, public TestWithParam<knowhere::MET
 };
 
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
-                        Values(knowhere::METRICTYPE::JACCARD, knowhere::METRICTYPE::TANIMOTO,
-                               knowhere::METRICTYPE::HAMMING));
+                        Values(knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO,
+                               knowhere::Metric::HAMMING));
 
 TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
-    knowhere::METRICTYPE MetricType = GetParam();
-    auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
-    conf->d = dim;
-    conf->k = k;
-    conf->metric_type = MetricType;
+    char* MetricType = GetParam();
+    knowhere::Config conf{
+        {knowhere::meta::DIM, dim},
+        {knowhere::meta::TOPK, k},
+        {knowhere::Metric::TYPE, MetricType},
+    };
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);
@@ -88,11 +89,12 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
         reader(ret, bin->size);
     };
 
-    knowhere::METRICTYPE MetricType = GetParam();
-    auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
-    conf->d = dim;
-    conf->k = k;
-    conf->metric_type = MetricType;
+    char* MetricType = GetParam();
+    knowhere::Config conf{
+        {knowhere::meta::DIM, dim},
+        {knowhere::meta::TOPK, k},
+        {knowhere::Metric::TYPE, MetricType},
+    };
 
     {
         // serialize index

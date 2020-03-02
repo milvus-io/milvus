@@ -43,22 +43,23 @@ namespace engine {
 namespace {
 
 Status
-MappingMetricType(MetricType metric_type, knowhere::METRICTYPE& kw_type) {
+MappingMetricType(MetricType metric_type, milvus::json& conf) {
     switch (metric_type) {
         case MetricType::IP:
             kw_type = knowhere::METRICTYPE::IP;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
             break;
         case MetricType::L2:
-            kw_type = knowhere::METRICTYPE::L2;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
             break;
         case MetricType::HAMMING:
-            kw_type = knowhere::METRICTYPE::HAMMING;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::HAMMING;
             break;
         case MetricType::JACCARD:
-            kw_type = knowhere::METRICTYPE::JACCARD;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::JACCARD;
             break;
         case MetricType::TANIMOTO:
-            kw_type = knowhere::METRICTYPE::TANIMOTO;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
             break;
         default:
             return Status(DB_ERROR, "Unsupported metric type");
@@ -108,16 +109,15 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    TempMetaConf temp_conf;
-    temp_conf.gpu_id = gpu_num_;
-    temp_conf.dim = dimension;
-    auto status = MappingMetricType(metric_type, temp_conf.metric_type);
-    if (!status.ok()) {
-        throw Exception(DB_ERROR, status.message());
-    }
-
+    milvus::json conf {
+        {"gpu_id", gpu_num_},
+        {knowhere::meta::DIM, dimension}
+    };
+    MappingMetricType(metric_type, conf);
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->Match(temp_conf);
+    if (adapter->CheckTrain(conf)) {
+        throw Exception(DB_ERROR, "Build Config illegal");
+    }
 
     ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
     if (auto bf_index = std::dynamic_pointer_cast<BFIndex>(index_)) {
@@ -409,17 +409,15 @@ ExecutionEngineImpl::Load(bool to_cache) {
         if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
-
-            TempMetaConf temp_conf;
-            temp_conf.gpu_id = gpu_num_;
-            temp_conf.dim = dim_;
-            auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
-            if (!status.ok()) {
-                return status;
-            }
-
+            milvus::json conf {
+                {"gpu_id", gpu_num_},
+                {knowhere::meta::DIM, dim_}
+            };
+            MappingMetricType(metric_type_, conf);
             auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-            auto conf = adapter->Match(temp_conf);
+            if (adapter->CheckTrain(conf)) {
+                throw Exception(DB_ERROR, "Build Config illegal");
+            }
 
             status = segment_reader_ptr->Load();
             if (!status.ok()) {
@@ -719,18 +717,15 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    TempMetaConf temp_conf;
-    temp_conf.gpu_id = gpu_num_;
-    temp_conf.dim = Dimension();
-    temp_conf.nlist = index_params_["nlist"];
-    temp_conf.size = Count();
-    auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
-    if (!status.ok()) {
-        throw Exception(DB_ERROR, status.message());
+    milvus::json conf = index_params_;
+    conf[knowhere::meta::DIM] = Dimension();
+    conf[knowhere::meta::ROWS] = Count();
+    conf["gpu_id"] = gpu_num_;
+    MappingMetricType(metric_type_, conf);
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    if (adapter->CheckTrain(conf)) {
+        throw Exception(DB_ERROR, "Build Config illegal");
     }
-
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
-    auto conf = adapter->Match(temp_conf);
 
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
@@ -809,13 +804,12 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
 
     ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-    temp_conf.k = k;
-    temp_conf.nprobe = extra_params["nprobe"];
-
+    milvus::json conf = extra_params;
+    conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+    if (adapter->CheckSearch(conf, index_->GetType())) {
+        throw Exception(DB_ERROR, "Search Config illegal");
+    }
 
     if (hybrid) {
         HybridLoad();
@@ -858,13 +852,12 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 
     ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-    temp_conf.k = k;
-    temp_conf.nprobe = extra_params["nprobe"];
-
+    milvus::json conf = extra_params;
+    conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+    if (adapter->CheckSearch(conf, index_->GetType())) {
+        throw Exception(DB_ERROR, "Search Config illegal");
+    }
 
     if (hybrid) {
         HybridLoad();
@@ -907,13 +900,12 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
 
     ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-    temp_conf.k = k;
-    temp_conf.nprobe = extra_params["nprobe"];
-
+    milvus::json conf = extra_params;
+    conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+    if (adapter->CheckSearch(conf, index_->GetType())) {
+        throw Exception(DB_ERROR, "Search Config illegal");
+    }
 
     if (hybrid) {
         HybridLoad();
@@ -992,19 +984,13 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid
         return Status(DB_ERROR, "index is null");
     }
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
-
     if (hybrid) {
         HybridLoad();
     }
 
     // Only one id for now
     std::vector<int64_t> ids{id};
-    auto status = index_->GetVectorById(1, ids.data(), vector, conf);
+    auto status = index_->GetVectorById(1, ids.data(), vector, milvus::json());
 
     if (hybrid) {
         HybridUnset();
@@ -1025,19 +1011,13 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
 
     ENGINE_LOG_DEBUG << "Get binary vector by id:  " << id;
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
-
     if (hybrid) {
         HybridLoad();
     }
 
     // Only one id for now
     std::vector<int64_t> ids{id};
-    auto status = index_->GetVectorById(1, ids.data(), vector, conf);
+    auto status = index_->GetVectorById(1, ids.data(), vector, milvus::json());
 
     if (hybrid) {
         HybridUnset();

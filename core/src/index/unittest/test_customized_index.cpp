@@ -69,7 +69,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             for (int i = 0; i < 3; ++i) {
                 auto gpu_idx = cpu_idx->CopyCpuToGpu(DEVICEID, conf);
                 auto result = gpu_idx->Search(query_dataset, conf);
-                AssertAnns(result, nq, conf->k);
+                AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
                 // PrintResult(result, nq, k);
             }
         }
@@ -86,7 +86,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         auto quantization = pair.second;
 
         auto result = gpu_idx->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf->k);
+        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
         //        PrintResult(result, nq, k);
 
         milvus::json quantizer_conf{{"gpu_id" : DEVICEID}, {"mode" : 2}};
@@ -95,7 +95,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             hybrid_idx->Load(binaryset);
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
             auto result = new_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, conf->k);
+            AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
         }
     }
@@ -114,7 +114,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 
             hybrid_idx->SetQuantizer(quantization);
             auto result = hybrid_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, conf->k);
+            AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
             hybrid_idx->UnsetQuantizer();
         }
