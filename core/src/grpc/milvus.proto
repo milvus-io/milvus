@@ -1,0 +1,448 @@
+syntax = "proto3";
+
+import "status.proto";
+
+package milvus.grpc;
+
+/**
+ * @brief Table name
+ */
+message TableName {
+    string table_name = 1;
+}
+
+/**
+ * @brief Table name list
+ */
+message TableNameList {
+    Status status = 1;
+    repeated string table_names = 2;
+}
+
+/**
+ * @brief Table schema
+ */
+message TableSchema {
+    Status status = 1;
+    string table_name = 2;
+    int64 dimension = 3;
+    int64 index_file_size = 4;
+    int32 metric_type = 5;
+}
+
+/**
+ * @brief Params of partition
+ */
+message PartitionParam {
+    string table_name = 1;
+    string tag = 2;
+}
+
+/**
+ * @brief Partition list
+ */
+message PartitionList {
+    Status status = 1;
+    repeated string partition_tag_array = 2;
+}
+
+/**
+ * @brief Record inserted
+ */
+message RowRecord {
+    repeated float float_data = 1;             //float vector data
+    bytes binary_data = 2;                      //binary vector data
+}
+
+/**
+ * @brief Params to be inserted
+ */
+message InsertParam {
+    string table_name = 1;
+    repeated RowRecord row_record_array = 2;
+    repeated int64 row_id_array = 3;            //optional
+    string partition_tag = 4;
+}
+
+/**
+ * @brief Vector ids
+ */
+message VectorIds {
+    Status status = 1;
+    repeated int64 vector_id_array = 2;
+}
+
+/**
+ * @brief Params for searching vector
+ */
+message SearchParam {
+    string table_name = 1;
+    repeated RowRecord query_record_array = 2;
+    int64 topk = 3;
+    int64 nprobe = 4;
+    repeated string partition_tag_array = 5;
+}
+
+/**
+ * @brief Params for searching vector in files
+ */
+message SearchInFilesParam {
+    repeated string file_id_array = 1;
+    SearchParam search_param = 2;
+}
+
+/**
+ * @brief Params for searching vector by ID
+ */
+message SearchByIDParam {
+    string table_name = 1;
+    int64 id = 2;
+    int64 topk = 3;
+    int64 nprobe = 4;
+    repeated string partition_tag_array = 5;
+}
+
+/**
+ * @brief Query result params
+ */
+message TopKQueryResult {
+    Status status = 1;
+    int64 row_num = 2;
+    repeated int64 ids = 3;
+    repeated float distances = 4;
+}
+
+/**
+ * @brief Server string Reply
+ */
+message StringReply {
+    Status status = 1;
+    string string_reply = 2;
+}
+
+/**
+ * @brief Server bool Reply
+ */
+message BoolReply {
+    Status status = 1;
+    bool bool_reply = 2;
+}
+
+/**
+ * @brief Return table row count
+ */
+message TableRowCount {
+    Status status = 1;
+    int64 table_row_count = 2;
+}
+
+/**
+ * @brief Give server Command
+ */
+message Command {
+    string cmd = 1;
+}
+
+/**
+ * @brief Index
+ * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
+ * @metric_type: 1-L2, 2-IP
+ */
+message Index {
+    int32 index_type = 1;
+    int32 nlist = 2;
+}
+
+/**
+ * @brief Index params
+ */
+message IndexParam {
+    Status status = 1;
+    string table_name = 2;
+    Index index = 3;
+}
+
+/**
+ * @brief Flush params
+ */
+message FlushParam {
+    repeated string table_name_array = 1;
+}
+
+/**
+ * @brief Flush params
+ */
+message DeleteByIDParam {
+    string table_name = 1;
+    repeated int64 id_array = 2;
+}
+
+/**
+ * @brief segment statistics
+ */
+message SegmentStat {
+    string segment_name = 1;
+    int64 row_count = 2;
+    string index_name = 3;
+    int64 data_size = 4;
+}
+
+/**
+ * @brief table statistics
+ */
+message PartitionStat {
+    string tag = 1;
+    int64 total_row_count = 2;
+    repeated SegmentStat segments_stat = 3;
+}
+
+/**
+ * @brief table information
+ */
+message TableInfo {
+    Status status = 1;
+    int64 total_row_count = 2;
+    repeated PartitionStat partitions_stat = 3;
+}
+
+/**
+ * @brief vector identity
+ */
+message VectorIdentity {
+    string table_name = 1;
+    int64 id = 2;
+}
+
+/**
+ * @brief vector data
+ */
+message VectorData {
+    Status status = 1;
+    RowRecord vector_data = 2;
+}
+
+/**
+ * @brief get vector ids from a segment parameters
+ */
+message GetVectorIDsParam {
+    string table_name = 1;
+    string segment_name = 2;
+}
+
+service MilvusService {
+    /**
+     * @brief This method is used to create table
+     *
+     * @param TableSchema, use to provide table information to be created.
+     *
+     * @return Status
+     */
+    rpc CreateTable(TableSchema) returns (Status){}
+
+    /**
+     * @brief This method is used to test table existence.
+     *
+     * @param TableName, table name is going to be tested.
+     *
+     * @return BoolReply
+     */
+    rpc HasTable(TableName) returns (BoolReply) {}
+
+    /**
+     * @brief This method is used to get table schema.
+     *
+     * @param TableName, target table name.
+     *
+     * @return TableSchema
+     */
+    rpc DescribeTable(TableName) returns (TableSchema) {}
+
+    /**
+     * @brief This method is used to get table schema.
+     *
+     * @param TableName, target table name.
+     *
+     * @return TableRowCount
+     */
+    rpc CountTable(TableName) returns (TableRowCount) {}
+
+    /**
+     * @brief This method is used to list all tables.
+     *
+     * @param Command, dummy parameter.
+     *
+     * @return TableNameList
+     */
+    rpc ShowTables(Command) returns (TableNameList) {}
+
+    /**
+     * @brief This method is used to get table detail information.
+     *
+     * @param TableName, target table name.
+     *
+     * @return TableInfo
+     */
+    rpc ShowTableInfo(TableName) returns (TableInfo) {}
+
+    /**
+     * @brief This method is used to delete table.
+     *
+     * @param TableName, table name is going to be deleted.
+     *
+     * @return TableNameList
+     */
+    rpc DropTable(TableName) returns (Status) {}
+
+    /**
+     * @brief This method is used to build index by table in sync mode.
+     *
+     * @param IndexParam, index paramters.
+     *
+     * @return Status
+     */
+    rpc CreateIndex(IndexParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to describe index
+     *
+     * @param TableName, target table name.
+     *
+     * @return IndexParam
+     */
+    rpc DescribeIndex(TableName) returns (IndexParam) {}
+
+    /**
+     * @brief This method is used to drop index
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc DropIndex(TableName) returns (Status) {}
+
+    /**
+     * @brief This method is used to create partition
+     *
+     * @param PartitionParam, partition parameters.
+     *
+     * @return Status
+     */
+    rpc CreatePartition(PartitionParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to show partition information
+     *
+     * @param TableName, target table name.
+     *
+     * @return PartitionList
+     */
+    rpc ShowPartitions(TableName) returns (PartitionList) {}
+
+    /**
+     * @brief This method is used to drop partition
+     *
+     * @param PartitionParam, target partition.
+     *
+     * @return Status
+     */
+    rpc DropPartition(PartitionParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to add vector array to table.
+     *
+     * @param InsertParam, insert parameters.
+     *
+     * @return VectorIds
+     */
+    rpc Insert(InsertParam) returns (VectorIds) {}
+
+    /**
+     * @brief This method is used to get vector data by id.
+     *
+     * @param VectorIdentity, target vector id.
+     *
+     * @return VectorData
+     */
+    rpc GetVectorByID(VectorIdentity) returns (VectorData) {}
+
+    /**
+     * @brief This method is used to get vector ids from a segment
+     *
+     * @param GetVectorIDsParam, target table and segment
+     *
+     * @return VectorIds
+     */
+    rpc GetVectorIDs(GetVectorIDsParam) returns (VectorIds) {}
+
+    /**
+     * @brief This method is used to query vector in table.
+     *
+     * @param SearchParam, search parameters.
+     *
+     * @return TopKQueryResult
+     */
+    rpc Search(SearchParam) returns (TopKQueryResult) {}
+
+    /**
+     * @brief This method is used to query vector by id.
+     *
+     * @param SearchByIDParam, search parameters.
+     *
+     * @return TopKQueryResult
+     */
+    rpc SearchByID(SearchByIDParam) returns (TopKQueryResult) {}
+
+    /**
+     * @brief This method is used to query vector in specified files.
+     *
+     * @param SearchInFilesParam, search in files paremeters.
+     *
+     * @return TopKQueryResult
+     */
+    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResult) {}
+
+    /**
+     * @brief This method is used to give the server status.
+     *
+     * @param Command, command string
+     *
+     * @return StringReply
+     */
+    rpc Cmd(Command) returns (StringReply) {}
+
+    /**
+     * @brief This method is used to delete vector by id
+     *
+     * @param DeleteByIDParam, delete parameters.
+     *
+     * @return status
+     */
+    rpc DeleteByID(DeleteByIDParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to preload table
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc PreloadTable(TableName) returns (Status) {}
+
+    /**
+     * @brief This method is used to flush buffer into storage.
+     *
+     * @param FlushParam, flush parameters
+     *
+     * @return Status
+     */
+    rpc Flush(FlushParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to compact table
+     *
+     * @param TableName, target table name.
+     *
+     * @return Status
+     */
+    rpc Compact(TableName) returns (Status) {}
+}

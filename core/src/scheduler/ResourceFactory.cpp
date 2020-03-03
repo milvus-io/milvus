@@ -1,0 +1,31 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+#include "scheduler/ResourceFactory.h"
+
+namespace milvus {
+namespace scheduler {
+
+std::shared_ptr<Resource>
+ResourceFactory::Create(const std::string& name, const std::string& type, uint64_t device_id, bool enable_executor) {
+    if (type == "DISK") {
+        return std::make_shared<DiskResource>(name, device_id, enable_executor);
+    } else if (type == "CPU") {
+        return std::make_shared<CpuResource>(name, device_id, enable_executor);
+    } else if (type == "GPU") {
+        return std::make_shared<GpuResource>(name, device_id, enable_executor);
+    } else {
+        return nullptr;
+    }
+}
+
+}  // namespace scheduler
+}  // namespace milvus

@@ -1,0 +1,202 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{c260e4c4-ec44-4d50-941f-078454da2a89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core">
+      <UniqueIdentifier>{c7b9ab49-a99f-4eb4-b8ab-61f0730b9a89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core\BKT">
+      <UniqueIdentifier>{a306a099-8e3f-433d-b065-9d99433f422e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Helper">
+      <UniqueIdentifier>{33f272c5-907e-4848-bbd7-4340fe44f511}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Source Files\Core">
+      <UniqueIdentifier>{47ec2958-e880-4c1a-b663-04fc48c799af}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core\BKT">
+      <UniqueIdentifier>{10d17e5e-9ad2-4000-96d4-83b616480b97}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Helper">
+      <UniqueIdentifier>{23fdeb31-9052-47d1-8edb-9b47c4b02707}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core\KDT">
+      <UniqueIdentifier>{6dff7b24-66ea-40b4-b408-d8fe264a6caa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core\Common">
+      <UniqueIdentifier>{b0f1e81d-ca05-426e-bffa-75513a52ca6b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core\Common">
+      <UniqueIdentifier>{774592a9-40aa-4342-a4af-b711a1cc4d52}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core\KDT">
+      <UniqueIdentifier>{8fb36afb-73ed-4c3d-8c9b-c3581d80c5d1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Helper\VectorSetReaders">
+      <UniqueIdentifier>{f7bc0bc7-1af5-4870-b8ee-fabdbabdb4c4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Helper\VectorSetReaders">
+      <UniqueIdentifier>{5c1449e0-38b7-4c82-976e-cbdc488d3fb5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="inc\Core\Common.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\CommonDataStructure.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\DefinitionList.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SearchQuery.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SearchResult.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\VectorIndex.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\BKT\Index.h">
+      <Filter>Header Files\Core\BKT</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\CommonHelper.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\SimpleIniReader.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\StringConvert.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\MetadataSet.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\VectorSet.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\Base64Encode.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\Concurrent.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\ArgumentsParser.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h">
+      <Filter>Header Files\Core\BKT</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\WorkSpace.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\CommonUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\Dataset.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\DataUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\DistanceUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\Heap.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\QueryResultSet.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\WorkSpacePool.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\KDT\Index.h">
+      <Filter>Header Files\Core\KDT</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h">
+      <Filter>Header Files\Core\KDT</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\FineGrainedLock.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\KDTree.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\BKTree.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\ConcurrentSet.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\BufferStream.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h">
+      <Filter>Header Files\Helper\VectorSetReaders</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReader.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Core\VectorIndex.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\CommonHelper.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\SimpleIniReader.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\VectorSet.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\MetadataSet.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\Base64Encode.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\Concurrent.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\ArgumentsParser.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\BKT\BKTIndex.cpp">
+      <Filter>Source Files\Core\BKT</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\KDT\KDTIndex.cpp">
+      <Filter>Source Files\Core\KDT</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp">
+      <Filter>Source Files\Helper\VectorSetReaders</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReader.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+</Project>

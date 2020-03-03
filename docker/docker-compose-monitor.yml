@@ -1,0 +1,58 @@
+version: '2.3'
+
+networks:
+    monitor:
+        driver: bridge
+
+services:
+    prometheus:
+        image: prom/prometheus:v2.11.1
+        container_name: prometheus
+        hostname: prometheus
+        restart: always
+        volumes:
+            - ./prometheus.yml:/etc/prometheus/prometheus.yml
+            - ./server_down.yml:/etc/prometheus/node_down.yml
+        ports:
+            - "9090:9090"
+        networks:
+            - monitor
+
+    alertmanager:
+        image: prom/alertmanager
+        container_name: alertmanager
+        hostname: alertmanager
+        restart: always
+        volumes:
+            - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+        ports:
+            - "9093:9093"
+        networks:
+            - monitor
+
+    grafana:
+        image: grafana/grafana
+        container_name: grafana
+        hostname: grafana
+        restart: always
+        ports:
+            - "3000:3000"
+        networks:
+            - monitor
+
+    milvus_server:
+        runtime: nvidia
+        image: milvusdb/milvus:latest
+        restart: always
+        links:
+            - prometheus
+        environment:
+            WEB_APP: host.docker.internal
+        volumes:
+            - ../core/conf/server_config.yaml:/var/lib/milvus/conf/server_config.yaml
+            - ../core/conf/log_config.conf:/var/lib/milvus/conf/log_config.conf
+        ports:
+            - "8080:8080"
+            - "19530:19530"
+        networks:
+            - monitor
