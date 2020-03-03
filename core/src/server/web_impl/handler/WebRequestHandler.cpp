@@ -441,10 +441,10 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     }
     int64_t topk = json["topk"];
 
-    if (!json.contains("nprobe")) {
-        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
-    }
-    int64_t nprobe = json["nprobe"];
+//    if (!json.contains("nprobe")) {
+//        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
+//    }
+//    int64_t nprobe = json["nprobe"];
 
     std::vector<std::string> partition_tags;
     if (json.contains("partition_tags")) {
@@ -458,47 +458,50 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
         }
     }
 
+//    if (json.contains("vector_id")) {
+//        auto vec_id = json["vector_id"].get<int64_t>();
+//        auto status =
+//            request_handler_.SearchByID(context_ptr_, table_name, vec_id, topk, nprobe, partition_tags, result);
+//        if (!status.ok()) {
+//            return status;
+//        }
+//    } else {
+    std::vector<std::string> file_id_vec;
+    if (json.contains("file_ids")) {
+        auto ids = json["file_ids"];
+        if (!ids.is_null() && !ids.is_array()) {
+            return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
+        }
+        for (auto& id : ids) {
+            file_id_vec.emplace_back(id.get<std::string>());
+        }
+    }
+
+    if (!json.contains("params")) {
+        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
+    }
+
+    bool bin_flag = false;
+    auto status = IsBinaryTable(table_name, bin_flag);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (!json.contains("vectors")) {
+        return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
+    }
+
+    engine::VectorsData vectors_data;
+    status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
+    if (!status.ok()) {
+        return status;
+    }
+
     TopKQueryResult result;
-    if (json.contains("vector_id")) {
-        auto vec_id = json["vector_id"].get<int64_t>();
-        auto status =
-            request_handler_.SearchByID(context_ptr_, table_name, vec_id, topk, nprobe, partition_tags, result);
-        if (!status.ok()) {
-            return status;
-        }
-    } else {
-        std::vector<std::string> file_id_vec;
-        if (json.contains("file_ids")) {
-            auto ids = json["file_ids"];
-            if (!ids.is_null() && !ids.is_array()) {
-                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
-            }
-            for (auto& id : ids) {
-                file_id_vec.emplace_back(id.get<std::string>());
-            }
-        }
-
-        bool bin_flag = false;
-        auto status = IsBinaryTable(table_name, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        if (!json.contains("vectors")) {
-            return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
-        }
-
-        engine::VectorsData vectors_data;
-        status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, nprobe, partition_tags,
-                                         file_id_vec, result);
-        if (!status.ok()) {
-            return status;
-        }
+    status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, json["params"],
+        partition_tags, file_id_vec, result);
+    if (!status.ok()) {
+        return status;
     }
 
     nlohmann::json result_json;
