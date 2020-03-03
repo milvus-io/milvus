@@ -560,7 +560,7 @@ WebRequestHandler::GetVectorsByIDs(const std::string& table_name, const std::vec
     for (size_t i = 0; i < ids.size(); i++) {
         auto vec_ids = std::vector<int64_t>(ids.begin() + i, ids.begin() + i + 1);
         engine::VectorsData vectors_data;
-        auto status = request_handler_.GetVectorByID(context_ptr_, table_name, ids, vectors_data);
+        auto status = request_handler_.GetVectorByID(context_ptr_, table_name, vec_ids, vectors_data);
         if (!status.ok()) {
             return status;
         }
@@ -1177,6 +1177,16 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
         RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param 'offset' or 'page_size' should equal or bigger than 0");
     }
 
+    bool all_required = false;
+    auto required = query_params.get("all_required");
+    if (nullptr != required.get()) {
+        auto required_str = required->std_str();
+        if (!ValidationUtil::ValidateStringIsBool(required_str).ok()) {
+            RETURN_STATUS_DTO(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool")
+        }
+        all_required = required_str == "True" || required_str == "true";
+    }
+
     std::string tag;
     if (nullptr != query_params.get("partition_tag").get()) {
         tag = query_params.get("partition_tag")->std_str();
@@ -1191,7 +1201,7 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
     typedef std::pair<std::string, SegmentStat> Pair;
     std::vector<Pair> segments;
     for (auto& par_stat : info.partitions_stat_) {
-        if (!tag.empty() && tag != par_stat.tag_) {
+        if (!(all_required || tag.empty() || tag == par_stat.tag_)) {
             continue;
         }
         for (auto& seg_stat : par_stat.segments_stat_) {
@@ -1200,25 +1210,26 @@ WebRequestHandler::ShowSegments(const OString& table_name, const OQueryParams& q
         }
     }
 
-    int64_t size = segments.size();
-    auto iter_begin = std::min(size, offset_value);
-    auto iter_end = std::min(size, offset_value + page_size_value);
-
-    auto segments_out = std::vector<Pair>(segments.begin() + iter_begin, segments.begin() + iter_end);
-
-    // sort with segment name
     auto compare = [](Pair& a, Pair& b) -> bool { return a.second.name_ >= b.second.name_; };
-    std::sort(segments_out.begin(), segments_out.end(), compare);
+    std::sort(segments.begin(), segments.end(), compare);
+
+    int64_t size = segments.size();
+    int64_t iter_begin = 0;   // std::min(size, offset_value);
+    int64_t iter_end = size;  // std::min(size, offset_value + page_size_value);
+    if (!all_required) {
+        iter_begin = std::min(size, offset_value);
+        iter_end = std::min(size, offset_value + page_size_value);
+    }
 
     nlohmann::json result_json;
-    if (segments_out.empty()) {
+    if (segments.empty()) {
         result_json["segments"] = std::vector<int64_t>();
     } else {
         nlohmann::json segs_json;
-        for (auto& s : segments_out) {
+        for (auto iter = iter_begin; iter < iter_end; iter++) {
             nlohmann::json seg_json;
-            ParseSegmentStat(s.second, seg_json);
-            seg_json["partition_tag"] = s.first;
+            ParseSegmentStat(segments.at(iter).second, seg_json);
+            seg_json["partition_tag"] = segments.at(iter).first;
             segs_json.push_back(seg_json);
         }
         result_json["segments"] = segs_json;
