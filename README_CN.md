@@ -53,12 +53,12 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 ## 支持的客户端
 
-- [Go](https://github.com/milvus-io/milvus-sdk-go)
-- [Python](https://github.com/milvus-io/pymilvus)
-- [Java](https://github.com/milvus-io/milvus-sdk-java)
-- [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
-- [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
-- [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go)
+-   [Python](https://github.com/milvus-io/pymilvus)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java)
+-   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
 
 ## 开始使用 Milvus
 
@@ -84,23 +84,23 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 ## 相关链接
 
-- [Milvus.io](https://www.milvus.io)
+-   [Milvus.io](https://www.milvus.io)
 
-- [Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
+-   [Milvus 在线训练营](https://github.com/milvus-io/bootcamp)
 
-- [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs)
+-   [Milvus 测试报告](https://github.com/milvus-io/milvus/tree/master/docs)
 
-- [Milvus 常见问题](https://www.milvus.io/cn/docs/faq/operational_faq.md)
+-   [Milvus 常见问题](https://www.milvus.io/cn/docs/faq/operational_faq.md)
 
-- [Milvus Medium](https://medium.com/@milvusio)
+-   [Milvus Medium](https://medium.com/@milvusio)
 
-- [Milvus CSDN](https://zilliz.blog.csdn.net/)
+-   [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
-- [Milvus Twitter](https://twitter.com/milvusio)
+-   [Milvus Twitter](https://twitter.com/milvusio)
 
-- [Milvus Facebook](https://www.facebook.com/io.milvus.5)
+-   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
-- [Milvus 设计文档](design.md)
+-   [Milvus 设计文档](design.md)
 
 ## 许可协议
 
