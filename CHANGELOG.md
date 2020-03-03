@@ -40,6 +40,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#813 Add push mode for prometheus monitor
 -   \#815 Support MinIO storage
 -   \#823 Support binary vector tanimoto/jaccard/hamming metric
+-   \#830 - Support WAL(write-ahead logging)
 -   \#853 Support HNSW
 -   \#861 Support DeleteById / SearchByID / GetVectorById / Flush
 -   \#910 Change Milvus c++ standard to c++17
@@ -68,7 +69,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1234 Do S3 server validation check when Milvus startup
 -   \#1263 Allow system conf modifiable and some take effect directly
 -   \#1320 Remove debug logging from faiss
+-   \#1426 - Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
+
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat
