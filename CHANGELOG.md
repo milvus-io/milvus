@@ -28,6 +28,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1298 Unittest failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
 -   \#1429 Server crashed when searching vectors using GPU
+-   \#1484 Index type changed to IDMAP after compacted 
 
 ## Feature
 -   \#216 Add CLI to get server info
