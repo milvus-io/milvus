@@ -672,7 +672,7 @@ DBImpl::Compact(const std::string& table_id) {
     }
 
     // Then update table index to the previous index
-    status = meta_ptr_->UpdateTableIndex(table_id, table_index);
+    status = UpdateTableIndexRecursively(table_id, table_index);
     if (!status.ok()) {
         return status;
     }
@@ -690,24 +690,51 @@ DBImpl::Compact(const std::string& table_id) {
     ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
-    for (auto& file : files_to_compact) {
-        status = CompactFile(table_id, file, table_index);
 
-        if (!status.ok()) {
-            OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
-            return status;
+    meta::TableFilesSchema files_to_update;
+    Status compact_status;
+    for (auto& file : files_to_compact) {
+        compact_status = CompactFile(table_id, file, files_to_update);
+
+        if (!compact_status.ok()) {
+            ENGINE_LOG_ERROR << "Compact failed for file " << file.file_id_ << ": " << compact_status.message();
+            break;
         }
     }
+
+    if (compact_status.ok()) {
+        ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
+    }
+
+    ENGINE_LOG_ERROR << "Updating meta after compaction...";
+
+    // Drop index again, in case some files were in the index building process during compacting
+    status = DropIndex(table_id);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // Update index
+    status = UpdateTableIndexRecursively(table_id, table_index);
+    if (!status.ok()) {
+        return status;
+    }
+
+    status = meta_ptr_->UpdateTableFiles(files_to_update);
+    if (!status.ok()) {
+        return status;
+    }
+
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
-    ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
+    ENGINE_LOG_DEBUG << "Finished updating meta after compaction";
 
     return status;
 }
 
 Status
-DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file,
-                    const TableIndex& table_index) {
+DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& file,
+                    meta::TableFilesSchema& files_to_update) {
     ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for table: " << table_id;
 
     // Create new table file
@@ -752,26 +779,14 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
         return status;
     }
 
-    // Drop index again, in case some files were in the index building process during merging
-    // TODO: might be too frequent?
-    status = DropIndex(table_id);
-    if (!status.ok()) {
-        return status;
-    }
-    status = meta_ptr_->UpdateTableIndex(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-        // Update table files state
-        // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-        // else set file type to RAW, no need to build index
-        if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    // Update table files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
                                         ? meta::TableFileSchema::TO_INDEX
                                         : meta::TableFileSchema::RAW;
-    }
-    else {
+    } else {
         compacted_file.file_type_ = meta::TableFileSchema::RAW;
     }
     compacted_file.file_size_ = segment_writer_ptr->Size();
@@ -783,7 +798,10 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     }
 
     updated.emplace_back(compacted_file);
-    status = meta_ptr_->UpdateTableFiles(updated);
+
+    for (auto& f : updated) {
+        files_to_update.emplace_back(f);
+    }
 
     ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
                      << std::to_string(file_to_compact.file_size_) << " bytes to "
