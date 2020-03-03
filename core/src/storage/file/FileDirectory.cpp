@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "store/Directory.h"
+#include "storage/file/FileDirectory.h"
 
 #include <boost/filesystem.hpp>
 
@@ -23,7 +23,7 @@
 #include "utils/Log.h"
 
 namespace milvus {
-namespace store {
+namespace storage {
 
 Directory::Directory(const std::string& dir_path) : dir_path_(dir_path) {
 }
@@ -63,5 +63,5 @@ Directory::GetDirPath() const {
     return dir_path_;
 }
 
-}  // namespace store
+}  // namespace storage
 }  // namespace milvus

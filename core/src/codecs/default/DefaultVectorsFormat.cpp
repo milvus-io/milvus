@@ -22,10 +22,10 @@
 #include <boost/filesystem.hpp>
 
 #include "server/Config.h"
-#include "storage/s3/S3IOReader.h"
-#include "storage/s3/S3IOWriter.h"
 #include "storage/file/FileIOReader.h"
 #include "storage/file/FileIOWriter.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -34,7 +34,7 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
+DefaultVectorsFormat::read(const storage::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     bool s3_enable = false;
@@ -113,7 +113,7 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
 }
 
 void
-DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
+DefaultVectorsFormat::write(const storage::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     bool s3_enable = false;
@@ -133,7 +133,7 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
         } else {
             rv_writer_ptr = std::make_shared<storage::FileIOWriter>(rv_file_path);
         }
-        size_t  num_bytes = vectors->GetData().size();
+        size_t num_bytes = vectors->GetData().size();
         rv_writer_ptr->write((void*)(vectors->GetData().data()), num_bytes);
 
         double span = recorder.RecordSection("done");
@@ -167,7 +167,7 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
 }
 
 void
-DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
+DefaultVectorsFormat::read_uids(const storage::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     bool s3_enable = false;
@@ -215,7 +215,7 @@ DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::v
 }
 
 void
-DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
+DefaultVectorsFormat::read_vectors(const storage::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
                                    std::vector<uint8_t>& raw_vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
@@ -236,7 +236,7 @@ DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off
     d_it it(target_path);
     //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
     for (; it != it_end; ++it) {
-        const auto &path = it->path();
+        const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
             try {
                 TimeRecorder recorder("read " + path.string());

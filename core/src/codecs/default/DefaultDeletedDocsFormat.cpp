@@ -24,10 +24,10 @@
 
 #include "segment/Types.h"
 #include "server/Config.h"
-#include "storage/s3/S3IOReader.h"
-#include "storage/s3/S3IOWriter.h"
 #include "storage/file/FileIOReader.h"
 #include "storage/file/FileIOWriter.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -36,7 +36,7 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
+DefaultDeletedDocsFormat::read(const storage::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     bool s3_enable = false;
@@ -73,7 +73,8 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
 }
 
 void
-DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) {
+DefaultDeletedDocsFormat::write(const storage::DirectoryPtr& directory_ptr,
+                                const segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     bool s3_enable = false;

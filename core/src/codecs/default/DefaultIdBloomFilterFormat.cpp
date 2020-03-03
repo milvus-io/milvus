@@ -30,7 +30,7 @@ constexpr unsigned int bloom_filter_capacity = 500000;
 constexpr double bloom_filter_error_rate = 0.01;
 
 void
-DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
+DefaultIdBloomFilterFormat::read(const storage::DirectoryPtr& directory_ptr,
                                  segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
@@ -48,7 +48,7 @@ DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
 }
 
 void
-DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
+DefaultIdBloomFilterFormat::write(const storage::DirectoryPtr& directory_ptr,
                                   const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
@@ -63,7 +63,7 @@ DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
 }
 
 void
-DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
+DefaultIdBloomFilterFormat::create(const storage::DirectoryPtr& directory_ptr,
                                    segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;

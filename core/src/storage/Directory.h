@@ -22,23 +22,26 @@
 #include <vector>
 
 namespace milvus {
-namespace store {
+namespace storage {
 
 class Directory {
  public:
-    explicit Directory(const std::string& dir_path);
+    explicit Directory(const std::string& dir_path) : dir_path_(dir_path) {
+    }
+
+    virtual void
+    Create() = 0;
 
     void
-    Create();
+    ListAll(std::vector<std::string>& file_paths) const = 0;
 
-    void
-    ListAll(std::vector<std::string>& file_paths);
-
-    bool
-    DeleteFile(const std::string& file_path);
+    virtual bool
+    DeleteFile(const std::string& file_path) = 0;
 
     const std::string&
-    GetDirPath() const;
+    GetDirPath() const {
+        return dir_path_;
+    }
 
     // TODO(zhiru):
     //  open(), sync(), close()
@@ -52,5 +55,5 @@ class Directory {
 
 using DirectoryPtr = std::shared_ptr<Directory>;
 
-}  // namespace store
+}  // namespace storage
 }  // namespace milvus

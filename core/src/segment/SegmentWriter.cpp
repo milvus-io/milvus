@@ -23,7 +23,7 @@
 #include "SegmentReader.h"
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
-#include "store/Directory.h"
+#include "storage/file/FileDirectory.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -31,7 +31,7 @@ namespace milvus {
 namespace segment {
 
 SegmentWriter::SegmentWriter(const std::string& directory) {
-    directory_ptr_ = std::make_shared<store::Directory>(directory);
+    directory_ptr_ = std::make_shared<storage::Directory>(directory);
     segment_ptr_ = std::make_shared<Segment>();
 }
 
