@@ -117,11 +117,12 @@ class TestFlushBase:
         status, ids = connect.insert(table_new, vectors, ids, partition_tag=tag)
         assert status.OK()
         status = connect.flush([table])
+        status = connect.flush([table_new])
         assert status.OK()
         result, res = connect.get_table_row_count(table)
         assert res == nb
         result, res = connect.get_table_row_count(table_new)
-        assert res == 0
+        assert res == nb
        
     def test_add_flush_multiable_times(self, connect, table):
         '''
