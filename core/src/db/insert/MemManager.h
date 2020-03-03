@@ -38,10 +38,10 @@ class MemManager {
     DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
 
     virtual Status
-    Flush(const std::string& table_id) = 0;
+    Flush(const std::string& table_id, bool apply_delete = true) = 0;
 
     virtual Status
-    Flush(std::set<std::string>& table_ids) = 0;
+    Flush(std::set<std::string>& table_ids, bool apply_delete = true) = 0;
 
     //    virtual Status
     //    Serialize(std::set<std::string>& table_ids) = 0;

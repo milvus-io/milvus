@@ -72,10 +72,10 @@ class MemManagerImpl : public MemManager {
     DeleteVectors(const std::string& table_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    Flush(const std::string& table_id) override;
+    Flush(const std::string& table_id, bool apply_delete = true) override;
 
     Status
-    Flush(std::set<std::string>& table_ids) override;
+    Flush(std::set<std::string>& table_ids, bool apply_delete = true) override;
 
     //    Status
     //    Serialize(std::set<std::string>& table_ids) override;
