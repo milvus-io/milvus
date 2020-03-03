@@ -182,7 +182,7 @@ TEST(WalTest, BUFFER_INIT_TEST) {
 
     FILE* fi = nullptr;
     char buff[128];
-    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, 0);
+    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, 32);
 
     // start_lsn == end_lsn, start_lsn == 0
     ASSERT_TRUE(buffer.Init(0, 0));
@@ -260,7 +260,7 @@ TEST(WalTest, BUFFER_INIT_TEST) {
 TEST(WalTest, BUFFER_TEST) {
     MakeEmptyTestPath();
 
-    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, WAL_BUFFER_MAX_SIZE + 1);
+    milvus::engine::wal::MXLogBuffer buffer(WAL_GTEST_PATH, 2048);
 
     uint32_t file_no = 4;
     uint32_t buf_off = 100;

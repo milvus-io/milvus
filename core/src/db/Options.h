@@ -71,7 +71,7 @@ struct DBOptions {
     size_t insert_buffer_size_ = 4 * ONE_GB;
     bool insert_cache_immediately_ = false;
 
-    int64_t auto_flush_interval_ = 1000;
+    int64_t auto_flush_interval_ = 1;
 
     // wal relative configurations
     bool wal_enable_ = true;
