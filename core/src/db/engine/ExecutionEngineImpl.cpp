@@ -111,7 +111,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     milvus::json conf{{"gpu_id", gpu_num_}, {knowhere::meta::DIM, dimension}};
     MappingMetricType(metric_type, conf);
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    if (adapter->CheckTrain(conf)) {
+    if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Build Config illegal");
     }
 
@@ -408,7 +408,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             milvus::json conf{{"gpu_id", gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
             auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-            if (adapter->CheckTrain(conf)) {
+            if (!adapter->CheckTrain(conf)) {
                 throw Exception(DB_ERROR, "Build Config illegal");
             }
 
@@ -716,7 +716,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf["gpu_id"] = gpu_num_;
     MappingMetricType(metric_type_, conf);
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    if (adapter->CheckTrain(conf)) {
+    if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Build Config illegal");
     }
 
@@ -801,7 +801,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    if (adapter->CheckSearch(conf, index_->GetType())) {
+    if (!adapter->CheckSearch(conf, index_->GetType())) {
         throw Exception(DB_ERROR, "Search Config illegal");
     }
 
@@ -849,7 +849,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    if (adapter->CheckSearch(conf, index_->GetType())) {
+    if (!adapter->CheckSearch(conf, index_->GetType())) {
         throw Exception(DB_ERROR, "Search Config illegal");
     }
 
@@ -897,7 +897,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    if (adapter->CheckSearch(conf, index_->GetType())) {
+    if (!adapter->CheckSearch(conf, index_->GetType())) {
         throw Exception(DB_ERROR, "Search Config illegal");
     }
 
