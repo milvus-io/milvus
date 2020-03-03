@@ -48,7 +48,7 @@ bool support_sse() {
     return (instruction_set_inst.SSE());
 }
 
-void hook_init() {
+std::string hook_init() {
     static std::mutex hook_mutex;
     std::lock_guard<std::mutex> lock(hook_mutex);
 
@@ -65,6 +65,7 @@ void hook_init() {
         sq_sel_quantizer = sq_select_quantizer_avx512;
 
         std::cout << "FAISS hook AVX512" << std::endl;
+        return "AVX512";
     } else if (support_avx()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_avx;
@@ -78,6 +79,7 @@ void hook_init() {
         sq_sel_quantizer = sq_select_quantizer_avx;
 
         std::cout << "FAISS hook AVX" << std::endl;
+        return "AVX";
     } else if (support_sse()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_sse;
@@ -91,8 +93,10 @@ void hook_init() {
         sq_sel_quantizer = sq_select_quantizer_sse;
 
         std::cout << "FAISS hook SSE" << std::endl;
+        return "SSE";
     } else {
         FAISS_ASSERT_MSG(false, "CPU not supported!");
+        return "UNSUPPORTED";
     }
 }
 

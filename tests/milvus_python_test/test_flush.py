@@ -121,7 +121,7 @@ class TestFlushBase:
         result, res = connect.get_table_row_count(table)
         assert res == nb
         result, res = connect.get_table_row_count(table_new)
-        assert res == nb 
+        assert res == nb
        
     def test_add_flush_multiable_times(self, connect, table):
         '''

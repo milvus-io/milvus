@@ -46,13 +46,14 @@ server_config:
 #                      | loaded when Milvus server starts up.                       |            |                 |
 #                      | '*' means preload all existing tables.                     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# auto_flush_interval  | The interval, in milliseconds, at which Milvus             | Integer    | 1000 (ms)       |
-#                      | automatically flushes data to disk.                        |            |                 |
+# auto_flush_interval  | The interval, in seconds, at which Milvus automatically    | Integer    | 1 (s)           |
+#                      | flushes data to disk.                                      |            |                 |
+#                      | 0 means disable the regular flush.                         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 db_config:
   backend_url: sqlite://:@:/
   preload_table:
-  auto_flush_interval: 1000
+  auto_flush_interval: 1
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Storage Config       | Description                                                | Type       | Default         |

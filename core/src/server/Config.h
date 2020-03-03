@@ -60,7 +60,7 @@ static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
 static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
-static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1000";
+static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
 
 /* storage config */
 static const char* CONFIG_STORAGE = "storage_config";
@@ -142,6 +142,8 @@ static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
+static const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
+static const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
 static const char* CONFIG_WAL_WAL_PATH = "wal_path";
 static const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 

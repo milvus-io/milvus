@@ -748,7 +748,7 @@ Status
 Config::CheckDBConfigAutoFlushInterval(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid db configuration auto_flush_interval: " + value +
-                          ". Possible reason: db.auto_flush_interval is not a positive integer.";
+                          ". Possible reason: db.auto_flush_interval is not a natural number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
@@ -1673,6 +1673,11 @@ Config::GetWalConfigBufferSize(int64_t& buffer_size) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
     CONFIG_CHECK(CheckWalConfigBufferSize(str));
     buffer_size = std::stoll(str);
+    if (buffer_size > CONFIG_WAL_BUFFER_SIZE_MAX) {
+        buffer_size = CONFIG_WAL_BUFFER_SIZE_MAX;
+    } else if (buffer_size < CONFIG_WAL_BUFFER_SIZE_MIN) {
+        buffer_size = CONFIG_WAL_BUFFER_SIZE_MIN;
+    }
     return Status::OK();
 }
 
