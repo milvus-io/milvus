@@ -1224,6 +1224,16 @@ Config::CheckWalConfigBufferSize(const std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::CheckWalConfigWalPath(const std::string& value) {
+    fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "wal_config.wal_path is empty.");
+    }
+
+    return ValidationUtil::ValidateStoragePath(value);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
 Config::GetConfigRoot() {
@@ -1859,6 +1869,24 @@ Status
 Config::SetEngineConfigUseAVX512(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigUseAVX512(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, value);
+}
+
+/* wal config */
+Status
+Config::SetWalConfigEnable(const std::string& value) {
+    CONFIG_CHECK
+}
+
+Status
+Config::SetWalConfigRecoveryErrorIgnore(const std::string& value) {
+}
+
+Status
+Config::SetWalConfigBufferSize(const std::string& value) {
+}
+
+Status
+Config::SetWalConfigWalPath(const std::string& value) {
 }
 
 #ifdef MILVUS_GPU_VERSION
