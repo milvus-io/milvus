@@ -408,7 +408,7 @@ def gen_invalid_vector_ids():
     return invalid_vector_ids
 
 
-def gen_invalid_config():
+def gen_invalid_cache_config():
     invalid_configs = [
             0,
             -1,
@@ -431,6 +431,30 @@ def gen_invalid_config():
             "中文",
             "'123'",
             "さようなら"
+    ]
+    return invalid_configs
+
+
+def gen_invalid_engine_config():
+    invalid_configs = [
+            -1,
+            [1,2,3],
+            (1,2),
+            {"a": 1},
+            " ",
+            "",
+            "String",
+            "12-s",
+            "BB。A",
+            " siede ",
+            "(mn)",
+            "#12s",
+            "pip+",
+            "=c",
+            "\n",
+            "\t",
+            "中文",
+            "'123'",
     ]
     return invalid_configs
 
