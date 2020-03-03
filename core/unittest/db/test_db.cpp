@@ -313,32 +313,34 @@ TEST_F(DBTest, SEARCH_TEST) {
     stat = db_->InsertVectors(TABLE_NAME, "", xb);
     ASSERT_TRUE(stat.ok());
 
+    milvus::json json_params = {{"nprobe", 10}};
     milvus::engine::TableIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
-
-    milvus::json json_params = {{"nprobe", 10}};
-
-    {
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-    }
-
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
-    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
-
-    {
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-    }
+    index.extra_params_ = {{"nlist", 16384}};
+//    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+//
+//    {
+//        std::vector<std::string> tags;
+//        milvus::engine::ResultIds result_ids;
+//        milvus::engine::ResultDistances result_distances;
+//        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
+//        ASSERT_TRUE(stat.ok());
+//    }
+//
+//    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+//    index.extra_params_ = {{"nlist", 16384}};
+//    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+//
+//    {
+//        std::vector<std::string> tags;
+//        milvus::engine::ResultIds result_ids;
+//        milvus::engine::ResultDistances result_distances;
+//        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
+//        ASSERT_TRUE(stat.ok());
+//    }
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.extra_params_ = {{"nlist", 16384}};
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     {

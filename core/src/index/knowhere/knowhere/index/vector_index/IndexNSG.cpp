@@ -102,7 +102,7 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     Graph knng;
     const float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
-    // if (config["gpu_id"] == knowhere::INVALID_VALUE) {
+    // if (config[knowhere::meta::DEVICEID] == knowhere::INVALID_VALUE) {
     // auto preprocess_index = std::make_shared<IDMAP>();
     // auto model = preprocess_index->Train(dataset, config);
     // preprocess_index->set_index_model(model);
@@ -110,7 +110,7 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     // preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
     // } else {
     // TODO(linxj): use ivf instead?
-    auto gpu_idx = cloner::CopyCpuToGpu(idmap, config["gpu_id"].get<int64_t>(), config);
+    auto gpu_idx = cloner::CopyCpuToGpu(idmap, config[knowhere::meta::DEVICEID].get<int64_t>(), config);
     auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
     gpu_idmap->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
     // }

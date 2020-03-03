@@ -50,7 +50,7 @@ class KnowhereWrapperTest
             {knowhere::meta::ROWS, nb},
             {knowhere::meta::DIM, dim},
             {knowhere::meta::TOPK, k},
-            {"gpu_id", DEVICEID}
+            {knowhere::meta::DEVICEID, DEVICEID}
         };
 
         index_ = GetVecIndexFactory(index_type);

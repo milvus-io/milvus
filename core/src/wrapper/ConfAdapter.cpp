@@ -36,18 +36,18 @@ namespace engine {
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
 
-#define checkint(key, min, max)                                                                           \
+#define CheckIntByRange(key, min, max)                                                                           \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() >= max || \
         oricfg[key].get<int64_t>() <= min) {                                                              \
         return false;                                                                                     \
     }
 
-#define checkfloat(key, min, max)                                                                              \
-    if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key] >= max || oricfg[key] <= min) { \
-        return false;                                                                                          \
-    }
+// #define checkfloat(key, min, max)                                                                              \
+//     if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key] >= max || oricfg[key] <= min) { \
+//         return false;                                                                                          \
+//     }
 
-#define checkintbyvalue(key, container)                                                                  \
+#define CheckIntByValues(key, container)                                                                  \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \
     } else {                                                                                             \
@@ -57,7 +57,7 @@ namespace engine {
         }                                                                                                \
     }
 
-#define checkstr(key, container)                                                                             \
+#define CheckStrByValues(key, container)                                                                             \
     if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
         return false;                                                                                        \
     } else {                                                                                                 \
@@ -71,15 +71,15 @@ bool
 ConfAdapter::CheckTrain(milvus::json& oricfg) {
     static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
-    checkint(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkstr(knowhere::Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
     return true;
 }
 
 bool
 ConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
-    checkint(knowhere::meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
+    CheckIntByRange(knowhere::meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
 
     return true;
 }
@@ -89,7 +89,7 @@ IVFConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
     static int64_t MIN_NLIST = 1;
 
-    checkint(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -101,9 +101,9 @@ IVFConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
 
     if (type == IndexType::FAISS_IVFPQ_GPU || type == IndexType::FAISS_IVFSQ8_GPU ||
         type == IndexType::FAISS_IVFSQ8_HYBRID || type == IndexType::FAISS_IVFFLAT_GPU) {
-        checkint(knowhere::IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
     } else {
-        checkint(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
     }
 
     return ConfAdapter::CheckSearch(oricfg, type);
@@ -131,12 +131,12 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     server::Config& config = server::Config::GetInstance();
     s = config.GetGpuResourceConfigEnable(enable_gpu);
     if (s.ok()) {
-        checkstr(knowhere::Metric::TYPE, GPU_METRICS);
+        CheckStrByValues(knowhere::Metric::TYPE, GPU_METRICS);
     } else {
-        checkstr(knowhere::Metric::TYPE, CPU_METRICS);
+        CheckStrByValues(knowhere::Metric::TYPE, CPU_METRICS);
     }
 #endif
-    checkint(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
 
     /*
      * Faiss 1.6
@@ -155,7 +155,7 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
             }
         }
     }
-    checkintbyvalue(knowhere::IndexParams::m, resset);
+    CheckIntByValues(knowhere::IndexParams::m, resset);
 
     return true;
 }
@@ -172,11 +172,11 @@ NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
     static std::vector<std::string> METRICS{knowhere::Metric::L2};
 
-    checkstr(knowhere::Metric::TYPE, METRICS);
-    checkint(knowhere::IndexParams::knng, MIN_KNNG, MAX_KNNG);
-    checkint(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
-    checkint(knowhere::IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
-    checkint(knowhere::IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::IndexParams::knng, MIN_KNNG, MAX_KNNG);
+    CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    CheckIntByRange(knowhere::IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
+    CheckIntByRange(knowhere::IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
 
     return true;
 }
@@ -186,7 +186,7 @@ NSGConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
     static int64_t MIN_SEARCH_LENGTH = 1;
     static int64_t MAX_SEARCH_LENGTH = 300;
 
-    checkint(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
 
     return ConfAdapter::CheckSearch(oricfg, type);
 }
@@ -198,8 +198,8 @@ HNSWConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MIN_M = 5;
     static int64_t MAX_M = 48;
 
-    checkint(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
-    checkint(knowhere::IndexParams::M, MIN_M, MAX_M);
+    CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -208,32 +208,30 @@ bool
 HNSWConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
     static int64_t MAX_EF = 4096;
 
-    checkint(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg, type);
 }
 
 bool
 BinIDMAPConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
-                                            knowhere::Metric::TANIMOTO};
+    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO};
 
-    checkint(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkstr(knowhere::Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
     return true;
 }
 
 bool
 BinIVFConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
-                                            knowhere::Metric::TANIMOTO};
-    static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
+    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO};
+    static int64_t MAX_NLIST = 99999;
     static int64_t MIN_NLIST = 1;
 
-    checkint(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkint(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
-    checkstr(knowhere::Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
     return true;
 }
