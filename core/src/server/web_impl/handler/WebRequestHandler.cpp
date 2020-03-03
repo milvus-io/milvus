@@ -441,10 +441,10 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     }
     int64_t topk = json["topk"];
 
-    if (!json.contains("nprobe")) {
-        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
-    }
-    int64_t nprobe = json["nprobe"];
+//    if (!json.contains("nprobe")) {
+//        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
+//    }
+//    int64_t nprobe = json["nprobe"];
 
     std::vector<std::string> partition_tags;
     if (json.contains("partition_tags")) {
@@ -458,47 +458,42 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
         }
     }
 
+    std::vector<std::string> file_id_vec;
+    if (json.contains("file_ids")) {
+        auto ids = json["file_ids"];
+        if (!ids.is_null() && !ids.is_array()) {
+            return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
+        }
+        for (auto& id : ids) {
+            file_id_vec.emplace_back(id.get<std::string>());
+        }
+    }
+
+    if (!json.contains("params")) {
+        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
+    }
+
+    bool bin_flag = false;
+    auto status = IsBinaryTable(table_name, bin_flag);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (!json.contains("vectors")) {
+        return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
+    }
+
+    engine::VectorsData vectors_data;
+    status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
+    if (!status.ok()) {
+        return status;
+    }
+
     TopKQueryResult result;
-    if (json.contains("vector_id")) {
-        auto vec_id = json["vector_id"].get<int64_t>();
-        auto status =
-            request_handler_.SearchByID(context_ptr_, table_name, vec_id, topk, nprobe, partition_tags, result);
-        if (!status.ok()) {
-            return status;
-        }
-    } else {
-        std::vector<std::string> file_id_vec;
-        if (json.contains("file_ids")) {
-            auto ids = json["file_ids"];
-            if (!ids.is_null() && !ids.is_array()) {
-                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
-            }
-            for (auto& id : ids) {
-                file_id_vec.emplace_back(id.get<std::string>());
-            }
-        }
-
-        bool bin_flag = false;
-        auto status = IsBinaryTable(table_name, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        if (!json.contains("vectors")) {
-            return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
-        }
-
-        engine::VectorsData vectors_data;
-        status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, nprobe, partition_tags,
-                                         file_id_vec, result);
-        if (!status.ok()) {
-            return status;
-        }
+    status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, json["params"],
+        partition_tags, file_id_vec, result);
+    if (!status.ok()) {
+        return status;
     }
 
     nlohmann::json result_json;
@@ -1006,34 +1001,43 @@ WebRequestHandler::DropTable(const OString& table_name) {
  */
 
 StatusDto::ObjectWrapper
-WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param) {
-    if (nullptr == index_param->index_type.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required")
-    }
-    std::string index_type = index_param->index_type->std_str();
-    if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
-        RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
+WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
+    try {
+        auto request_json = nlohmann::json::parse(body->std_str());
+        if (!request_json.contains("index_type")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
+        }
+
+        std::string index_type = request_json["index_type"];
+        if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
+            RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
+        }
+        auto index = static_cast<int64_t>(IndexNameMap.at(index_type));
+        if (!request_json.contains("params")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
+        }
+        auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index, request_json["params"]);
+        ASSIGN_RETURN_STATUS_DTO(status);
+    } catch (nlohmann::detail::parse_error & e) {
+
+    } catch (nlohmann::detail::type_error & e) {
+
     }
 
-    std::string extra_params = index_param->extra_params->std_str();
-    if (extra_params.empty()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'extra_params\' is required")
-    }
-
-    auto json = milvus::json::parse(extra_params);
-    auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
-                                               static_cast<int64_t>(IndexNameMap.at(index_type)), json);
-    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(Status::OK())
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto) {
+WebRequestHandler::GetIndex(const OString& table_name, OString& result) {
     IndexParam param;
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
 
     if (status.ok()) {
-        index_dto->index_type = IndexMap.at(engine::EngineType(param.index_type_)).c_str();
-        index_dto->extra_params = param.extra_params_.c_str();
+        nlohmann::json json_out;
+        auto index_type = IndexMap.at(engine::EngineType(param.index_type_));
+        json_out["index_type"] = index_type;
+        json_out["params"] = nlohmann::json::parse(param.extra_params_);
+        result = json_out.dump().c_str();
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
