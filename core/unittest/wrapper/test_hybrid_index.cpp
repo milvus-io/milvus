@@ -56,7 +56,7 @@ TEST_F(KnowhereHybrid, test_interface) {
         {knowhere::meta::ROWS, nb},
         {knowhere::meta::DIM, dim},
         {knowhere::meta::TOPK, k},
-        {"gpu_id", DEVICEID}
+        {knowhere::meta::DEVICEID, DEVICEID}
     };
 
     index_type = milvus::engine::IndexType::FAISS_IVFSQ8_HYBRID;
@@ -102,7 +102,7 @@ TEST_F(KnowhereHybrid, test_interface) {
 
         milvus::json quantizer_conf {
             {"mode", 2},
-            {"gpu_id", DEVICEID}
+            {knowhere::meta::DEVICEID, DEVICEID}
         };
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = GetVecIndexFactory(index_type);

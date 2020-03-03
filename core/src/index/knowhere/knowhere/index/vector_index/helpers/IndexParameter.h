@@ -23,6 +23,7 @@ constexpr const char* ROWS = "rows";
 constexpr const char* IDS = "ids";
 constexpr const char* DISTANCE = "distance";
 constexpr const char* TOPK = "k";
+constexpr const char* DEVICEID = "gpu_id";
 };  // namespace meta
 
 namespace IndexParams {
@@ -30,7 +31,7 @@ namespace IndexParams {
 constexpr const char* nprobe = "nprobe";
 constexpr const char* nlist = "nlist";
 constexpr const char* m = "m";          // PQ
-constexpr const char* nbits = "nbits";  // pq
+constexpr const char* nbits = "nbits";  // PQ/SQ
 
 // NSG Params
 constexpr const char* knng = "knng";

@@ -89,7 +89,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
         //        PrintResult(result, nq, k);
 
-        milvus::json quantizer_conf{{"gpu_id", DEVICEID}, {"mode", 2}};
+        milvus::json quantizer_conf{{knowhere::meta::DEVICEID, DEVICEID}, {"mode", 2}};
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);

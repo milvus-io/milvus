@@ -30,7 +30,7 @@ namespace knowhere {
 IndexModelPtr
 GPUIVF::Train(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
-    gpu_id_ = config["gpu_id"];
+    gpu_id_ = config[knowhere::meta::DEVICEID];
 
     auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (temp_resource != nullptr) {

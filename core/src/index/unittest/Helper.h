@@ -78,7 +78,7 @@ class ParamGenerator {
                 {knowhere::IndexParams::nlist, 100},
                 {knowhere::IndexParams::nprobe, 4},
                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {"gpu_id", DEVICEID},
+                {knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == ParameterType::ivfpq) {
             return knowhere::Config{
@@ -89,7 +89,7 @@ class ParamGenerator {
                 {knowhere::IndexParams::m, 4},
                 {knowhere::IndexParams::nbits, 8},
                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {"gpu_id", DEVICEID},
+                {knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == ParameterType::ivfsq) {
             return knowhere::Config{
@@ -99,7 +99,7 @@ class ParamGenerator {
                 {knowhere::IndexParams::nprobe, 4},
                 {knowhere::IndexParams::nbits, 8},
                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {"gpu_id", DEVICEID},
+                {knowhere::meta::DEVICEID, DEVICEID},
             };
         }
     }

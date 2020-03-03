@@ -84,7 +84,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     }
     // train_conf->gpu_id = knowhere::INVALID_VALUE;
     // auto model_invalid_gpu = index_->Train(base_dataset, train_conf);
-    train_conf["gpu_id"] = DEVICEID;
+    train_conf[knowhere::meta::DEVICEID] = DEVICEID;
     auto model = index_->Train(base_dataset, train_conf);
     auto result = index_->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
