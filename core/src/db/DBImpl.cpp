@@ -657,12 +657,23 @@ DBImpl::Compact(const std::string& table_id) {
 
     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
+    // Save table index
+    TableIndex table_index;
+    status = DescribeIndex(table_id, table_index);
+    if (!status.ok()) {
+        return status;
+    }
+
     // Drop all index
     status = DropIndex(table_id);
     if (!status.ok()) {
-        std::string err_msg = "Failed to drop index in compact: " + status.message();
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(DB_ERROR, err_msg);
+        return status;
+    }
+
+    // Then update table index to the previous index
+    status = meta_ptr_->UpdateTableIndex(table_id, table_index);
+    if (!status.ok()) {
+        return status;
     }
 
     // Get files to compact from meta.
@@ -679,7 +690,7 @@ DBImpl::Compact(const std::string& table_id) {
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
     for (auto& file : files_to_compact) {
-        status = CompactFile(table_id, file);
+        status = CompactFile(table_id, file, table_index);
 
         if (!status.ok()) {
             OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
@@ -694,7 +705,8 @@ DBImpl::Compact(const std::string& table_id) {
 }
 
 Status
-DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file) {
+DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file,
+                    const TableIndex& table_index) {
     ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for table: " << table_id;
 
     // Create new table file
@@ -741,16 +753,24 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
 
     // Drop index again, in case some files were in the index building process during merging
     // TODO: might be too frequent?
-    DropIndex(table_id);
+    status = DropIndex(table_id);
+    if (!status.ok()) {
+        return status;
+    }
+    status = meta_ptr_->UpdateTableIndex(table_id, table_index);
+    if (!status.ok()) {
+        return status;
+    }
 
-    // Update table files state
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-    // else set file type to RAW, no need to build index
-    if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        // Update table files state
+        // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+        // else set file type to RAW, no need to build index
+        if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
                                         ? meta::TableFileSchema::TO_INDEX
                                         : meta::TableFileSchema::RAW;
-    } else {
+    }
+    else {
         compacted_file.file_type_ = meta::TableFileSchema::RAW;
     }
     compacted_file.file_size_ = segment_writer_ptr->Size();
