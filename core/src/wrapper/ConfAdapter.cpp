@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #include "wrapper/ConfAdapter.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #include <fiu-local.h>
 
@@ -19,6 +18,7 @@
 #include <vector>
 
 #include "WrapperException.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "server/Config.h"
 #include "utils/Log.h"
 
@@ -35,8 +35,10 @@ namespace engine {
 #define DEFAULT_MIN_DIM 1
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
+#define DEFAULT_MIN_ROWS 100  // minimum size for build index
+#define DEFAULT_MAX_ROWS 50000000
 
-#define CheckIntByRange(key, min, max)                                                                           \
+#define CheckIntByRange(key, min, max)                                                                    \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() >= max || \
         oricfg[key].get<int64_t>() <= min) {                                                              \
         return false;                                                                                     \
@@ -47,7 +49,7 @@ namespace engine {
 //         return false;                                                                                          \
 //     }
 
-#define CheckIntByValues(key, container)                                                                  \
+#define CheckIntByValues(key, container)                                                                 \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \
     } else {                                                                                             \
@@ -57,7 +59,7 @@ namespace engine {
         }                                                                                                \
     }
 
-#define CheckStrByValues(key, container)                                                                             \
+#define CheckStrByValues(key, container)                                                                     \
     if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
         return false;                                                                                        \
     } else {                                                                                                 \
@@ -86,10 +88,18 @@ ConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
 
 bool
 IVFConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
+    static int64_t MAX_NLIST = 999999;
     static int64_t MIN_NLIST = 1;
 
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+
+    int64_t nlist = oricfg[knowhere::IndexParams::nlist];
+    CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+
+    // Best Practice
+    // static int64_t MIN_POINTS_PER_CENTROID = 40;
+    // static int64_t MAX_POINTS_PER_CENTROID = 256;
+    // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -97,7 +107,7 @@ IVFConfAdapter::CheckTrain(milvus::json& oricfg) {
 bool
 IVFConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
     static int64_t MIN_NPROBE = 1;
-    static int64_t MAX_NPROBE = 99999;  // todo(linxj): [1, nlist]
+    static int64_t MAX_NPROBE = 999999;  // todo(linxj): [1, nlist]
 
     if (type == IndexType::FAISS_IVFPQ_GPU || type == IndexType::FAISS_IVFSQ8_GPU ||
         type == IndexType::FAISS_IVFSQ8_HYBRID || type == IndexType::FAISS_IVFFLAT_GPU) {
@@ -120,6 +130,8 @@ IVFSQConfAdapter::CheckTrain(milvus::json& oricfg) {
 bool
 IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t DEFAULT_NBITS = 8;
+    static int64_t MAX_NLIST = 999999;
+    static int64_t MIN_NLIST = 1;
     static std::vector<std::string> CPU_METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
     static std::vector<std::string> GPU_METRICS{knowhere::Metric::L2};
 
@@ -137,6 +149,15 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     }
 #endif
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+
+    int64_t nlist = oricfg[knowhere::IndexParams::nlist];
+    CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+
+    // Best Practice
+    // static int64_t MIN_POINTS_PER_CENTROID = 40;
+    // static int64_t MAX_POINTS_PER_CENTROID = 256;
+    // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
     /*
      * Faiss 1.6
@@ -173,6 +194,7 @@ NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
     static std::vector<std::string> METRICS{knowhere::Metric::L2};
 
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::knng, MIN_KNNG, MAX_KNNG);
     CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
     CheckIntByRange(knowhere::IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
@@ -198,6 +220,7 @@ HNSWConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MIN_M = 5;
     static int64_t MAX_M = 48;
 
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
     CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
 
@@ -215,7 +238,8 @@ HNSWConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
 
 bool
 BinIDMAPConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO};
+    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
+                                            knowhere::Metric::TANIMOTO};
 
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
@@ -225,13 +249,23 @@ BinIDMAPConfAdapter::CheckTrain(milvus::json& oricfg) {
 
 bool
 BinIVFConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO};
-    static int64_t MAX_NLIST = 99999;
+    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
+                                            knowhere::Metric::TANIMOTO};
+    static int64_t MAX_NLIST = 999999;
     static int64_t MIN_NLIST = 1;
 
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
+
+    int64_t nlist = oricfg[knowhere::IndexParams::nlist];
+    CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+
+    // Best Practice
+    // static int64_t MIN_POINTS_PER_CENTROID = 40;
+    // static int64_t MAX_POINTS_PER_CENTROID = 256;
+    // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
     return true;
 }
