@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <memory>
 
+#include "server/Config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -25,8 +26,11 @@ namespace engine {
 namespace wal {
 
 WalManager::WalManager(const MXLogConfiguration& config) {
+    __glibcxx_assert(config.buffer_size <= milvus::server::CONFIG_WAL_BUFFER_SIZE_MAX / 2);
+    __glibcxx_assert(config.buffer_size >= milvus::server::CONFIG_WAL_BUFFER_SIZE_MIN / 2);
+
     mxlog_config_.recovery_error_ignore = config.recovery_error_ignore;
-    mxlog_config_.buffer_size = config.buffer_size * 1024 * 1024;
+    mxlog_config_.buffer_size = config.buffer_size;
     mxlog_config_.mxlog_path = config.mxlog_path;
 
     // check the path end with '/'
