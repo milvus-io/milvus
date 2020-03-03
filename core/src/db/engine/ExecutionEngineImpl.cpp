@@ -715,11 +715,11 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf[knowhere::meta::ROWS] = Count();
     conf["gpu_id"] = gpu_num_;
     MappingMetricType(metric_type_, conf);
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Build Config illegal");
     }
-
+    ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
     auto status = Status::OK();
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
