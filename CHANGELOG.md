@@ -69,8 +69,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1234 Do S3 server validation check when Milvus startup
 -   \#1263 Allow system conf modifiable and some take effect directly
 -   \#1320 Remove debug logging from faiss
--   \#1426 - Support to configure whether to enabled autoflush and the autoflush interval
+-   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
+-   \#1480 Add return code for AVX512 selection
 
 
 ## Task
