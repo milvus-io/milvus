@@ -157,7 +157,7 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
         vectors, ids = self.init_data(connect, table)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
@@ -182,7 +182,7 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         vectors, ids = self.init_data(connect, table)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
@@ -192,7 +192,7 @@ class TestSearchBase:
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
         assert result[0][0].distance <= epsilon
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result) == 0
@@ -208,11 +208,11 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         vectors, ids = self.init_data(connect, table)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result) == 0
@@ -228,7 +228,7 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         vectors, ids = self.init_data(connect, table, partition_tags=tag)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
@@ -238,7 +238,7 @@ class TestSearchBase:
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
         assert result[0][0].distance <= epsilon
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
@@ -256,11 +256,11 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         vectors, ids = self.init_data(connect, table, partition_tags=tag)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag, "new_tag"], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag, "new_tag"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
@@ -278,11 +278,11 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         vectors, ids = self.init_data(connect, table, partition_tags=tag)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=["new_tag"], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=["new_tag"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result) == 0
@@ -301,11 +301,11 @@ class TestSearchBase:
         status = connect.create_partition(table, new_tag)
         vectors, ids = self.init_data(connect, table, partition_tags=tag)
         new_vectors, new_ids = self.init_data(connect, table, nb=6001, partition_tags=new_tag)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0], new_vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag, new_tag], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[tag, new_tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
@@ -313,7 +313,7 @@ class TestSearchBase:
         assert check_result(result[1], new_ids[0])
         assert result[0][0].distance <= epsilon
         assert result[1][0].distance <= epsilon
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[new_tag], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=[new_tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
@@ -335,16 +335,16 @@ class TestSearchBase:
         status = connect.create_partition(table, new_tag)
         vectors, ids = self.init_data(connect, table, partition_tags=tag)
         new_vectors, new_ids = self.init_data(connect, table, nb=6001, partition_tags=new_tag)
-        status = create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         query_vec = [vectors[0], new_vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=["new(.*)"], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=["new(.*)"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert result[0][0].distance > epsilon
         assert result[1][0].distance <= epsilon
-        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=["(.*)tag"], search_param)
+        status, result = connect.search_vectors(table, top_k, query_vec, partition_tags=["(.*)tag"], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert result[0][0].distance <= epsilon
@@ -383,7 +383,7 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        logging.getLogger().info(index_params)
+        logging.getLogger().info(index_param)
         status = connect.create_partition(ip_table, tag)
         vectors, ids = self.init_data(connect, ip_table)
         status = connect.create_index(ip_table, index_type, index_param)
@@ -396,7 +396,7 @@ class TestSearchBase:
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
         assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
-        status, result = connect.search_vectors(ip_table, top_k, query_vec, partition_tags=[tag], search_param)
+        status, result = connect.search_vectors(ip_table, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result) == 0
@@ -409,14 +409,14 @@ class TestSearchBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        logging.getLogger().info(index_params)
+        logging.getLogger().info(index_param)
         status = connect.create_partition(ip_table, tag)
         vectors, ids = self.init_data(connect, ip_table, partition_tags=tag)
         status = connect.create_index(ip_table, index_type, index_param)
         query_vec = [vectors[0]]
         top_k = 10
         search_param = get_search_param(index_type)
-        status, result = connect.search_vectors(ip_table, top_k, query_vec, partition_tags=[tag], search_param)
+        status, result = connect.search_vectors(ip_table, top_k, query_vec, partition_tags=[tag], params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
@@ -529,7 +529,7 @@ class TestSearchBase:
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, jac_table, nb=2)
         index_type = IndexType.FLAT
-        index_params = {
+        index_param = {
             "nlist": 16384
         }
         connect.create_index(jac_table, index_type, index_param)
@@ -555,7 +555,7 @@ class TestSearchBase:
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, ham_table, nb=2)
         index_type = IndexType.FLAT
-        index_params = {
+        index_param = {
             "nlist": 16384
         }
         connect.create_index(ham_table, index_type, index_param)
@@ -581,7 +581,7 @@ class TestSearchBase:
         nprobe = 512
         int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_table, nb=2)
         index_type = IndexType.FLAT
-        index_params = {
+        index_param = {
             "nlist": 16384
         }
         connect.create_index(tanimoto_table, index_type, index_param)

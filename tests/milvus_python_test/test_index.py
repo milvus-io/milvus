@@ -930,7 +930,7 @@ class TestIndexIP:
         for i in range(10):
             status, result = connect.describe_index(table_list[i])
             logging.getLogger().info(result)
-            assert result._params["nlist"] == index_params["nlist"]
+            assert result._params["nlist"] == index_param["nlist"]
             assert result._table_name == table_list[i]
             assert result._index_type == index_type
         for i in range(10):
@@ -1140,9 +1140,9 @@ class TestIndexIP:
             status = connect.create_index(ip_table, indexs[i]["index_type"], indexs[i]["index_param"])
             assert status.OK()
             status, result = connect.describe_index(ip_table)
-            assert result._params["nlist"] == index_params[i]["nlist"]
+            assert result._params["nlist"] == indexs[i]["nlist"]
             assert result._table_name == ip_table
-            assert result._index_type == index_params[i]["index_type"]
+            assert result._index_type == indexs[i]["index_type"]
             status, result = connect.describe_index(ip_table)
             logging.getLogger().info(result)
             status = connect.drop_index(ip_table)
@@ -1283,7 +1283,7 @@ class TestIndexJAC:
         logging.getLogger().info(result)
         assert result._table_name == jac_table
         assert result._index_type == index_type
-        assert result._params["nlist"] == index_params["nlist"]
+        assert result._params["nlist"] == index_param["nlist"]
 
     def test_describe_index_partition(self, connect, jac_table, get_jaccard_index):
         '''
@@ -1299,7 +1299,7 @@ class TestIndexJAC:
         status = connect.create_index(jac_table, index_type, index_param)
         status, result = connect.describe_index(jac_table)
         logging.getLogger().info(result)
-        assert result._params["nlist"] == index_params["nlist"]
+        assert result._params["nlist"] == index_param["nlist"]
         assert result._table_name == jac_table
         assert result._index_type == index_type
 
