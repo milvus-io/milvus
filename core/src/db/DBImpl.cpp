@@ -146,7 +146,7 @@ DBImpl::Stop() {
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         if (options_.wal_enable_) {
             // wait flush merge/buildindex finish
-            wal_task_swn_.Notify();
+            bg_task_swn_.Notify();
             bg_wal_thread_.join();
 
         } else {
@@ -156,6 +156,7 @@ DBImpl::Stop() {
             ExecWalRecord(record);
 
             // wait merge/buildindex finish
+            bg_task_swn_.Notify();
             bg_timer_thread_.join();
         }
 
@@ -502,7 +503,7 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         } else if (!vectors.binary_data_.empty()) {
             wal_mgr_->Insert(table_id, partition_tag, vectors.id_array_, vectors.binary_data_);
         }
-        wal_task_swn_.Notify();
+        bg_task_swn_.Notify();
 
     } else {
         wal::MXLogRecord record;
@@ -545,7 +546,7 @@ DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
     Status status;
     if (options_.wal_enable_) {
         wal_mgr_->DeleteById(table_id, vector_ids);
-        wal_task_swn_.Notify();
+        bg_task_swn_.Notify();
 
     } else {
         wal::MXLogRecord record;
@@ -585,7 +586,7 @@ DBImpl::Flush(const std::string& table_id) {
         auto lsn = wal_mgr_->Flush(table_id);
         ENGINE_LOG_DEBUG << "wal_mgr_->Flush";
         if (lsn != 0) {
-            wal_task_swn_.Notify();
+            bg_task_swn_.Notify();
             flush_task_swn_.Wait();
             ENGINE_LOG_DEBUG << "flush_task_swn_.Wait()";
         }
@@ -616,7 +617,7 @@ DBImpl::Flush() {
         ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush();
         if (lsn != 0) {
-            wal_task_swn_.Notify();
+            bg_task_swn_.Notify();
             flush_task_swn_.Wait();
         }
     } else {
@@ -1207,7 +1208,11 @@ DBImpl::BackgroundTimerTask() {
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(options_.auto_flush_interval_));
+        if (options_.auto_flush_interval_ > 0) {
+            bg_task_swn_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
+        } else {
+            bg_task_swn_.Wait();
+        }
 
         StartMetricTask();
         StartMergeTask();
@@ -1948,10 +1953,13 @@ void
 DBImpl::BackgroundWalTask() {
     server::SystemInfo::GetInstance().Init();
 
+    std::chrono::system_clock::time_point next_auto_flush_time;
     auto get_next_auto_flush_time = [&]() {
-        return std::chrono::system_clock::now() + std::chrono::milliseconds(options_.auto_flush_interval_);
+        return std::chrono::system_clock::now() + std::chrono::seconds(options_.auto_flush_interval_);
     };
-    auto next_auto_flush_time = get_next_auto_flush_time();
+    if (options_.auto_flush_interval_ > 0) {
+        next_auto_flush_time = get_next_auto_flush_time();
+    }
 
     wal::MXLogRecord record;
 
@@ -1966,9 +1974,11 @@ DBImpl::BackgroundWalTask() {
     };
 
     while (true) {
-        if (std::chrono::system_clock::now() >= next_auto_flush_time) {
-            auto_flush();
-            next_auto_flush_time = get_next_auto_flush_time();
+        if (options_.auto_flush_interval_ > 0) {
+            if (std::chrono::system_clock::now() >= next_auto_flush_time) {
+                auto_flush();
+                next_auto_flush_time = get_next_auto_flush_time();
+            }
         }
 
         auto error_code = wal_mgr_->GetNextRecord(record);
@@ -1984,7 +1994,7 @@ DBImpl::BackgroundWalTask() {
                 flush_task_swn_.Notify();
 
                 // if user flush all manually, update auto flush also
-                if (record.table_id.empty()) {
+                if (record.table_id.empty() && options_.auto_flush_interval_ > 0) {
                     next_auto_flush_time = get_next_auto_flush_time();
                 }
             }
@@ -1998,7 +2008,11 @@ DBImpl::BackgroundWalTask() {
                 break;
             }
 
-            wal_task_swn_.Wait_Until(next_auto_flush_time);
+            if (options_.auto_flush_interval_ > 0) {
+                bg_task_swn_.Wait_Until(next_auto_flush_time);
+            } else {
+                bg_task_swn_.Wait();
+            }
         }
     }
 }
