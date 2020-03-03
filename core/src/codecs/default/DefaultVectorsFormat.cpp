@@ -144,6 +144,8 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     if (::write(rv_fd, vectors->GetData().data(), vectors->GetData().size()) == -1) {
         std::string err_msg = "Failed to write to file" + rv_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
@@ -155,6 +157,11 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Writing raw vectors took " << diff.count() << " s";
+
+    start = std::chrono::high_resolution_clock::now();
     if (::write(uid_fd, vectors->GetUids().data(), sizeof(segment::doc_id_t) * vectors->GetCount()) == -1) {
         std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
@@ -165,6 +172,9 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Writing uids took " << diff.count() << " s";
 }
 
 void

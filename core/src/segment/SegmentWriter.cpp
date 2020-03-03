@@ -47,18 +47,37 @@ SegmentWriter::AddVectors(const std::string& name, const std::vector<uint8_t>& d
 
 Status
 SegmentWriter::Serialize() {
+    auto start = std::chrono::high_resolution_clock::now();
+
     auto status = WriteBloomFilter();
     if (!status.ok()) {
         return status;
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    ENGINE_LOG_DEBUG << "Writing bloom filter took " << diff.count() << " s in total";
+
+    start = std::chrono::high_resolution_clock::now();
 
     status = WriteVectors();
     if (!status.ok()) {
         return status;
     }
 
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Writing vectors and uids took " << diff.count() << " s in total";
+
+    start = std::chrono::high_resolution_clock::now();
+
     // Write an empty deleted doc
     status = WriteDeletedDocs();
+
+    end = std::chrono::high_resolution_clock::now();
+    diff = end - start;
+    ENGINE_LOG_DEBUG << "Writing deleted docs took " << diff.count() << " s";
+
     return status;
 }
 
@@ -81,15 +100,33 @@ SegmentWriter::WriteBloomFilter() {
     codec::DefaultCodec default_codec;
     try {
         directory_ptr_->Create();
+
+        auto start = std::chrono::high_resolution_clock::now();
+
         default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> diff = end - start;
+        ENGINE_LOG_DEBUG << "Initializing bloom filter took " << diff.count() << " s";
+
+        start = std::chrono::high_resolution_clock::now();
+
         auto& uids = segment_ptr_->vectors_ptr_->GetUids();
         for (auto& uid : uids) {
-            auto status = segment_ptr_->id_bloom_filter_ptr_->Add(uid);
-            if (!status.ok()) {
-                return status;
-            }
+            segment_ptr_->id_bloom_filter_ptr_->Add(uid);
         }
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Adding " << uids.size() << " ids to bloom filter took " << diff.count() << " s";
+
+        start = std::chrono::high_resolution_clock::now();
+
         default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
+
+        end = std::chrono::high_resolution_clock::now();
+        diff = end - start;
+        ENGINE_LOG_DEBUG << "Writing bloom filter took " << diff.count() << " s";
     } catch (Exception& e) {
         std::string err_msg = "Failed to write vectors. " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
