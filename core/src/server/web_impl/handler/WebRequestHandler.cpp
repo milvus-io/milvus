@@ -458,14 +458,6 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
         }
     }
 
-//    if (json.contains("vector_id")) {
-//        auto vec_id = json["vector_id"].get<int64_t>();
-//        auto status =
-//            request_handler_.SearchByID(context_ptr_, table_name, vec_id, topk, nprobe, partition_tags, result);
-//        if (!status.ok()) {
-//            return status;
-//        }
-//    } else {
     std::vector<std::string> file_id_vec;
     if (json.contains("file_ids")) {
         auto ids = json["file_ids"];
