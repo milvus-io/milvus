@@ -558,7 +558,7 @@ class TestSearchBase:
         index_params = {
             "nlist": 16384
         }
-        connect.create_index(ham_table, index_params)
+        connect.create_index(ham_table, index_type, index_param)
         logging.getLogger().info(connect.describe_table(ham_table))
         logging.getLogger().info(connect.describe_index(ham_table))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, ham_table, nb=1, insert=False)
@@ -584,7 +584,7 @@ class TestSearchBase:
         index_params = {
             "nlist": 16384
         }
-        connect.create_index(tanimoto_table, index_params)
+        connect.create_index(tanimoto_table, index_type, index_param)
         logging.getLogger().info(connect.describe_table(tanimoto_table))
         logging.getLogger().info(connect.describe_index(tanimoto_table))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, tanimoto_table, nb=1, insert=False)
