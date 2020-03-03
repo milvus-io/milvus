@@ -182,7 +182,8 @@ class DBImpl : public DB {
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file);
+    CompactFile(const std::string& table_id, const meta::TableFileSchema& file,
+                meta::TableFilesSchema& files_to_update);
 
     /*
     Status
