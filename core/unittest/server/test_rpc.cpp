@@ -225,7 +225,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     fiu_disable("CreateIndexRequest.OnExecute.create_index_fail");
 
 #ifdef MILVUS_GPU_VERSION
-    request.mutable_index()->set_index_type(static_cast<int>(milvus::engine::EngineType::FAISS_PQ));
+    request.set_index_type(static_cast<int>(milvus::engine::EngineType::FAISS_PQ));
     fiu_enable("CreateIndexRequest.OnExecute.ip_meteric", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_TRUE(grpc_status.ok());
