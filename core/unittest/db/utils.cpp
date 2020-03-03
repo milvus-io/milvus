@@ -151,6 +151,8 @@ BaseTest::GetOptions() {
     auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = CONFIG_PATH;
     options.meta_.backend_uri_ = "sqlite://:@:/";
+    // BaseTest not to enable WAL
+    options.wal_enable_ = false;
     return options;
 }
 
@@ -206,6 +208,8 @@ DBTest2::GetOptions() {
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.archive_conf_ = milvus::engine::ArchiveConf("delete", "disk:1");
     options.meta_.backend_uri_ = "sqlite://:@:/";
+    // DBTest2 not to enable WAL
+    options.wal_enable_ = false;
     return options;
 }
 
@@ -229,7 +233,7 @@ milvus::engine::DBOptions
 DBTestWALRecovery::GetOptions() {
     auto options = DBTestWAL::GetOptions();
     //disable auto flush
-    options.auto_flush_interval_ = 10000;
+    options.auto_flush_interval_ = 0;
     return options;
 }
 
@@ -240,7 +244,8 @@ DBTestWALRecovery_Error::GetOptions() {
     options.meta_.path_ = CONFIG_PATH;
     options.meta_.backend_uri_ = "sqlite://:@:/";
 
-    options.auto_flush_interval_ = 10000;
+    //disable auto flush
+    options.auto_flush_interval_ = 0;
     options.wal_enable_ = true;
     options.recovery_error_ignore_ = false;
     options.buffer_size_ = 128;
