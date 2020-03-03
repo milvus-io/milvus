@@ -25,10 +25,6 @@
 namespace milvus {
 namespace engine {
 
-using knowhere::IndexParams;
-using knowhere::meta;
-using knowhere::Metric;
-
 #if CUDA_VERSION > 9000
 #define GPU_MAX_NRPOBE 2048
 #else
@@ -40,18 +36,18 @@ using knowhere::Metric;
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
 
-#define checkint(key, min, max)                                                                           \
+#define CheckIntByRange(key, min, max)                                                                           \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() >= max || \
         oricfg[key].get<int64_t>() <= min) {                                                              \
         return false;                                                                                     \
     }
 
-#define checkfloat(key, min, max)                                                                              \
-    if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key] >= max || oricfg[key] <= min) { \
-        return false;                                                                                          \
-    }
+// #define checkfloat(key, min, max)                                                                              \
+//     if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key] >= max || oricfg[key] <= min) { \
+//         return false;                                                                                          \
+//     }
 
-#define checkintbyvalue(key, container)                                                                  \
+#define CheckIntByValues(key, container)                                                                  \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \
     } else {                                                                                             \
@@ -61,7 +57,7 @@ using knowhere::Metric;
         }                                                                                                \
     }
 
-#define checkstr(key, container)                                                                             \
+#define CheckStrByValues(key, container)                                                                             \
     if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
         return false;                                                                                        \
     } else {                                                                                                 \
@@ -73,17 +69,17 @@ using knowhere::Metric;
 
 bool
 ConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{Metric::L2, Metric::IP};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
-    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkstr(Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
     return true;
 }
 
 bool
 ConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
-    checkint(meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
+    CheckIntByRange(knowhere::meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
 
     return true;
 }
@@ -93,7 +89,7 @@ IVFConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
     static int64_t MIN_NLIST = 1;
 
-    checkint(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -105,9 +101,9 @@ IVFConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
 
     if (type == IndexType::FAISS_IVFPQ_GPU || type == IndexType::FAISS_IVFSQ8_GPU ||
         type == IndexType::FAISS_IVFSQ8_HYBRID || type == IndexType::FAISS_IVFFLAT_GPU) {
-        checkint(IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
     } else {
-        checkint(IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
     }
 
     return ConfAdapter::CheckSearch(oricfg, type);
@@ -116,7 +112,7 @@ IVFConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
 bool
 IVFSQConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t DEFAULT_NBITS = 8;
-    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
+    oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
     return IVFConfAdapter::CheckTrain(oricfg);
 }
@@ -124,10 +120,10 @@ IVFSQConfAdapter::CheckTrain(milvus::json& oricfg) {
 bool
 IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t DEFAULT_NBITS = 8;
-    static std::vector<std::string> CPU_METRICS{Metric::L2, Metric::IP};
-    static std::vector<std::string> GPU_METRICS{Metric::L2};
+    static std::vector<std::string> CPU_METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
+    static std::vector<std::string> GPU_METRICS{knowhere::Metric::L2};
 
-    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
+    oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
 #ifdef MILVUS_GPU_VERSION
     Status s;
@@ -135,12 +131,12 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     server::Config& config = server::Config::GetInstance();
     s = config.GetGpuResourceConfigEnable(enable_gpu);
     if (s.ok()) {
-        checkstr(Metric::TYPE, GPU_METRICS);
+        CheckStrByValues(knowhere::Metric::TYPE, GPU_METRICS);
     } else {
-        checkstr(Metric::TYPE, CPU_METRICS);
+        CheckStrByValues(knowhere::Metric::TYPE, CPU_METRICS);
     }
 #endif
-    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
 
     /*
      * Faiss 1.6
@@ -151,15 +147,15 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
     std::vector<int64_t> resset;
     for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(oricfg[meta::DIM].get<int64_t>() % dimperquantizer)) {
-            auto subquantzier_num = oricfg[meta::DIM].get<int64_t>() / dimperquantizer;
+        if (!(oricfg[knowhere::meta::DIM].get<int64_t>() % dimperquantizer)) {
+            auto subquantzier_num = oricfg[knowhere::meta::DIM].get<int64_t>() / dimperquantizer;
             auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
             if (finder != support_subquantizer.end()) {
                 resset.push_back(subquantzier_num);
             }
         }
     }
-    checkintbyvalue(IndexParams::m, resset);
+    CheckIntByValues(knowhere::IndexParams::m, resset);
 
     return true;
 }
@@ -174,13 +170,13 @@ NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MAX_OUT_DEGREE = 300;
     static int64_t MIN_CANDIDATE_POOL_SIZE = 50;
     static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
-    static std::vector<std::string> METRICS{Metric::L2};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2};
 
-    checkstr(Metric::TYPE, METRICS);
-    checkint(IndexParams::knng, MIN_KNNG, MAX_KNNG);
-    checkint(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
-    checkint(IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
-    checkint(IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::IndexParams::knng, MIN_KNNG, MAX_KNNG);
+    CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    CheckIntByRange(knowhere::IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
+    CheckIntByRange(knowhere::IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
 
     return true;
 }
@@ -190,7 +186,7 @@ NSGConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
     static int64_t MIN_SEARCH_LENGTH = 1;
     static int64_t MAX_SEARCH_LENGTH = 300;
 
-    checkint(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
 
     return ConfAdapter::CheckSearch(oricfg, type);
 }
@@ -202,8 +198,8 @@ HNSWConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MIN_M = 5;
     static int64_t MAX_M = 48;
 
-    checkint(IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
-    checkint(IndexParams::M, MIN_M, MAX_M);
+    CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
 
     return ConfAdapter::CheckTrain(oricfg);
 }
@@ -212,30 +208,30 @@ bool
 HNSWConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
     static int64_t MAX_EF = 4096;
 
-    checkint(IndexParams::ef, oricfg[meta::TOPK], MAX_EF);
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg, type);
 }
 
 bool
 BinIDMAPConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD, Metric::TANIMOTO};
+    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO};
 
-    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkstr(Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
     return true;
 }
 
 bool
 BinIVFConfAdapter::CheckTrain(milvus::json& oricfg) {
-    static std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD, Metric::TANIMOTO};
-    static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
+    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD, knowhere::Metric::TANIMOTO};
+    static int64_t MAX_NLIST = 99999;
     static int64_t MIN_NLIST = 1;
 
-    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    checkint(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
-    checkstr(Metric::TYPE, METRICS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
     return true;
 }

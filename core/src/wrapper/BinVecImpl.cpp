@@ -47,7 +47,7 @@ BinVecImpl::BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, c
 Status
 BinVecImpl::Search(const int64_t& nq, const uint8_t* xq, float* dist, int64_t* ids, const Config& cfg) {
     try {
-        int64_t k = cfg["k"];
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nq);
         ret_ds->Set(knowhere::meta::DIM, dim);
@@ -172,7 +172,7 @@ BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_
         throw WrapperException("not support");
     }
     try {
-        int64_t k = cfg["k"];
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nq);
         ret_ds->Set(knowhere::meta::DIM, dim);

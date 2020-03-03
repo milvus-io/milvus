@@ -374,7 +374,7 @@ TEST_P(IVFTest, invalid_gpu_source) {
     }
 
     auto invalid_conf = ParamGenerator::GetInstance().Gen(parameter_type_);
-    invalid_conf["gpu_id"] = -1;
+    invalid_conf[knowhere::meta::DEVICEID] = -1;
 
     if (index_type == "GPUIVF") {
         // null faiss index

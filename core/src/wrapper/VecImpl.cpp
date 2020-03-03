@@ -80,7 +80,7 @@ VecIndexImpl::Add(const int64_t& nb, const float* xb, const int64_t* ids, const 
 Status
 VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg) {
     try {
-        int64_t k = cfg["k"];
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto dataset = GenDataset(nq, dim, xq);
 
         fiu_do_on("VecIndexImpl.Search.throw_knowhere_exception", throw knowhere::KnowhereException(""));
@@ -239,7 +239,7 @@ VecIndexImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int6
     }
 
     try {
-        int64_t k = cfg["k"];
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto dataset = std::make_shared<knowhere::Dataset>();
         dataset->Set(knowhere::meta::ROWS, nq);
         dataset->Set(knowhere::meta::DIM, dim);

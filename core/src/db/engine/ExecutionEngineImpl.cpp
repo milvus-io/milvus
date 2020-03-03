@@ -108,7 +108,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    milvus::json conf{{"gpu_id", gpu_num_}, {knowhere::meta::DIM, dimension}};
+    milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dimension}};
     MappingMetricType(metric_type, conf);
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     if (adapter->CheckTrain(conf)) {
@@ -277,7 +277,7 @@ ExecutionEngineImpl::HybridLoad() const {
         auto best_index = std::distance(all_free_mem.begin(), max_e);
         auto best_device_id = gpus[best_index];
 
-        milvus::json quantizer_conf{{"gpu_id", best_device_id}, {"mode", 1}};
+        milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
@@ -405,7 +405,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
         if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
-            milvus::json conf{{"gpu_id", gpu_num_}, {knowhere::meta::DIM, dim_}};
+            milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
             auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
             if (adapter->CheckTrain(conf)) {
@@ -537,7 +537,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 
             if (device_id != NOT_FOUND) {
                 // cache hit
-                milvus::json quantizer_conf{{"gpu_id" : device_id}, {"mode" : 2}};
+                milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
                 auto new_index = index_->LoadData(quantizer, config);
                 index_ = new_index;
             }
@@ -713,7 +713,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     milvus::json conf = index_params_;
     conf[knowhere::meta::DIM] = Dimension();
     conf[knowhere::meta::ROWS] = Count();
-    conf["gpu_id"] = gpu_num_;
+    conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     if (adapter->CheckTrain(conf)) {
@@ -760,7 +760,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
 
                 if (device_id != NOT_FOUND) {
                     // cache hit
-                    milvus::json quantizer_conf{{"gpu_id" : device_id}, {"mode" : 2}};
+                    milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
                     auto new_index = index_->LoadData(quantizer, config);
                     index_ = new_index;
                 }
