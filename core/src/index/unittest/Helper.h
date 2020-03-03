@@ -93,12 +93,9 @@ class ParamGenerator {
             };
         } else if (type == ParameterType::ivfsq) {
             return knowhere::Config{
-                {knowhere::meta::DIM, DIM},
-                {knowhere::meta::TOPK, K},
-                {knowhere::IndexParams::nlist, 100},
-                {knowhere::IndexParams::nprobe, 4},
-                {knowhere::IndexParams::nbits, 8},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                {knowhere::meta::DIM, DIM},           {knowhere::meta::TOPK, K},
+                {knowhere::IndexParams::nlist, 100},  {knowhere::IndexParams::nprobe, 4},
+                {knowhere::IndexParams::nbits, 8},    {knowhere::Metric::TYPE, knowhere::Metric::L2},
                 {knowhere::meta::DEVICEID, DEVICEID},
             };
         }

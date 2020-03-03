@@ -441,10 +441,10 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     }
     int64_t topk = json["topk"];
 
-//    if (!json.contains("nprobe")) {
-//        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
-//    }
-//    int64_t nprobe = json["nprobe"];
+    //    if (!json.contains("nprobe")) {
+    //        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
+    //    }
+    //    int64_t nprobe = json["nprobe"];
 
     std::vector<std::string> partition_tags;
     if (json.contains("partition_tags")) {
@@ -490,8 +490,8 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     }
 
     TopKQueryResult result;
-    status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, json["params"],
-        partition_tags, file_id_vec, result);
+    status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, json["params"], partition_tags,
+                                     file_id_vec, result);
     if (!status.ok()) {
         return status;
     }
@@ -1018,10 +1018,8 @@ WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
         }
         auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
-    } catch (nlohmann::detail::parse_error & e) {
-
-    } catch (nlohmann::detail::type_error & e) {
-
+    } catch (nlohmann::detail::parse_error& e) {
+    } catch (nlohmann::detail::type_error& e) {
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK())
