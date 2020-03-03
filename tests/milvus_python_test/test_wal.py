@@ -11,6 +11,7 @@ dim = 128
 table_id = "test_wal"
 WAL_TIMEOUT = 30
 nb = 6000
+add_interval = 1.5
 
 
 class TestWalBase:
@@ -49,6 +50,7 @@ class TestWalBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
+        time.sleep(add_interval)
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         logging.getLogger().info(res)
@@ -71,6 +73,7 @@ class TestWalBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
+        time.sleep(add_interval)
         status = connect.delete_by_id(table, [0])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
@@ -92,6 +95,7 @@ class TestWalBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
+        time.sleep(add_interval)
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 0
@@ -113,6 +117,7 @@ class TestWalBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
+        time.sleep(add_interval)
         assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert status.OK()

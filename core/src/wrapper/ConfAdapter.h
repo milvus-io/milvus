@@ -14,117 +14,78 @@
 #include <memory>
 
 #include "VecIndex.h"
-#include "knowhere/common/Config.h"
+#include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
 
-// TODO(linxj): remove later, replace with real metaconf
-constexpr int64_t TEMPMETA_DEFAULT_VALUE = -1;
-struct TempMetaConf {
-    int64_t size = TEMPMETA_DEFAULT_VALUE;
-    int64_t nlist = TEMPMETA_DEFAULT_VALUE;
-    int64_t dim = TEMPMETA_DEFAULT_VALUE;
-    int64_t gpu_id = TEMPMETA_DEFAULT_VALUE;
-    int64_t k = TEMPMETA_DEFAULT_VALUE;
-    int64_t nprobe = TEMPMETA_DEFAULT_VALUE;
-    int64_t search_length = TEMPMETA_DEFAULT_VALUE;
-    knowhere::METRICTYPE metric_type = knowhere::DEFAULT_TYPE;
-};
-
 class ConfAdapter {
  public:
-    virtual knowhere::Config
-    Match(const TempMetaConf& metaconf);
+    virtual bool
+    CheckTrain(milvus::json& oricfg);
 
-    virtual knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type);
+    virtual bool
+    CheckSearch(milvus::json& oricfg, const IndexType& type);
 
- protected:
-    static void
-    MatchBase(knowhere::Config conf, knowhere::METRICTYPE defalut_metric = knowhere::METRICTYPE::L2);
+    //  todo(linxj): refactor in next release.
+    //
+    //  virtual bool
+    //  CheckTrain(milvus::json&, IndexMode&) = 0;
+    //
+    //  virtual bool
+    //  CheckSearch(milvus::json&, const IndexType&, IndexMode&) = 0;
 };
-
 using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
 
 class IVFConfAdapter : public ConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 
-    knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
-
- protected:
-    static int64_t
-    MatchNlist(const int64_t& size, const int64_t& nlist, const int64_t& per_nlist);
+    bool
+    CheckSearch(milvus::json& oricfg, const IndexType& type) override;
 };
 
 class IVFSQConfAdapter : public IVFConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
-
-    knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
-
- protected:
-    static int64_t
-    MatchNlist(const int64_t& size, const int64_t& nlist);
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 
-    knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) final;
-};
-
-class SPTAGKDTConfAdapter : public ConfAdapter {
- public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
-
-    knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
-};
-
-class SPTAGBKTConfAdapter : public ConfAdapter {
- public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
-
-    knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
+    bool
+    CheckSearch(milvus::json& oricfg, const IndexType& type) override;
 };
 
 class BinIDMAPConfAdapter : public ConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class BinIVFConfAdapter : public IVFConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 };
 
 class HNSWConfAdapter : public ConfAdapter {
  public:
-    knowhere::Config
-    Match(const TempMetaConf& metaconf) override;
+    bool
+    CheckTrain(milvus::json& oricfg) override;
 
-    knowhere::Config
-    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
+    bool
+    CheckSearch(milvus::json& oricfg, const IndexType& type) override;
 };
 
 }  // namespace engine
