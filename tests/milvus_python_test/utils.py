@@ -408,6 +408,33 @@ def gen_invalid_vector_ids():
     return invalid_vector_ids
 
 
+def gen_invalid_config():
+    invalid_configs = [
+            0,
+            -1,
+            9223372036854775808,
+            [1,2,3],
+            (1,2),
+            {"a": 1},
+            " ",
+            "",
+            "String",
+            "12-s",
+            "BB。A",
+            " siede ",
+            "(mn)",
+            "#12s",
+            "pip+",
+            "=c",
+            "\n",
+            "\t",
+            "中文",
+            "'123'",
+            "さようなら"
+    ]
+    return invalid_configs
+
+
 def gen_invalid_index():
     index_params = []
     for index_type in gen_invalid_index_types():
@@ -495,11 +522,10 @@ def gen_simple_index():
         {"search_length": 100, "out_degree": 40, "pool_size": 66}
     ]
 
-    def gen_params(index_types, index_params):
-        return [ {"index_type": index_type, "index_param": index_param} \
-            for index_type in index_types \
-                for index_param in index_params]
-    return gen_params(index_types, index_params)
+    index_params = []
+    for i in range(len(index_types)):
+        index_params.append({"index_type": index_types[i], "index_param": index_params[i]})
+    return index_params
 
 
 def get_search_param(index_type):

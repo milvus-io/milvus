@@ -50,11 +50,7 @@ class TestWalBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
-        time.sleep(add_interval)
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
-        logging.getLogger().info(res)
-        assert res == 0
+        status = connect.flush([table])
         status = connect.delete_by_id(table, ids)
         assert status.OK()
         status = connect.flush([table])
@@ -73,14 +69,10 @@ class TestWalBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
-        time.sleep(add_interval)
+        status = connect.flush([table])
         status = connect.delete_by_id(table, [0])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
-        assert res == 0
         status = connect.flush([table])
-        assert status.OK()
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         assert res == 1
@@ -95,10 +87,8 @@ class TestWalBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
-        time.sleep(add_interval)
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
-        assert res == 0
+        status = connect.flush([table])
+        status = connect.delete_by_id(table, [0])
         table_new = gen_unique_str()
         status = connect.delete_by_id(table_new, ids)
         assert not status.OK()
@@ -117,14 +107,14 @@ class TestWalBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(add_interval)
         assert status.OK()
+        status = connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         logging.getLogger().info(res) # should be 0 because no auto flush
         logging.getLogger().info("Stop server and restart")
         # kill server and restart. auto flush should be set to 15 seconds.
-        time.sleep(15)
+        # time.sleep(15)
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table)

@@ -8,23 +8,26 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-
 #include "wrapper/ConfAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #include <fiu-local.h>
+
 #include <cmath>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "WrapperException.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "server/Config.h"
 #include "utils/Log.h"
 
-// TODO(lxj): add conf checker
-
 namespace milvus {
 namespace engine {
+
+using knowhere::IndexParams;
+using knowhere::meta;
+using knowhere::Metric;
 
 #if CUDA_VERSION > 9000
 #define GPU_MAX_NRPOBE 2048
@@ -32,111 +35,112 @@ namespace engine {
 #define GPU_MAX_NRPOBE 1024
 #endif
 
-void
-ConfAdapter::MatchBase(knowhere::Config conf, knowhere::METRICTYPE default_metric) {
-    if (conf->metric_type == knowhere::DEFAULT_TYPE)
-        conf->metric_type = default_metric;
-}
+#define DEFAULT_MAX_DIM 16384
+#define DEFAULT_MIN_DIM 1
+#define DEFAULT_MAX_K 16384
+#define DEFAULT_MIN_K 1
 
-knowhere::Config
-ConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::Cfg>();
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    conf->k = metaconf.k;
-    MatchBase(conf);
-    return conf;
-}
-
-knowhere::Config
-ConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::Cfg>();
-    conf->k = metaconf.k;
-    return conf;
-}
-
-knowhere::Config
-IVFConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::IVFCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    MatchBase(conf);
-    return conf;
-}
-
-static constexpr float TYPICAL_COUNT = 1000000.0;
-
-int64_t
-IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist, const int64_t& per_nlist) {
-    if (size <= TYPICAL_COUNT / per_nlist + 1) {
-        // handle less row count, avoid nlist set to 0
-        return 1;
-    } else if (int(size / TYPICAL_COUNT) * nlist <= 0) {
-        // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
-        return int(size / TYPICAL_COUNT * per_nlist);
+#define checkint(key, min, max)                                                                           \
+    if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() >= max || \
+        oricfg[key].get<int64_t>() <= min) {                                                              \
+        return false;                                                                                     \
     }
-    return nlist;
-}
 
-knowhere::Config
-IVFConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::IVFCfg>();
-    conf->k = metaconf.k;
-
-    if (metaconf.nprobe <= 0)
-        conf->nprobe = 16;  // hardcode here
-    else
-        conf->nprobe = metaconf.nprobe;
-
-    switch (type) {
-        case IndexType::FAISS_IVFFLAT_GPU:
-        case IndexType::FAISS_IVFSQ8_GPU:
-        case IndexType::FAISS_IVFPQ_GPU:
-            if (conf->nprobe > GPU_MAX_NRPOBE) {
-                WRAPPER_LOG_WARNING << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE
-                                    << ", but you passed " << conf->nprobe << ". Search with " << GPU_MAX_NRPOBE
-                                    << " instead";
-                conf->nprobe = GPU_MAX_NRPOBE;
-            }
+#define checkfloat(key, min, max)                                                                              \
+    if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key] >= max || oricfg[key] <= min) { \
+        return false;                                                                                          \
     }
-    return conf;
+
+#define checkintbyvalue(key, container)                                                                  \
+    if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
+        return false;                                                                                    \
+    } else {                                                                                             \
+        auto finder = std::find(std::begin(container), std::end(container), oricfg[key].get<int64_t>()); \
+        if (finder == std::end(container)) {                                                             \
+            return false;                                                                                \
+        }                                                                                                \
+    }
+
+#define checkstr(key, container)                                                                             \
+    if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
+        return false;                                                                                        \
+    } else {                                                                                                 \
+        auto finder = std::find(std::begin(container), std::end(container), oricfg[key].get<std::string>()); \
+        if (finder == std::end(container)) {                                                                 \
+            return false;                                                                                    \
+        }                                                                                                    \
+    }
+
+bool
+ConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static std::vector<std::string> METRICS{Metric::L2, Metric::IP};
+
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkstr(Metric::TYPE, METRICS);
+
+    return true;
 }
 
-knowhere::Config
-IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::IVFSQCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    conf->nbits = 8;
-    MatchBase(conf);
-    return conf;
+bool
+ConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
+    checkint(meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
+
+    return true;
 }
 
-knowhere::Config
-IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::IVFPQCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    conf->nbits = 8;
-    MatchBase(conf);
+bool
+IVFConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
+    static int64_t MIN_NLIST = 1;
+
+    checkint(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+
+    return ConfAdapter::CheckTrain(oricfg);
+}
+
+bool
+IVFConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
+    static int64_t MIN_NPROBE = 1;
+    static int64_t MAX_NPROBE = 99999;  // todo(linxj): [1, nlist]
+
+    if (type == IndexType::FAISS_IVFPQ_GPU || type == IndexType::FAISS_IVFSQ8_GPU ||
+        type == IndexType::FAISS_IVFSQ8_HYBRID || type == IndexType::FAISS_IVFFLAT_GPU) {
+        checkint(IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
+    } else {
+        checkint(IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+    }
+
+    return ConfAdapter::CheckSearch(oricfg, type);
+}
+
+bool
+IVFSQConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static int64_t DEFAULT_NBITS = 8;
+    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
+
+    return IVFConfAdapter::CheckTrain(oricfg);
+}
+
+bool
+IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static int64_t DEFAULT_NBITS = 8;
+    static std::vector<std::string> CPU_METRICS{Metric::L2, Metric::IP};
+    static std::vector<std::string> GPU_METRICS{Metric::L2};
+
+    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
 
 #ifdef MILVUS_GPU_VERSION
     Status s;
     bool enable_gpu = false;
     server::Config& config = server::Config::GetInstance();
     s = config.GetGpuResourceConfigEnable(enable_gpu);
-    if (s.ok() && conf->metric_type == knowhere::METRICTYPE::IP) {
-        WRAPPER_LOG_ERROR << "PQ not support IP in GPU version!";
-        throw WrapperException("PQ not support IP in GPU version!");
+    if (s.ok()) {
+        checkstr(Metric::TYPE, GPU_METRICS);
+    } else {
+        checkstr(Metric::TYPE, CPU_METRICS);
     }
 #endif
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
 
     /*
      * Faiss 1.6
@@ -147,165 +151,93 @@ IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
     std::vector<int64_t> resset;
     for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(conf->d % dimperquantizer)) {
-            auto subquantzier_num = conf->d / dimperquantizer;
+        if (!(oricfg[meta::DIM].get<int64_t>() % dimperquantizer)) {
+            auto subquantzier_num = oricfg[meta::DIM].get<int64_t>() / dimperquantizer;
             auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
             if (finder != support_subquantizer.end()) {
                 resset.push_back(subquantzier_num);
             }
         }
     }
-    fiu_do_on("IVFPQConfAdapter.Match.empty_resset", resset.clear());
-    if (resset.empty()) {
-        // todo(linxj): throw exception here.
-        WRAPPER_LOG_ERROR << "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-"
-                             "quantizer are currently supported with no precomputed codes.";
-        throw WrapperException(
-            "The dims of PQ is wrong : only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims "
-            "per sub-quantizer are currently supported with no precomputed codes.");
-        // return nullptr;
-    }
-    static int64_t compression_level = 1;  // 1:low, 2:high
-    if (compression_level == 1) {
-        conf->m = resset[int(resset.size() / 2)];
-        WRAPPER_LOG_DEBUG << "PQ m = " << conf->m << ", compression radio = " << conf->d / conf->m * 4;
-    }
-    return conf;
+    checkintbyvalue(IndexParams::m, resset);
+
+    return true;
 }
 
-knowhere::Config
-IVFPQConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::IVFPQCfg>();
-    conf->k = metaconf.k;
+bool
+NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static int64_t MIN_KNNG = 5;
+    static int64_t MAX_KNNG = 300;
+    static int64_t MIN_SEARCH_LENGTH = 10;
+    static int64_t MAX_SEARCH_LENGTH = 300;
+    static int64_t MIN_OUT_DEGREE = 5;
+    static int64_t MAX_OUT_DEGREE = 300;
+    static int64_t MIN_CANDIDATE_POOL_SIZE = 50;
+    static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
+    static std::vector<std::string> METRICS{Metric::L2};
 
-    if (metaconf.nprobe <= 0) {
-        WRAPPER_LOG_ERROR << "The nprobe of PQ is wrong!";
-        throw WrapperException("The nprobe of PQ is wrong!");
-    } else {
-        conf->nprobe = metaconf.nprobe;
-    }
+    checkstr(Metric::TYPE, METRICS);
+    checkint(IndexParams::knng, MIN_KNNG, MAX_KNNG);
+    checkint(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    checkint(IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
+    checkint(IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
 
-    return conf;
+    return true;
 }
 
-int64_t
-IVFPQConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
-    if (size <= TYPICAL_COUNT / 16384 + 1) {
-        // handle less row count, avoid nlist set to 0
-        return 1;
-    } else if (int(size / TYPICAL_COUNT) * nlist <= 0) {
-        // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
-        return int(size / TYPICAL_COUNT * 16384);
-    }
-    return nlist;
+bool
+NSGConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
+    static int64_t MIN_SEARCH_LENGTH = 1;
+    static int64_t MAX_SEARCH_LENGTH = 300;
+
+    checkint(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+
+    return ConfAdapter::CheckSearch(oricfg, type);
 }
 
-knowhere::Config
-NSGConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::NSGCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 16384);
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    conf->k = metaconf.k;
+bool
+HNSWConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static int64_t MIN_EFCONSTRUCTION = 100;
+    static int64_t MAX_EFCONSTRUCTION = 500;
+    static int64_t MIN_M = 5;
+    static int64_t MAX_M = 48;
 
-    auto scale_factor = round(metaconf.dim / 128.0);
-    scale_factor = scale_factor >= 4 ? 4 : scale_factor;
-    conf->nprobe = int64_t(conf->nlist * 0.01);
-    //    conf->knng = 40 + 10 * scale_factor;  // the size of knng
-    conf->knng = 50;
-    conf->search_length = 50 + 5 * scale_factor;
-    conf->out_degree = 50 + 5 * scale_factor;
-    conf->candidate_pool_size = 300;
-    MatchBase(conf);
-    return conf;
+    checkint(IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
+    checkint(IndexParams::M, MIN_M, MAX_M);
+
+    return ConfAdapter::CheckTrain(oricfg);
 }
 
-knowhere::Config
-NSGConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::NSGCfg>();
-    conf->k = metaconf.k;
-    conf->search_length = metaconf.search_length;
-    if (metaconf.search_length == TEMPMETA_DEFAULT_VALUE) {
-        conf->search_length = 30;  // TODO(linxj): hardcode here.
-    }
-    return conf;
+bool
+HNSWConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
+    static int64_t MAX_EF = 4096;
+
+    checkint(IndexParams::ef, oricfg[meta::TOPK], MAX_EF);
+
+    return ConfAdapter::CheckSearch(oricfg, type);
 }
 
-knowhere::Config
-SPTAGKDTConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::KDTCfg>();
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    return conf;
+bool
+BinIDMAPConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD, Metric::TANIMOTO};
+
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkstr(Metric::TYPE, METRICS);
+
+    return true;
 }
 
-knowhere::Config
-SPTAGKDTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::KDTCfg>();
-    conf->k = metaconf.k;
-    return conf;
-}
+bool
+BinIVFConfAdapter::CheckTrain(milvus::json& oricfg) {
+    static std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD, Metric::TANIMOTO};
+    static int64_t MAX_NLIST = 99999;  // todo(jinhai): default value
+    static int64_t MIN_NLIST = 1;
 
-knowhere::Config
-SPTAGBKTConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::BKTCfg>();
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    return conf;
-}
+    checkint(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    checkint(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    checkstr(Metric::TYPE, METRICS);
 
-knowhere::Config
-SPTAGBKTConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::BKTCfg>();
-    conf->k = metaconf.k;
-    return conf;
-}
-
-knowhere::Config
-HNSWConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::HNSWCfg>();
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-
-    conf->ef = 500;  // ef can be auto-configured by using sample data.
-    conf->M = 24;    // A reasonable range of M is from 5 to 48.
-    return conf;
-}
-
-knowhere::Config
-HNSWConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
-    auto conf = std::make_shared<knowhere::HNSWCfg>();
-    conf->k = metaconf.k;
-
-    if (metaconf.nprobe < metaconf.k) {
-        conf->ef = metaconf.k + 32;
-    } else {
-        conf->ef = metaconf.nprobe;
-    }
-    return conf;
-}
-
-knowhere::Config
-BinIDMAPConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::BinIDMAPCfg>();
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    conf->k = metaconf.k;
-    MatchBase(conf, knowhere::METRICTYPE::HAMMING);
-    return conf;
-}
-
-knowhere::Config
-BinIVFConfAdapter::Match(const TempMetaConf& metaconf) {
-    auto conf = std::make_shared<knowhere::IVFBinCfg>();
-    conf->nlist = MatchNlist(metaconf.size, metaconf.nlist, 2048);
-    conf->d = metaconf.dim;
-    conf->metric_type = metaconf.metric_type;
-    conf->gpu_id = metaconf.gpu_id;
-    MatchBase(conf, knowhere::METRICTYPE::HAMMING);
-    return conf;
+    return true;
 }
 }  // namespace engine
 }  // namespace milvus

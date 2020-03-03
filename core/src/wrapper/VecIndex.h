@@ -12,6 +12,7 @@
 #pragma once
 
 #include <faiss/utils/ConcurrentBitset.h>
+#include <thirdparty/nlohmann/json.hpp>
 
 #include <memory>
 #include <string>
@@ -29,7 +30,8 @@
 namespace milvus {
 namespace engine {
 
-using Config = knowhere::Config;
+using json = nlohmann::json;
+using Config = json;
 
 // TODO(linxj): replace with string, Do refactor serialization
 enum class IndexType {
