@@ -29,7 +29,7 @@ namespace milvus {
 namespace segment {
 
 SegmentReader::SegmentReader(const std::string& directory) {
-    directory_ptr_ = std::make_shared<storage::Directory>(directory);
+    directory_ptr_ = std::make_shared<storage::FileDirectory>(directory);
     segment_ptr_ = std::make_shared<Segment>();
 }
 

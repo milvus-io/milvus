@@ -32,7 +32,7 @@ class Directory {
     virtual void
     Create() = 0;
 
-    void
+    virtual void
     ListAll(std::vector<std::string>& file_paths) const = 0;
 
     virtual bool

@@ -21,33 +21,23 @@
 #include <string>
 #include <vector>
 
+#include "storage/Directory.h"
+
 namespace milvus {
 namespace storage {
 
-class Directory {
+class FileDirectory : public Directory {
  public:
-    explicit Directory(const std::string& dir_path);
+    explicit FileDirectory(const std::string& dir_path);
 
     void
-    Create();
+    Create() override;
 
     void
-    ListAll(std::vector<std::string>& file_paths);
+    ListAll(std::vector<std::string>& file_paths) const override;
 
     bool
-    DeleteFile(const std::string& file_path);
-
-    const std::string&
-    GetDirPath() const;
-
-    // TODO(zhiru):
-    //  open(), sync(), close()
-    //  function that opens a stream for reading file
-    //  function that creates a new, empty file and returns an stream for appending data to this file
-    //  function that creates a new, empty, temporary file and returns an stream for appending data to this file
-
- private:
-    const std::string dir_path_;
+    DeleteFile(const std::string& file_path) override;
 };
 
 using DirectoryPtr = std::shared_ptr<Directory>;

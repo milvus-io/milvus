@@ -25,15 +25,15 @@
 namespace milvus {
 namespace storage {
 
-Directory::Directory(const std::string& dir_path) : dir_path_(dir_path) {
+FileDirectory::FileDirectory(const std::string& dir_path) : Directory(dir_path) {
 }
 
 void
-Directory::Create() {
-    if (!boost::filesystem::is_directory(dir_path_)) {
-        auto ret = boost::filesystem::create_directory(dir_path_);
+FileDirectory::Create() {
+    if (!boost::filesystem::is_directory(GetDirPath())) {
+        auto ret = boost::filesystem::create_directory(GetDirPath());
         if (!ret) {
-            std::string err_msg = "Failed to create directory: " + dir_path_;
+            std::string err_msg = "Failed to create directory: " + GetDirPath();
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);
         }
@@ -41,12 +41,12 @@ Directory::Create() {
 }
 
 void
-Directory::ListAll(std::vector<std::string>& file_paths) {
-    boost::filesystem::path target_path(dir_path_);
+FileDirectory::ListAll(std::vector<std::string>& file_paths) const {
+    boost::filesystem::path target_path(GetDirPath());
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
     d_it it(target_path);
-    if (boost::filesystem::is_directory(dir_path_)) {
+    if (boost::filesystem::is_directory(GetDirPath())) {
         for (; it != it_end; ++it) {
             file_paths.emplace_back(it->path().c_str());
         }
@@ -54,13 +54,8 @@ Directory::ListAll(std::vector<std::string>& file_paths) {
 }
 
 bool
-Directory::DeleteFile(const std::string& file_path) {
+FileDirectory::DeleteFile(const std::string& file_path) {
     return boost::filesystem::remove(file_path);
-}
-
-const std::string&
-Directory::GetDirPath() const {
-    return dir_path_;
 }
 
 }  // namespace storage
