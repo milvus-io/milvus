@@ -37,6 +37,7 @@ TEST(TaskTest, INVALID_INDEX) {
 
     TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
     dummy_file->index_params_ = "{ \"nlist\": 16384 }";
+    dummy_file->dimension_ = 64;
     auto search_task =
         std::make_shared<XSearchTask>(dummy_context, dummy_file, nullptr);
     search_task->Load(LoadType::TEST, 10);
@@ -52,6 +53,7 @@ TEST(TaskTest, TEST_TASK) {
 
     auto file = std::make_shared<TableFileSchema>();
     file->index_params_ = "{ \"nlist\": 16384 }";
+    file->dimension_ = 64;
     auto label = std::make_shared<BroadcastLabel>();
 
     TestTask task(dummy_context, file, label);

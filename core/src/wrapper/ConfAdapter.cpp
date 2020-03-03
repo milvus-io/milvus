@@ -81,7 +81,7 @@ ConfAdapter::CheckTrain(milvus::json& oricfg) {
 
 bool
 ConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
-    CheckIntByRange(knowhere::meta::TOPK, DEFAULT_MIN_K, DEFAULT_MAX_K);
+    CheckIntByRange(knowhere::meta::TOPK, DEFAULT_MIN_K - 1, DEFAULT_MAX_K);
 
     return true;
 }

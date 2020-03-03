@@ -108,8 +108,11 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dimension}};
+    milvus::json conf = index_params;
+    conf[knowhere::meta::DEVICEID] = gpu_num_;
+    conf[knowhere::meta::DIM] = dimension;
     MappingMetricType(metric_type, conf);
+    ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Build Config illegal");
@@ -715,6 +718,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf[knowhere::meta::ROWS] = Count();
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
+    ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Build Config illegal");
@@ -801,6 +805,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
         throw Exception(DB_ERROR, "Search Config illegal");
     }
