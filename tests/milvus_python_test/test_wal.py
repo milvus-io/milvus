@@ -1,5 +1,4 @@
 import time
-import random
 import pdb
 import threading
 import logging
@@ -10,13 +9,14 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-table_id = "test_compact"
+table_id = "test_wal"
 WAL_TIMEOUT = 30
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
 tag = "1970-01-01"
 nb = 6000
+add_interval = 1.5
 
 
 class TestWalBase:
@@ -55,10 +55,9 @@ class TestWalBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert status.OK()
-        logging.getLogger().info(res)
-        assert res == 0
         status = connect.delete_by_id(table, ids)
         assert status.OK()
         status = connect.flush([table])
@@ -77,11 +76,9 @@ class TestWalBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
+        connect.flush([table])
         status = connect.delete_by_id(table, [0])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
-        assert res == 0
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
@@ -98,9 +95,7 @@ class TestWalBase:
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
-        assert status.OK()
-        assert res == 0
+        connect.flush([table])
         table_new = gen_unique_str()
         status = connect.delete_by_id(table_new, ids)
         assert not status.OK()
@@ -120,12 +115,13 @@ class TestWalBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert status.OK()
         logging.getLogger().info(res) # should be 0 because no auto flush
         logging.getLogger().info("Stop server and restart")
         # kill server and restart. auto flush should be set to 15 seconds.
-        time.sleep(15)
+        # time.sleep(15)
         status = connect.flush([table])
         assert status.OK()
         status, res = connect.get_table_row_count(table)
