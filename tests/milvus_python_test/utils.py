@@ -512,7 +512,7 @@ def gen_simple_index():
         IndexType.HNSW,
         IndexType.RNSG
     ]
-    index_params = [
+    params = [
         {"nlist": 1024},
         {"nlist": 1024},
         {"nlist": 1024},
@@ -524,7 +524,7 @@ def gen_simple_index():
 
     index_params = []
     for i in range(len(index_types)):
-        index_params.append({"index_type": index_types[i], "index_param": index_params[i]})
+        index_params.append({"index_type": index_types[i], "index_param": params[i]})
     return index_params
 
 
