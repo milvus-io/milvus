@@ -283,6 +283,7 @@ def gen_invalid_index_types():
 
 def gen_invalid_params():
     params = [
+            9999999999,
             -1,
             # None,
             [1,2,3],
@@ -468,20 +469,23 @@ def gen_invalid_index():
         index_param = {"index_type": IndexType.IVFLAT, "index_param": {"nlist": nlist}}
         index_params.append(index_param)
     for M in gen_invalid_params():
-        index_param = {"index_type": IndexType.HNSW, "index_param": {"M": M, "ef_construct": 100}}
+        index_param = {"index_type": IndexType.HNSW, "index_param": {"M": M, "efConstruction": 100}}
         index_params.append(index_param)
-    for ef_construct in gen_invalid_params():
-        index_param = {"index_type": IndexType.HNSW, "index_param": {"M": 16, "ef_construct": ef_construct}}
+    for efConstruction in gen_invalid_params():
+        index_param = {"index_type": IndexType.HNSW, "index_param": {"M": 16, "efConstruction": efConstruction}}
         index_params.append(index_param)
     for search_length in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": search_length, "out_degree": 40, "pool_size": 50}}
+        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50, "knng": 100}}
         index_params.append(index_param)
     for out_degree in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": out_degree, "pool_size": 50}}
+        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50, "knng": 100}}
         index_params.append(index_param)
-    for pool_size in gen_invalid_params():
-        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": 40, "pool_size": pool_size}}
+    for candidate_pool_size in gen_invalid_params():
+        index_param = {"index_type": IndexType.RNSG, "index_param": {"search_length": 100, "out_degree": 40, "candidate_pool_size": candidate_pool_size, "knng": 100}}
         index_params.append(index_param)
+    index_params.append({"index_type": IndexType.IVF_FLAT, "index_param": {"invalid_key": 1024}})
+    index_params.append({"index_type": IndexType.HNSW, "index_param": {"invalid_key": 16, "efConstruction": 100}})
+    index_params.append({"index_type": IndexType.RNSG, "index_param": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300, "knng": 100}})
     return index_params
 
 
@@ -498,10 +502,10 @@ def gen_index():
     
     nlists = [1, 1024, 16384]
     Ms = [5, 24, 48]
-    ef_constructs = [100, 300, 500]
+    efConstructions = [100, 300, 500]
     search_lengths = [10, 100, 300]
     out_degrees = [5, 40, 300]
-    pool_sizes = [50, 100, 300]
+    candidate_pool_sizes = [50, 100, 300]
 
     index_params = []
     for index_type in index_types:
@@ -512,15 +516,15 @@ def gen_index():
                 for nlist in nlists ]
             index_params.extend(ivf_params)
         elif index_type == IndexType.HNSW:
-            hnsw_params = [ {"index_type": index_type, "index_param": {"M": M, "ef_construct": ef_construct}} \
+            hnsw_params = [ {"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
                 for M in Ms \
-                    for ef_construct in ef_constructs]
+                    for efConstruction in efConstructions]
             index_params.extend(hnsw_params)
         elif index_type == IndexType.RNSG:
-            nsg_params = [ {"index_type": index_type, "index_param": {"search_length": search_length, "out_degree": out_degree, "pool_size": pool_size}} \
+            nsg_params = [ {"index_type": index_type, "index_param": {"search_length": search_length, "out_degree": out_degree, "candidate_pool_size": candidate_pool_size}} \
                 for search_length in search_lengths \
                     for out_degree in out_degrees \
-                        for pool_size in pool_sizes]
+                        for candidate_pool_size in candidate_pool_sizes]
             index_params.extend(nsg_params)
     
     return index_params
@@ -542,8 +546,8 @@ def gen_simple_index():
         {"nlist": 1024},
         {"nlist": 1024},
         {"nlist": 1024},
-        {"M": 16, "ef_construct": 500},
-        {"search_length": 100, "out_degree": 40, "pool_size": 66}
+        {"M": 16, "efConstruction": 500},
+        {"search_length": 100, "out_degree": 40, "candidate_pool_size": 66}
     ]
 
     index_params = []

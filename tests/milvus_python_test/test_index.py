@@ -319,7 +319,7 @@ class TestIndexBase:
             status = connect.create_index(table, index["index_type"], index["index_param"])
             assert status.OK()
         status, result = connect.describe_index(table)
-        assert result._nlist == nlist
+        assert result._params["nlist"] == nlist
         assert result._table_name == table
         assert result._index_type == index_type_2
 
@@ -342,7 +342,7 @@ class TestIndexBase:
         status = connect.create_index(table, index_type, index_param)
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
-        assert result._nlist == index_param["nlist"]
+        assert result._params["nlist"] == index_param["nlist"]
         assert result._table_name == table
         assert result._index_type == index_type
 
@@ -375,7 +375,7 @@ class TestIndexBase:
         for i in range(10):
             status, result = connect.describe_index(table_list[i])
             logging.getLogger().info(result)
-            assert result._nlist == index_param["nlist"]
+            assert result._params["nlist"] == index_param["nlist"]
             assert result._table_name == table_list[i]
             assert result._index_type == index_type
 
@@ -384,7 +384,7 @@ class TestIndexBase:
             assert status.OK()
             status, result = connect.describe_index(table_list[i])
             logging.getLogger().info(result)
-            assert result._nlist == NLIST
+            assert result._params["nlist"] == NLIST
             assert result._table_name == table_list[i]
             assert result._index_type == IndexType.FLAT
 
@@ -430,7 +430,7 @@ class TestIndexBase:
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
         assert status.OK()
-        # assert result._nlist == index_params["nlist"]
+        # assert result._params["nlist"] == index_params["nlist"]
         # assert result._table_name == table
         # assert result._index_type == index_params["index_type"]
 
@@ -457,7 +457,7 @@ class TestIndexBase:
         assert status.OK()
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
-        assert result._nlist == NLIST
+        assert result._params["nlist"] == NLIST
         assert result._table_name == table
         assert result._index_type == IndexType.FLAT
 
@@ -480,7 +480,7 @@ class TestIndexBase:
         assert status.OK()
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
-        assert result._nlist == NLIST
+        assert result._params["nlist"] == NLIST
         assert result._table_name == table
         assert result._index_type == IndexType.FLAT
 
@@ -547,7 +547,7 @@ class TestIndexBase:
             assert status.OK()
             status, result = connect.describe_index(table)
             logging.getLogger().info(result)
-            assert result._nlist == NLIST
+            assert result._params["nlist"] == NLIST
             assert result._table_name == table
             assert result._index_type == IndexType.FLAT
 
@@ -569,7 +569,7 @@ class TestIndexBase:
             assert status.OK()
             status, result = connect.describe_index(table)
             logging.getLogger().info(result)
-            assert result._nlist == NLIST
+            assert result._params["nlist"] == NLIST
             assert result._table_name == table
             assert result._index_type == IndexType.FLAT
 
@@ -857,7 +857,7 @@ class TestIndexIP:
             assert result._params["nlist"] == NLIST
         else:
             assert result._index_type == index_type
-            assert result._nlist == index_param["nlist"]
+            assert result._params["nlist"] == index_param["nlist"]
 
     def test_describe_index_partition(self, connect, ip_table, get_simple_index):
         '''
@@ -963,7 +963,7 @@ class TestIndexIP:
         status, result = connect.describe_index(ip_table)
         logging.getLogger().info(result)
         assert status.OK()
-        # assert result._nlist == index_params["nlist"]
+        # assert result._params["nlist"] == index_params["nlist"]
         # assert result._table_name == table
         # assert result._index_type == index_params["index_type"]
 
@@ -1613,3 +1613,44 @@ class TestCreateIndexParamsInvalid(object):
         else:
             status = connect.create_index(table, index_type, index_param)
             assert not status.OK()
+
+    '''
+    Test Building index with empty params
+    '''
+    def gen_index_with_empty_param(self):
+        index_types = [
+            IndexType.FLAT,
+            IndexType.IVFLAT,
+            IndexType.IVF_SQ8,
+            IndexType.IVF_SQ8H,
+            # IndexType.IVF_PQ
+            IndexType.HNSW,
+            IndexType.RNSG
+        ]
+
+        index_params = []
+        for index_type in index_types:
+            index_params.append({"index_type": index_type, "index_param": {}})
+        return index_params
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_index_with_empty_param()
+    )
+    def get_index_with_empty_param(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in CPU mode")
+        return request.param
+
+    def test_create_index_with_empty_param(self, connect, table, get_index_with_empty_param):
+        index_param = get_index_with_empty_param["index_param"]
+        index_type = get_index_with_empty_param["index_type"]
+        logging.getLogger().info(get_index_with_empty_param)
+        status = connect.create_index(table, index_type, index_param)
+        assert not status.OK()
+        status, result = connect.describe_index(table)
+        logging.getLogger().info(result)
+        assert result._table_name == table
+        assert result._index_type == IndexType.FLAT
+
