@@ -24,7 +24,6 @@
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
 #include "store/Directory.h"
-#include "utils/Exception.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -87,10 +86,10 @@ SegmentWriter::WriteVectors() {
     try {
         directory_ptr_->Create();
         default_codec.GetVectorsFormat()->write(directory_ptr_, segment_ptr_->vectors_ptr_);
-    } catch (Exception& e) {
-        std::string err_msg = "Failed to write vectors. " + std::string(e.what());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
 }
@@ -127,10 +126,10 @@ SegmentWriter::WriteBloomFilter() {
         end = std::chrono::high_resolution_clock::now();
         diff = end - start;
         ENGINE_LOG_DEBUG << "Writing bloom filter took " << diff.count() << " s";
-    } catch (Exception& e) {
-        std::string err_msg = "Failed to write vectors. " + std::string(e.what());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
 }
@@ -142,10 +141,10 @@ SegmentWriter::WriteDeletedDocs() {
         directory_ptr_->Create();
         DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
         default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs_ptr);
-    } catch (Exception& e) {
-        std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
 }
@@ -156,10 +155,10 @@ SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
     try {
         directory_ptr_->Create();
         default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs);
-    } catch (Exception& e) {
-        std::string err_msg = "Failed to write deleted docs. " + std::string(e.what());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
 }
@@ -170,10 +169,10 @@ SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
         directory_ptr_->Create();
         default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, id_bloom_filter_ptr);
-    } catch (Exception& e) {
-        std::string err_msg = "Failed to write bloom filter. " + std::string(e.what());
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
-        return Status(e.code(), err_msg);
+        return Status(SERVER_WRITE_ERROR, err_msg);
     }
     return Status::OK();
 }
