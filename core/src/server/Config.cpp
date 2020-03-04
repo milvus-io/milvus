@@ -74,20 +74,6 @@ Config::Config() {
 
     std::string node_gpu_build_res = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES;
     config_callback_[node_gpu_build_res] = empty_map;
-
-    // wal config
-    std::string node_wal_enable = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_ENABLE);
-    config_callback_[node_wal_enable] = empty_map;
-
-    std::string node_wal_recovery_error_ignore =
-        std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_RECOVERY_ERROR_IGNORE);
-    config_callback_[node_wal_recovery_error_ignore] = empty_map;
-
-    std::string node_wal_buffer_size = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_BUFFER_SIZE);
-    config_callback_[node_wal_buffer_size] = empty_map;
-
-    std::string node_wal_path = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_WAL_PATH);
-    config_callback_[node_wal_path] = empty_map;
 }
 
 Config&
@@ -422,14 +408,14 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
 #endif
     } else if (parent_key == CONFIG_TRACING) {
         return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config currently");
-    } else if (CONFIG_WAL == parent_key) {
-        if (CONFIG_WAL_ENABLE == child_key) {
+    } else if (parent_key == CONFIG_WAL) {
+        if (child_key == CONFIG_WAL_ENABLE) {
             status = SetWalConfigEnable(value);
-        } else if (CONFIG_WAL_RECOVERY_ERROR_IGNORE == child_key) {
+        } else if (child_key == CONFIG_WAL_RECOVERY_ERROR_IGNORE) {
             status = SetWalConfigRecoveryErrorIgnore(value);
-        } else if (CONFIG_WAL_BUFFER_SIZE == child_key) {
+        } else if (child_key == CONFIG_WAL_BUFFER_SIZE) {
             status = SetWalConfigBufferSize(value);
-        } else if (CONFIG_WAL_WAL_PATH == child_key) {
+        } else if (child_key == CONFIG_WAL_WAL_PATH) {
             status = SetWalConfigWalPath(value);
         }
     }
@@ -1269,7 +1255,7 @@ Config::CheckWalConfigBufferSize(const std::string& value) {
 
 Status
 Config::CheckWalConfigWalPath(const std::string& value) {
-    fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, value = ""));
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "wal_config.wal_path is empty.");
     }
