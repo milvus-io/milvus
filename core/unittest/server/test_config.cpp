@@ -345,7 +345,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.SetWalConfigWalPath(wal_path).ok());
     ASSERT_TRUE(config.GetWalConfigWalPath(str_val).ok());
     ASSERT_TRUE(str_val == wal_path);
-
 }
 
 std::string
@@ -894,7 +893,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     s = config.ValidateConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_wal_path_fail");
-
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {

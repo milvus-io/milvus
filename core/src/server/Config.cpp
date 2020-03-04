@@ -78,7 +78,8 @@ Config::Config() {
     std::string node_wal_enable = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_ENABLE);
     config_callback_[node_wal_enable] = empty_map;
 
-    std::string node_wal_recovery_error_ignore = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_RECOVERY_ERROR_IGNORE);
+    std::string node_wal_recovery_error_ignore = std::string(CONFIG_WAL) + "."
+                                                 + std::string(CONFIG_WAL_RECOVERY_ERROR_IGNORE);
     config_callback_[node_wal_recovery_error_ignore] = empty_map;
 
     std::string node_wal_buffer_size = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_BUFFER_SIZE);
@@ -86,7 +87,6 @@ Config::Config() {
 
     std::string node_wal_path = std::string(CONFIG_WAL) + "." + std::string(CONFIG_WAL_WAL_PATH);
     config_callback_[node_wal_path] = empty_map;
-
 }
 
 Config&
