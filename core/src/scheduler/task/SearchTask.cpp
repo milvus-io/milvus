@@ -115,9 +115,12 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
             engine_type = (EngineType)file->engine_type_;
         }
 
-        auto json = milvus::json::parse(file_->index_params_);
+        milvus::json json_params;
+        if (!file_->index_params_.empty()) {
+            json_params = milvus::json::parse(file_->index_params_);
+        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-                                             (MetricType)file_->metric_type_, json);
+                                             (MetricType)file_->metric_type_, json_params);
     }
 }
 
