@@ -219,6 +219,7 @@ XSearchTask::Execute() {
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
         const milvus::json& extra_params = search_job->extra_params();
+        ENGINE_LOG_DEBUG << "Search job extra params: " << extra_params.dump();
         const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);

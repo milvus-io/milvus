@@ -115,7 +115,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     if (!adapter->CheckTrain(conf)) {
-        throw Exception(DB_ERROR, "Build Config illegal");
+        throw Exception(DB_ERROR, "Illegal index params");
     }
 
     ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
@@ -282,6 +282,7 @@ ExecutionEngineImpl::HybridLoad() const {
 
         milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        ENGINE_LOG_DEBUG << "Quantizer params: " << quantizer_conf.dump();
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
         }
@@ -411,8 +412,9 @@ ExecutionEngineImpl::Load(bool to_cache) {
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
             auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+            ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
             if (!adapter->CheckTrain(conf)) {
-                throw Exception(DB_ERROR, "Build Config illegal");
+                throw Exception(DB_ERROR, "Illegal index params");
             }
 
             auto status = segment_reader_ptr->Load();
@@ -718,10 +720,10 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf[knowhere::meta::ROWS] = Count();
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
-    ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
+    ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     if (!adapter->CheckTrain(conf)) {
-        throw Exception(DB_ERROR, "Build Config illegal");
+        throw Exception(DB_ERROR, "Illegal index params");
     }
     ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
     auto status = Status::OK();
@@ -800,14 +802,12 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
-
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
-        throw Exception(DB_ERROR, "Search Config illegal");
+        throw Exception(DB_ERROR, "Illegal search params");
     }
 
     if (hybrid) {
@@ -849,13 +849,12 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
-
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
-        throw Exception(DB_ERROR, "Search Config illegal");
+        throw Exception(DB_ERROR, "Illegal search params");
     }
 
     if (hybrid) {
@@ -897,13 +896,12 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
-
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
-        throw Exception(DB_ERROR, "Search Config illegal");
+        throw Exception(DB_ERROR, "Illegal search params");
     }
 
     if (hybrid) {
