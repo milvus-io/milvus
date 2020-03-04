@@ -242,8 +242,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
 
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
-
-        std::vector<int64_t > to_delete{pair.first};
+        std::vector<int64_t> to_delete{pair.first};
         stat = db_->DeleteVectors(GetTableName(), to_delete);
         ASSERT_TRUE(stat.ok());
 
