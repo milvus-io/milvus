@@ -65,7 +65,13 @@ IDNumber
 SafeIDGenerator::GetNextIDNumber() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return micros * MAX_IDS_PER_MICRO;
+    std::lock_guard<std::mutex> lock(mtx_);
+    if (micros <= time_stamp_ms_) {
+        time_stamp_ms_ += 1;
+    } else {
+        time_stamp_ms_ = micros;
+    }
+    return time_stamp_ms_ * MAX_IDS_PER_MICRO;
 }
 
 Status
@@ -87,6 +93,7 @@ SafeIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
             break;
         }
     }
+    return Status::OK();
 }
 
 Status

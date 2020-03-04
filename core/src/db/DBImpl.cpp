@@ -484,8 +484,8 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     // insert vectors into target table
     // (zhiru): generate ids
     if (vectors.id_array_.empty()) {
-        auto id_generator = std::make_shared<SimpleIDGenerator>();
-        id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        id_generator.GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
     }
 
     Status status;
