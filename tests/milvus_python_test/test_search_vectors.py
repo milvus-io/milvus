@@ -774,7 +774,8 @@ class TestSearchBase:
 
 class TestSearchParamsInvalid(object):
     nlist = 16384
-    index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
+    index_type = IndexType.IVF_SQ8
+    index_param = {"nlist": nlist}
     logging.getLogger().info(index_param)
 
     def init_data(self, connect, table, nb=6000):
@@ -876,21 +877,25 @@ class TestSearchParamsInvalid(object):
     @pytest.mark.level(1)
     def test_search_with_invalid_nprobe(self, connect, table, get_nprobes):
         '''
-        target: test search fuction, with the wrong top_k
-        method: search with top_k
+        target: test search fuction, with the wrong nprobe
+        method: search with nprobe
         expected: raise an error, and the connection is normal
         '''
+        index_type = IndexType.IVF_SQ8
+        index_param = {"nlist": 16384}
+        connect.create_index(table, index_type, index_param)
+
         top_k = 1
         nprobe = get_nprobes
         search_param = {"nprobe": nprobe}
         logging.getLogger().info(nprobe)
         query_vecs = gen_vectors(1, dim)
-        if isinstance(nprobe, int):
-            status, result = connect.search_vectors(table, top_k, query_vecs, params=search_param)
-            assert not status.OK()
-        else:
-            with pytest.raises(Exception) as e:
-                status, result = connect.search_vectors(table, top_k, query_vecs, params=search_param)
+        # if isinstance(nprobe, int):
+        status, result = connect.search_vectors(table, top_k, query_vecs, params=search_param)
+        assert not status.OK()
+        # else:
+        #     with pytest.raises(Exception) as e:
+        #         status, result = connect.search_vectors(table, top_k, query_vecs, params=search_param)
 
     @pytest.mark.level(2)
     def test_search_with_invalid_nprobe_ip(self, connect, ip_table, get_nprobes):
@@ -904,13 +909,69 @@ class TestSearchParamsInvalid(object):
         search_param = {"nprobe": nprobe}
         logging.getLogger().info(nprobe)
         query_vecs = gen_vectors(1, dim)
-        if isinstance(nprobe, int):
-            status, result = connect.search_vectors(ip_table, top_k, query_vecs, params=search_param)
-            assert not status.OK()
-        else:
-            with pytest.raises(Exception) as e:
-                status, result = connect.search_vectors(ip_table, top_k, query_vecs, params=search_param)
+        # if isinstance(nprobe, int):
+        status, result = connect.search_vectors(ip_table, top_k, query_vecs, params=search_param)
+        assert not status.OK()
+        # else:
+        #     with pytest.raises(Exception) as e:
+        #         status, result = connect.search_vectors(ip_table, top_k, query_vecs, params=search_param)
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in CPU mode")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
+        return request.param
+
+    def test_search_with_empty_params(self, connect, table, get_simple_index):
+        '''
+        target: test search fuction, with empty search params
+        method: search with params
+        expected: search status not ok, and the connection is normal
+        '''
+        index_type = get_simple_index["index_type"]
+        index_param = get_simple_index["index_param"]
+        connect.create_index(table, index_type, index_param)
+
+        top_k = 1
+        nprobe = 16384
+        query_vecs = gen_vectors(1, dim)
+        status, result = connect.search_vectors(table, top_k, query_vecs, params={})
+        assert not status.OK()
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_invaild_search_params()
+    )
+    def get_invalid_searh_param(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] == IndexType.IVF_SQ8H:
+                pytest.skip("sq8h not support in CPU mode")
+        if request.param["index_type"] == IndexType.IVF_PQ:
+            pytest.skip("Skip PQ Temporary")
+        return request.param
+
+    def test_search_with_invalid_params(self, connect, table, get_invalid_searh_param):
+        '''
+        target: test search fuction, with invalid search params
+        method: search with params
+        expected: search status not ok, and the connection is normal
+        '''
+        index_type = get_invalid_searh_param["index_type"]
+        search_param = get_invalid_searh_param["search_param"]
+        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+            connect.create_index(table, index_type, {"nlist": 16384})
+        if(index_type == IndexType.HNSW):
+            connect.create_index(table, index_type, {})
+        top_k = 1
+        query_vecs = gen_vectors(1, dim)
+        status, result = connect.search_vectors(table, top_k, query_vecs, params=search_param)
+        assert not status.OK()
 
 def check_result(result, id):
     if len(result) >= 5:
