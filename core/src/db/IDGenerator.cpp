@@ -16,6 +16,7 @@
 #include <fiu-local.h>
 #include <chrono>
 #include <iostream>
+#include <string>
 
 namespace milvus {
 namespace engine {
@@ -31,7 +32,7 @@ SimpleIDGenerator::GetNextIDNumber() {
     return micros * MAX_IDS_PER_MICRO;
 }
 
-void
+Status
 SimpleIDGenerator::NextIDNumbers(size_t n, IDNumbers& ids) {
     if (n > MAX_IDS_PER_MICRO) {
         NextIDNumbers(n - MAX_IDS_PER_MICRO, ids);
@@ -67,20 +68,20 @@ SafeIDGenerator::GetNextIDNumber() {
     return micros * MAX_IDS_PER_MICRO;
 }
 
-void
+Status
 SafeIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
     ids.clear();
     std::lock_guard<std::mutex> lock(mtx_);
-    while(n > 0) {
+    while (n > 0) {
         if (n > MAX_IDS_PER_MICRO) {
             Status status = NextIDNumbers(MAX_IDS_PER_MICRO, ids);
-            if(!status.ok()) {
+            if (!status.ok()) {
                 return status;
             }
             n -= MAX_IDS_PER_MICRO;
         } else {
             Status status = NextIDNumbers(n, ids);
-            if(!status.ok()) {
+            if (!status.ok()) {
                 return status;
             }
             break;
@@ -88,7 +89,7 @@ SafeIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
     }
 }
 
-void
+Status
 SafeIDGenerator::NextIDNumbers(size_t n, IDNumbers& ids) {
     if (n <= 0 || n > MAX_IDS_PER_MICRO) {
         std::string msg = "Invalid ID number: " + std::to_string(n);

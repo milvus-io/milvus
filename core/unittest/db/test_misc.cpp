@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "db/IDGenerator.h"
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Options.h"
