@@ -166,7 +166,9 @@ TEST(DBMiscTest, SAFE_ID_GENERATOR_TEST) {
     milvus::engine::SafeIDGenerator& generator = milvus::engine::SafeIDGenerator::GetInstance();
     size_t n = 1000000;
     milvus::engine::IDNumbers ids;
-    generator.GetNextIDNumbers(n, ids);
+
+    milvus::Status status = generator.GetNextIDNumbers(n, ids);
+    ASSERT_TRUE(status.ok());
 
     std::set<int64_t> unique_ids;
     for (size_t i = 0; i < ids.size(); i++) {
