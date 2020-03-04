@@ -1255,7 +1255,7 @@ Config::CheckWalConfigBufferSize(const std::string& value) {
 
 Status
 Config::CheckWalConfigWalPath(const std::string& value) {
-    fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, value = ""));
+    fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "wal_config.wal_path is empty.");
     }
