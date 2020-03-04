@@ -38,10 +38,10 @@ namespace engine {
 #define DEFAULT_MIN_ROWS 100  // minimum size for build index
 #define DEFAULT_MAX_ROWS 50000000
 
-#define CheckIntByRange(key, min, max)                                                                    \
-    if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() >= max || \
-        oricfg[key].get<int64_t>() <= min) {                                                              \
-        return false;                                                                                     \
+#define CheckIntByRange(key, min, max)                                                                   \
+    if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
+        oricfg[key].get<int64_t>() < min) {                                                              \
+        return false;                                                                                    \
     }
 
 // #define checkfloat(key, min, max)                                                                              \

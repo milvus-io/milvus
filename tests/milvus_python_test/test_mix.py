@@ -20,6 +20,7 @@ vectors = vectors.tolist()
 top_k = 1
 nprobe = 1
 epsilon = 0.001
+nlist = 128
 index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 
@@ -79,9 +80,9 @@ class TestMixBase:
         expected: status ok
         '''
         nq = 10000
-        nlist= 16384
         table_list = []
         idx = []
+        index_param = {'nlist': nlist}
 
         #create table and add vectors
         for i in range(30):
@@ -106,73 +107,56 @@ class TestMixBase:
                      'metric_type': MetricType.IP}
             connect.create_table(param)
             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
+            assert status.OK()
+            status = connect.flush([table_name])
+            assert status.OK()
             idx.append(ids[0])
             idx.append(ids[10])
             idx.append(ids[20])
             assert status.OK()
-        time.sleep(2)
-
-        #create index
         for i in range(10):
-            index_params = {'index_type': IndexType.FLAT, 'nlist': nlist}
-            status = connect.create_index(table_list[i], index_params)
+            status = connect.create_index(table_list[i], IndexType.FLAT, index_param)
             assert status.OK()
-            status = connect.create_index(table_list[30 + i], index_params)
+            status = connect.create_index(table_list[30 + i], IndexType.FLAT, index_param)
             assert status.OK()
-            index_params = {'index_type': IndexType.IVFLAT, 'nlist': nlist}
-            status = connect.create_index(table_list[10 + i], index_params)
+            status = connect.create_index(table_list[10 + i], IndexType.IVFLAT, index_param)
             assert status.OK()
-            status = connect.create_index(table_list[40 + i], index_params)
+            status = connect.create_index(table_list[40 + i], IndexType.IVFLAT, index_param)
             assert status.OK()
-            index_params = {'index_type': IndexType.IVF_SQ8, 'nlist': nlist}
-            status = connect.create_index(table_list[20 + i], index_params)
+            status = connect.create_index(table_list[20 + i], IndexType.IVF_SQ8, index_param)
             assert status.OK()
-            status = connect.create_index(table_list[50 + i], index_params)
+            status = connect.create_index(table_list[50 + i], IndexType.IVF_SQ8, index_param)
             assert status.OK()
 
         #describe index
         for i in range(10):
             status, result = connect.describe_index(table_list[i])
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == table_list[i]
             assert result._index_type == IndexType.FLAT
             status, result = connect.describe_index(table_list[10 + i])
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == table_list[10 + i]
             assert result._index_type == IndexType.IVFLAT
             status, result = connect.describe_index(table_list[20 + i])
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == table_list[20 + i]
             assert result._index_type == IndexType.IVF_SQ8
             status, result = connect.describe_index(table_list[30 + i])
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == table_list[30 + i]
             assert result._index_type == IndexType.FLAT
             status, result = connect.describe_index(table_list[40 + i])
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == table_list[40 + i]
             assert result._index_type == IndexType.IVFLAT
             status, result = connect.describe_index(table_list[50 + i])
-            logging.getLogger().info(result)
-            assert result._nlist == 16384
-            assert result._table_name == table_list[50 + i]
             assert result._index_type == IndexType.IVF_SQ8
 
         #search
         query_vecs = [vectors[0], vectors[10], vectors[20]]
         for i in range(60):
             table = table_list[i]
-            status, result = connect.search_vectors(table, top_k, nprobe, query_vecs)
+            status, result = connect.search_vectors(table, top_k, query_records=query_vecs, params={"nprobe": 1})
             assert status.OK()
             assert len(result) == len(query_vecs)
+            logging.getLogger().info(i)
             for j in range(len(query_vecs)):
                 assert len(result[j]) == top_k
             for j in range(len(query_vecs)):
+                if not check_result(result[j], idx[3 * i + j]):
+                    logging.getLogger().info(result[j]._id_list)
+                    logging.getLogger().info(idx[3 * i + j])
                 assert check_result(result[j], idx[3 * i + j])
 
 def check_result(result, id):
