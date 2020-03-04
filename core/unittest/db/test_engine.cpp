@@ -155,45 +155,45 @@ TEST_F(EngineTest, FACTORY_TEST) {
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     fiu_init(0);
 
-//    {
-//        milvus::json index_params = {{"nlist", 10}};
-//        auto engine_ptr = CreateExecEngine(index_params);
-//
-//        ASSERT_EQ(engine_ptr->Dimension(), DIMENSION);
-//        ASSERT_EQ(engine_ptr->Count(), ROW_COUNT);
-//        ASSERT_EQ(engine_ptr->GetLocation(), INIT_PATH);
-//        ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
-//
-//        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::INVALID));
-//        FIU_ENABLE_FIU("VecIndexImpl.BuildAll.throw_knowhere_exception");
-//        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::SPTAG_KDT));
-//        fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
-//
-//        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
-//        ASSERT_NE(engine_build, nullptr);
-//    }
-//
-//    {
-//#ifndef MILVUS_GPU_VERSION
-//        milvus::json index_params = {{"nlist", 10}, {"m", 16}};
-//        auto engine_ptr = CreateExecEngine(index_params);
-//        //PQ don't support IP In gpu version
-//        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
-//        ASSERT_NE(engine_build, nullptr);
-//#endif
-//    }
-//
-//    {
-//        milvus::json index_params = {{"nlist", 10}};
-//        auto engine_ptr = CreateExecEngine(index_params);
-//        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
-//        engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
-//        engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);
-//
-//        //CPU version invoke CopyToCpu will fail
-//        auto status = engine_ptr->CopyToCpu();
-//        ASSERT_FALSE(status.ok());
-//    }
+    {
+        milvus::json index_params = {{"nlist", 10}};
+        auto engine_ptr = CreateExecEngine(index_params);
+
+        ASSERT_EQ(engine_ptr->Dimension(), DIMENSION);
+        ASSERT_EQ(engine_ptr->Count(), ROW_COUNT);
+        ASSERT_EQ(engine_ptr->GetLocation(), INIT_PATH);
+        ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
+
+        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::INVALID));
+        FIU_ENABLE_FIU("VecIndexImpl.BuildAll.throw_knowhere_exception");
+        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::SPTAG_KDT));
+        fiu_disable("VecIndexImpl.BuildAll.throw_knowhere_exception");
+
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+        ASSERT_NE(engine_build, nullptr);
+    }
+
+    {
+#ifndef MILVUS_GPU_VERSION
+        milvus::json index_params = {{"nlist", 10}, {"m", 16}};
+        auto engine_ptr = CreateExecEngine(index_params);
+        //PQ don't support IP In gpu version
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
+        ASSERT_NE(engine_build, nullptr);
+#endif
+    }
+
+    {
+        milvus::json index_params = {{"nlist", 10}};
+        auto engine_ptr = CreateExecEngine(index_params);
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_4", milvus::engine::EngineType::SPTAG_KDT);
+        engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_5", milvus::engine::EngineType::SPTAG_BKT);
+        engine_ptr->BuildIndex("/tmp/milvus_index_SPTAG_BKT", milvus::engine::EngineType::SPTAG_BKT);
+
+        //CPU version invoke CopyToCpu will fail
+        auto status = engine_ptr->CopyToCpu();
+        ASSERT_FALSE(status.ok());
+    }
 
 #ifdef MILVUS_GPU_VERSION
     {
