@@ -976,7 +976,7 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
         }
 
         int64_t cache_size = 0;
-        CONFIG_CHECK(GetCacheConfigCpuCacheCapacity(cache_sizej));
+        CONFIG_CHECK(GetCacheConfigCpuCacheCapacity(cache_size));
 
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
