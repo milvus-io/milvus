@@ -28,6 +28,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1298 Unittest failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
 -   \#1429 Server crashed when searching vectors using GPU
+-   \#1510 Add set interfaces for WAL configurations
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -40,7 +41,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#813 Add push mode for prometheus monitor
 -   \#815 Support MinIO storage
 -   \#823 Support binary vector tanimoto/jaccard/hamming metric
--   \#830 - Support WAL(write-ahead logging)
+-   \#830 Support WAL(write-ahead logging)
 -   \#853 Support HNSW
 -   \#861 Support DeleteById / SearchByID / GetVectorById / Flush
 -   \#910 Change Milvus c++ standard to c++17
