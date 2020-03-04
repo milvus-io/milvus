@@ -22,8 +22,7 @@
 namespace milvus {
 namespace engine {
 
-VectorSource::VectorSource(VectorsData vectors)
-    : vectors_(std::move(vectors)) {
+VectorSource::VectorSource(VectorsData vectors) : vectors_(std::move(vectors)) {
     current_num_vectors_added = 0;
 }
 
