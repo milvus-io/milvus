@@ -2,7 +2,6 @@ import pdb
 import pytest
 import logging
 import itertools
-import numpy
 from time import sleep
 from multiprocessing import Process
 from milvus import IndexType, MetricType
@@ -734,7 +733,7 @@ class TestTable:
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in open source")
+                pytest.skip("sq8h not support in cpu mode")
         if request.param["index_type"] == IndexType.IVF_PQ:
             pytest.skip("Skip PQ Temporary")
         return request.param
@@ -965,7 +964,7 @@ def rowcount(connect, **params):
     return status
 
 def create_index(connect, **params):
-    status = connect.create_index(params["table_name"], params["index_params"])
+    status = connect.create_index(params["table_name"], params["index_type"], params["index_param"])
     return status
 
 func_map = { 
@@ -1044,9 +1043,9 @@ class TestTableLogic(object):
                  'metric_type': MetricType.L2,
                  'nprobe': 1,
                  'top_k': top_k,
-                 'index_params': {
-                        'index_type': IndexType.IVF_SQ8,
-                        'params': {'nlist': 16384}
+                 'index_type': IndexType.IVF_SQ8,
+                 'index_param': {
+                        'nlist': 16384
                  },
                  'query_vectors': vectors}
         return param

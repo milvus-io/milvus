@@ -12,6 +12,7 @@ index_file_size = 10
 table_id = "test_add"
 ADD_TIMEOUT = 60
 tag = "1970-01-01"
+add_interval_time = 1.5
 
 
 class TestAddBase:
@@ -226,7 +227,7 @@ class TestAddBase:
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         connect.flush([table])
-        status = connect.create_index(param['table_name'], index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -817,7 +818,7 @@ class TestAddIP:
         status, mode = connect._cmd("mode")
         assert status.OK()
         status = connect.create_index(ip_table, index_type, index_param)
-        if str(mode) == "GPU" and (index_param["index_type"] == IndexType.IVF_PQ):
+        if str(mode) == "GPU" and (index_type == IndexType.IVF_PQ):
             assert not status.OK()
         else:
             assert status.OK()
@@ -850,7 +851,7 @@ class TestAddIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_param["index_type"] == IndexType.IVF_PQ:
+        if index_type == IndexType.IVF_PQ:
             pytest.skip("Skip some PQ cases")
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
