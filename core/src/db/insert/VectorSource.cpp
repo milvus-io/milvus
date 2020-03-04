@@ -39,7 +39,7 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
     IDNumbers vector_ids_to_add;
     if (vectors_.id_array_.empty()) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
-        id_generator->GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
+        id_generator.GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
     } else {
         vector_ids_to_add.resize(num_vectors_added);
         for (size_t pos = current_num_vectors_added; pos < current_num_vectors_added + num_vectors_added; pos++) {
