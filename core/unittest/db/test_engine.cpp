@@ -181,7 +181,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
         engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
         fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
 
-        status = engine_ptr->CopyToGpu(0, false);
+        auto status = engine_ptr->CopyToGpu(0, false);
         ASSERT_TRUE(status.ok());
         status = engine_ptr->GpuCache(0);
         ASSERT_TRUE(status.ok());
