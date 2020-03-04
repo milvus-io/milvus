@@ -22,7 +22,7 @@ namespace {
 static const char* VALID_CONFIG_STR =
     "# Default values are used when you make no changes to the following parameters.\n"
     "\n"
-    "version: 0.1"
+    "version: 0.2"
     "\n"
     "server_config:\n"
     "  address: 0.0.0.0                  # milvus server ip address (IPv4)\n"
