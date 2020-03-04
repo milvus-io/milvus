@@ -199,6 +199,68 @@ TEST_F(DeleteTest, delete_on_disk) {
     }
 }
 
+TEST_F(DeleteTest, delete_multiple_times) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = GetTableName();
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 100000;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    for (int64_t i = 0; i < nb; i++) {
+        xb.id_array_.push_back(i);
+    }
+
+    stat = db_->InsertVectors(GetTableName(), "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int64_t> dis(0, nb - 1);
+
+    int64_t num_query = 10;
+    std::map<int64_t, milvus::engine::VectorsData> search_vectors;
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = dis(gen);
+        milvus::engine::VectorsData search;
+        search.vector_count_ = 1;
+        for (int64_t j = 0; j < TABLE_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        }
+        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+    }
+
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+    for (auto& pair : search_vectors) {
+        std::vector<int64_t> to_delete{pair.first};
+        stat = db_->DeleteVectors(GetTableName(), to_delete);
+        ASSERT_TRUE(stat.ok());
+
+        stat = db_->Flush();
+        ASSERT_TRUE(stat.ok());
+
+        auto& search = pair.second;
+
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        ASSERT_NE(result_ids[0], pair.first);
+        //        ASSERT_LT(result_distances[0], 1e-4);
+        ASSERT_GT(result_distances[0], 1);
+    }
+}
+
 TEST_F(DeleteTest, delete_with_index) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     table_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
@@ -456,7 +518,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
 
-TEST_F(DeleteTest, compact_basic) {
+TEST_F(CompactTest, compact_basic) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -507,7 +569,7 @@ TEST_F(DeleteTest, compact_basic) {
     }
 }
 
-TEST_F(DeleteTest, compact_with_index) {
+TEST_F(CompactTest, compact_with_index) {
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     table_info.index_file_size_ = milvus::engine::ONE_KB;
     table_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8;
@@ -591,7 +653,7 @@ TEST_F(DeleteTest, compact_with_index) {
     }
 }
 
-TEST_F(DeleteTest, compact_non_existing_table) {
+TEST_F(CompactTest, compact_non_existing_table) {
     auto status = db_->Compact("non_existing_table");
     ASSERT_FALSE(status.ok());
 }
