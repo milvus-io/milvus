@@ -9,8 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "server/Config.h"
+
+#include <cache/CpuCacheMgr.h>
+#include <cache/GpuCacheMgr.h>
+#include <fiu-local.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
 #include <fstream>
@@ -23,15 +29,10 @@
 #include <vector>
 
 #include "config/YamlConfigMgr.h"
-#include "server/Config.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
-
-#include <cache/CpuCacheMgr.h>
-#include <cache/GpuCacheMgr.h>
-#include <fiu-local.h>
 
 namespace milvus {
 namespace server {
@@ -974,9 +975,12 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
+        int64_t cache_size;
+        CONFIG_CHECK(GetCacheConfigCpuCacheCapacity(cache_sizej));
+
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if (buffer_size >= total_mem) {
+        if (buffer_size + cache_size >= total_mem) {
             std::string msg = "Invalid insert buffer size: " + value +
                               ". Possible reason: cache_config.insert_buffer_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
