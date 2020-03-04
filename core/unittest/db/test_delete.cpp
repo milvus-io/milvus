@@ -578,7 +578,11 @@ TEST_F(DeleteTest, compact_with_index) {
 
     stat = db_->Compact(GetTableName());
     ASSERT_TRUE(stat.ok());
-    // std::this_thread::sleep_for(std::chrono::seconds(5));  // wait for build index to finish
+
+    milvus::engine::TableIndex table_index;
+    stat = db_->DescribeIndex(GetTableName(), table_index);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_FLOAT_EQ(table_index.engine_type_, index.engine_type_);
 
     const int topk = 10, nprobe = 10;
     milvus::json json_params = {{"nprobe", nprobe}};

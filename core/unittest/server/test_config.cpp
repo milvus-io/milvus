@@ -650,10 +650,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 
-    fiu_enable("check_config_version_fail", 1, NULL, 0);
-    s = config.ValidateConfig();
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_version_fail");
+    // fiu_enable("check_config_version_fail", 1, NULL, 0);
+    // s = config.ValidateConfig();
+    // ASSERT_FALSE(s.ok());
+    // fiu_disable("check_config_version_fail");
 
     /* server config */
     fiu_enable("check_config_address_fail", 1, NULL, 0);
