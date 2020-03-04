@@ -29,6 +29,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1359 Negative distance value returned when searching with HNSW index type
 -   \#1429 Server crashed when searching vectors using GPU
 -   \#1476 Fix vectors results bug when getting vectors from segments
+-   \#1484 Index type changed to IDMAP after compacted 
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -50,6 +51,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1250 Support CPU profiling
 -   \#1302 Get all record IDs in a segment by given a segment id
 -   \#1461 Add crud APIs and segments APIs into http module
+-   \#1463 Update config version to 0.2
 
 ## Improvement
 -   \#738 Use Openblas / lapack from apt install
@@ -72,6 +74,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1320 Remove debug logging from faiss
 -   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
+-   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
 
 
