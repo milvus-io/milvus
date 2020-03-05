@@ -726,7 +726,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 #ifdef MILVUS_GPU_VERSION
     engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) + " " +
                         std::to_string(advanced_config->gpu_search_threshold->getValue());
-    CommandLine(engine_cmd_string, reply);
+    status = CommandLine(engine_cmd_string, reply);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1434,7 +1434,7 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
                 status = Compact(j["compact"], result_str);
             }
         } else if (op->equals("config")) {
-            SetConfig(j, result_str);
+            status = SetConfig(j, result_str);
         } else {
             status = Status(UNKNOWN_PATH, "Unknown path: /system/" + op->std_str());
         }

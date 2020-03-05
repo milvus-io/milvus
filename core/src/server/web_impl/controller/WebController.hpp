@@ -527,12 +527,12 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto status_dto = handler.ShowSegments(table_name, query_params, response);
 
         switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:{
+            case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
-            }
-            default:{
+            case StatusCode::TABLE_NOT_EXISTS:
+                return createDtoResponse(Status::CODE_404, status_dto);
+            default:
                 return createDtoResponse(Status::CODE_400, status_dto);
-            }
         }
     }
 
@@ -551,12 +551,12 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto status_dto = handler.GetSegmentInfo(table_name, segment_name, info, query_params, response);
 
         switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:{
+            case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
-            }
-            default:{
+            case StatusCode::TABLE_NOT_EXISTS:
+                return createDtoResponse(Status::CODE_404, status_dto);
+            default:
                 return createDtoResponse(Status::CODE_400, status_dto);
-            }
         }
     }
 
@@ -578,12 +578,12 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto status_dto = handler.GetVector(table_name, query_params, response);
 
         switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:{
+            case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
-            }
-            default:{
+            case StatusCode::TABLE_NOT_EXISTS:
+                return createDtoResponse(Status::CODE_404, status_dto);
+            default:
                 return createDtoResponse(Status::CODE_400, status_dto);
-            }
         }
     }
 
