@@ -327,9 +327,10 @@ Config::GetConfigCli(std::string& value, const std::string& parent_key, const st
 
 Status
 Config::SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value) {
+    std::string invalid_node_str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
+
     if (!ConfigNodeValid(parent_key, child_key)) {
-        std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
-        return Status(SERVER_UNEXPECTED_ERROR, str);
+        return Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
     }
     auto status = Status::OK();
     if (parent_key == CONFIG_SERVER) {
@@ -343,12 +344,16 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetServerConfigTimeZone(value);
         } else if (child_key == CONFIG_SERVER_WEB_PORT) {
             status = SetServerConfigWebPort(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_DB) {
         if (child_key == CONFIG_DB_BACKEND_URL) {
             status = SetDBConfigBackendUrl(value);
         } else if (child_key == CONFIG_DB_PRELOAD_TABLE) {
             status = SetDBConfigPreloadTable(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_STORAGE) {
         if (child_key == CONFIG_STORAGE_PRIMARY_PATH) {
@@ -367,6 +372,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetStorageConfigS3SecretKey(value);
         } else if (child_key == CONFIG_STORAGE_S3_BUCKET) {
             status = SetStorageConfigS3Bucket(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_METRIC) {
         if (child_key == CONFIG_METRIC_ENABLE_MONITOR) {
@@ -375,6 +382,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetMetricConfigAddress(value);
         } else if (child_key == CONFIG_METRIC_PORT) {
             status = SetMetricConfigPort(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_CACHE) {
         if (child_key == CONFIG_CACHE_CPU_CACHE_CAPACITY) {
@@ -385,6 +394,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetCacheConfigCacheInsertData(value);
         } else if (child_key == CONFIG_CACHE_INSERT_BUFFER_SIZE) {
             status = SetCacheConfigInsertBufferSize(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_ENGINE) {
         if (child_key == CONFIG_ENGINE_USE_BLAS_THRESHOLD) {
@@ -397,6 +408,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             status = SetEngineConfigGpuSearchThreshold(value);
 #endif
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
 #ifdef MILVUS_GPU_VERSION
     } else if (parent_key == CONFIG_GPU_RESOURCE) {
@@ -410,6 +423,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetGpuResourceConfigSearchResources(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
             status = SetGpuResourceConfigBuildIndexResources(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
 #endif
     } else if (parent_key == CONFIG_TRACING) {
@@ -423,6 +438,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetWalConfigBufferSize(value);
         } else if (child_key == CONFIG_WAL_WAL_PATH) {
             status = SetWalConfigWalPath(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     }
 
