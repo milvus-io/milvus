@@ -32,6 +32,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1499 Fix duplicated ID number issue
 -   \#1491 Server crashed during adding vectors  
 -   \#1504 Avoid possible race condition between delete and search 
+-   \#1510 Add set interfaces for WAL configurations
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -44,7 +45,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#813 Add push mode for prometheus monitor
 -   \#815 Support MinIO storage
 -   \#823 Support binary vector tanimoto/jaccard/hamming metric
--   \#830 - Support WAL(write-ahead logging)
+-   \#830 Support WAL(write-ahead logging)
 -   \#853 Support HNSW
 -   \#861 Support DeleteById / SearchByID / GetVectorById / Flush
 -   \#910 Change Milvus c++ standard to c++17
