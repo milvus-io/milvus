@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <boost/filesystem.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,6 +39,16 @@ class Operation {
     const std::string&
     GetDirectory() const {
         return dir_path_;
+    }
+
+    const std::string&
+    GetFileName(const std::string& file_path) const {
+        return boost::filesystem::path(file_path).stem().string();
+    }
+
+    const std::string&
+    GetFileExt(const std::string& file_path) const {
+        return boost::filesystem::path(file_path).extension().string();
     }
 
     virtual bool

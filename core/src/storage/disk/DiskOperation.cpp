@@ -48,7 +48,7 @@ DiskOperation::ListDirectory(std::vector<std::string>& file_paths) const {
     d_it it(target_path);
     if (boost::filesystem::is_directory(GetDirectory())) {
         for (; it != it_end; ++it) {
-            file_paths.emplace_back(it->path().c_str());
+            file_paths.emplace_back(it->path().string());
         }
     }
 }

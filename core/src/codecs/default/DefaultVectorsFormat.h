@@ -56,10 +56,10 @@ class DefaultVectorsFormat : public VectorsFormat {
 
  private:
     void
-    read_vectors_internal(const std::string&, off_t, size_t, std::vector<uint8_t>&, std::string&);
+    read_vectors_internal(const storage::OperationPtr&, const std::string&, off_t, size_t, std::vector<uint8_t>&, std::string&);
 
     void
-    read_uids_internal(const std::string&, std::vector<segment::doc_id_t>&);
+    read_uids_internal(const storage::OperationPtr&, const std::string&, std::vector<segment::doc_id_t>&);
 
  private:
     std::mutex mutex_;

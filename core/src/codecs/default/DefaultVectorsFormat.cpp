@@ -28,24 +28,18 @@
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-#include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
 
 void
-DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t offset, size_t num,
-                                            std::vector<uint8_t>& raw_vectors, std::string& rv_name) {
+DefaultVectorsFormat::read_vectors_internal(const storage::OperationPtr& operation_ptr, const std::string& file_path,
+                                            off_t offset, size_t num, std::vector<uint8_t>& raw_vectors,
+                                            std::string& rv_name) {
     bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
-
-    std::vector<std::string> path;
-    std::vector<std::string> name;
-    server::StringHelpFunctions::SplitStringByDelimeter(file_path, "/", path);
-    server::StringHelpFunctions::SplitStringByDelimeter(path.back(), ".", name);
-    rv_name = name[0];
 
     try {
         TimeRecorder recorder("read rv " + file_path);
@@ -87,7 +81,7 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
 
-        // rv_name = path.stem().string());
+        rv_name = operation_ptr->GetFileName(file_path);
 
         double span = recorder.RecordSection("done");
         double rate = file_size * 1000000.0 / span / 1024 / 1024;
@@ -100,7 +94,8 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
 }
 
 void
-DefaultVectorsFormat::read_uids_internal(const std::string& file_path, std::vector<segment::doc_id_t>& uids) {
+DefaultVectorsFormat::read_uids_internal(const storage::OperationPtr& operation_ptr, const std::string& file_path,
+                                         std::vector<segment::doc_id_t>& uids) {
     bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
@@ -171,14 +166,14 @@ DefaultVectorsFormat::read(const storage::OperationPtr& operation_ptr, segment::
         if (path.extension().string() == raw_vector_extension_) {
             std::vector<uint8_t> vector_list;
             std::string rv_name;
-            read_vectors_internal(path.string(), 0, INT64_MAX, vector_list, rv_name);
+            read_vectors_internal(operation_ptr, path.string(), 0, INT64_MAX, vector_list, rv_name);
             vectors_read->AddData(vector_list);
             vectors_read->SetName(path.stem().string());
         }
 
         if (path.extension().string() == user_id_extension_) {
             std::vector<segment::doc_id_t> uids;
-            read_uids_internal(path.string(), uids);
+            read_uids_internal(operation_ptr, path.string(), uids);
             vectors_read->AddUids(uids);
         }
     }
@@ -261,7 +256,7 @@ DefaultVectorsFormat::read_uids(const storage::OperationPtr& operation_ptr, std:
     for (; it != it_end; ++it) {
         const auto& path = it->path();
         if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(path.string(), uids);
+            read_uids_internal(operation_ptr, path.string(), uids);
         }
     }
 }
@@ -287,7 +282,7 @@ DefaultVectorsFormat::read_vectors(const storage::OperationPtr& operation_ptr, o
         const auto& path = it->path();
         if (path.extension().string() == raw_vector_extension_) {
             std::string rv_name;
-            read_vectors_internal(path.string(), offset, num_bytes, raw_vectors, rv_name);
+            read_vectors_internal(operation_ptr, path.string(), offset, num_bytes, raw_vectors, rv_name);
         }
     }
 }
