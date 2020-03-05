@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "knowhere/index/vector_index/IndexNSG.h"
+
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
@@ -23,6 +24,7 @@
 #endif
 
 #include <fiu-local.h>
+
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/nsg/NSG.h"
@@ -102,18 +104,18 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     Graph knng;
     const float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
-    // if (config[knowhere::meta::DEVICEID] == knowhere::INVALID_VALUE) {
-    // auto preprocess_index = std::make_shared<IDMAP>();
-    // auto model = preprocess_index->Train(dataset, config);
-    // preprocess_index->set_index_model(model);
-    // preprocess_index->Add(dataset, config);
-    // preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
-    // } else {
-    // TODO(linxj): use ivf instead?
-    auto gpu_idx = cloner::CopyCpuToGpu(idmap, config[knowhere::meta::DEVICEID].get<int64_t>(), config);
-    auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
-    gpu_idmap->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
-    // }
+    if (config[knowhere::meta::DEVICEID] == knowhere::INVALID_VALUE) {
+        auto preprocess_index = std::make_shared<IVF>();
+        auto model = preprocess_index->Train(dataset, config);
+        preprocess_index->set_index_model(model);
+        preprocess_index->AddWithoutIds(dataset, config);
+        preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+    } else {
+        // TODO(linxj): use ivf instead?
+        auto gpu_idx = cloner::CopyCpuToGpu(idmap, config[knowhere::meta::DEVICEID].get<int64_t>(), config);
+        auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
+        gpu_idmap->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
+    }
 #else
     auto preprocess_index = std::make_shared<IVF>();
     auto model = preprocess_index->Train(dataset, config);

@@ -35,7 +35,7 @@ namespace engine {
 #define DEFAULT_MIN_DIM 1
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
-#define DEFAULT_MIN_ROWS 100  // minimum size for build index
+#define DEFAULT_MIN_ROWS 1  // minimum size for build index
 #define DEFAULT_MAX_ROWS 50000000
 
 #define CheckIntByRange(key, min, max)                                                                   \
@@ -86,15 +86,33 @@ ConfAdapter::CheckSearch(milvus::json& oricfg, const IndexType& type) {
     return true;
 }
 
+int64_t
+MatchNlist(const int64_t& size, const int64_t& nlist, const int64_t& per_nlist) {
+    static float TYPICAL_COUNT = 1000000.0;
+    if (size <= TYPICAL_COUNT / per_nlist + 1) {
+        // handle less row count, avoid nlist set to 0
+        return 1;
+    } else if (int(size / TYPICAL_COUNT) * nlist <= 0) {
+        // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
+        return int(size / TYPICAL_COUNT * per_nlist);
+    }
+    return nlist;
+}
+
 bool
 IVFConfAdapter::CheckTrain(milvus::json& oricfg) {
     static int64_t MAX_NLIST = 999999;
     static int64_t MIN_NLIST = 1;
 
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
 
-    int64_t nlist = oricfg[knowhere::IndexParams::nlist];
-    CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+    // int64_t nlist = oricfg[knowhere::IndexParams::nlist];
+    // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+
+    // auto tune params
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(),
+                                                      oricfg[knowhere::IndexParams::nlist].get<int64_t>(), 16384);
 
     // Best Practice
     // static int64_t MIN_POINTS_PER_CENTROID = 40;
@@ -149,10 +167,15 @@ IVFPQConfAdapter::CheckTrain(milvus::json& oricfg) {
     }
 #endif
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
 
-    int64_t nlist = oricfg[knowhere::IndexParams::nlist];
-    CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+    // int64_t nlist = oricfg[knowhere::IndexParams::nlist];
+    // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+
+    // auto tune params
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(),
+                                                      oricfg[knowhere::IndexParams::nlist].get<int64_t>(), 16384);
 
     // Best Practice
     // static int64_t MIN_POINTS_PER_CENTROID = 40;
@@ -199,6 +222,10 @@ NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
     CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
     CheckIntByRange(knowhere::IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
     CheckIntByRange(knowhere::IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
+
+    // auto tune params
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(), 8192, 8192);
+    oricfg[knowhere::IndexParams::nprobe] = int(oricfg[knowhere::IndexParams::nlist].get<int64_t>() * 0.01);
 
     return true;
 }
