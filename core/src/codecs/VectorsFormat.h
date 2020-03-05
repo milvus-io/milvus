@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "segment/Vectors.h"
-#include "storage/disk/DiskDirectory.h"
+#include "storage/Operation.h"
 
 namespace milvus {
 namespace codec {
@@ -29,17 +29,16 @@ namespace codec {
 class VectorsFormat {
  public:
     virtual void
-    read(const storage::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) = 0;
+    read(const storage::OperationPtr&, segment::VectorsPtr&) = 0;
 
     virtual void
-    write(const storage::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) = 0;
+    write(const storage::OperationPtr&, const segment::VectorsPtr&) = 0;
 
     virtual void
-    read_uids(const storage::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) = 0;
+    read_uids(const storage::OperationPtr&, std::vector<segment::doc_id_t>&) = 0;
 
     virtual void
-    read_vectors(const storage::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
-                 std::vector<uint8_t>& raw_vectors) = 0;
+    read_vectors(const storage::OperationPtr&, off_t, size_t, std::vector<uint8_t>&) = 0;
 };
 
 using VectorsFormatPtr = std::shared_ptr<VectorsFormat>;

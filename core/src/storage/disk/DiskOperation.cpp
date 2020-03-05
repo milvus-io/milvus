@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "storage/disk/DiskDirectory.h"
+#include "storage/disk/DiskOperation.h"
 
 #include <boost/filesystem.hpp>
 
@@ -25,15 +25,15 @@
 namespace milvus {
 namespace storage {
 
-DiskDirectory::DiskDirectory(const std::string& dir_path) : Directory(dir_path) {
+DiskOperation::DiskOperation(const std::string& dir_path) : Operation(dir_path) {
 }
 
 void
-DiskDirectory::Create() {
-    if (!boost::filesystem::is_directory(GetDirPath())) {
-        auto ret = boost::filesystem::create_directory(GetDirPath());
+DiskOperation::CreateDirectory() {
+    if (!boost::filesystem::is_directory(GetDirectory())) {
+        auto ret = boost::filesystem::create_directory(GetDirectory());
         if (!ret) {
-            std::string err_msg = "Failed to create directory: " + GetDirPath();
+            std::string err_msg = "Failed to create directory: " + GetDirectory();
             ENGINE_LOG_ERROR << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);
         }
@@ -41,12 +41,12 @@ DiskDirectory::Create() {
 }
 
 void
-DiskDirectory::ListAll(std::vector<std::string>& file_paths) const {
-    boost::filesystem::path target_path(GetDirPath());
+DiskOperation::ListDirectory(std::vector<std::string>& file_paths) const {
+    boost::filesystem::path target_path(GetDirectory());
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
     d_it it(target_path);
-    if (boost::filesystem::is_directory(GetDirPath())) {
+    if (boost::filesystem::is_directory(GetDirectory())) {
         for (; it != it_end; ++it) {
             file_paths.emplace_back(it->path().c_str());
         }
@@ -54,8 +54,22 @@ DiskDirectory::ListAll(std::vector<std::string>& file_paths) const {
 }
 
 bool
-DiskDirectory::DeleteFile(const std::string& file_path) {
+DiskOperation::DeleteFile(const std::string& file_path) {
     return boost::filesystem::remove(file_path);
+}
+
+void
+DiskOperation::CopyFile(const std::string& from_name, const std::string& to_name) {
+    auto from_path = boost::filesystem::path(from_name);
+    auto to_path = boost::filesystem::path(to_name);
+    boost::filesystem::copy_file(from_path, to_path);
+}
+
+void
+DiskOperation::RenameFile(const std::string& old_name, const std::string& new_name) {
+    auto old_path = boost::filesystem::path(old_name);
+    auto new_path = boost::filesystem::path(new_name);
+    boost::filesystem::rename(old_path, new_path);
 }
 
 }  // namespace storage

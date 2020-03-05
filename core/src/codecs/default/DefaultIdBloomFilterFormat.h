@@ -22,7 +22,7 @@
 
 #include "codecs/IdBloomFilterFormat.h"
 #include "segment/IdBloomFilter.h"
-#include "storage/disk/DiskDirectory.h"
+#include "storage/Operation.h"
 
 namespace milvus {
 namespace codec {
@@ -32,13 +32,13 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     DefaultIdBloomFilterFormat() = default;
 
     void
-    read(const storage::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    read(const storage::OperationPtr&, segment::IdBloomFilterPtr&) override;
 
     void
-    write(const storage::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    write(const storage::OperationPtr&, const segment::IdBloomFilterPtr&) override;
 
     void
-    create(const storage::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    create(const storage::OperationPtr&, segment::IdBloomFilterPtr&) override;
 
     // No copy and move
     DefaultIdBloomFilterFormat(const DefaultIdBloomFilterFormat&) = delete;

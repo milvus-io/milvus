@@ -34,17 +34,16 @@ class DefaultVectorsFormat : public VectorsFormat {
     DefaultVectorsFormat() = default;
 
     void
-    read(const storage::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) override;
+    read(const storage::OperationPtr&, segment::VectorsPtr&) override;
 
     void
-    write(const storage::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) override;
+    write(const storage::OperationPtr&, const segment::VectorsPtr&) override;
 
     void
-    read_uids(const storage::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) override;
+    read_uids(const storage::OperationPtr&, std::vector<segment::doc_id_t>&) override;
 
     void
-    read_vectors(const storage::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
-                 std::vector<uint8_t>& raw_vectors) override;
+    read_vectors(const storage::OperationPtr&, off_t, size_t, std::vector<uint8_t>&) override;
 
     // No copy and move
     DefaultVectorsFormat(const DefaultVectorsFormat&) = delete;
@@ -57,11 +56,10 @@ class DefaultVectorsFormat : public VectorsFormat {
 
  private:
     void
-    read_vectors_internal(const std::string& file_path, off_t offset, size_t num_bytes,
-                          std::vector<uint8_t>& raw_vectors, std::string& rv_name);
+    read_vectors_internal(const std::string&, off_t, size_t, std::vector<uint8_t>&, std::string&);
 
     void
-    read_uids_internal(const std::string& file_path, std::vector<segment::doc_id_t>& uids);
+    read_uids_internal(const std::string&, std::vector<segment::doc_id_t>&);
 
  private:
     std::mutex mutex_;

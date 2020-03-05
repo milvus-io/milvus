@@ -24,24 +24,30 @@
 namespace milvus {
 namespace storage {
 
-class Directory {
+class Operation {
  public:
-    explicit Directory(const std::string& dir_path) : dir_path_(dir_path) {
+    explicit Operation(const std::string& dir_path) : dir_path_(dir_path) {
     }
 
     virtual void
-    Create() = 0;
+    CreateDirectory() = 0;
 
     virtual void
-    ListAll(std::vector<std::string>& file_paths) const = 0;
+    ListDirectory(std::vector<std::string>& file_paths) const = 0;
+
+    const std::string&
+    GetDirectory() const {
+        return dir_path_;
+    }
 
     virtual bool
     DeleteFile(const std::string& file_path) = 0;
 
-    const std::string&
-    GetDirPath() const {
-        return dir_path_;
-    }
+    virtual void
+    CopyFile(const std::string& from_name, const std::string& to_name) = 0;
+
+    virtual void
+    RenameFile(const std::string& old_name, const std::string& new_name) = 0;
 
     // TODO(zhiru):
     //  open(), sync(), close()
@@ -53,7 +59,7 @@ class Directory {
     const std::string dir_path_;
 };
 
-using DirectoryPtr = std::shared_ptr<Directory>;
+using OperationPtr = std::shared_ptr<Operation>;
 
 }  // namespace storage
 }  // namespace milvus

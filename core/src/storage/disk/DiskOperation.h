@@ -21,26 +21,32 @@
 #include <string>
 #include <vector>
 
-#include "storage/Directory.h"
+#include "storage/Operation.h"
 
 namespace milvus {
 namespace storage {
 
-class DiskDirectory : public Directory {
+class DiskOperation : public Operation {
  public:
-    explicit DiskDirectory(const std::string& dir_path);
+    explicit DiskOperation(const std::string& dir_path);
 
     void
-    Create() override;
+    CreateDirectory() override;
 
     void
-    ListAll(std::vector<std::string>& file_paths) const override;
+    ListDirectory(std::vector<std::string>& file_paths) const override;
 
     bool
     DeleteFile(const std::string& file_path) override;
+
+    void
+    CopyFile(const std::string& from_name, const std::string& to_name) override;
+
+    void
+    RenameFile(const std::string& old_name, const std::string& new_name) override;
 };
 
-using DirectoryPtr = std::shared_ptr<Directory>;
+using DirectoryPtr = std::shared_ptr<Operation>;
 
 }  // namespace storage
 }  // namespace milvus

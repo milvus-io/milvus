@@ -23,7 +23,7 @@
 #include "SegmentReader.h"
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
-#include "storage/disk/DiskDirectory.h"
+#include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -31,7 +31,7 @@ namespace milvus {
 namespace segment {
 
 SegmentWriter::SegmentWriter(const std::string& directory) {
-    directory_ptr_ = std::make_shared<storage::DiskDirectory>(directory);
+    operation_ptr_ = std::make_shared<storage::DiskOperation>(directory);
     segment_ptr_ = std::make_shared<Segment>();
 }
 
@@ -85,8 +85,8 @@ Status
 SegmentWriter::WriteVectors() {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
-        default_codec.GetVectorsFormat()->write(directory_ptr_, segment_ptr_->vectors_ptr_);
+        operation_ptr_->CreateDirectory();
+        default_codec.GetVectorsFormat()->write(operation_ptr_, segment_ptr_->vectors_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
@@ -99,11 +99,11 @@ Status
 SegmentWriter::WriteBloomFilter() {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        operation_ptr_->CreateDirectory();
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        default_codec.GetIdBloomFilterFormat()->create(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
+        default_codec.GetIdBloomFilterFormat()->create(operation_ptr_, segment_ptr_->id_bloom_filter_ptr_);
 
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff = end - start;
@@ -122,7 +122,7 @@ SegmentWriter::WriteBloomFilter() {
 
         start = std::chrono::high_resolution_clock::now();
 
-        default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, segment_ptr_->id_bloom_filter_ptr_);
+        default_codec.GetIdBloomFilterFormat()->write(operation_ptr_, segment_ptr_->id_bloom_filter_ptr_);
 
         end = std::chrono::high_resolution_clock::now();
         diff = end - start;
@@ -139,9 +139,9 @@ Status
 SegmentWriter::WriteDeletedDocs() {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        operation_ptr_->CreateDirectory();
         DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
-        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs_ptr);
+        default_codec.GetDeletedDocsFormat()->write(operation_ptr_, deleted_docs_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
@@ -154,8 +154,8 @@ Status
 SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
-        default_codec.GetDeletedDocsFormat()->write(directory_ptr_, deleted_docs);
+        operation_ptr_->CreateDirectory();
+        default_codec.GetDeletedDocsFormat()->write(operation_ptr_, deleted_docs);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
@@ -168,8 +168,8 @@ Status
 SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
-        default_codec.GetIdBloomFilterFormat()->write(directory_ptr_, id_bloom_filter_ptr);
+        operation_ptr_->CreateDirectory();
+        default_codec.GetIdBloomFilterFormat()->write(operation_ptr_, id_bloom_filter_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         ENGINE_LOG_ERROR << err_msg;
@@ -192,11 +192,11 @@ SegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
 
 Status
 SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
-    if (dir_to_merge == directory_ptr_->GetDirPath()) {
+    if (dir_to_merge == operation_ptr_->GetDirectory()) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
 
-    ENGINE_LOG_DEBUG << "Merging from " << dir_to_merge << " to " << directory_ptr_->GetDirPath();
+    ENGINE_LOG_DEBUG << "Merging from " << dir_to_merge << " to " << operation_ptr_->GetDirectory();
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -235,7 +235,7 @@ SegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
     ENGINE_LOG_DEBUG << "Adding " << segment_to_merge->vectors_ptr_->GetCount() << " vectors and uids took "
                      << diff.count() << " s";
 
-    ENGINE_LOG_DEBUG << "Merging completed from " << dir_to_merge << " to " << directory_ptr_->GetDirPath();
+    ENGINE_LOG_DEBUG << "Merging completed from " << dir_to_merge << " to " << operation_ptr_->GetDirectory();
 
     return Status::OK();
 }

@@ -41,14 +41,14 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultDeletedDocsFormat::read(const storage::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
+DefaultDeletedDocsFormat::read(const storage::OperationPtr& operation_ptr, segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
     bool s3_enable = false;
     server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = operation_ptr->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     try {
@@ -100,7 +100,7 @@ DefaultDeletedDocsFormat::read(const storage::DirectoryPtr& directory_ptr, segme
 }
 
 void
-DefaultDeletedDocsFormat::write(const storage::DirectoryPtr& directory_ptr,
+DefaultDeletedDocsFormat::write(const storage::OperationPtr& operation_ptr,
                                 const segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
@@ -108,7 +108,7 @@ DefaultDeletedDocsFormat::write(const storage::DirectoryPtr& directory_ptr,
     server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = operation_ptr->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     // try {

@@ -20,7 +20,7 @@
 #include <memory>
 
 #include "segment/IdBloomFilter.h"
-#include "storage/disk/DiskDirectory.h"
+#include "storage/Operation.h"
 
 namespace milvus {
 namespace codec {
@@ -28,13 +28,13 @@ namespace codec {
 class IdBloomFilterFormat {
  public:
     virtual void
-    read(const storage::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    read(const storage::OperationPtr&, segment::IdBloomFilterPtr&) = 0;
 
     virtual void
-    write(const storage::DirectoryPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    write(const storage::OperationPtr&, const segment::IdBloomFilterPtr&) = 0;
 
     virtual void
-    create(const storage::DirectoryPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    create(const storage::OperationPtr&, segment::IdBloomFilterPtr&) = 0;
 };
 
 using IdBloomFilterFormatPtr = std::shared_ptr<IdBloomFilterFormat>;

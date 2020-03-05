@@ -20,7 +20,7 @@
 #include <memory>
 
 #include "segment/DeletedDocs.h"
-#include "storage/disk/DiskDirectory.h"
+#include "storage/Operation.h"
 
 namespace milvus {
 namespace codec {
@@ -28,10 +28,10 @@ namespace codec {
 class DeletedDocsFormat {
  public:
     virtual void
-    read(const storage::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) = 0;
+    read(const storage::OperationPtr&, segment::DeletedDocsPtr&) = 0;
 
     virtual void
-    write(const storage::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) = 0;
+    write(const storage::OperationPtr&, const segment::DeletedDocsPtr&) = 0;
 };
 
 using DeletedDocsFormatPtr = std::shared_ptr<DeletedDocsFormat>;
