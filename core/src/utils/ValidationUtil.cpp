@@ -53,6 +53,8 @@ CheckIndexParameter(const milvus::json& index_params, const std::string& param_n
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+
+    return Status::OK();
 }
 }  // namespace
 
