@@ -37,14 +37,7 @@ ParserLsn(uint64_t lsn, uint32_t& file_no, uint32_t& offset) {
 }
 
 MXLogBuffer::MXLogBuffer(const std::string& mxlog_path, const uint32_t buffer_size)
-    : mxlog_buffer_size_(buffer_size), mxlog_writer_(mxlog_path) {
-    if (mxlog_buffer_size_ < (uint32_t)WAL_BUFFER_MIN_SIZE) {
-        WAL_LOG_INFO << "config wal buffer size is too small " << mxlog_buffer_size_;
-        mxlog_buffer_size_ = (uint32_t)WAL_BUFFER_MIN_SIZE;
-    } else if (mxlog_buffer_size_ > (uint32_t)WAL_BUFFER_MAX_SIZE) {
-        WAL_LOG_INFO << "config wal buffer size is too larger " << mxlog_buffer_size_;
-        mxlog_buffer_size_ = (uint32_t)WAL_BUFFER_MAX_SIZE;
-    }
+    : mxlog_buffer_size_(buffer_size * UNIT_MB), mxlog_writer_(mxlog_path) {
 }
 
 MXLogBuffer::~MXLogBuffer() {

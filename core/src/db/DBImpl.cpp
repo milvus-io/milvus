@@ -146,7 +146,7 @@ DBImpl::Stop() {
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         if (options_.wal_enable_) {
             // wait flush merge/buildindex finish
-            wal_task_swn_.Notify();
+            bg_task_swn_.Notify();
             bg_wal_thread_.join();
 
         } else {
@@ -156,6 +156,7 @@ DBImpl::Stop() {
             ExecWalRecord(record);
 
             // wait merge/buildindex finish
+            bg_task_swn_.Notify();
             bg_timer_thread_.join();
         }
 
@@ -483,8 +484,11 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
     // insert vectors into target table
     // (zhiru): generate ids
     if (vectors.id_array_.empty()) {
-        auto id_generator = std::make_shared<SimpleIDGenerator>();
-        id_generator->GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        Status status = id_generator.GetNextIDNumbers(vectors.vector_count_, vectors.id_array_);
+        if (!status.ok()) {
+            return status;
+        }
     }
 
     Status status;
@@ -500,7 +504,7 @@ DBImpl::InsertVectors(const std::string& table_id, const std::string& partition_
         } else if (!vectors.binary_data_.empty()) {
             wal_mgr_->Insert(table_id, partition_tag, vectors.id_array_, vectors.binary_data_);
         }
-        wal_task_swn_.Notify();
+        bg_task_swn_.Notify();
 
     } else {
         wal::MXLogRecord record;
@@ -543,7 +547,7 @@ DBImpl::DeleteVectors(const std::string& table_id, IDNumbers vector_ids) {
     Status status;
     if (options_.wal_enable_) {
         wal_mgr_->DeleteById(table_id, vector_ids);
-        wal_task_swn_.Notify();
+        bg_task_swn_.Notify();
 
     } else {
         wal::MXLogRecord record;
@@ -583,7 +587,7 @@ DBImpl::Flush(const std::string& table_id) {
         auto lsn = wal_mgr_->Flush(table_id);
         ENGINE_LOG_DEBUG << "wal_mgr_->Flush";
         if (lsn != 0) {
-            wal_task_swn_.Notify();
+            bg_task_swn_.Notify();
             flush_task_swn_.Wait();
             ENGINE_LOG_DEBUG << "flush_task_swn_.Wait()";
         }
@@ -614,7 +618,7 @@ DBImpl::Flush() {
         ENGINE_LOG_DEBUG << "WAL flush";
         auto lsn = wal_mgr_->Flush();
         if (lsn != 0) {
-            wal_task_swn_.Notify();
+            bg_task_swn_.Notify();
             flush_task_swn_.Wait();
         }
     } else {
@@ -657,12 +661,23 @@ DBImpl::Compact(const std::string& table_id) {
 
     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
+    // Save table index
+    TableIndex table_index;
+    status = DescribeIndex(table_id, table_index);
+    if (!status.ok()) {
+        return status;
+    }
+
     // Drop all index
     status = DropIndex(table_id);
     if (!status.ok()) {
-        std::string err_msg = "Failed to drop index in compact: " + status.message();
-        ENGINE_LOG_ERROR << err_msg;
-        return Status(DB_ERROR, err_msg);
+        return status;
+    }
+
+    // Then update table index to the previous index
+    status = UpdateTableIndexRecursively(table_id, table_index);
+    if (!status.ok()) {
+        return status;
     }
 
     // Get files to compact from meta.
@@ -678,23 +693,51 @@ DBImpl::Compact(const std::string& table_id) {
     ENGINE_LOG_DEBUG << "Found " << files_to_compact.size() << " segment to compact";
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
-    for (auto& file : files_to_compact) {
-        status = CompactFile(table_id, file);
 
-        if (!status.ok()) {
-            OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
-            return status;
+    meta::TableFilesSchema files_to_update;
+    Status compact_status;
+    for (auto& file : files_to_compact) {
+        compact_status = CompactFile(table_id, file, files_to_update);
+
+        if (!compact_status.ok()) {
+            ENGINE_LOG_ERROR << "Compact failed for file " << file.file_id_ << ": " << compact_status.message();
+            break;
         }
     }
+
+    if (compact_status.ok()) {
+        ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
+    }
+
+    ENGINE_LOG_ERROR << "Updating meta after compaction...";
+
+    // Drop index again, in case some files were in the index building process during compacting
+    status = DropIndex(table_id);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // Update index
+    status = UpdateTableIndexRecursively(table_id, table_index);
+    if (!status.ok()) {
+        return status;
+    }
+
+    status = meta_ptr_->UpdateTableFiles(files_to_update);
+    if (!status.ok()) {
+        return status;
+    }
+
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
-    ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
+    ENGINE_LOG_DEBUG << "Finished updating meta after compaction";
 
     return status;
 }
 
 Status
-DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file) {
+DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& file,
+                    meta::TableFilesSchema& files_to_update) {
     ENGINE_LOG_DEBUG << "Compacting segment " << file.segment_id_ << " for table: " << table_id;
 
     // Create new table file
@@ -739,10 +782,6 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
         return status;
     }
 
-    // Drop index again, in case some files were in the index building process during merging
-    // TODO: might be too frequent?
-    DropIndex(table_id);
-
     // Update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
@@ -762,7 +801,10 @@ DBImpl::CompactFile(const std::string& table_id, const milvus::engine::meta::Tab
     }
 
     updated.emplace_back(compacted_file);
-    status = meta_ptr_->UpdateTableFiles(updated);
+
+    for (auto& f : updated) {
+        files_to_update.emplace_back(f);
+    }
 
     ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
                      << std::to_string(file_to_compact.file_size_) << " bytes to "
@@ -1204,7 +1246,11 @@ DBImpl::BackgroundTimerTask() {
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(options_.auto_flush_interval_));
+        if (options_.auto_flush_interval_ > 0) {
+            bg_task_swn_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
+        } else {
+            bg_task_swn_.Wait();
+        }
 
         StartMetricTask();
         StartMergeTask();
@@ -1945,10 +1991,13 @@ void
 DBImpl::BackgroundWalTask() {
     server::SystemInfo::GetInstance().Init();
 
+    std::chrono::system_clock::time_point next_auto_flush_time;
     auto get_next_auto_flush_time = [&]() {
-        return std::chrono::system_clock::now() + std::chrono::milliseconds(options_.auto_flush_interval_);
+        return std::chrono::system_clock::now() + std::chrono::seconds(options_.auto_flush_interval_);
     };
-    auto next_auto_flush_time = get_next_auto_flush_time();
+    if (options_.auto_flush_interval_ > 0) {
+        next_auto_flush_time = get_next_auto_flush_time();
+    }
 
     wal::MXLogRecord record;
 
@@ -1963,9 +2012,11 @@ DBImpl::BackgroundWalTask() {
     };
 
     while (true) {
-        if (std::chrono::system_clock::now() >= next_auto_flush_time) {
-            auto_flush();
-            next_auto_flush_time = get_next_auto_flush_time();
+        if (options_.auto_flush_interval_ > 0) {
+            if (std::chrono::system_clock::now() >= next_auto_flush_time) {
+                auto_flush();
+                next_auto_flush_time = get_next_auto_flush_time();
+            }
         }
 
         auto error_code = wal_mgr_->GetNextRecord(record);
@@ -1981,7 +2032,7 @@ DBImpl::BackgroundWalTask() {
                 flush_task_swn_.Notify();
 
                 // if user flush all manually, update auto flush also
-                if (record.table_id.empty()) {
+                if (record.table_id.empty() && options_.auto_flush_interval_ > 0) {
                     next_auto_flush_time = get_next_auto_flush_time();
                 }
             }
@@ -1995,7 +2046,11 @@ DBImpl::BackgroundWalTask() {
                 break;
             }
 
-            wal_task_swn_.Wait_Until(next_auto_flush_time);
+            if (options_.auto_flush_interval_ > 0) {
+                bg_task_swn_.Wait_Until(next_auto_flush_time);
+            } else {
+                bg_task_swn_.Wait();
+            }
         }
     }
 }

@@ -49,8 +49,6 @@ class VectorSource {
     IDNumbers vector_ids_;
 
     size_t current_num_vectors_added;
-
-    std::shared_ptr<IDGenerator> id_generator_;
 };  // VectorSource
 
 using VectorSourcePtr = std::shared_ptr<VectorSource>;

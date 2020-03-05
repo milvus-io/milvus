@@ -28,6 +28,13 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1298 Unittest failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
 -   \#1429 Server crashed when searching vectors using GPU
+-   \#1476 Fix vectors results bug when getting vectors from segments
+-   \#1484 Index type changed to IDMAP after compacted 
+-   \#1499 Fix duplicated ID number issue
+-   \#1491 Server crashed during adding vectors  
+-   \#1504 Avoid possible race condition between delete and search 
+-   \#1510 Add set interfaces for WAL configurations
+-   \#1511 Fix big integer cannot pass to server correctly
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -40,6 +47,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#813 Add push mode for prometheus monitor
 -   \#815 Support MinIO storage
 -   \#823 Support binary vector tanimoto/jaccard/hamming metric
+-   \#830 Support WAL(write-ahead logging)
 -   \#853 Support HNSW
 -   \#861 Support DeleteById / SearchByID / GetVectorById / Flush
 -   \#910 Change Milvus c++ standard to c++17
@@ -48,6 +56,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1250 Support CPU profiling
 -   \#1302 Get all record IDs in a segment by given a segment id
 -   \#1461 Add crud APIs and segments APIs into http module
+-   \#1463 Update config version to 0.2
 
 ## Improvement
 -   \#738 Use Openblas / lapack from apt install
@@ -68,7 +77,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1234 Do S3 server validation check when Milvus startup
 -   \#1263 Allow system conf modifiable and some take effect directly
 -   \#1320 Remove debug logging from faiss
+-   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
+-   \#1480 Add return code for AVX512 selection
+
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat

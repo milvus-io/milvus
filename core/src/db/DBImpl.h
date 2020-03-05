@@ -182,7 +182,8 @@ class DBImpl : public DB {
     BackgroundBuildIndex();
 
     Status
-    CompactFile(const std::string& table_id, const milvus::engine::meta::TableFileSchema& file);
+    CompactFile(const std::string& table_id, const meta::TableFileSchema& file,
+                meta::TableFilesSchema& files_to_update);
 
     /*
     Status
@@ -261,6 +262,15 @@ class DBImpl : public DB {
         }
 
         void
+        Wait_For(const std::chrono::system_clock::duration& tm_dur) {
+            std::unique_lock<std::mutex> lck(mutex_);
+            if (!notified_) {
+                cv_.wait_for(lck, tm_dur);
+            }
+            notified_ = false;
+        }
+
+        void
         Notify() {
             std::unique_lock<std::mutex> lck(mutex_);
             notified_ = true;
@@ -269,7 +279,7 @@ class DBImpl : public DB {
         }
     };
 
-    SimpleWaitNotify wal_task_swn_;
+    SimpleWaitNotify bg_task_swn_;
     SimpleWaitNotify flush_task_swn_;
 
     ThreadPool merge_thread_pool_;

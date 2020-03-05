@@ -38,7 +38,8 @@ namespace server {
 
 constexpr int64_t GB = 1UL << 30;
 
-static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.7.0", "0.1"}});
+static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"},
+                                                                                     {"0.7.0", "0.2"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
@@ -283,6 +284,12 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
     CONFIG_CHECK(SetEngineConfigUseAVX512(CONFIG_ENGINE_USE_AVX512_DEFAULT));
+
+    /* wal config */
+    CONFIG_CHECK(SetWalConfigEnable(CONFIG_WAL_ENABLE_DEFAULT));
+    CONFIG_CHECK(SetWalConfigRecoveryErrorIgnore(CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT));
+    CONFIG_CHECK(SetWalConfigBufferSize(CONFIG_WAL_BUFFER_SIZE_DEFAULT));
+    CONFIG_CHECK(SetWalConfigWalPath(CONFIG_WAL_WAL_PATH_DEFAULT));
 #ifdef MILVUS_GPU_VERSION
     CONFIG_CHECK(SetEngineConfigGpuSearchThreshold(CONFIG_ENGINE_GPU_SEARCH_THRESHOLD_DEFAULT));
 #endif
@@ -401,6 +408,16 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
 #endif
     } else if (parent_key == CONFIG_TRACING) {
         return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config currently");
+    } else if (parent_key == CONFIG_WAL) {
+        if (child_key == CONFIG_WAL_ENABLE) {
+            status = SetWalConfigEnable(value);
+        } else if (child_key == CONFIG_WAL_RECOVERY_ERROR_IGNORE) {
+            status = SetWalConfigRecoveryErrorIgnore(value);
+        } else if (child_key == CONFIG_WAL_BUFFER_SIZE) {
+            status = SetWalConfigBufferSize(value);
+        } else if (child_key == CONFIG_WAL_WAL_PATH) {
+            status = SetWalConfigWalPath(value);
+        }
     }
 
     if (status.ok()) {
@@ -609,12 +626,15 @@ Config::CancelCallBack(const std::string& node, const std::string& sub_node, con
 ////////////////////////////////////////////////////////////////////////////////
 Status
 Config::CheckConfigVersion(const std::string& value) {
-    bool exist_error = milvus_config_version_map.at(MILVUS_VERSION) != value;
-    fiu_do_on("check_config_version_fail", exist_error = true);
-    if (exist_error) {
-        std::string msg = "Invalid config version: " + value +
-                          ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+    if (milvus_config_version_map.find(MILVUS_VERSION) != milvus_config_version_map.end()) {
+        bool exist_error = milvus_config_version_map.at(MILVUS_VERSION) != value;
+        fiu_do_on("check_config_version_fail", exist_error = true);
+        if (exist_error) {
+            std::string msg = "Invalid config version: " + value +
+                              ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
+            SERVER_LOG_ERROR << msg;
+            // return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
     return Status::OK();
 }
@@ -748,7 +768,7 @@ Status
 Config::CheckDBConfigAutoFlushInterval(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid db configuration auto_flush_interval: " + value +
-                          ". Possible reason: db.auto_flush_interval is not a positive integer.";
+                          ". Possible reason: db.auto_flush_interval is not a natural number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
@@ -1197,7 +1217,10 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 /* wal config */
 Status
 Config::CheckWalConfigEnable(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_config_wal_enable_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid wal config: " + value + ". Possible reason: wal_config.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
@@ -1206,7 +1229,10 @@ Config::CheckWalConfigEnable(const std::string& value) {
 
 Status
 Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_config_wal_recovery_error_ignore_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg =
             "Invalid wal config: " + value + ". Possible reason: wal_config.recovery_error_ignore is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1216,12 +1242,25 @@ Config::CheckWalConfigRecoveryErrorIgnore(const std::string& value) {
 
 Status
 Config::CheckWalConfigBufferSize(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_wal_buffer_size_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid wal buffer size: " + value +
                           ". Possible reason: wal_config.buffer_size is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
+}
+
+Status
+Config::CheckWalConfigWalPath(const std::string& value) {
+    fiu_return_on("check_wal_path_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "wal_config.wal_path is empty!");
+    }
+
+    return ValidationUtil::ValidateStoragePath(value);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1673,12 +1712,18 @@ Config::GetWalConfigBufferSize(int64_t& buffer_size) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, CONFIG_WAL_BUFFER_SIZE_DEFAULT);
     CONFIG_CHECK(CheckWalConfigBufferSize(str));
     buffer_size = std::stoll(str);
+    if (buffer_size > CONFIG_WAL_BUFFER_SIZE_MAX) {
+        buffer_size = CONFIG_WAL_BUFFER_SIZE_MAX;
+    } else if (buffer_size < CONFIG_WAL_BUFFER_SIZE_MIN) {
+        buffer_size = CONFIG_WAL_BUFFER_SIZE_MIN;
+    }
     return Status::OK();
 }
 
 Status
 Config::GetWalConfigWalPath(std::string& wal_path) {
     wal_path = GetConfigStr(CONFIG_WAL, CONFIG_WAL_WAL_PATH, CONFIG_WAL_WAL_PATH_DEFAULT);
+    CONFIG_CHECK(CheckWalConfigWalPath(wal_path));
     return Status::OK();
 }
 
@@ -1854,6 +1899,31 @@ Status
 Config::SetEngineConfigUseAVX512(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigUseAVX512(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, value);
+}
+
+/* wal config */
+Status
+Config::SetWalConfigEnable(const std::string& value) {
+    CONFIG_CHECK(CheckWalConfigEnable(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_ENABLE, value);
+}
+
+Status
+Config::SetWalConfigRecoveryErrorIgnore(const std::string& value) {
+    CONFIG_CHECK(CheckWalConfigRecoveryErrorIgnore(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT, value);
+}
+
+Status
+Config::SetWalConfigBufferSize(const std::string& value) {
+    CONFIG_CHECK(CheckWalConfigBufferSize(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_BUFFER_SIZE, value);
+}
+
+Status
+Config::SetWalConfigWalPath(const std::string& value) {
+    CONFIG_CHECK(CheckWalConfigWalPath(value));
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_WAL_PATH, value);
 }
 
 #ifdef MILVUS_GPU_VERSION
