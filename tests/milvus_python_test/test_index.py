@@ -22,7 +22,7 @@ BUILD_TIMEOUT = 300
 nprobe = 1
 tag = "1970-01-01"
 NLIST = 4046
-INVALID_NLIST = 16384
+INVALID_NLIST = 10000000
 
 
 class TestIndexBase:
