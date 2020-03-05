@@ -395,6 +395,154 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexMetricType(2).code(), milvus::SERVER_SUCCESS);
 }
 
+TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
+    milvus::engine::meta::TableSchema table_schema;
+    table_schema.dimension_ = 64;
+    milvus::json json_params = {};
+
+    auto status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"nlist", "\t"}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8H);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"nlist", -1}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_BIN_IDMAP);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"nlist", 32}};
+
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT);
+    ASSERT_TRUE(status.ok());
+
+    json_params = {{"nlist", -1}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_PQ);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"nlist", 32}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_PQ);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"nlist", 32}, {"m", 4}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_PQ);
+    ASSERT_TRUE(status.ok());
+
+    json_params = {{"search_length", -1}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}, {"out_degree", -1}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}, {"out_degree", 50}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}, {"out_degree", 50}, {"candidate_pool_size", -1}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}, {"out_degree", 50}, {"candidate_pool_size", 100}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}, {"out_degree", 50}, {"candidate_pool_size", 100}, {"knng", -1}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 50}, {"out_degree", 50}, {"candidate_pool_size", 100}, {"knng", 100}};
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
+                                                            (int32_t)milvus::engine::EngineType::NSG_MIX);
+    ASSERT_TRUE(status.ok());
+}
+
+TEST(ValidationUtilTest, VALIDATE_SEARCH_PARAMS_TEST) {
+    milvus::engine::meta::TableSchema table_schema;
+    table_schema.dimension_ = 64;
+    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
+
+    milvus::json json_params = {};
+    auto status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"nprobe", "\t"}};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_FALSE(status.ok());
+
+    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_BIN_IDMAP;
+    json_params = {{"nprobe", 32}};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_TRUE(status.ok());
+
+    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::NSG_MIX;
+    json_params = {};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"search_length", 100}};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_TRUE(status.ok());
+
+    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::HNSW;
+    json_params = {};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"ef", 100}};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    ASSERT_TRUE(status.ok());
+}
+
 TEST(ValidationUtilTest, VALIDATE_TOPK_TEST) {
     milvus::engine::meta::TableSchema schema;
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateSearchTopk(10, schema).code(), milvus::SERVER_SUCCESS);

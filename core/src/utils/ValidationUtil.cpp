@@ -39,23 +39,52 @@ constexpr int64_t TABLE_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
 
 Status
-CheckIndexParameter(const milvus::json& index_params, const std::string& param_name, int64_t min, int64_t max,
+CheckIndexParameter(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
                     bool min_close = true, bool max_closed = true) {
     std::string msg = "Index parameters must contain ";
-    if (index_params.find(param_name) == index_params.end()) {
+    if (json_params.find(param_name) == json_params.end()) {
         return Status(SERVER_INVALID_ARGUMENT, msg + param_name);
     }
-    int64_t value = index_params[param_name];
-    if (value < min || value > 300) {
-        std::string msg = "Invalid " + param_name + ": " + std::to_string(value) + ". The knng valid range is " +
-                          (min_close ? "[" : "(") + std::to_string(min) + ", " + std::to_string(max) +
-                          (max_closed ? "]" : ")");
-        SERVER_LOG_ERROR << msg;
-        return Status(SERVER_INVALID_ARGUMENT, msg);
+
+    try {
+        int64_t value = json_params[param_name];
+        if (value < min || value > 300) {
+            std::string msg = "Invalid " + param_name + ": " + std::to_string(value) + ". The knng valid range is " +
+                              (min_close ? "[" : "(") + std::to_string(min) + ", " + std::to_string(max) +
+                              (max_closed ? "]" : ")");
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    } catch (std::exception& e) {
+        std::string msg = "Invalid " + param_name + ": ";
+        return Status(SERVER_INVALID_ARGUMENT, msg + e.what());
     }
 
     return Status::OK();
 }
+
+Status
+CheckSearchParameter(const milvus::json& json_params, const std::string& param_name) {
+    std::string msg = "Search parameters must contain ";
+    if (json_params.find(param_name) == json_params.end()) {
+        return Status(SERVER_INVALID_ARGUMENT, msg + param_name);
+    }
+
+    try {
+        int64_t value = json_params[param_name];
+        if (value < 0) {
+            std::string msg = "Invalid " + param_name + ": " + std::to_string(value);
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    } catch (std::exception& e) {
+        std::string msg = "Invalid " + param_name + ": ";
+        return Status(SERVER_INVALID_ARGUMENT, msg + e.what());
+    }
+
+    return Status::OK();
+}
+
 }  // namespace
 
 Status
@@ -194,7 +223,6 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
 
 Status
 ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema) {
-    std::string msg = "Search parameters must contain ";
     switch (table_schema.engine_type_) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_IVFFLAT:
@@ -203,20 +231,23 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const en
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_PQ: {
-            if (search_params.find(knowhere::IndexParams::nprobe) == search_params.end()) {
-                return Status(SERVER_INVALID_ARGUMENT, msg + knowhere::IndexParams::nprobe);
+            auto status = CheckSearchParameter(search_params, knowhere::IndexParams::nprobe);
+            if (!status.ok()) {
+                return status;
             }
             break;
         }
         case (int32_t)engine::EngineType::NSG_MIX: {
-            if (search_params.find(knowhere::IndexParams::search_length) == search_params.end()) {
-                return Status(SERVER_INVALID_ARGUMENT, msg + knowhere::IndexParams::search_length);
+            auto status = CheckSearchParameter(search_params, knowhere::IndexParams::search_length);
+            if (!status.ok()) {
+                return status;
             }
             break;
         }
         case (int32_t)engine::EngineType::HNSW: {
-            if (search_params.find(knowhere::IndexParams::ef) == search_params.end()) {
-                return Status(SERVER_INVALID_ARGUMENT, msg + knowhere::IndexParams::ef);
+            auto status = CheckSearchParameter(search_params, knowhere::IndexParams::ef);
+            if (!status.ok()) {
+                return status;
             }
             break;
         }
