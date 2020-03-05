@@ -22,8 +22,8 @@
 #include <boost/filesystem.hpp>
 
 #include "server/Config.h"
-#include "storage/file/FileIOReader.h"
-#include "storage/file/FileIOWriter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
@@ -53,7 +53,7 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
         if (s3_enable) {
             rv_reader_ptr = std::make_shared<storage::S3IOReader>(file_path);
         } else {
-            rv_reader_ptr = std::make_shared<storage::FileIOReader>(file_path);
+            rv_reader_ptr = std::make_shared<storage::DiskIOReader>(file_path);
         }
 
         size_t file_size = rv_reader_ptr->length();
@@ -87,7 +87,7 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
 
-        //rv_name = path.stem().string());
+        // rv_name = path.stem().string());
 
         double span = recorder.RecordSection("done");
         double rate = file_size * 1000000.0 / span / 1024 / 1024;
@@ -98,7 +98,6 @@ DefaultVectorsFormat::read_vectors_internal(const std::string& file_path, off_t 
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 }
-
 
 void
 DefaultVectorsFormat::read_uids_internal(const std::string& file_path, std::vector<segment::doc_id_t>& uids) {
@@ -112,7 +111,7 @@ DefaultVectorsFormat::read_uids_internal(const std::string& file_path, std::vect
         if (s3_enable) {
             uid_reader_ptr = std::make_shared<storage::S3IOReader>(file_path);
         } else {
-            uid_reader_ptr = std::make_shared<storage::FileIOReader>(file_path);
+            uid_reader_ptr = std::make_shared<storage::DiskIOReader>(file_path);
         }
 
         size_t file_size = uid_reader_ptr->length();
@@ -204,7 +203,7 @@ DefaultVectorsFormat::write(const storage::DirectoryPtr& directory_ptr, const se
         if (s3_enable) {
             rv_writer_ptr = std::make_shared<storage::S3IOWriter>(rv_file_path);
         } else {
-            rv_writer_ptr = std::make_shared<storage::FileIOWriter>(rv_file_path);
+            rv_writer_ptr = std::make_shared<storage::DiskIOWriter>(rv_file_path);
         }
 
         size_t num_bytes = vectors->GetData().size() * sizeof(uint8_t);
@@ -226,7 +225,7 @@ DefaultVectorsFormat::write(const storage::DirectoryPtr& directory_ptr, const se
         if (s3_enable) {
             uid_writer_ptr = std::make_shared<storage::S3IOWriter>(uid_file_path);
         } else {
-            uid_writer_ptr = std::make_shared<storage::FileIOWriter>(uid_file_path);
+            uid_writer_ptr = std::make_shared<storage::DiskIOWriter>(uid_file_path);
         }
 
         size_t num_bytes = vectors->GetUids().size() * sizeof(segment::doc_id_t);

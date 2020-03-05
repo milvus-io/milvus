@@ -63,7 +63,7 @@ class DefaultVectorsFormat : public VectorsFormat {
     void
     read_uids_internal(const std::string& file_path, std::vector<segment::doc_id_t>& uids);
 
-private:
+ private:
     std::mutex mutex_;
 
     const std::string raw_vector_extension_ = ".rv";

@@ -9,31 +9,31 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/file/FileIOReader.h"
+#include "storage/disk/DiskIOReader.h"
 
 namespace milvus {
 namespace storage {
 
-FileIOReader::FileIOReader(const std::string& name) : IOReader(name) {
+DiskIOReader::DiskIOReader(const std::string& name) : IOReader(name) {
     fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
 }
 
-FileIOReader::~FileIOReader() {
+DiskIOReader::~DiskIOReader() {
     fs_.close();
 }
 
 void
-FileIOReader::read(void* ptr, size_t size) {
+DiskIOReader::read(void* ptr, size_t size) {
     fs_.read(reinterpret_cast<char*>(ptr), size);
 }
 
 void
-FileIOReader::seekg(size_t pos) {
+DiskIOReader::seekg(size_t pos) {
     fs_.seekg(pos);
 }
 
 size_t
-FileIOReader::length() {
+DiskIOReader::length() {
     fs_.seekg(0, fs_.end);
     size_t file_size = fs_.tellg();
     fs_.seekg(0, fs_.beg);

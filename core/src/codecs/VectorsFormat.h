@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "segment/Vectors.h"
-#include "storage/file/FileDirectory.h"
+#include "storage/disk/DiskDirectory.h"
 
 namespace milvus {
 namespace codec {

@@ -20,7 +20,7 @@
 #include <memory>
 
 #include "segment/DeletedDocs.h"
-#include "storage/file/FileDirectory.h"
+#include "storage/disk/DiskDirectory.h"
 
 namespace milvus {
 namespace codec {

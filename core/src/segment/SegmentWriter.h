@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "segment/Types.h"
-#include "src/storage/file/FileDirectory.h"
+#include "storage/disk/DiskDirectory.h"
 #include "utils/Status.h"
 
 namespace milvus {

@@ -21,7 +21,7 @@
 
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
-#include "storage/file/FileDirectory.h"
+#include "storage/disk/DiskDirectory.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -29,7 +29,7 @@ namespace milvus {
 namespace segment {
 
 SegmentReader::SegmentReader(const std::string& directory) {
-    directory_ptr_ = std::make_shared<storage::FileDirectory>(directory);
+    directory_ptr_ = std::make_shared<storage::DiskDirectory>(directory);
     segment_ptr_ = std::make_shared<Segment>();
 }
 

@@ -29,8 +29,8 @@
 
 #include "segment/Types.h"
 #include "server/Config.h"
-#include "storage/file/FileIOReader.h"
-#include "storage/file/FileIOWriter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
@@ -57,7 +57,7 @@ DefaultDeletedDocsFormat::read(const storage::DirectoryPtr& directory_ptr, segme
         if (s3_enable) {
             reader_ptr = std::make_shared<storage::S3IOReader>(del_file_path);
         } else {
-            reader_ptr = std::make_shared<storage::FileIOReader>(del_file_path);
+            reader_ptr = std::make_shared<storage::DiskIOReader>(del_file_path);
         }
 
         size_t file_size = reader_ptr->length();
@@ -111,26 +111,26 @@ DefaultDeletedDocsFormat::write(const storage::DirectoryPtr& directory_ptr,
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
-//    try {
-//        TimeRecorder recorder("write " + del_file_path);
-//        std::shared_ptr<storage::IOWriter> writer_ptr;
-//        if (s3_enable) {
-//            writer_ptr = std::make_shared<storage::S3IOWriter>(del_file_path);
-//        } else {
-//            writer_ptr = std::make_shared<storage::FileIOWriter>(del_file_path);
-//        }
-//        auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-//        size_t num_bytes = sizeof(segment::offset_t) * deleted_docs->GetSize();
-//        writer_ptr->write((void*)(deleted_docs_list.data()), num_bytes);
-//
-//        double span = recorder.RecordSection("done");
-//        double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
-//        ENGINE_LOG_DEBUG << "write(" << del_file_path << ") rate " << rate << "MB/s";
-//    } catch (std::exception& e) {
-//        std::string err_msg = "Failed to write rv file: " + del_file_path + ", error: " + e.what();
-//        ENGINE_LOG_ERROR << err_msg;
-//        throw Exception(SERVER_WRITE_ERROR, err_msg);
-//    }
+    // try {
+    //     TimeRecorder recorder("write " + del_file_path);
+    //     std::shared_ptr<storage::IOWriter> writer_ptr;
+    //     if (s3_enable) {
+    //         writer_ptr = std::make_shared<storage::S3IOWriter>(del_file_path);
+    //     } else {
+    //         writer_ptr = std::make_shared<storage::FileIOWriter>(del_file_path);
+    //     }
+    //     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
+    //     size_t num_bytes = sizeof(segment::offset_t) * deleted_docs->GetSize();
+    //     writer_ptr->write((void*)(deleted_docs_list.data()), num_bytes);
+
+    //     double span = recorder.RecordSection("done");
+    //     double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
+    //     ENGINE_LOG_DEBUG << "write(" << del_file_path << ") rate " << rate << "MB/s";
+    // } catch (std::exception& e) {
+    //     std::string err_msg = "Failed to write rv file: " + del_file_path + ", error: " + e.what();
+    //     ENGINE_LOG_ERROR << err_msg;
+    //     throw Exception(SERVER_WRITE_ERROR, err_msg);
+    // }
 
     // Create a temporary file from the existing file
     const std::string temp_path = dir_path + "/" + "temp_del";

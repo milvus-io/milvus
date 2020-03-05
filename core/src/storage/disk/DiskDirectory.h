@@ -26,9 +26,9 @@
 namespace milvus {
 namespace storage {
 
-class FileDirectory : public Directory {
+class DiskDirectory : public Directory {
  public:
-    explicit FileDirectory(const std::string& dir_path);
+    explicit DiskDirectory(const std::string& dir_path);
 
     void
     Create() override;
