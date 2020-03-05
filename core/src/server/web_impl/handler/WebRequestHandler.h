@@ -78,6 +78,13 @@ class WebRequestHandler {
     }
 
  private:
+    Status
+    ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable = true);
+
+    Status
+    ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value, bool nullable = true);
+
+ private:
     void
     AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg);
 

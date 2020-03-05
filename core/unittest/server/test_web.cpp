@@ -1552,12 +1552,12 @@ TEST_F(WebControllerTest, DELETE_BY_ID) {
     auto ids_json = insert_result_json["ids"];
     ASSERT_TRUE(ids_json.is_array());
 
-    std::vector<int64_t> ids;
+    std::vector<std::string> ids;
     for (auto & id : ids_json) {
-        ids.emplace_back(std::stol(id.get<std::string>()));
+        ids.emplace_back(id.get<std::string>());
     }
 
-    auto delete_ids = std::vector<int64_t>(ids.begin(), ids.begin() + 10);
+    auto delete_ids = std::vector<std::string>(ids.begin(), ids.begin() + 10);
 
     nlohmann::json delete_json;
     delete_json["delete"]["ids"] = delete_ids;

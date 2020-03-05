@@ -34,6 +34,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1491 Server crashed during adding vectors  
 -   \#1504 Avoid possible race condition between delete and search 
 -   \#1510 Add set interfaces for WAL configurations
+-   \#1511 Fix big integer cannot pass to server correctly
 
 ## Feature
 -   \#216 Add CLI to get server info
