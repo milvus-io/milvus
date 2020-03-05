@@ -635,7 +635,6 @@ DBImpl::Flush() {
 
 Status
 DBImpl::Compact(const std::string& table_id) {
-    // TODO: WAL???
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -659,29 +658,33 @@ DBImpl::Compact(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
 
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    WaitBuildIndexFinish();
 
-    // Save table index
-    TableIndex table_index;
-    status = DescribeIndex(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
+    std::lock_guard<std::mutex> index_lock(index_result_mutex_);
+    const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
+    /*
+        // Save table index
+        TableIndex table_index;
+        status = DescribeIndex(table_id, table_index);
+        if (!status.ok()) {
+            return status;
+        }
 
-    // Drop all index
-    status = DropIndex(table_id);
-    if (!status.ok()) {
-        return status;
-    }
+        // Drop all index
+        status = DropIndex(table_id);
+        if (!status.ok()) {
+            return status;
+        }
 
-    // Then update table index to the previous index
-    status = UpdateTableIndexRecursively(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
-
+        // Then update table index to the previous index
+        status = UpdateTableIndexRecursively(table_id, table_index);
+        if (!status.ok()) {
+            return status;
+        }
+    */
     // Get files to compact from meta.
-    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX};
+    std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
+                                meta::TableFileSchema::FILE_TYPE::BACKUP};
     meta::TableFilesSchema files_to_compact;
     status = meta_ptr_->FilesByType(table_id, file_types, files_to_compact);
     if (!status.ok()) {
@@ -697,11 +700,26 @@ DBImpl::Compact(const std::string& table_id) {
     meta::TableFilesSchema files_to_update;
     Status compact_status;
     for (auto& file : files_to_compact) {
-        compact_status = CompactFile(table_id, file, files_to_update);
+        // Check if the segment needs compacting
+        std::string segment_dir;
+        utils::GetParentPath(file.location_, segment_dir);
 
-        if (!compact_status.ok()) {
-            ENGINE_LOG_ERROR << "Compact failed for file " << file.file_id_ << ": " << compact_status.message();
-            break;
+        segment::SegmentReader segment_reader(segment_dir);
+        segment::DeletedDocsPtr deleted_docs;
+        status = segment_reader.LoadDeletedDocs(deleted_docs);
+        if (!status.ok()) {
+            std::string msg = "Failed to load segment from " + segment_dir;
+            ENGINE_LOG_ERROR << msg;
+            return Status(DB_ERROR, msg);
+        }
+
+        if (deleted_docs->GetSize() != 0) {
+            compact_status = CompactFile(table_id, file, files_to_update);
+
+            if (!compact_status.ok()) {
+                ENGINE_LOG_ERROR << "Compact failed for file " << file.file_id_ << ": " << compact_status.message();
+                break;
+            }
         }
     }
 
@@ -711,6 +729,7 @@ DBImpl::Compact(const std::string& table_id) {
 
     ENGINE_LOG_ERROR << "Updating meta after compaction...";
 
+    /*
     // Drop index again, in case some files were in the index building process during compacting
     status = DropIndex(table_id);
     if (!status.ok()) {
@@ -722,6 +741,7 @@ DBImpl::Compact(const std::string& table_id) {
     if (!status.ok()) {
         return status;
     }
+     */
 
     status = meta_ptr_->UpdateTableFiles(files_to_update);
     if (!status.ok()) {
@@ -803,6 +823,18 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     updated.emplace_back(compacted_file);
 
     for (auto& f : updated) {
+        files_to_update.emplace_back(f);
+    }
+
+    // Set all files in segment to TO_DELETE
+    auto& segment_id = compacted_file.segment_id_;
+    meta::TableFilesSchema segment_files;
+    status = meta_ptr_->GetTableFilesBySegmentId(segment_id, segment_files);
+    if (!status.ok()) {
+        return status;
+    }
+    for (auto& f : segment_files) {
+        f.file_type_ = meta::TableFileSchema::FILE_TYPE::TO_DELETE;
         files_to_update.emplace_back(f);
     }
 
