@@ -24,12 +24,12 @@
 #include <vector>
 
 #include "scheduler/optimizer/Pass.h"
-#include "scheduler/optimizer/handler/GpuSearchResHandler.h"
+#include "config/handler/GpuSearchResHandler.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFSQ8Pass : public Pass, public GpuSearchResHandler {
+ class FaissIVFSQ8Pass : public Pass, public server::GpuSearchResHandler {
  public:
     FaissIVFSQ8Pass() = default;
 
