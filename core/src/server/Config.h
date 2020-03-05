@@ -288,6 +288,8 @@ class Config {
     CheckWalConfigRecoveryErrorIgnore(const std::string& value);
     Status
     CheckWalConfigBufferSize(const std::string& value);
+    Status
+    CheckWalConfigWalPath(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -392,13 +394,13 @@ class Config {
 
     /* wal config */
     Status
-    GetWalConfigEnable(bool& wal_enable);
+    GetWalConfigEnable(bool& value);
     Status
-    GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore);
+    GetWalConfigRecoveryErrorIgnore(bool& value);
     Status
-    GetWalConfigBufferSize(int64_t& buffer_size);
+    GetWalConfigBufferSize(int64_t& value);
     Status
-    GetWalConfigWalPath(std::string& wal_path);
+    GetWalConfigWalPath(std::string& value);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -467,6 +469,16 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
     SetEngineConfigUseAVX512(const std::string& value);
+
+    /* wal config */
+    Status
+    SetWalConfigEnable(const std::string& value);
+    Status
+    SetWalConfigRecoveryErrorIgnore(const std::string& value);
+    Status
+    SetWalConfigBufferSize(const std::string& value);
+    Status
+    SetWalConfigWalPath(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status
