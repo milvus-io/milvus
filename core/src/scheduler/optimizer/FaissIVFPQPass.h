@@ -23,8 +23,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "scheduler/optimizer/Pass.h"
 #include "config/handler/GpuSearchResHandler.h"
+#include "scheduler/optimizer/Pass.h"
 
 namespace milvus {
 namespace scheduler {

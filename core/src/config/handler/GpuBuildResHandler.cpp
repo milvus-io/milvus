@@ -52,7 +52,7 @@ GpuBuildResHandler::AddGpuBuildResListener() {
 
 void
 GpuBuildResHandler::RemoveGpuBuildResListener() {
-    auto & config = server::Config::GetInstance();
+    auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
 }
 

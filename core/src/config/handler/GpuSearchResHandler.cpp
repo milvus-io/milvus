@@ -31,9 +31,8 @@ GpuSearchResHandler::GpuSearchResHandler() {
 }
 
 GpuSearchResHandler::~GpuSearchResHandler() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
+    RemoveGpuSearchThresholdListener();
+    RemoveGpuSearchResListener();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -91,7 +90,7 @@ GpuSearchResHandler::RemoveGpuSearchThresholdListener() {
 
 void
 GpuSearchResHandler::RemoveGpuSearchResListener() {
-    auto & config = server::Config::GetInstance();
+    auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
 }
 

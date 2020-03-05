@@ -1621,6 +1621,31 @@ TEST_F(WebControllerTest, CONFIG) {
 
     auto response = client_ptr->cmd("config", "", "", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("restart_required"));
+
+    OString table_name = "milvus_test_webcontroller_test_preload_table";
+    GenTable(table_name, 16, 10, "L2");
+
+    OString table_name_s = "milvus_test_webcontroller_test_preload_table";
+    GenTable(table_name_s, 16, 10, "L2");
+
+    OString body_str = "{\"db_config\": {\"preload_table\": \"" + table_name + "\"}}";
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    body_str = "{\"db_config\": {\"preload_table\": \"" + table_name + "," + table_name_s + "\"}}";
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto set_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(set_result_json.contains("restart_required"));
+    ASSERT_EQ(true, set_result_json["restart_required"].get<bool>());
+
+    response = client_ptr->cmd("config", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto get_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(get_result_json.contains("restart_required"));
+    ASSERT_EQ(true, get_result_json["restart_required"].get<bool>());
 }
 
 TEST_F(WebControllerTest, ADVANCED_CONFIG) {

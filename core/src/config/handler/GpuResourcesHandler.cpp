@@ -21,8 +21,7 @@ GpuResourcesHandler::GpuResourcesHandler() {
 }
 
 GpuResourcesHandler::~GpuResourcesHandler() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+    RemoveGpuEnableListener();
 }
 
 //////////////////////////////////////////////////////////////
