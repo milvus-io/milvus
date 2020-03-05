@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <stddef.h>
+#include <string>
 #include <faiss/impl/ScalarQuantizerOp.h>
 
 namespace faiss {
@@ -28,6 +29,6 @@ extern sq_sel_func_ptr sq_sel_quantizer;
 
 extern bool support_avx512();
 
-extern void hook_init();
+extern std::string hook_init();
 
 } // namespace faiss

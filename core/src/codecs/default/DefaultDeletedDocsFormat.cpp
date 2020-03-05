@@ -17,7 +17,12 @@
 
 #include "codecs/default/DefaultDeletedDocsFormat.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#define BOOST_NO_CXX11_SCOPED_ENUMS
 #include <boost/filesystem.hpp>
+#undef BOOST_NO_CXX11_SCOPED_ENUMS
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,7 +52,7 @@ DefaultDeletedDocsFormat::read(const storage::DirectoryPtr& directory_ptr, segme
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     try {
-        TimeRecorder recorder("read " + del_file_path);
+        TimeRecorder recorder("read deleted docs " + del_file_path);
         std::shared_ptr<storage::IOReader> reader_ptr;
         if (s3_enable) {
             reader_ptr = std::make_shared<storage::S3IOReader>(del_file_path);
@@ -56,9 +61,31 @@ DefaultDeletedDocsFormat::read(const storage::DirectoryPtr& directory_ptr, segme
         }
 
         size_t file_size = reader_ptr->length();
+        if (file_size <= 0) {
+            std::string err_msg = "File size " + std::to_string(file_size) + " invalid: " + del_file_path;
+            ENGINE_LOG_ERROR << err_msg;
+            throw Exception(SERVER_WRITE_ERROR, err_msg);
+        }
+
+        size_t rp = 0;
+        reader_ptr->seekg(0);
+
+        size_t num_bytes;
+        reader_ptr->read(&num_bytes, sizeof(size_t));
+        rp += sizeof(size_t);
+        reader_ptr->seekg(rp);
+
         std::vector<segment::offset_t> deleted_docs_list;
-        deleted_docs_list.resize(file_size / sizeof(segment::offset_t));
-        reader_ptr->read(deleted_docs_list.data(), file_size);
+        deleted_docs_list.resize(num_bytes / sizeof(segment::offset_t));
+        reader_ptr->read(deleted_docs_list.data(), num_bytes);
+        rp += num_bytes;
+        reader_ptr->seekg(rp);
+
+        if (rp != file_size) {
+            std::string err_msg = "File size mis-match: " + del_file_path;
+            ENGINE_LOG_ERROR << err_msg;
+            throw Exception(SERVER_WRITE_ERROR, err_msg);
+        }
 
         deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
 
@@ -84,26 +111,90 @@ DefaultDeletedDocsFormat::write(const storage::DirectoryPtr& directory_ptr,
     std::string dir_path = directory_ptr->GetDirPath();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
-    try {
-        TimeRecorder recorder("write " + del_file_path);
-        std::shared_ptr<storage::IOWriter> writer_ptr;
-        if (s3_enable) {
-            writer_ptr = std::make_shared<storage::S3IOWriter>(del_file_path);
-        } else {
-            writer_ptr = std::make_shared<storage::FileIOWriter>(del_file_path);
-        }
-        auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-        size_t num_bytes = sizeof(segment::offset_t) * deleted_docs->GetSize();
-        writer_ptr->write((void*)(deleted_docs_list.data()), num_bytes);
+//    try {
+//        TimeRecorder recorder("write " + del_file_path);
+//        std::shared_ptr<storage::IOWriter> writer_ptr;
+//        if (s3_enable) {
+//            writer_ptr = std::make_shared<storage::S3IOWriter>(del_file_path);
+//        } else {
+//            writer_ptr = std::make_shared<storage::FileIOWriter>(del_file_path);
+//        }
+//        auto deleted_docs_list = deleted_docs->GetDeletedDocs();
+//        size_t num_bytes = sizeof(segment::offset_t) * deleted_docs->GetSize();
+//        writer_ptr->write((void*)(deleted_docs_list.data()), num_bytes);
+//
+//        double span = recorder.RecordSection("done");
+//        double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
+//        ENGINE_LOG_DEBUG << "write(" << del_file_path << ") rate " << rate << "MB/s";
+//    } catch (std::exception& e) {
+//        std::string err_msg = "Failed to write rv file: " + del_file_path + ", error: " + e.what();
+//        ENGINE_LOG_ERROR << err_msg;
+//        throw Exception(SERVER_WRITE_ERROR, err_msg);
+//    }
 
-        double span = recorder.RecordSection("done");
-        double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
-        ENGINE_LOG_DEBUG << "write(" << del_file_path << ") rate " << rate << "MB/s";
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to write rv file: " + del_file_path + ", error: " + e.what();
+    // Create a temporary file from the existing file
+    const std::string temp_path = dir_path + "/" + "temp_del";
+    bool exists = boost::filesystem::exists(del_file_path);
+    if (exists) {
+        boost::filesystem::copy_file(del_file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);
+    }
+
+    // Write to the temp file, in order to avoid possible race condition with search (concurrent read and write)
+    int del_fd = open(temp_path.c_str(), O_RDWR | O_CREAT, 00664);
+    if (del_fd == -1) {
+        std::string err_msg = "Failed to open file: " + temp_path;
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
+
+    size_t old_num_bytes;
+    if (exists) {
+        if (::read(del_fd, &old_num_bytes, sizeof(size_t)) == -1) {
+            std::string err_msg = "Failed to read from file: " + temp_path + ", error: " + std::strerror(errno);
+            ENGINE_LOG_ERROR << err_msg;
+            throw Exception(SERVER_WRITE_ERROR, err_msg);
+        }
+    } else {
+        old_num_bytes = 0;
+    }
+
+    auto deleted_docs_list = deleted_docs->GetDeletedDocs();
+    size_t new_num_bytes = old_num_bytes + sizeof(segment::offset_t) * deleted_docs->GetSize();
+
+    // rewind and overwrite with the new_num_bytes
+    int off = lseek(del_fd, 0, SEEK_SET);
+    if (off == -1) {
+        std::string err_msg = "Failed to seek file: " + temp_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    if (::write(del_fd, &new_num_bytes, sizeof(size_t)) == -1) {
+        std::string err_msg = "Failed to write to file" + temp_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    // Move to the end of file and append
+    off = lseek(del_fd, 0, SEEK_END);
+    if (off == -1) {
+        std::string err_msg = "Failed to seek file: " + temp_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    if (::write(del_fd, deleted_docs_list.data(), new_num_bytes) == -1) {
+        std::string err_msg = "Failed to write to file" + temp_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    if (::close(del_fd) == -1) {
+        std::string err_msg = "Failed to close file: " + temp_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    // Move temp file to delete file
+    boost::filesystem::rename(temp_path, del_file_path);
 }
 
 }  // namespace codec

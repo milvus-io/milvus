@@ -17,6 +17,7 @@
 #include "faiss/FaissHook.h"
 #include "scheduler/Utils.h"
 #include "server/Config.h"
+#include "utils/Log.h"
 
 #include <fiu-local.h>
 #include <map>
@@ -36,7 +37,8 @@ KnowhereResource::Initialize() {
     bool use_avx512 = true;
     CONFIG_CHECK(config.GetEngineConfigUseAVX512(use_avx512));
     faiss::faiss_use_avx512 = use_avx512;
-    faiss::hook_init();
+    std::string type = faiss::hook_init();
+    ENGINE_LOG_DEBUG << "FAISS hook " << type;
 
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;

@@ -60,7 +60,7 @@ static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
 static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 static const char* CONFIG_DB_PRELOAD_TABLE_DEFAULT = "";
 static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
-static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1000";
+static const char* CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
 
 /* storage config */
 static const char* CONFIG_STORAGE = "storage_config";
@@ -142,6 +142,8 @@ static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE = "recovery_error_ignore";
 static const char* CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT = "true";
 static const char* CONFIG_WAL_BUFFER_SIZE = "buffer_size";
 static const char* CONFIG_WAL_BUFFER_SIZE_DEFAULT = "256";
+static const int64_t CONFIG_WAL_BUFFER_SIZE_MAX = 4096;
+static const int64_t CONFIG_WAL_BUFFER_SIZE_MIN = 64;
 static const char* CONFIG_WAL_WAL_PATH = "wal_path";
 static const char* CONFIG_WAL_WAL_PATH_DEFAULT = "/tmp/milvus/wal";
 
@@ -286,6 +288,8 @@ class Config {
     CheckWalConfigRecoveryErrorIgnore(const std::string& value);
     Status
     CheckWalConfigBufferSize(const std::string& value);
+    Status
+    CheckWalConfigWalPath(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -390,13 +394,13 @@ class Config {
 
     /* wal config */
     Status
-    GetWalConfigEnable(bool& wal_enable);
+    GetWalConfigEnable(bool& value);
     Status
-    GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore);
+    GetWalConfigRecoveryErrorIgnore(bool& value);
     Status
-    GetWalConfigBufferSize(int64_t& buffer_size);
+    GetWalConfigBufferSize(int64_t& value);
     Status
-    GetWalConfigWalPath(std::string& wal_path);
+    GetWalConfigWalPath(std::string& value);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -465,6 +469,16 @@ class Config {
     SetEngineConfigOmpThreadNum(const std::string& value);
     Status
     SetEngineConfigUseAVX512(const std::string& value);
+
+    /* wal config */
+    Status
+    SetWalConfigEnable(const std::string& value);
+    Status
+    SetWalConfigRecoveryErrorIgnore(const std::string& value);
+    Status
+    SetWalConfigBufferSize(const std::string& value);
+    Status
+    SetWalConfigWalPath(const std::string& value);
 
 #ifdef MILVUS_GPU_VERSION
     Status

@@ -67,7 +67,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createDtoResponse(Status::CODE_200, StatusDto::createShared());
     }
 
-
     ADD_CORS(GetDevices)
 
     ENDPOINT("GET", "/devices", GetDevices) {
@@ -245,15 +244,13 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         WebRequestHandler handler = WebRequestHandler();
 
-        auto response_dto = TableListFieldsDto::createShared();
-        auto offset = query_params.get("offset");
-        auto page_size = query_params.get("page_size");
 
+        String result;
+        auto status_dto = handler.ShowTables(query_params, result);
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.ShowTables(offset, page_size, response_dto);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, response_dto);
+                response = createResponse(Status::CODE_200, result);
                 break;
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
@@ -281,13 +278,13 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         WebRequestHandler handler = WebRequestHandler();
 
-        auto fields_dto = TableFieldsDto::createShared();
-        auto status_dto = handler.GetTable(table_name, query_params, fields_dto);
+        String response_str;
+        auto status_dto = handler.GetTable(table_name, query_params, response_str);
 
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, fields_dto);
+                response = createResponse(Status::CODE_200, response_str);
                 break;
             case StatusCode::TABLE_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
@@ -472,7 +469,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.ShowPartitions(offset, page_size, table_name, partition_list_dto);
+        auto status_dto = handler.ShowPartitions(table_name, query_params, partition_list_dto);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, partition_list_dto);
@@ -489,24 +486,18 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(PartitionOptions)
-
-    ENDPOINT("OPTIONS", "/tables/{table_name}/partitions/{partition_tag}", PartitionOptions) {
-        return createResponse(Status::CODE_204, "No Content");
-    }
-
     ADD_CORS(DropPartition)
 
-    ENDPOINT("DELETE", "/tables/{table_name}/partitions/{partition_tag}", DropPartition,
-             PATH(String, table_name), PATH(String, partition_tag)) {
+    ENDPOINT("DELETE", "/tables/{table_name}/partitions", DropPartition,
+             PATH(String, table_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) +
-                        "DELETE \'/tables/" + table_name->std_str() + "/partitions/" + partition_tag->std_str() + "\'");
+                        "DELETE \'/tables/" + table_name->std_str() + "/partitions\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.DropPartition(table_name, partition_tag);
+        auto status_dto = handler.DropPartition(table_name, body);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);
@@ -524,16 +515,82 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
+    ADD_CORS(ShowSegments)
+
+    ENDPOINT("GET", "/tables/{table_name}/segments", ShowSegments,
+             PATH(String, table_name), QUERIES(const QueryParams&, query_params)) {
+        auto offset = query_params.get("offset");
+        auto page_size = query_params.get("page_size");
+
+        auto handler = WebRequestHandler();
+        String response;
+        auto status_dto = handler.ShowSegments(table_name, query_params, response);
+
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:{
+                return createResponse(Status::CODE_200, response);
+            }
+            default:{
+                return createDtoResponse(Status::CODE_400, status_dto);
+            }
+        }
+    }
+
+    ADD_CORS(GetSegmentInfo)
+    /**
+     *
+     * GetSegmentVector
+     */
+    ENDPOINT("GET", "/tables/{table_name}/segments/{segment_name}/{info}", GetSegmentInfo,
+             PATH(String, table_name), PATH(String, segment_name), PATH(String, info), QUERIES(const QueryParams&, query_params)) {
+        auto offset = query_params.get("offset");
+        auto page_size = query_params.get("page_size");
+
+        auto handler = WebRequestHandler();
+        String response;
+        auto status_dto = handler.GetSegmentInfo(table_name, segment_name, info, query_params, response);
+
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:{
+                return createResponse(Status::CODE_200, response);
+            }
+            default:{
+                return createDtoResponse(Status::CODE_400, status_dto);
+            }
+        }
+    }
+
     ADD_CORS(VectorsOptions)
 
     ENDPOINT("OPTIONS", "/tables/{table_name}/vectors", VectorsOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
+    ADD_CORS(GetVectors)
+    /**
+     *
+     * GetVectorByID ?id=
+     */
+    ENDPOINT("GET", "/tables/{table_name}/vectors", GetVectors,
+             PATH(String, table_name), QUERIES(const QueryParams&, query_params)) {
+        auto handler = WebRequestHandler();
+        String response;
+        auto status_dto = handler.GetVector(table_name, query_params, response);
+
+        switch (status_dto->code->getValue()) {
+            case StatusCode::SUCCESS:{
+                return createResponse(Status::CODE_200, response);
+            }
+            default:{
+                return createDtoResponse(Status::CODE_400, status_dto);
+            }
+        }
+    }
+
     ADD_CORS(Insert)
 
     ENDPOINT("POST", "/tables/{table_name}/vectors", Insert,
-             PATH(String, table_name), BODY_DTO(InsertRequestDto::ObjectWrapper, body)) {
+             PATH(String, table_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + table_name->std_str() + "/vectors\'");
         tr.RecordSection("Received request.");
 
@@ -559,21 +616,24 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(Search)
-
-    ENDPOINT("PUT", "/tables/{table_name}/vectors", Search,
-             PATH(String, table_name), BODY_DTO(SearchRequestDto::ObjectWrapper, body)) {
+    ADD_CORS(VectorsOp)
+    /*************
+     * Search
+     * Delete by ID
+     * */
+    ENDPOINT("PUT", "/tables/{table_name}/vectors", VectorsOp,
+             PATH(String, table_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/tables/" + table_name->std_str() + "/vectors\'");
         tr.RecordSection("Received request.");
 
-        auto results_dto = TopkResultsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
+        OString result;
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.Search(table_name, body, results_dto);
+        auto status_dto = handler.VectorsOp(table_name, body, result);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, results_dto);
+                response = createResponse(Status::CODE_200, result);
                 break;
             case StatusCode::TABLE_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);
@@ -590,18 +650,17 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(SystemInfo)
 
-    ENDPOINT("GET", "/system/{msg}", SystemInfo, PATH(String, msg), QUERIES(const QueryParams&, query_params)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/system/" + msg->std_str() + "\'");
+    ENDPOINT("GET", "/system/{info}", SystemInfo, PATH(String, info), QUERIES(const QueryParams&, query_params)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/system/" + info->std_str() + "\'");
         tr.RecordSection("Received request.");
 
-        auto info_dto = CommandDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
-
-        auto status_dto = handler.SystemInfo(msg, info_dto);
+        OString result = "";
+        auto status_dto = handler.SystemInfo(info, query_params, result);
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, info_dto);
+                response = createResponse(Status::CODE_200, result);
                 break;
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
@@ -615,6 +674,11 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(SystemOp)
 
+    /**
+    * Load
+    * Compact
+    * Flush
+    */
     ENDPOINT("PUT", "/system/{Op}", SystemOp, PATH(String, Op), BODY_STRING(String, body_str)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + Op->std_str() + "\'");
         tr.RecordSection("Received request.");

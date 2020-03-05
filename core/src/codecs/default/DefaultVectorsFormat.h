@@ -56,6 +56,14 @@ class DefaultVectorsFormat : public VectorsFormat {
     operator=(DefaultVectorsFormat&&) = delete;
 
  private:
+    void
+    read_vectors_internal(const std::string& file_path, off_t offset, size_t num_bytes,
+                          std::vector<uint8_t>& raw_vectors, std::string& rv_name);
+
+    void
+    read_uids_internal(const std::string& file_path, std::vector<segment::doc_id_t>& uids);
+
+private:
     std::mutex mutex_;
 
     const std::string raw_vector_extension_ = ".rv";
