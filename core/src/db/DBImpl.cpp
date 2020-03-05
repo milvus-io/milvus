@@ -720,7 +720,8 @@ DBImpl::Compact(const std::string& table_id) {
             compact_status = CompactFile(table_id, file, files_to_update);
 
             if (!compact_status.ok()) {
-                ENGINE_LOG_ERROR << "Compact failed for segment " << file.segment_id_ << ": " << compact_status.message();
+                ENGINE_LOG_ERROR << "Compact failed for segment " << file.segment_id_ << ": "
+                                 << compact_status.message();
                 break;
             }
         } else {
@@ -835,8 +836,8 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     }
 
     ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
-                     << std::to_string(file.file_size_) << " bytes to "
-                     << std::to_string(compacted_file.file_size_) << " bytes";
+                     << std::to_string(file.file_size_) << " bytes to " << std::to_string(compacted_file.file_size_)
+                     << " bytes";
 
     if (options_.insert_cache_immediately_) {
         segment_writer_ptr->Cache();
@@ -1393,7 +1394,7 @@ DBImpl::StartMergeTask() {
 
 Status
 DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& files) {
-    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
@@ -1483,7 +1484,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
 
 Status
 DBImpl::BackgroundMergeFiles(const std::string& table_id) {
-    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
     meta::TableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
