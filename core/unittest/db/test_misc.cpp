@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "db/IDGenerator.h"
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Options.h"
@@ -159,6 +160,22 @@ TEST(DBMiscTest, UTILS_TEST) {
     ASSERT_TRUE(status.ok());
 
     status = milvus::engine::utils::DeleteSegment(options, file);
+}
+
+TEST(DBMiscTest, SAFE_ID_GENERATOR_TEST) {
+    milvus::engine::SafeIDGenerator& generator = milvus::engine::SafeIDGenerator::GetInstance();
+    size_t n = 1000000;
+    milvus::engine::IDNumbers ids;
+
+    milvus::Status status = generator.GetNextIDNumbers(n, ids);
+    ASSERT_TRUE(status.ok());
+
+    std::set<int64_t> unique_ids;
+    for (size_t i = 0; i < ids.size(); i++) {
+        unique_ids.insert(ids[i]);
+    }
+
+    ASSERT_EQ(ids.size(), unique_ids.size());
 }
 
 TEST(DBMiscTest, CHECKER_TEST) {
