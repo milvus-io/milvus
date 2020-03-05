@@ -48,8 +48,10 @@ CheckIndexParameter(const milvus::json& json_params, const std::string& param_na
 
     try {
         int64_t value = json_params[param_name];
-        if (value < min || value > 300) {
-            std::string msg = "Invalid " + param_name + ": " + std::to_string(value) + ". The knng valid range is " +
+        bool min_err = min_close ? value < min : value <= min;
+        bool max_err = max_closed ? value > max : value >= max;
+        if (min_err || max_err) {
+            std::string msg = "Invalid " + param_name + ": " + std::to_string(value) + ". Valid range is " +
                               (min_close ? "[" : "(") + std::to_string(min) + ", " + std::to_string(max) +
                               (max_closed ? "]" : ")");
             SERVER_LOG_ERROR << msg;
