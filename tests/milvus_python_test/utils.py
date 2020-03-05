@@ -475,17 +475,17 @@ def gen_invaild_search_params():
     for index_type in index_types:
         if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
             for nprobe in gen_invalid_params():
-                ivf_search_params = [{"index_type": index_type, "search_param": {"nprobe": nprobe}}]
+                ivf_search_params = {"index_type": index_type, "search_param": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
         elif index_type == IndexType.HNSW:
             for efConstruction in gen_invalid_params():
-                hnsw_search_param = [{"index_type": index_type, "search_param": {"efConstruction": efConstruction}}]
+                hnsw_search_param = {"index_type": index_type, "search_param": {"efConstruction": efConstruction}}
                 search_params.append(hnsw_search_param)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
         elif index_type == IndexType.RNSG:
             for search_length in gen_invalid_params():
-                nsg_search_param = [{"index_type": index_type, "search_param": {"search_length": search_length}}]
+                nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
                 search_params.append(nsg_search_param)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
 
