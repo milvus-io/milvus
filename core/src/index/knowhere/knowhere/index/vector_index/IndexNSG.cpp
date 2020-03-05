@@ -104,7 +104,7 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
     Graph knng;
     const float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
-    if (config[knowhere::meta::DEVICEID] == knowhere::INVALID_VALUE) {
+    if (config[knowhere::meta::DEVICEID].get<int64_t>() == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         auto model = preprocess_index->Train(dataset, config);
         preprocess_index->set_index_model(model);
