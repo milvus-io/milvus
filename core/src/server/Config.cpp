@@ -942,8 +942,9 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
         }
 
-        int64_t buffer_value;
-        CONFIG_CHECK(GetCacheConfigInsertBufferSize(buffer_value));
+        std::string str =
+            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT);
+        int64_t buffer_value = std::stoll(str);
 
         int64_t insert_buffer_size = buffer_value * GB;
         fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
@@ -993,6 +994,10 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
 
         int64_t cache_size = 0;
         CONFIG_CHECK(GetCacheConfigCpuCacheCapacity(cache_size));
+
+        std::string str =
+            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
+        int64_t cache_size = std::stoll(str);
 
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
