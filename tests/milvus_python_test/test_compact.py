@@ -422,7 +422,7 @@ class TestCompactBase:
         status = connect.flush([table])
         assert status.OK()
         query_vecs = [vectors[0]]
-        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs) 
+        status, res = connect.search_vectors(table, top_k, query_records=query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()
 
@@ -660,7 +660,7 @@ class TestCompactJAC:
         expected: status ok
         '''
         nq = 100
-        num_tables = 50
+        num_tables = 10
         tmp, vectors = gen_binary_vectors(nq, dim)
         table_list = []
         for i in range(num_tables):
@@ -674,6 +674,10 @@ class TestCompactJAC:
         time.sleep(6)
         for i in range(num_tables):
             status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
+            assert status.OK()
+            status = connect.delete_by_id(table_list[i], [ids[0], ids[-1]])
+            assert status.OK()
+            status = connect.flush([table_list[i]])
             assert status.OK()
             status = connect.compact(table_list[i])
             assert status.OK()
@@ -745,7 +749,7 @@ class TestCompactJAC:
         status = connect.flush([jac_table])
         assert status.OK()
         query_vecs = [vectors[0]]
-        status, res = connect.search_vectors(jac_table, top_k, nprobe, query_vecs) 
+        status, res = connect.search_vectors(jac_table, top_k, query_records=query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()
 
@@ -1040,6 +1044,6 @@ class TestCompactIP:
         status = connect.flush([ip_table])
         assert status.OK()
         query_vecs = [vectors[0]]
-        status, res = connect.search_vectors(ip_table, top_k, nprobe, query_vecs) 
+        status, res = connect.search_vectors(ip_table, top_k, query_records=query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()

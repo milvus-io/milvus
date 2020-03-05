@@ -88,6 +88,11 @@ SearchByIDRequest::OnExecute() {
             }
         }
 
+        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
         // Check whether GPU search resource is enabled
 #ifdef MILVUS_GPU_VERSION
         Config& config = Config::GetInstance();

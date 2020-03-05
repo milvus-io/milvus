@@ -84,6 +84,11 @@ SearchRequest::OnExecute() {
             }
         }
 
+        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
         // step 3: check search parameter
         status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
         if (!status.ok()) {

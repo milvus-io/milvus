@@ -115,7 +115,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     if (!adapter->CheckTrain(conf)) {
-        throw Exception(DB_ERROR, "Build Config illegal");
+        throw Exception(DB_ERROR, "Illegal index params");
     }
 
     ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
@@ -282,6 +282,7 @@ ExecutionEngineImpl::HybridLoad() const {
 
         milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        ENGINE_LOG_DEBUG << "Quantizer params: " << quantizer_conf.dump();
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
         }
@@ -411,8 +412,9 @@ ExecutionEngineImpl::Load(bool to_cache) {
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
             auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+            ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
             if (!adapter->CheckTrain(conf)) {
-                throw Exception(DB_ERROR, "Build Config illegal");
+                throw Exception(DB_ERROR, "Illegal index params");
             }
 
             auto status = segment_reader_ptr->Load();
@@ -718,10 +720,10 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf[knowhere::meta::ROWS] = Count();
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
-    ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
+    ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     if (!adapter->CheckTrain(conf)) {
-        throw Exception(DB_ERROR, "Build Config illegal");
+        throw Exception(DB_ERROR, "Illegal index params");
     }
     ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
     auto status = Status::OK();
@@ -736,6 +738,17 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
     ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
+}
+
+// map offsets to ids
+void
+MapUids(const std::vector<segment::doc_id_t>& uids, int64_t* labels, size_t num) {
+    for (int64_t i = 0; i < num; ++i) {
+        int64_t& offset = labels[i];
+        if (offset != -1) {
+            offset = uids[offset];
+        }
+    }
 }
 
 Status
@@ -793,21 +806,19 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
         }
     }
 #endif
-    TimeRecorder rc("ExecutionEngineImpl::Search");
+    TimeRecorder rc("ExecutionEngineImpl::Search float");
 
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
-
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
-        throw Exception(DB_ERROR, "Search Config illegal");
+        throw Exception(DB_ERROR, "Illegal search params");
     }
 
     if (hybrid) {
@@ -819,15 +830,9 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     rc.RecordSection("search done");
 
     // map offsets to ids
-    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
-    for (int64_t i = 0; i < n * k; i++) {
-        int64_t offset = labels[i];
-        if (offset != -1) {
-            labels[i] = uids[offset];
-        }
-    }
+    MapUids(index_->GetUids(), labels, n * k);
 
-    rc.RecordSection("map uids");
+    rc.RecordSection("map uids " + std::to_string(n * k));
 
     if (hybrid) {
         HybridUnset();
@@ -842,20 +847,19 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
 Status
 ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params,
                             float* distances, int64_t* labels, bool hybrid) {
-    TimeRecorder rc("ExecutionEngineImpl::Search");
+    TimeRecorder rc("ExecutionEngineImpl::Search uint8");
 
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
-
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
-        throw Exception(DB_ERROR, "Search Config illegal");
+        throw Exception(DB_ERROR, "Illegal search params");
     }
 
     if (hybrid) {
@@ -867,15 +871,9 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     rc.RecordSection("search done");
 
     // map offsets to ids
-    const std::vector<segment::doc_id_t>& uids = index_->GetUids();
-    for (int64_t i = 0; i < n * k; i++) {
-        int64_t offset = labels[i];
-        if (offset != -1) {
-            labels[i] = uids[offset];
-        }
-    }
+    MapUids(index_->GetUids(), labels, n * k);
 
-    rc.RecordSection("map uids");
+    rc.RecordSection("map uids " + std::to_string(n * k));
 
     if (hybrid) {
         HybridUnset();
@@ -890,20 +888,19 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 Status
 ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params,
                             float* distances, int64_t* labels, bool hybrid) {
-    TimeRecorder rc("ExecutionEngineImpl::Search");
+    TimeRecorder rc("ExecutionEngineImpl::Search vector of ids");
 
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [topk]  " << k << " [extra_params] " << extra_params.dump();
-
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
     if (!adapter->CheckSearch(conf, index_->GetType())) {
-        throw Exception(DB_ERROR, "Search Config illegal");
+        throw Exception(DB_ERROR, "Illegal search params");
     }
 
     if (hybrid) {
@@ -954,16 +951,12 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
     auto status = Status::OK();
     if (!offsets.empty()) {
         status = index_->SearchById(offsets.size(), offsets.data(), distances, labels, conf);
-        rc.RecordSection("search by id done");
+        rc.RecordSection("search done");
 
         // map offsets to ids
-        for (int64_t i = 0; i < offsets.size() * k; i++) {
-            int64_t offset = labels[i];
-            if (offset != -1) {
-                labels[i] = uids[offset];
-            }
-        }
-        rc.RecordSection("map uids");
+        MapUids(uids, labels, offsets.size() * k);
+
+        rc.RecordSection("map uids " + std::to_string(offsets.size() * k));
     }
 
     if (hybrid) {

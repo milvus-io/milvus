@@ -57,9 +57,6 @@ BuildVectors(uint64_t n, uint64_t batch_index, milvus::engine::VectorsData& vect
 
         vectors.id_array_.push_back(n * batch_index + i);
     }
-
-    //    milvus::engine::SimpleIDGenerator id_gen;
-    //    id_gen.GetNextIDNumbers(n, vectors.id_array_);
 }
 
 std::string

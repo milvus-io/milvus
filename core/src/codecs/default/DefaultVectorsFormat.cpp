@@ -53,7 +53,14 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
-            size_t num_bytes = boost::filesystem::file_size(path);
+
+            size_t num_bytes;
+            if (::read(rv_fd, &num_bytes, sizeof(size_t)) == -1) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
             std::vector<uint8_t> vector_list;
             vector_list.resize(num_bytes);
             if (::read(rv_fd, vector_list.data(), num_bytes) == -1) {
@@ -78,11 +85,18 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
-            auto file_size = boost::filesystem::file_size(path);
-            auto count = file_size / sizeof(segment::doc_id_t);
+
+            size_t num_bytes;
+            if (::read(uid_fd, &num_bytes, sizeof(size_t)) == -1) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
+            auto count = num_bytes / sizeof(segment::doc_id_t);
             std::vector<segment::doc_id_t> uids;
             uids.resize(count);
-            if (::read(uid_fd, uids.data(), file_size) == -1) {
+            if (::read(uid_fd, uids.data(), num_bytes) == -1) {
                 std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
@@ -146,8 +160,14 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    if (::write(rv_fd, vectors->GetData().data(), vectors->GetData().size()) == -1) {
-        std::string err_msg = "Failed to write to file" + rv_file_path + ", error: " + std::strerror(errno);
+    size_t rv_num_bytes = vectors->GetData().size() * sizeof(uint8_t);
+    if (::write(rv_fd, &rv_num_bytes, sizeof(size_t)) == -1) {
+        std::string err_msg = "Failed to write to file: " + rv_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    if (::write(rv_fd, vectors->GetData().data(), rv_num_bytes) == -1) {
+        std::string err_msg = "Failed to write to file: " + rv_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
@@ -162,7 +182,14 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
     ENGINE_LOG_DEBUG << "Writing raw vectors took " << diff.count() << " s";
 
     start = std::chrono::high_resolution_clock::now();
-    if (::write(uid_fd, vectors->GetUids().data(), sizeof(segment::doc_id_t) * vectors->GetCount()) == -1) {
+
+    size_t uid_num_bytes = vectors->GetUids().size() * sizeof(segment::doc_id_t);
+    if (::write(uid_fd, &uid_num_bytes, sizeof(size_t)) == -1) {
+        std::string err_msg = "Failed to write to file" + rv_file_path + ", error: " + std::strerror(errno);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+    if (::write(uid_fd, vectors->GetUids().data(), uid_num_bytes) == -1) {
         std::string err_msg = "Failed to write to file" + uid_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
@@ -202,10 +229,15 @@ DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::v
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
-            auto file_size = boost::filesystem::file_size(path);
-            auto count = file_size / sizeof(segment::doc_id_t);
+            size_t num_bytes;
+            if (::read(uid_fd, &num_bytes, sizeof(size_t)) == -1) {
+                std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
+                ENGINE_LOG_ERROR << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+            auto count = num_bytes / sizeof(segment::doc_id_t);
             uids.resize(count);
-            if (::read(uid_fd, uids.data(), file_size) == -1) {
+            if (::read(uid_fd, uids.data(), num_bytes) == -1) {
                 std::string err_msg = "Failed to read from file: " + path.string() + ", error: " + std::strerror(errno);
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
@@ -245,6 +277,8 @@ DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off
                 ENGINE_LOG_ERROR << err_msg;
                 throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
             }
+
+            offset += sizeof(size_t);  // Beginning of file is num_bytes
             int off = lseek(rv_fd, offset, SEEK_SET);
             if (off == -1) {
                 std::string err_msg = "Failed to seek file: " + path.string() + ", error: " + std::strerror(errno);
