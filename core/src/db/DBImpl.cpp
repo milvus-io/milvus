@@ -656,12 +656,15 @@ DBImpl::Compact(const std::string& table_id) {
         }
     }
 
-    ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+    ENGINE_LOG_DEBUG << "Before compacting, wait for build index thread to finish...";
 
     WaitBuildIndexFinish();
 
     std::lock_guard<std::mutex> index_lock(index_result_mutex_);
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
+
+    ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
+
     /*
         // Save table index
         TableIndex table_index;
@@ -708,7 +711,7 @@ DBImpl::Compact(const std::string& table_id) {
         segment::DeletedDocsPtr deleted_docs;
         status = segment_reader.LoadDeletedDocs(deleted_docs);
         if (!status.ok()) {
-            std::string msg = "Failed to load segment from " + segment_dir;
+            std::string msg = "Failed to load deleted_docs from " + segment_dir;
             ENGINE_LOG_ERROR << msg;
             return Status(DB_ERROR, msg);
         }
@@ -717,9 +720,11 @@ DBImpl::Compact(const std::string& table_id) {
             compact_status = CompactFile(table_id, file, files_to_update);
 
             if (!compact_status.ok()) {
-                ENGINE_LOG_ERROR << "Compact failed for file " << file.file_id_ << ": " << compact_status.message();
+                ENGINE_LOG_ERROR << "Compact failed for segment " << file.segment_id_ << ": " << compact_status.message();
                 break;
             }
+        } else {
+            ENGINE_LOG_ERROR << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
         }
     }
 
@@ -773,7 +778,6 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     }
 
     // Compact (merge) file to the newly created table file
-    meta::TableFilesSchema updated;
 
     std::string new_segment_dir;
     utils::GetParentPath(compacted_file.location_, new_segment_dir);
@@ -784,10 +788,6 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
 
     ENGINE_LOG_DEBUG << "Compacting begin...";
     segment_writer_ptr->Merge(segment_dir_to_merge, compacted_file.file_id_);
-
-    auto file_to_compact = file;
-    file_to_compact.file_type_ = meta::TableFileSchema::TO_DELETE;
-    updated.emplace_back(file_to_compact);
 
     // Serialize
     ENGINE_LOG_DEBUG << "Serializing compacted segment...";
@@ -820,14 +820,10 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
         compacted_file.file_type_ = meta::TableFileSchema::TO_DELETE;
     }
 
-    updated.emplace_back(compacted_file);
-
-    for (auto& f : updated) {
-        files_to_update.emplace_back(f);
-    }
+    files_to_update.emplace_back(compacted_file);
 
     // Set all files in segment to TO_DELETE
-    auto& segment_id = compacted_file.segment_id_;
+    auto& segment_id = file.segment_id_;
     meta::TableFilesSchema segment_files;
     status = meta_ptr_->GetTableFilesBySegmentId(segment_id, segment_files);
     if (!status.ok()) {
@@ -839,7 +835,7 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     }
 
     ENGINE_LOG_DEBUG << "Compacted segment " << compacted_file.segment_id_ << " from "
-                     << std::to_string(file_to_compact.file_size_) << " bytes to "
+                     << std::to_string(file.file_size_) << " bytes to "
                      << std::to_string(compacted_file.file_size_) << " bytes";
 
     if (options_.insert_cache_immediately_) {
