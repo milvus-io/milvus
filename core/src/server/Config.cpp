@@ -992,9 +992,6 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        int64_t cache_size = 0;
-        CONFIG_CHECK(GetCacheConfigCpuCacheCapacity(cache_size));
-
         std::string str =
             GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
         int64_t cache_size = std::stoll(str);
