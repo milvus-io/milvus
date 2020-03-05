@@ -12,6 +12,7 @@
 #pragma once
 
 #include "db/meta/MetaTypes.h"
+#include "utils/Json.h"
 #include "utils/Status.h"
 
 #include <string>
@@ -34,11 +35,15 @@ class ValidationUtil {
     static Status
     ValidateTableIndexType(int32_t index_type);
 
-    static bool
-    IsBinaryIndexType(int32_t index_type);
+    static Status
+    ValidateIndexParams(const milvus::json& index_params, const engine::meta::TableSchema& table_schema,
+                        int32_t index_type);
 
     static Status
-    ValidateTableIndexNlist(int32_t nlist);
+    ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema);
+
+    static bool
+    IsBinaryIndexType(int32_t index_type);
 
     static Status
     ValidateTableIndexFileSize(int64_t index_file_size);

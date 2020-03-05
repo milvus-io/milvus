@@ -385,9 +385,6 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
         milvus::server::ValidationUtil::ValidateTableIndexType((int)milvus::engine::EngineType::MAX_VALUE + 1).code(),
         milvus::SERVER_INVALID_INDEX_TYPE);
 
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexNlist(0).code(), milvus::SERVER_INVALID_INDEX_NLIST);
-    ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexNlist(100).code(), milvus::SERVER_SUCCESS);
-
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexFileSize(0).code(),
               milvus::SERVER_INVALID_INDEX_FILE_SIZE);
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateTableIndexFileSize(100).code(), milvus::SERVER_SUCCESS);

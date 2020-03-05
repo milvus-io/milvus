@@ -22,8 +22,7 @@
 namespace milvus {
 namespace engine {
 
-VectorSource::VectorSource(VectorsData vectors)
-    : vectors_(std::move(vectors)), id_generator_(std::make_shared<SimpleIDGenerator>()) {
+VectorSource::VectorSource(VectorsData vectors) : vectors_(std::move(vectors)) {
     current_num_vectors_added = 0;
 }
 
@@ -38,7 +37,11 @@ VectorSource::Add(/*const ExecutionEnginePtr& execution_engine,*/ const segment:
         current_num_vectors_added + num_vectors_to_add <= n ? num_vectors_to_add : n - current_num_vectors_added;
     IDNumbers vector_ids_to_add;
     if (vectors_.id_array_.empty()) {
-        id_generator_->GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
+        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+        Status status = id_generator.GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
+        if (!status.ok()) {
+            return status;
+        }
     } else {
         vector_ids_to_add.resize(num_vectors_added);
         for (size_t pos = current_num_vectors_added; pos < current_num_vectors_added + num_vectors_added; pos++) {

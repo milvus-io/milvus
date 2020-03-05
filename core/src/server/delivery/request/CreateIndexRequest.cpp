@@ -72,6 +72,11 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
+        status = ValidationUtil::ValidateIndexParams(json_params_, table_schema, index_type_);
+        if (!status.ok()) {
+            return status;
+        }
+
         // step 2: binary and float vector support different index/metric type, need to adapt here
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;

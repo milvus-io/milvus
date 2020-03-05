@@ -101,8 +101,8 @@ Status
 SqliteMetaImpl::NextTableId(std::string& table_id) {
     std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
-    SimpleIDGenerator g;
-    ss << g.GetNextIDNumber();
+    SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+    ss << id_generator.GetNextIDNumber();
     table_id = ss.str();
     return Status::OK();
 }
@@ -111,8 +111,8 @@ Status
 SqliteMetaImpl::NextFileId(std::string& file_id) {
     std::lock_guard<std::mutex> lock(genid_mutex_);  // avoid duplicated id
     std::stringstream ss;
-    SimpleIDGenerator g;
-    ss << g.GetNextIDNumber();
+    SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
+    ss << id_generator.GetNextIDNumber();
     file_id = ss.str();
     return Status::OK();
 }
