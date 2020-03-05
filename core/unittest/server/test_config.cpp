@@ -56,6 +56,7 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     milvus::server::ConfigNode& db_config = root_config.GetChild("db_config");
     milvus::server::ConfigNode& metric_config = root_config.GetChild("metric_config");
     milvus::server::ConfigNode& cache_config = root_config.GetChild("cache_config");
+    milvus::server::ConfigNode& wal_config = root_config.GetChild("wal_config");
     milvus::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
 
     const auto& im_config_mgr = *static_cast<milvus::server::YamlConfigMgr*>(config_mgr);
@@ -323,6 +324,27 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
         ASSERT_TRUE(std::stoll(build_index_resources[i].substr(3)) == build_index_res_vec[i]);
     }
 #endif
+
+    /* wal config */
+    bool wal_enable = false;
+    ASSERT_TRUE(config.SetWalConfigEnable(std::to_string(wal_enable)).ok());
+    ASSERT_TRUE(config.GetWalConfigEnable(bool_val).ok());
+    ASSERT_TRUE(bool_val == wal_enable);
+
+    bool wal_recovery_ignore = true;
+    ASSERT_TRUE(config.SetWalConfigRecoveryErrorIgnore(std::to_string(wal_recovery_ignore)).ok());
+    ASSERT_TRUE(config.GetWalConfigRecoveryErrorIgnore(bool_val).ok());
+    ASSERT_TRUE(bool_val == wal_recovery_ignore);
+
+    int64_t wal_buffer_size = 128;
+    ASSERT_TRUE(config.SetWalConfigBufferSize(std::to_string(wal_buffer_size)).ok());
+    ASSERT_TRUE(config.GetWalConfigBufferSize(int64_val).ok());
+    ASSERT_TRUE(int64_val == wal_buffer_size);
+
+    std::string wal_path = "/tmp/aaa/wal";
+    ASSERT_TRUE(config.SetWalConfigWalPath(wal_path).ok());
+    ASSERT_TRUE(config.GetWalConfigWalPath(str_val).ok());
+    ASSERT_TRUE(str_val == wal_path);
 }
 
 std::string
@@ -625,6 +647,12 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gpu16").ok());
     ASSERT_FALSE(config.SetGpuResourceConfigBuildIndexResources("gpu0, gpu0, gpu1").ok());
 #endif
+
+    /* wal config */
+    ASSERT_FALSE(config.SetWalConfigWalPath("hello/world").ok());
+    ASSERT_FALSE(config.SetWalConfigWalPath("").ok());
+    ASSERT_FALSE(config.SetWalConfigBufferSize("-1").ok());
+    ASSERT_FALSE(config.SetWalConfigBufferSize("a").ok());
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
@@ -844,6 +872,27 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("Config.GetGpuResourceConfigCacheThreshold.diable_gpu_resource");
 #endif
+
+    /* wal config */
+    fiu_enable("check_config_wal_enable_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_wal_enable_fail");
+
+    fiu_enable("check_config_wal_recovery_error_ignore_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_wal_recovery_error_ignore_fail");
+
+    fiu_enable("check_config_wal_buffer_size_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_wal_buffer_size_fail");
+
+    fiu_enable("check_wal_path_fail", 1, NULL, 0);
+    s = config.ValidateConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_wal_path_fail");
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
@@ -977,6 +1026,27 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
 
     s = config.ResetDefaultConfig();
     ASSERT_TRUE(s.ok());
+
+    /* wal config */
+    fiu_enable("check_config_wal_enable_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_wal_enable_fail");
+
+    fiu_enable("check_config_wal_recovery_error_ignore_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_wal_recovery_error_ignore_fail");
+
+    fiu_enable("check_config_wal_buffer_size_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_wal_buffer_size_fail");
+
+    fiu_enable("check_wal_path_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_wal_path_fail");
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
