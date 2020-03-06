@@ -3,6 +3,7 @@ import pytest
 import logging
 import itertools
 from time import sleep
+import threading
 from multiprocessing import Process
 from milvus import IndexType, MetricType
 from utils import *
@@ -11,6 +12,7 @@ dim = 128
 index_file_size = 10
 add_time_interval = 3
 tag = "1970-01-01"
+nb = 6000
 
 class TestTableCount:
     """

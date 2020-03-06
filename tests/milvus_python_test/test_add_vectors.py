@@ -1,6 +1,7 @@
 import time
 import threading
 import logging
+import threading
 from multiprocessing import Pool, Process
 import pytest
 from milvus import IndexType, MetricType
@@ -13,6 +14,7 @@ table_id = "test_add"
 ADD_TIMEOUT = 60
 tag = "1970-01-01"
 add_interval_time = 1.5
+nb = 6000
 
 
 class TestAddBase:
@@ -288,6 +290,8 @@ class TestAddBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
+        assert status.OK()
+        connect.flush([table])
         status, result = connect.search_vectors(table, 1, vector)
         assert status.OK()
 
@@ -359,8 +363,7 @@ class TestAddBase:
         connect.flush([table])
         assert status.OK()
         assert len(ids) == nq
-        # check search result
-        status, result = connect.search_vectors(table, top_k, vectors)
+        status, result = connect.search_vectors(table, top_k, query_records=vectors)
         logging.getLogger().info(result)
         assert len(result) == nq
         for i in range(nq):
@@ -616,6 +619,44 @@ class TestAddBase:
         time.sleep(2)
         status, count = milvus.get_table_row_count(table)
         assert count == process_num * loop_num
+
+    @pytest.mark.level(2)
+    @pytest.mark.timeout(30)
+    def test_table_add_rows_count_multi_threading(self, args):
+        '''
+        target: test table rows_count is correct or not with multi threading
+        method: create table and add vectors in it(idmap),
+            assert the value returned by get_table_row_count method is equal to length of vectors
+        expected: the count is equal to the length of vectors
+        '''
+        thread_num = 8
+        threads = []
+        table = gen_unique_str()
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+        param = {'table_name': table,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.L2}
+        milvus = get_milvus(args["handler"])
+        milvus.connect(uri=uri)
+        milvus.create_table(param)
+        vectors = gen_vectors(nb, dim)
+        def add(thread_i):
+            logging.getLogger().info("In thread-%d" % thread_i)
+            milvus = get_milvus()
+            milvus.connect(uri=uri)
+            status, result = milvus.add_vectors(table, records=vectors)
+            assert status.OK()
+            status = milvus.flush([table])
+            assert status.OK()
+        for i in range(thread_num):
+            x = threading.Thread(target=add, args=(i, ))
+            threads.append(x)
+            x.start()
+        for th in threads:
+            th.join()
+        status, res = milvus.get_table_row_count(table)
+        assert res == thread_num * nb
 
     def test_add_vector_multi_tables(self, connect):
         '''
