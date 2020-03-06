@@ -19,7 +19,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
@@ -29,6 +28,8 @@
 #include <vector>
 
 #include "config/YamlConfigMgr.h"
+#include "server/Config.h"
+#include "server/DBWrapper.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
@@ -131,6 +132,9 @@ Config::ValidateConfig() {
     /* db config */
     std::string db_backend_url;
     CONFIG_CHECK(GetDBConfigBackendUrl(db_backend_url));
+
+    std::string db_preload_table;
+    CONFIG_CHECK(GetDBConfigPreloadTable(db_preload_table));
 
     int64_t db_archive_disk_threshold;
     CONFIG_CHECK(GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold));
@@ -257,6 +261,7 @@ Config::ResetDefaultConfig() {
 
     /* db config */
     CONFIG_CHECK(SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT));
+    CONFIG_CHECK(SetDBConfigPreloadTable(CONFIG_DB_PRELOAD_TABLE_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
 
@@ -324,9 +329,10 @@ Config::GetConfigCli(std::string& value, const std::string& parent_key, const st
 
 Status
 Config::SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value) {
+    std::string invalid_node_str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
+
     if (!ConfigNodeValid(parent_key, child_key)) {
-        std::string str = "Config node invalid: " + parent_key + CONFIG_NODE_DELIMITER + child_key;
-        return Status(SERVER_UNEXPECTED_ERROR, str);
+        return Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
     }
     auto status = Status::OK();
     if (parent_key == CONFIG_SERVER) {
@@ -340,10 +346,16 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetServerConfigTimeZone(value);
         } else if (child_key == CONFIG_SERVER_WEB_PORT) {
             status = SetServerConfigWebPort(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_DB) {
         if (child_key == CONFIG_DB_BACKEND_URL) {
             status = SetDBConfigBackendUrl(value);
+        } else if (child_key == CONFIG_DB_PRELOAD_TABLE) {
+            status = SetDBConfigPreloadTable(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_STORAGE) {
         if (child_key == CONFIG_STORAGE_PRIMARY_PATH) {
@@ -362,6 +374,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetStorageConfigS3SecretKey(value);
         } else if (child_key == CONFIG_STORAGE_S3_BUCKET) {
             status = SetStorageConfigS3Bucket(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_METRIC) {
         if (child_key == CONFIG_METRIC_ENABLE_MONITOR) {
@@ -370,6 +384,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetMetricConfigAddress(value);
         } else if (child_key == CONFIG_METRIC_PORT) {
             status = SetMetricConfigPort(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_CACHE) {
         if (child_key == CONFIG_CACHE_CPU_CACHE_CAPACITY) {
@@ -380,6 +396,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetCacheConfigCacheInsertData(value);
         } else if (child_key == CONFIG_CACHE_INSERT_BUFFER_SIZE) {
             status = SetCacheConfigInsertBufferSize(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     } else if (parent_key == CONFIG_ENGINE) {
         if (child_key == CONFIG_ENGINE_USE_BLAS_THRESHOLD) {
@@ -392,6 +410,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         } else if (child_key == CONFIG_ENGINE_GPU_SEARCH_THRESHOLD) {
             status = SetEngineConfigGpuSearchThreshold(value);
 #endif
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
 #ifdef MILVUS_GPU_VERSION
     } else if (parent_key == CONFIG_GPU_RESOURCE) {
@@ -405,6 +425,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetGpuResourceConfigSearchResources(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
             status = SetGpuResourceConfigBuildIndexResources(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
 #endif
     } else if (parent_key == CONFIG_TRACING) {
@@ -418,6 +440,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetWalConfigBufferSize(value);
         } else if (child_key == CONFIG_WAL_WAL_PATH) {
             status = SetWalConfigWalPath(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
     }
 
@@ -736,6 +760,28 @@ Config::CheckDBConfigBackendUrl(const std::string& value) {
             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
         return Status(SERVER_INVALID_ARGUMENT, "invalid db_backend_url: " + value);
     }
+    return Status::OK();
+}
+
+Status
+Config::CheckDBConfigPreloadTable(const std::string& value) {
+    if (value.empty() || value == "*") {
+        return Status::OK();
+    }
+
+    std::vector<std::string> tables;
+    StringHelpFunctions::SplitStringByDelimeter(value, ",", tables);
+    for (auto& table : tables) {
+        if (!ValidationUtil::ValidateTableName(table).ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid table name: " + table);
+        }
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasNativeTable(table, exist);
+        if (!(status.ok() && exist)) {
+            return Status(SERVER_TABLE_NOT_EXIST, "Table " + table + " not exist");
+        }
+    }
+
     return Status::OK();
 }
 
@@ -1776,6 +1822,12 @@ Status
 Config::SetDBConfigBackendUrl(const std::string& value) {
     CONFIG_CHECK(CheckDBConfigBackendUrl(value));
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
+}
+
+Status
+Config::SetDBConfigPreloadTable(const std::string& value) {
+    CONFIG_CHECK(CheckDBConfigPreloadTable(value));
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, value);
 }
 
 Status
