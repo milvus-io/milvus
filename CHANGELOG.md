@@ -184,6 +184,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#634 FAISS GPU version is compiled with O0
 -   \#737 Refactor server module to separate Grpc from server handler and scheduler
 
+
 ## Task
 
 # Milvus 0.5.3 (2019-11-13)
