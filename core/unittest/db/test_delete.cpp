@@ -634,6 +634,10 @@ TEST_F(CompactTest, compact_with_index) {
     stat = db_->Compact(GetTableName());
     ASSERT_TRUE(stat.ok());
 
+    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, nb - ids_to_delete.size());
+
     milvus::engine::TableIndex table_index;
     stat = db_->DescribeIndex(GetTableName(), table_index);
     ASSERT_TRUE(stat.ok());
