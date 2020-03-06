@@ -84,7 +84,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
 -   \#1480 Add return code for AVX512 selection
-
+-   \#1537 Optimize raw vector and uids read/write
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat
