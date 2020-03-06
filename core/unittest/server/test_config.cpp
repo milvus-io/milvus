@@ -851,10 +851,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("ValidationUtil.GetGpuMemory.return_error");
 
-    fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
-    s = config.GetCacheConfigCpuCacheCapacity(value);
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_insert_buffer_size_fail");
+    // fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
+    // s = config.GetCacheConfigCpuCacheCapacity(value);
+    // ASSERT_FALSE(s.ok());
+    // fiu_disable("check_config_insert_buffer_size_fail");
 
     fiu_enable("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", 1, NULL, 0);
     s = config.GetCacheConfigCpuCacheCapacity(value);
