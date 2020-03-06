@@ -429,6 +429,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
             auto vectors_uids = vectors->GetUids();
             index_->SetUids(vectors_uids);
+            ENGINE_LOG_DEBUG << "set uids " << index_->GetUids().size() << " for index " << location_;
 
             auto vectors_data = vectors->GetData();
 
@@ -508,6 +509,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     std::vector<segment::doc_id_t> uids;
                     segment_reader_ptr->LoadUids(uids);
                     index_->SetUids(uids);
+                    ENGINE_LOG_DEBUG << "set uids " << index_->GetUids().size() << " for index " << location_;
 
                     ENGINE_LOG_DEBUG << "Finished loading index file from segment " << segment_dir;
                 }
@@ -738,8 +740,14 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+        std::vector<segment::doc_id_t> uids = from_index->GetUids();
+        to_index->SetUids(uids);
+        ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
     } else if (bin_from_index) {
         status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
+        std::vector<segment::doc_id_t> uids = from_index->GetUids();
+        to_index->SetUids(uids);
+        ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
     }
     if (!status.ok()) {
         throw Exception(DB_ERROR, status.message());
@@ -843,6 +851,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     rc.RecordSection("search done");
 
     // map offsets to ids
+    ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
     MapUids(index_->GetUids(), labels, n * k);
 
     rc.RecordSection("map uids " + std::to_string(n * k));
@@ -886,6 +895,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
     rc.RecordSection("search done");
 
     // map offsets to ids
+    ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
     MapUids(index_->GetUids(), labels, n * k);
 
     rc.RecordSection("map uids " + std::to_string(n * k));
@@ -971,6 +981,7 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         rc.RecordSection("search done");
 
         // map offsets to ids
+        ENGINE_LOG_DEBUG << "get uids " << index_->GetUids().size() << " from index " << location_;
         MapUids(uids, labels, offsets.size() * k);
 
         rc.RecordSection("map uids " + std::to_string(offsets.size() * k));
