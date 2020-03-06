@@ -25,7 +25,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1152 Error log output continuously after server start
 -   \#1211 Server down caused by searching with index_type: HNSW
 -   \#1240 Update license declaration
--   \#1298 Unittest failed when on CPU2GPU case
+-   \#1298 Unit test failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
 -   \#1429 Server crashed when searching vectors using GPU
 -   \#1476 Fix vectors results bug when getting vectors from segments
