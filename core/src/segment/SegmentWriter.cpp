@@ -243,9 +243,11 @@ size_t
 SegmentWriter::Size() {
     // TODO(zhiru): switch to actual directory size
     size_t ret = segment_ptr_->vectors_ptr_->Size();
+    /*
     if (segment_ptr_->id_bloom_filter_ptr_) {
         ret += segment_ptr_->id_bloom_filter_ptr_->Size();
     }
+     */
     return ret;
 }
 
