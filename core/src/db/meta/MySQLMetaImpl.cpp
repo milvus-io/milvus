@@ -37,6 +37,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -672,7 +673,16 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.index_file_size_ = table_schema.index_file_size_;
-        file_schema.engine_type_ = table_schema.engine_type_;
+
+        if (file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW ||
+            file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW_MERGE) {
+            file_schema.engine_type_ = server::ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)
+                                           ? (int32_t)EngineType::FAISS_BIN_IDMAP
+                                           : (int32_t)EngineType::FAISS_IDMAP;
+        } else {
+            file_schema.engine_type_ = table_schema.engine_type_;
+        }
+
         file_schema.nlist_ = table_schema.nlist_;
         file_schema.metric_type_ = table_schema.metric_type_;
 
