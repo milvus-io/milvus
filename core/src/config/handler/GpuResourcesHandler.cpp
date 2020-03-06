@@ -32,9 +32,11 @@ GpuResourcesHandler::OnGpuEnableChanged(bool enable) {
 
 void
 GpuResourcesHandler::AddGpuEnableListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] AddGpuEnableListener";
     auto& config = server::Config::GetInstance();
 
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        SERVER_LOG_WARNING << "[" + identity_ + "] Call GpuEnableListener";
         auto& config = server::Config::GetInstance();
         bool enable;
         auto status = config.GetGpuResourceConfigEnable(enable);
@@ -49,6 +51,7 @@ GpuResourcesHandler::AddGpuEnableListener() {
 
 void
 GpuResourcesHandler::RemoveGpuEnableListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] RemoveGpuEnableListener";
     server::Config& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
 }

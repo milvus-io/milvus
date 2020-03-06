@@ -63,7 +63,9 @@ CacheConfigHandler::AddCpuCacheCapacityListener() {
 
 void
 CacheConfigHandler::AddInsertBufferSizeListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] AddInsertBufferSizeListener";
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        SERVER_LOG_WARNING << "[" + identity_ + "] Call InsertBufferSizeListener";
         server::Config& config = server::Config::GetInstance();
         int64_t size;
         auto status = config.GetCacheConfigInsertBufferSize(size);
@@ -79,7 +81,9 @@ CacheConfigHandler::AddInsertBufferSizeListener() {
 
 void
 CacheConfigHandler::AddCacheInsertDataListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] AddCacheInsertDataListener";
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        SERVER_LOG_WARNING << "[" + identity_ + "] Call CacheInsertDataListener";
         auto& config = server::Config::GetInstance();
         bool ok;
         auto status = config.GetCacheConfigCacheInsertData(ok);
@@ -101,12 +105,14 @@ CacheConfigHandler::RemoveCpuCacheCapacityListener() {
 
 void
 CacheConfigHandler::RemoveInsertBufferSizeListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] RemoveInsertBufferSizeListener";
     auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_INSERT_BUFFER_SIZE, identity_);
 }
 
 void
 CacheConfigHandler::RemoveCacheInsertDataListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] RemoveCacheInsertDataListener";
     auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_CACHE, server::CONFIG_CACHE_CACHE_INSERT_DATA, identity_);
 }

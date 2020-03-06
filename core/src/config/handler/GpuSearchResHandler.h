@@ -11,8 +11,6 @@
 #ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include "config/handler/GpuResourcesHandler.h"
-
 #include <limits>
 #include <vector>
 

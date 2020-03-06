@@ -23,8 +23,7 @@ GpuBuildResHandler::GpuBuildResHandler() {
 }
 
 GpuBuildResHandler::~GpuBuildResHandler() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
+    RemoveGpuBuildResListener();
 }
 
 ////////////////////////////////////////////////////////////////
@@ -35,8 +34,10 @@ GpuBuildResHandler::OnGpuBuildResChanged(const std::vector<int64_t>& gpus) {
 
 void
 GpuBuildResHandler::AddGpuBuildResListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] AddGpuBuildResListener";
     server::Config& config = server::Config::GetInstance();
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        SERVER_LOG_WARNING << "[" + identity_ + "] Call GpuBuildResListener";
         server::Config& config = server::Config::GetInstance();
         std::vector<int64_t> gpu_ids;
         auto status = config.GetGpuResourceConfigSearchResources(gpu_ids);
@@ -52,6 +53,7 @@ GpuBuildResHandler::AddGpuBuildResListener() {
 
 void
 GpuBuildResHandler::RemoveGpuBuildResListener() {
+    SERVER_LOG_WARNING << "[" + identity_ + "] RemoveGpuBuildResListener";
     auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
 }

@@ -352,6 +352,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetDBConfigBackendUrl(value);
         } else if (child_key == CONFIG_DB_PRELOAD_TABLE) {
             status = SetDBConfigPreloadTable(value);
+        } else if (child_key == CONFIG_DB_AUTO_FLUSH_INTERVAL) {
+            status = SetDBConfigAutoFlushInterval(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -428,7 +430,11 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
         }
 #endif
     } else if (parent_key == CONFIG_TRACING) {
-        return Status(SERVER_UNSUPPORTED_ERROR, "Not support set tracing_config currently");
+        if (child_key == CONFIG_TRACING_JSON_CONFIG_PATH) {
+            status = SetTracingConfigJsonConfigPath(value);
+        } else {
+            status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
+        }
     } else if (parent_key == CONFIG_WAL) {
         if (child_key == CONFIG_WAL_ENABLE) {
             status = SetWalConfigEnable(value);
@@ -769,6 +775,9 @@ Config::CheckDBConfigPreloadTable(const std::string& value) {
 
     std::vector<std::string> tables;
     StringHelpFunctions::SplitStringByDelimeter(value, ",", tables);
+
+    std::unordered_set<std::string> table_set;
+
     for (auto& table : tables) {
         if (!ValidationUtil::ValidateTableName(table).ok()) {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid table name: " + table);
@@ -778,6 +787,14 @@ Config::CheckDBConfigPreloadTable(const std::string& value) {
         if (!(status.ok() && exist)) {
             return Status(SERVER_TABLE_NOT_EXIST, "Table " + table + " not exist");
         }
+        table_set.insert(table);
+    }
+
+    if (table_set.size() != tables.size()) {
+        std::string msg =
+            "Invalid preload tables. "
+            "Possible reason: db_config.preload_table contains duplicate table.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
 
     return Status::OK();
@@ -1258,6 +1275,12 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 }
 
 #endif
+/* tracing config */
+Status
+Config::CheckTracingConfigJsonConfigPath(const std::string& value) {
+    std::string msg = "Invalid wal config: " + value + ". Possible reason: tracing_config.json_config_path is not supported to configure.";
+    return Status(SERVER_INVALID_ARGUMENT, msg);
+}
 
 /* wal config */
 Status
@@ -1835,6 +1858,12 @@ Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
     return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, value);
 }
 
+Status
+Config::SetDBConfigAutoFlushInterval(const std::string& value) {
+    CONFIG_CHECK(CheckDBConfigAutoFlushInterval(value));
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_AUTO_FLUSH_INTERVAL, value);
+}
+
 /* storage config */
 Status
 Config::SetStorageConfigPrimaryPath(const std::string& value) {
@@ -1950,6 +1979,13 @@ Status
 Config::SetEngineConfigUseAVX512(const std::string& value) {
     CONFIG_CHECK(CheckEngineConfigUseAVX512(value));
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_AVX512, value);
+}
+
+/* tracing config */
+Status
+Config::SetTracingConfigJsonConfigPath(const std::string& value) {
+    CONFIG_CHECK(CheckTracingConfigJsonConfigPath(value));
+    return SetConfigValueInMem(CONFIG_TRACING, CONFIG_TRACING_JSON_CONFIG_PATH, value);
 }
 
 /* wal config */
