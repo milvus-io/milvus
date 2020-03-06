@@ -510,7 +510,7 @@ Config::GenUniqueIdentityID(const std::string& identity, std::string& uid) {
 
     // get current timestamp
     auto time_now = std::chrono::system_clock::now();
-    auto duration_in_ms = std::chrono::duration_cast<std::chrono::microseconds>(time_now.time_since_epoch());
+    auto duration_in_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(time_now.time_since_epoch());
     elements.push_back(std::to_string(duration_in_ms.count()));
 
     StringHelpFunctions::MergeStringWithDelimeter(elements, "-", uid);
