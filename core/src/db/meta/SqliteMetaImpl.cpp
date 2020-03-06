@@ -14,6 +14,7 @@
 #include <sqlite_orm.h>
 #include <unistd.h>
 
+#include <fiu-local.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
@@ -22,7 +23,6 @@
 #include <memory>
 #include <set>
 #include <sstream>
-#include <fiu-local.h>
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
@@ -33,6 +33,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace engine {
@@ -372,7 +373,16 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.index_file_size_ = table_schema.index_file_size_;
-        file_schema.engine_type_ = table_schema.engine_type_;
+
+        if (file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW ||
+            file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW_MERGE) {
+            file_schema.engine_type_ = server::ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)
+                                           ? (int32_t)EngineType::FAISS_BIN_IDMAP
+                                           : (int32_t)EngineType::FAISS_IDMAP;
+        } else {
+            file_schema.engine_type_ = table_schema.engine_type_;
+        }
+
         file_schema.nlist_ = table_schema.nlist_;
         file_schema.metric_type_ = table_schema.metric_type_;
 
@@ -447,9 +457,10 @@ SqliteMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
     try {
         table_files.clear();
         auto files = ConnectorPtr->select(
-            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_, &TableFileSchema::file_id_,
-                    &TableFileSchema::file_type_, &TableFileSchema::file_size_, &TableFileSchema::row_count_,
-                    &TableFileSchema::date_, &TableFileSchema::engine_type_, &TableFileSchema::created_on_),
+            columns(&TableFileSchema::id_, &TableFileSchema::table_id_, &TableFileSchema::segment_id_,
+                    &TableFileSchema::file_id_, &TableFileSchema::file_type_, &TableFileSchema::file_size_,
+                    &TableFileSchema::row_count_, &TableFileSchema::date_, &TableFileSchema::engine_type_,
+                    &TableFileSchema::created_on_),
             where(c(&TableFileSchema::segment_id_) == segment_id and
                   c(&TableFileSchema::file_type_) != (int)TableFileSchema::TO_DELETE));
 
@@ -875,13 +886,13 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.ShowPartitions.throw_exception", throw std::exception());
 
-        auto partitions = ConnectorPtr->select(
-            columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
-                    &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
-                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::partition_tag_,
-                    &TableSchema::version_, &TableSchema::table_id_),
-            where(c(&TableSchema::owner_table_) == table_id and
-                  c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+        auto partitions =
+            ConnectorPtr->select(columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_,
+                                         &TableSchema::created_on_, &TableSchema::flag_, &TableSchema::index_file_size_,
+                                         &TableSchema::engine_type_, &TableSchema::nlist_, &TableSchema::metric_type_,
+                                         &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::table_id_),
+                                 where(c(&TableSchema::owner_table_) == table_id and
+                                       c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (size_t i = 0; i < partitions.size(); i++) {
             meta::TableSchema partition_schema;
             partition_schema.id_ = std::get<0>(partitions[i]);
@@ -1185,19 +1196,26 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                 file_schema.metric_type_ = table_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
-                    case (int)TableFileSchema::RAW:++raw_count;
+                    case (int)TableFileSchema::RAW:
+                        ++raw_count;
                         break;
-                    case (int)TableFileSchema::NEW:++new_count;
+                    case (int)TableFileSchema::NEW:
+                        ++new_count;
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:++new_merge_count;
+                    case (int)TableFileSchema::NEW_MERGE:
+                        ++new_merge_count;
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:++new_index_count;
+                    case (int)TableFileSchema::NEW_INDEX:
+                        ++new_index_count;
                         break;
-                    case (int)TableFileSchema::TO_INDEX:++to_index_count;
+                    case (int)TableFileSchema::TO_INDEX:
+                        ++to_index_count;
                         break;
-                    case (int)TableFileSchema::INDEX:++index_count;
+                    case (int)TableFileSchema::INDEX:
+                        ++index_count;
                         break;
-                    case (int)TableFileSchema::BACKUP:++backup_count;
+                    case (int)TableFileSchema::BACKUP:
+                        ++backup_count;
                         break;
                     default:
                         break;
@@ -1214,21 +1232,26 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
             std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)TableFileSchema::RAW:
+                        msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)TableFileSchema::NEW:
+                        msg = msg + " new files:" + std::to_string(new_count);
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:msg = msg + " new_merge files:"
-                                                               + std::to_string(new_merge_count);
+                    case (int)TableFileSchema::NEW_MERGE:
+                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:msg = msg + " new_index files:"
-                                                               + std::to_string(new_index_count);
+                    case (int)TableFileSchema::NEW_INDEX:
+                        msg = msg + " new_index files:" + std::to_string(new_index_count);
                         break;
-                    case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)TableFileSchema::TO_INDEX:
+                        msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)TableFileSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)TableFileSchema::INDEX:
+                        msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)TableFileSchema::BACKUP:
+                        msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
                     default:
                         break;
