@@ -19,6 +19,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <algorithm>
 
 #include <boost/filesystem.hpp>
 
