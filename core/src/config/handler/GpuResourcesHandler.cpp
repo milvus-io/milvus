@@ -31,17 +31,11 @@ GpuResourcesHandler::OnGpuEnableChanged(bool enable) {
 }
 
 void
-GpuResourcesHandler::SetIdentity(const std::string& identity) {
-    server::Config& config = server::Config::GetInstance();
-    config.GenUniqueIdentityID(identity, identity_);
-}
-
-void
 GpuResourcesHandler::AddGpuEnableListener() {
-    server::Config& config = server::Config::GetInstance();
+    auto& config = server::Config::GetInstance();
 
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
+        auto& config = server::Config::GetInstance();
         bool enable;
         auto status = config.GetGpuResourceConfigEnable(enable);
         if (status.ok()) {

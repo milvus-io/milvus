@@ -8,50 +8,54 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include "config/handler/GpuResourcesHandler.h"
+#include <string>
 
-#include <limits>
-#include <vector>
-
-#include "config/handler/GpuResourcesHandler.h"
+#include "config/handler/ConfigHandler.h"
 
 namespace milvus {
 namespace server {
 
-class GpuSearchResHandler : virtual public GpuResourcesHandler {
+class CacheConfigHandler : virtual public ConfigHandler {
  public:
-    GpuSearchResHandler();
+    CacheConfigHandler();
+    ~CacheConfigHandler();
 
-    ~GpuSearchResHandler();
-
- public:
+ protected:
     virtual void
-    OnGpuSearchThresholdChanged(int64_t threshold);
+    OnCpuCacheCapacityChanged(int64_t value);
 
     virtual void
-    OnGpuSearchResChanged(const std::vector<int64_t>& gpus);
+    OnInsertBufferSizeChanged(int64_t value);
+
+    virtual void
+    OnCacheInsertDataChanged(bool value);
 
  protected:
     void
-    AddGpuSearchThresholdListener();
+    AddCpuCacheCapacityListener();
 
     void
-    AddGpuSearchResListener();
+    AddInsertBufferSizeListener();
 
     void
-    RemoveGpuSearchThresholdListener();
+    AddCacheInsertDataListener();
 
     void
-    RemoveGpuSearchResListener();
+    RemoveCpuCacheCapacityListener();
 
- protected:
-    int64_t threshold_ = std::numeric_limits<int64_t>::max();
-    std::vector<int64_t> search_gpus_;
+    void
+    RemoveInsertBufferSizeListener();
+
+    void
+    RemoveCacheInsertDataListener();
+
+ private:
+    int64_t cpu_cache_capacity_ = 4 /*GiB*/;
+    int64_t insert_buffer_size_ = 1 /*GiB*/;
+    bool cache_insert_data_ = false;
 };
 
 }  // namespace server
 }  // namespace milvus
-#endif
