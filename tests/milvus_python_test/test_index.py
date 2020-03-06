@@ -1614,7 +1614,8 @@ class TestCreateIndexParamsInvalid(object):
     def test_create_index_with_invalid_nlist(self, connect, table, get_index_type):
         status, ids = connect.add_vectors(table, vectors)
         status = connect.create_index(table, get_index_type, {"nlist": INVALID_NLIST})
-        assert not status.OK()
+        if get_index_type != IndexType.FLAT:
+            assert not status.OK()
 
     '''
     Test Building index with empty params
