@@ -403,6 +403,12 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
     auto status =
         milvus::server::ValidationUtil::ValidateIndexParams(json_params,
                                                             table_schema,
+                                                            (int32_t)milvus::engine::EngineType::FAISS_IDMAP);
+    ASSERT_TRUE(status.ok());
+
+    status =
+        milvus::server::ValidationUtil::ValidateIndexParams(json_params,
+                                                            table_schema,
                                                             (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT);
     ASSERT_FALSE(status.ok());
 
@@ -417,7 +423,7 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
     status =
         milvus::server::ValidationUtil::ValidateIndexParams(json_params,
                                                             table_schema,
-                                                            (int32_t)milvus::engine::EngineType::FAISS_BIN_IDMAP);
+                                                            (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8);
     ASSERT_FALSE(status.ok());
 
     json_params = {{"nlist", 32}};
@@ -507,39 +513,48 @@ TEST(ValidationUtilTest, VALIDATE_INDEX_PARAMS_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_SEARCH_PARAMS_TEST) {
+    int64_t topk = 10;
     milvus::engine::meta::TableSchema table_schema;
     table_schema.dimension_ = 64;
-    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
 
     milvus::json json_params = {};
-    auto status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IDMAP;
+    auto status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
+    ASSERT_TRUE(status.ok());
+
+    table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_FALSE(status.ok());
 
     json_params = {{"nprobe", "\t"}};
-    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_FALSE(status.ok());
 
     table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_BIN_IDMAP;
     json_params = {{"nprobe", 32}};
-    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_TRUE(status.ok());
 
     table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::NSG_MIX;
     json_params = {};
-    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_FALSE(status.ok());
 
     json_params = {{"search_length", 100}};
-    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_TRUE(status.ok());
 
     table_schema.engine_type_ = (int32_t)milvus::engine::EngineType::HNSW;
     json_params = {};
-    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
+    ASSERT_FALSE(status.ok());
+
+    json_params = {{"ef", 5}};
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_FALSE(status.ok());
 
     json_params = {{"ef", 100}};
-    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema);
+    status = milvus::server::ValidationUtil::ValidateSearchParams(json_params, table_schema, topk);
     ASSERT_TRUE(status.ok());
 }
 

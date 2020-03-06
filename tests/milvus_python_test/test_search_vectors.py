@@ -138,8 +138,7 @@ class TestSearchBase:
         vectors, ids = self.init_data(connect, table)
         query_vec = [vectors[0]]
         top_k = get_top_k
-        params = {"nprobe":1}
-        status, result = connect.search_vectors(table, top_k, query_vec, params=params)
+        status, result = connect.search_vectors(table, top_k, query_vec)
         if top_k <= 2048:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
@@ -516,7 +515,6 @@ class TestSearchBase:
         expected: status ok and the returned vectors should be query_records
         '''
         top_k = 10
-        nprobe = 1
         vectors, ids = self.init_data(connect, table)
         query_vecs = [vectors[0],vectors[55],vectors[99]]
         status, result = connect.search_vectors(table, top_k, query_vecs)
@@ -534,7 +532,6 @@ class TestSearchBase:
         '''
         nb = 2
         top_k = 1
-        nprobe = 1
         vectors, ids = self.init_data(connect, table, nb=nb)
         query_vecs = [[0.50 for i in range(dim)]]
         distance_0 = numpy.linalg.norm(numpy.array(query_vecs[0]) - numpy.array(vectors[0]))
@@ -737,7 +734,6 @@ class TestSearchBase:
         '''
         num = 10
         top_k = 10
-        nprobe = 1
         tables = []
         idx = []
         for i in range(num):
@@ -779,7 +775,6 @@ class TestSearchBase:
         '''
         num = 10
         top_k = 10
-        nprobe = 1
         tables = []
         idx = []
         for i in range(num):
@@ -951,11 +946,16 @@ class TestSearchParamsInvalid(object):
         method: search with top_k
         expected: raise an error, and the connection is normal
         '''
+        index_type = IndexType.IVF_SQ8
+        index_param = {"nlist": 16384}
+        connect.create_index(ip_table, index_type, index_param)
+
         top_k = 1
         nprobe = get_nprobes
         search_param = {"nprobe": nprobe}
         logging.getLogger().info(nprobe)
         query_vecs = gen_vectors(1, dim)
+
         # if isinstance(nprobe, int):
         status, result = connect.search_vectors(ip_table, top_k, query_vecs, params=search_param)
         assert not status.OK()
@@ -986,10 +986,13 @@ class TestSearchParamsInvalid(object):
         connect.create_index(table, index_type, index_param)
 
         top_k = 1
-        nprobe = 16384
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search_vectors(table, top_k, query_vecs, params={})
-        assert not status.OK()
+
+        if index_type == IndexType.FLAT:
+            assert status.OK()
+        else:
+            assert not status.OK()
 
     @pytest.fixture(
         scope="function",
@@ -1011,10 +1014,16 @@ class TestSearchParamsInvalid(object):
         '''
         index_type = get_invalid_searh_param["index_type"]
         search_param = get_invalid_searh_param["search_param"]
-        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+
+        if index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
             connect.create_index(table, index_type, {"nlist": 16384})
+        if (index_type == IndexType.IVF_PQ):
+            connect.create_index(table, index_type, {"nlist": 16384, "m": 10})
         if(index_type == IndexType.HNSW):
-            connect.create_index(table, index_type, {})
+            connect.create_index(table, index_type, {"M": 16, "efConstruction": 500})
+        if (index_type == IndexType.RNSG):
+            connect.create_index(table, index_type, {"search_length": 60, "out_degree": 50, "candidate_pool_size": 300, "knng": 100})
+
         top_k = 1
         query_vecs = gen_vectors(1, dim)
         status, result = connect.search_vectors(table, top_k, query_vecs, params=search_param)

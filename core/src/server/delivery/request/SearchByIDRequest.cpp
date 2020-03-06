@@ -88,7 +88,7 @@ SearchByIDRequest::OnExecute() {
             }
         }
 
-        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema);
+        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
         if (!status.ok()) {
             return status;
         }
