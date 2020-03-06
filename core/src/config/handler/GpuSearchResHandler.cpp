@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "scheduler/optimizer/handler/GpuSearchResHandler.h"
+#include "config/handler/GpuSearchResHandler.h"
 
 #include <string>
 #include <vector>
@@ -17,7 +17,7 @@
 #include "server/Config.h"
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
 GpuSearchResHandler::GpuSearchResHandler() {
     server::Config& config = server::Config::GetInstance();
@@ -31,9 +31,8 @@ GpuSearchResHandler::GpuSearchResHandler() {
 }
 
 GpuSearchResHandler::~GpuSearchResHandler() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
+    RemoveGpuSearchThresholdListener();
+    RemoveGpuSearchResListener();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -83,6 +82,18 @@ GpuSearchResHandler::AddGpuSearchResListener() {
                             lambda_gpu_search_res);
 }
 
-}  // namespace scheduler
+void
+GpuSearchResHandler::RemoveGpuSearchThresholdListener() {
+    server::Config& config = server::Config::GetInstance();
+    config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
+}
+
+void
+GpuSearchResHandler::RemoveGpuSearchResListener() {
+    auto& config = server::Config::GetInstance();
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
+}
+
+}  // namespace server
 }  // namespace milvus
 #endif

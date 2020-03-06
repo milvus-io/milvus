@@ -214,6 +214,8 @@ class Config {
     Status
     CheckDBConfigBackendUrl(const std::string& value);
     Status
+    CheckDBConfigPreloadTable(const std::string& value);
+    Status
     CheckDBConfigArchiveDiskThreshold(const std::string& value);
     Status
     CheckDBConfigArchiveDaysThreshold(const std::string& value);
@@ -421,6 +423,8 @@ class Config {
     /* db config */
     Status
     SetDBConfigBackendUrl(const std::string& value);
+    Status
+    SetDBConfigPreloadTable(const std::string& value);
     Status
     SetDBConfigArchiveDiskThreshold(const std::string& value);
     Status

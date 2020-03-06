@@ -9,13 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "scheduler/optimizer/handler/GpuBuildResHandler.h"
+#include "config/handler/GpuBuildResHandler.h"
 
 #include <string>
 #include <vector>
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
 GpuBuildResHandler::GpuBuildResHandler() {
     server::Config& config = server::Config::GetInstance();
@@ -50,6 +50,12 @@ GpuBuildResHandler::AddGpuBuildResListener() {
                             lambda);
 }
 
-}  // namespace scheduler
+void
+GpuBuildResHandler::RemoveGpuBuildResListener() {
+    auto& config = server::Config::GetInstance();
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
+}
+
+}  // namespace server
 }  // namespace milvus
 #endif
