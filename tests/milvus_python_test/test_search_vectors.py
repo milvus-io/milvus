@@ -138,8 +138,8 @@ class TestSearchBase:
         vectors, ids = self.init_data(connect, table)
         query_vec = [vectors[0]]
         top_k = get_top_k
-        nprobe = 1
-        status, result = connect.search_vectors(table, top_k, query_vec)
+        params = {"nprobe":1}
+        status, result = connect.search_vectors(table, top_k, query_vec, params=params)
         if top_k <= 2048:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
