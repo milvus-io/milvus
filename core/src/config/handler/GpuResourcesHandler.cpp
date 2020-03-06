@@ -10,10 +10,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "scheduler/optimizer/handler/GpuResourcesHandler.h"
+#include "config/handler/GpuResourcesHandler.h"
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
 GpuResourcesHandler::GpuResourcesHandler() {
     server::Config& config = server::Config::GetInstance();
@@ -21,8 +21,7 @@ GpuResourcesHandler::GpuResourcesHandler() {
 }
 
 GpuResourcesHandler::~GpuResourcesHandler() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+    RemoveGpuEnableListener();
 }
 
 //////////////////////////////////////////////////////////////
@@ -54,6 +53,12 @@ GpuResourcesHandler::AddGpuEnableListener() {
     config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda);
 }
 
-}  // namespace scheduler
+void
+GpuResourcesHandler::RemoveGpuEnableListener() {
+    server::Config& config = server::Config::GetInstance();
+    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+}
+
+}  // namespace server
 }  // namespace milvus
 #endif

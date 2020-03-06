@@ -11,12 +11,12 @@
 #ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include "scheduler/optimizer/handler/GpuResourcesHandler.h"
-
 #include <vector>
 
+#include "config/handler/GpuResourcesHandler.h"
+
 namespace milvus {
-namespace scheduler {
+namespace server {
 
 class GpuBuildResHandler : virtual public GpuResourcesHandler {
  public:
@@ -32,10 +32,13 @@ class GpuBuildResHandler : virtual public GpuResourcesHandler {
     void
     AddGpuBuildResListener();
 
+    void
+    RemoveGpuBuildResListener();
+
  protected:
     std::vector<int64_t> build_gpus_;
 };
 
-}  // namespace scheduler
+}  // namespace server
 }  // namespace milvus
 #endif

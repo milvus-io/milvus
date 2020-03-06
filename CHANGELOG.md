@@ -37,6 +37,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1511 Fix big integer cannot pass to server correctly
 -   \#1518 Table count did not match after deleting vectors and compact
 -   \#1530 Set table file with correct engine type in meta
+-   \#1525 Add setter API for config preload_table
 
 ## Feature
 -   \#216 Add CLI to get server info
