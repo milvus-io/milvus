@@ -166,13 +166,13 @@ Status
 ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engine::meta::TableSchema& table_schema,
                                     int32_t index_type) {
     switch (index_type) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP: {
+        case (int32_t)engine::EngineType::FAISS_IDMAP:
+        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
             break;
         }
         case (int32_t)engine::EngineType::FAISS_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 0, 999999, false);
             if (!status.ok()) {
@@ -231,13 +231,13 @@ Status
 ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
                                      int64_t topk) {
     switch (table_schema.engine_type_) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP: {
+        case (int32_t)engine::EngineType::FAISS_IDMAP:
+        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
             break;
         }
         case (int32_t)engine::EngineType::FAISS_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_PQ: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 999999);
