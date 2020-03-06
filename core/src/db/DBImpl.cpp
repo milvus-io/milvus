@@ -380,7 +380,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
         size += engine->PhysicalSize();
         fiu_do_on("DBImpl.PreloadTable.exceed_cache", size = available_size + 1);
         if (size > available_size) {
-            ENGINE_LOG_DEBUG << "Pre-load canceled since cache almost full";
+            ENGINE_LOG_DEBUG << "Pre-load cancelled since cache is almost full";
             return Status(SERVER_CACHE_FULL, "Cache is full");
         } else {
             try {
