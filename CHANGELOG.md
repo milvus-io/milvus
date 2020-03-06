@@ -59,6 +59,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1302 Get all record IDs in a segment by given a segment id
 -   \#1461 Add crud APIs and segments APIs into http module
 -   \#1463 Update config version to 0.2
+-   \#1531 Remove S3 related config
 
 ## Improvement
 -   \#738 Use Openblas / lapack from apt install
