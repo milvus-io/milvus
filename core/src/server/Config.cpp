@@ -9,8 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <cache/CpuCacheMgr.h>
+#include <cache/GpuCacheMgr.h>
+#include <fiu-local.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -28,10 +32,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
-
-#include <cache/CpuCacheMgr.h>
-#include <cache/GpuCacheMgr.h>
-#include <fiu-local.h>
 
 namespace milvus {
 namespace server {
@@ -986,8 +986,9 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
         }
 
-        int64_t buffer_value;
-        CONFIG_CHECK(GetCacheConfigInsertBufferSize(buffer_value));
+        std::string str =
+            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT);
+        int64_t buffer_value = std::stoll(str);
 
         int64_t insert_buffer_size = buffer_value * GB;
         fiu_do_on("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", insert_buffer_size = total_mem + 1);
@@ -1035,9 +1036,13 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
+        std::string str =
+            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
+        int64_t cache_size = std::stoll(str);
+
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if (buffer_size >= total_mem) {
+        if (buffer_size + cache_size >= total_mem) {
             std::string msg = "Invalid insert buffer size: " + value +
                               ". Possible reason: cache_config.insert_buffer_size exceeds system memory.";
             return Status(SERVER_INVALID_ARGUMENT, msg);
