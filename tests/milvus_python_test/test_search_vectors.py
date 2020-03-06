@@ -685,6 +685,46 @@ class TestSearchBase:
         for th in threads:
             th.join()
 
+    @pytest.mark.timeout(30)
+    def _test_search_concurrent_multithreads(self, args):
+        '''
+        target: test concurrent search with multiprocessess
+        method: search with 10 processes, each process uses dependent connection
+        expected: status ok and the returned vectors should be query_records
+        '''
+        nb = 100
+        top_k = 10
+        threads_num = 4
+        threads = []
+        table = gen_unique_str("test_search_concurrent_multiprocessing")
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+        param = {'table_name': table,
+                 'dimension': dim,
+                 'index_type': IndexType.FLAT,
+                 'store_raw_vector': False}
+        # create table
+        milvus = get_milvus(args["handler"])
+        milvus.connect(uri=uri)
+        milvus.create_table(param)
+        vectors, ids = self.init_data(milvus, table, nb=nb)
+        query_vecs = vectors[nb//2:nb]
+        def search(milvus):
+            status, result = milvus.search_vectors(table, top_k, query_vecs)
+            assert len(result) == len(query_vecs)
+            for i in range(len(query_vecs)):
+                assert result[i][0].id in ids
+                assert result[i][0].distance == 0.0
+
+        for i in range(threads_num):
+            milvus = get_milvus(args["handler"])
+            milvus.connect(uri=uri)
+            t = threading.Thread(target=search, args=(milvus, ))
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+
     # TODO: enable
     @pytest.mark.timeout(30)
     def _test_search_concurrent_multiprocessing(self, args):
