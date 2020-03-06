@@ -35,6 +35,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1504 Avoid possible race condition between delete and search 
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
+-   \#1518 Table count did not match after deleting vectors and compact
+-   \#1525 Add setter API for config preload_table
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -57,6 +59,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1302 Get all record IDs in a segment by given a segment id
 -   \#1461 Add crud APIs and segments APIs into http module
 -   \#1463 Update config version to 0.2
+-   \#1531 Remove S3 related config
 
 ## Improvement
 -   \#738 Use Openblas / lapack from apt install
