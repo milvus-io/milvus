@@ -36,6 +36,8 @@ class Server:
         self.router = router
         self.discover = discover
 
+        logger.debug('Init grpc server with max_workers: {}'.format(max_workers))
+
         self.server_impl = grpc.server(
             thread_pool=futures.ThreadPoolExecutor(max_workers=max_workers),
             options=[(cygrpc.ChannelArgKey.max_send_message_length, -1),

@@ -35,7 +35,8 @@ def create_app(testing_config=None):
     grpc_server.init_app(conn_mgr=connect_mgr,
                          tracer=tracer,
                          router=router,
-                         discover=discover)
+                         discover=discover,
+                         max_workers=settings.MAX_WORKERS)
 
     from mishards import exception_handlers
 
