@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "config/handler/GpuBuildResHandler.h"
+#include "config/handler/GpuBuildConfigHandler.h"
 
 #include <string>
 #include <vector>
@@ -17,27 +17,25 @@
 namespace milvus {
 namespace server {
 
-GpuBuildResHandler::GpuBuildResHandler() {
+GpuBuildConfigHandler::GpuBuildConfigHandler() {
     server::Config& config = server::Config::GetInstance();
     config.GetGpuResourceConfigBuildIndexResources(build_gpus_);
 }
 
-GpuBuildResHandler::~GpuBuildResHandler() {
+GpuBuildConfigHandler::~GpuBuildConfigHandler() {
     RemoveGpuBuildResListener();
 }
 
 ////////////////////////////////////////////////////////////////
 void
-GpuBuildResHandler::OnGpuBuildResChanged(const std::vector<int64_t>& gpus) {
+GpuBuildConfigHandler::OnGpuBuildResChanged(const std::vector<int64_t>& gpus) {
     build_gpus_ = gpus;
 }
 
 void
-GpuBuildResHandler::AddGpuBuildResListener() {
-    SERVER_LOG_WARNING << "[" + identity_ + "] AddGpuBuildResListener";
+GpuBuildConfigHandler::AddGpuBuildResListener() {
     server::Config& config = server::Config::GetInstance();
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        SERVER_LOG_WARNING << "[" + identity_ + "] Call GpuBuildResListener";
         server::Config& config = server::Config::GetInstance();
         std::vector<int64_t> gpu_ids;
         auto status = config.GetGpuResourceConfigSearchResources(gpu_ids);
@@ -52,8 +50,7 @@ GpuBuildResHandler::AddGpuBuildResListener() {
 }
 
 void
-GpuBuildResHandler::RemoveGpuBuildResListener() {
-    SERVER_LOG_WARNING << "[" + identity_ + "] RemoveGpuBuildResListener";
+GpuBuildConfigHandler::RemoveGpuBuildResListener() {
     auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
 }

@@ -21,11 +21,11 @@
 namespace milvus {
 namespace server {
 
-class GpuResourcesHandler : virtual public ConfigHandler {
+class GpuConfigHandler : virtual public ConfigHandler {
  public:
-    GpuResourcesHandler();
+    GpuConfigHandler();
 
-    ~GpuResourcesHandler();
+    ~GpuConfigHandler();
 
  protected:
     virtual void

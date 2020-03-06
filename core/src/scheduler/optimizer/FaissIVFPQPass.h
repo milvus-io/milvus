@@ -23,13 +23,13 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/GpuSearchResHandler.h"
+#include "config/handler/GpuSearchConfigHandler.h"
 #include "scheduler/optimizer/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFPQPass : public Pass, public server::GpuSearchResHandler {
+class FaissIVFPQPass : public Pass, public server::GpuSearchConfigHandler {
  public:
     FaissIVFPQPass() = default;
 
