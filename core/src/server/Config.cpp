@@ -986,8 +986,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
         }
 
-        std::string str =
-            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
+        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
         int64_t buffer_value = std::stoll(str);
 
         int64_t insert_buffer_size = buffer_value * GB;
@@ -1036,8 +1035,7 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        std::string str =
-            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
+        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
         int64_t cache_size = std::stoll(str);
 
         uint64_t total_mem = 0, free_mem = 0;
