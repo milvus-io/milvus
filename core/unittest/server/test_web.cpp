@@ -1627,7 +1627,7 @@ TEST_F(WebControllerTest, CONFIG) {
     OString table_name = "milvus_test_webcontroller_test_preload_table";
     GenTable(table_name, 16, 10, "L2");
 
-    OString table_name_s = "milvus_test_webcontroller_test_preload_table";
+    OString table_name_s = "milvus_test_webcontroller_test_preload_table_s";
     GenTable(table_name_s, 16, 10, "L2");
 
     OString body_str = "{\"db_config\": {\"preload_table\": \"" + table_name + "\"}}";

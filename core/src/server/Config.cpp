@@ -262,6 +262,7 @@ Config::ResetDefaultConfig() {
     CONFIG_CHECK(SetDBConfigPreloadTable(CONFIG_DB_PRELOAD_TABLE_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
     CONFIG_CHECK(SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
+    CONFIG_CHECK(SetDBConfigAutoFlushInterval(CONFIG_DB_AUTO_FLUSH_INTERVAL_DEFAULT));
 
     /* storage config */
     CONFIG_CHECK(SetStorageConfigPrimaryPath(CONFIG_STORAGE_PRIMARY_PATH_DEFAULT));
@@ -769,6 +770,8 @@ Config::CheckDBConfigBackendUrl(const std::string& value) {
 
 Status
 Config::CheckDBConfigPreloadTable(const std::string& value) {
+    fiu_return_on("check_config_preload_table_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
     if (value.empty() || value == "*") {
         return Status::OK();
     }
@@ -828,7 +831,10 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string& value) {
 
 Status
 Config::CheckDBConfigAutoFlushInterval(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+    auto exist_error = !ValidationUtil::ValidateStringIsNumber(value).ok();
+    fiu_do_on("check_config_auto_flush_interval_fail", exist_error = true);
+
+    if (exist_error) {
         std::string msg = "Invalid db configuration auto_flush_interval: " + value +
                           ". Possible reason: db.auto_flush_interval is not a natural number.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -1278,7 +1284,8 @@ Config::CheckGpuResourceConfigBuildIndexResources(const std::vector<std::string>
 /* tracing config */
 Status
 Config::CheckTracingConfigJsonConfigPath(const std::string& value) {
-    std::string msg = "Invalid wal config: " + value + ". Possible reason: tracing_config.json_config_path is not supported to configure.";
+    std::string msg = "Invalid wal config: " + value +
+                      ". Possible reason: tracing_config.json_config_path is not supported to configure.";
     return Status(SERVER_INVALID_ARGUMENT, msg);
 }
 
