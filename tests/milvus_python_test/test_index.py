@@ -22,7 +22,7 @@ BUILD_TIMEOUT = 300
 nprobe = 1
 tag = "1970-01-01"
 NLIST = 4046
-INVALID_NLIST = 10000000
+INVALID_NLIST = 100000000
 
 
 class TestIndexBase:
@@ -1622,7 +1622,8 @@ class TestCreateIndexParamsInvalid(object):
     def test_create_index_with_empty_param(self, connect, table, get_index_type):
         logging.getLogger().info(get_index_type)
         status = connect.create_index(table, get_index_type, {})
-        assert not status.OK()
+        if get_index_type != IndexType.FLAT :
+            assert not status.OK()
         status, result = connect.describe_index(table)
         logging.getLogger().info(result)
         assert result._table_name == table
