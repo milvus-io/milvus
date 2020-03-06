@@ -40,8 +40,7 @@ class ValidationUtil {
                         int32_t index_type);
 
     static Status
-    ValidateSearchParams(const milvus::json& search_params,
-                         const engine::meta::TableSchema& table_schema,
+    ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
                          int64_t topk);
 
     static bool

@@ -228,8 +228,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
 }
 
 Status
-ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
-                                     const engine::meta::TableSchema& table_schema,
+ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
                                      int64_t topk) {
     switch (table_schema.engine_type_) {
         case (int32_t)engine::EngineType::FAISS_IDMAP: {
@@ -427,7 +426,8 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
     fiu_do_on("ValidationUtil.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
-        case 1:return Status::OK();
+        case 1:
+            return Status::OK();
         case 0: {
             std::string msg = "Invalid IP address: " + ip_address;
             SERVER_LOG_ERROR << msg;
