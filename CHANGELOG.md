@@ -27,7 +27,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1240 Update license declaration
 -   \#1298 Unit test failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
--   \#1429 Server crashed when searching vectors using GPU
+-   \#1429 Server crashed when searching vectors with GPU
 -   \#1476 Fix vectors results bug when getting vectors from segments
 -   \#1484 Index type changed to IDMAP after compacted 
 -   \#1499 Fix duplicated ID number issue
