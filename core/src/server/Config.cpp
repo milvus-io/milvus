@@ -1855,7 +1855,8 @@ Config::SetDBConfigBackendUrl(const std::string& value) {
 Status
 Config::SetDBConfigPreloadTable(const std::string& value) {
     CONFIG_CHECK(CheckDBConfigPreloadTable(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, value);
+    std::string cor_value = value == "*" ? "\'*\'" : value;
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, cor_value);
 }
 
 Status
