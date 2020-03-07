@@ -811,9 +811,9 @@ class TestGPUResourceConfig:
         method: call set_config with invalid child values
         expected: status not ok
         '''
-        self.reset_configs(connect)
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
+        self.reset_configs(connect)
         for i in [-1, "10", "1\n", "1\t"]:
             status, reply = connect.set_config("gpu_resource_config", "cache_capacity", i)
             assert not status.OK()
