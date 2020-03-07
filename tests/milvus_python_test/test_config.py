@@ -10,7 +10,13 @@ from utils import *
 import ujson
 
 
+dim = 128
+index_file_size = 10
 CONFIG_TIMEOUT = 80
+nprobe = 1
+top_k = 1
+tag = "1970-01-01"
+nb = 6000
 
 
 class TestCacheConfig:
@@ -929,9 +935,10 @@ class TestGPUResourceConfig:
         '''
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
-        for i in ["gpu0", "gpu0,gpu1", "gpu1,gpu0"]:
-            status, reply = connect.set_config("gpu_resource_config", "build_index_resources", i)
-            assert status.OK()
+        status, reply = connect.set_config("gpu_resource_config", "build_index_resources", "gpu0")
+        assert status.OK()
+        status, config_value = connect.get_config("gpu_resource_config", "build_index_resources")
+        assert config_value == "gpu0"
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_build_index_resources_invalid_values(self, connect, table):
