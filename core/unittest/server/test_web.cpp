@@ -245,7 +245,7 @@ class WebHandlerTest : public testing::Test {
         collection_dto->index_file_size = index_size;
         collection_dto->metric_type = metric.c_str();
 
-        auto status_dto = handler->CreateTable(collection_dto);
+        handler->CreateTable(collection_dto);
     }
 
  protected:
