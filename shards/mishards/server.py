@@ -1,4 +1,5 @@
 import logging
+import sys
 import grpc
 import time
 import socket
@@ -85,7 +86,7 @@ class Server:
     def on_pre_run(self):
         for handler in self.pre_run_handlers:
             handler()
-        self.discover.start()
+        return self.discover.start()
 
     def start(self, port=None):
         handler_class = self.decorate_handler(ServiceHandler)
@@ -99,7 +100,11 @@ class Server:
     def run(self, port):
         logger.info('Milvus server start ......')
         port = port or self.port
-        self.on_pre_run()
+        ok = self.on_pre_run()
+
+        if not ok:
+            logger.error('Terminate server due to error found in on_pre_run')
+            sys.exit(1)
 
         self.start(port)
         logger.info('Listening on port {}'.format(port))

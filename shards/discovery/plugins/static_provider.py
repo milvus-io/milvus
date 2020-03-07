@@ -6,6 +6,7 @@ if __name__ == '__main__':
 import logging
 import socket
 from environs import Env
+from mishards.exceptions import ConnectionConnectError
 
 logger = logging.getLogger(__name__)
 env = Env()
@@ -32,19 +33,33 @@ class StaticDiscovery(object):
         self.hosts = [resolve_address(host, self.port) for host in hosts]
 
     def start(self):
+        ok = True
         for host in self.hosts:
-            self.add_pod(host, host)
+            ok &= self.add_pod(host, host)
+            if not ok: break
+        if ok and len(self.hosts) == 0:
+            logger.error('No address is specified')
+            ok = False
+        return ok
 
     def stop(self):
         for host in self.hosts:
             self.delete_pod(host)
 
     def add_pod(self, name, addr):
-        self.conn_mgr.register(name, 'tcp://{}'.format(addr))
-        logger.debug('StaticDiscovery Add Static Address: {}'.format(addr))
+        ok = False
+        try:
+            ok = self.conn_mgr.register(name, 'tcp://{}'.format(addr))
+        except ConnectionConnectError as exc:
+            ok = False
+            logger.error('Connection error to: {}'.format(addr))
+
+        ok and logger.debug('StaticDiscovery Add Static Address: {}'.format(addr))
+        return ok
 
     def delete_pod(self, name):
-        self.conn_mgr.unregister(name)
+        ok = self.conn_mgr.unregister(name)
+        return ok
 
     @classmethod
     def Create(cls, conn_mgr, plugin_config, **kwargs):

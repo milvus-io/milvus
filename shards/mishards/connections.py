@@ -126,6 +126,14 @@ class ConnectionMgr:
     def on_new_meta(self, name, url):
         logger.info('Register Connection: name={};url={}'.format(name, url))
         self.metas[name] = url
+        conn = self.conn(name, metadata=None)
+        conn.on_connect(metadata=None)
+        status, _ = conn.conn.server_version()
+        if not status.OK():
+            logger.error('Cannot connect to newly added address: {}. Remove it now'.format(name))
+            self.unregister(name)
+            return False
+        return True
 
     def on_duplicate_meta(self, name, url):
         if self.metas[name] == url:
@@ -135,19 +143,22 @@ class ConnectionMgr:
 
     def on_same_meta(self, name, url):
         # logger.warning('Register same meta: {}:{}'.format(name, url))
-        pass
+        return True
 
     def on_diff_meta(self, name, url):
         logger.warning('Received {} with diff url={}'.format(name, url))
         self.metas[name] = url
         self.conns[name] = {}
+        return True
 
     def on_unregister_meta(self, name, url):
         logger.info('Unregister name={};url={}'.format(name, url))
         self.conns.pop(name, None)
+        return True
 
     def on_nonexisted_meta(self, name):
         logger.warning('Non-existed meta: {}'.format(name))
+        return False
 
     def register(self, name, url):
         meta = self.metas.get(name)
