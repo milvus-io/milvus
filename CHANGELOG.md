@@ -20,7 +20,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1066 optimize http insert and search speed
 -   \#1067 Add binary vectors support in http server
 -   \#1075 Improve error message when page size or offset is illegal
--   \#1082 check page_size or offset value to avoid float
+-   \#1082 Check page_size or offset value to avoid float
 -   \#1115 http server support load table into memory
 -   \#1152 Error log output continuously after server start
 -   \#1211 Server down caused by searching with index_type: HNSW
