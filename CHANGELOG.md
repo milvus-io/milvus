@@ -32,7 +32,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1484 Index type changed to IDMAP after compacted
 -   \#1491 Server crashed during adding vectors
 -   \#1499 Fix duplicated ID number issue
--   \#1504 Avoid possible race condition between delete and search 
+-   \#1504 Avoid possible race condition between delete and search
 -   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
