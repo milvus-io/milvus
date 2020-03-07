@@ -14,9 +14,9 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
+#include "config/Config.h"
 #include "faiss/FaissHook.h"
 #include "scheduler/Utils.h"
-#include "server/Config.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>

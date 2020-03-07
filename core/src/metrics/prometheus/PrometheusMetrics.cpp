@@ -11,8 +11,8 @@
 
 #include "metrics/prometheus/PrometheusMetrics.h"
 #include "cache/GpuCacheMgr.h"
+#include "config/Config.h"
 #include "metrics/SystemInfo.h"
-#include "server/Config.h"
 #include "utils/Log.h"
 
 #include <string>

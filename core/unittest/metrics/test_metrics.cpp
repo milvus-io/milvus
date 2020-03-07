@@ -21,7 +21,7 @@
 #define private public
 
 #include "cache/CpuCacheMgr.h"
-#include "server/Config.h"
+#include "config/Config.h"
 #include "metrics/utils.h"
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"

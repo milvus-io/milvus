@@ -12,7 +12,7 @@
 #include "scheduler/SchedInst.h"
 #include "ResourceFactory.h"
 #include "Utils.h"
-#include "server/Config.h"
+#include "config/Config.h"
 
 #include <fiu-local.h>
 #include <set>

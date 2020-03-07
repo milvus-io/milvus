@@ -12,7 +12,7 @@
 #include "utils/CommonUtil.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
-#include "server/Config.h"
+#include "config/Config.h"
 #include "utils/Log.h"
 
 #include <dirent.h>

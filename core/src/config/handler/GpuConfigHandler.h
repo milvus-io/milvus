@@ -15,8 +15,8 @@
 #include <limits>
 #include <string>
 
+#include "config/Config.h"
 #include "config/handler/ConfigHandler.h"
-#include "server/Config.h"
 
 namespace milvus {
 namespace server {

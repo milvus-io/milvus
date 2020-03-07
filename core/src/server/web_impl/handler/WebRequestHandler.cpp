@@ -17,8 +17,8 @@
 #include <string>
 #include <vector>
 
+#include "config/Config.h"
 #include "metrics/SystemInfo.h"
-#include "server/Config.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"

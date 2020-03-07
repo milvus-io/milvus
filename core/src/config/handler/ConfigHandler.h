@@ -13,7 +13,7 @@
 
 #include <string>
 
-#include "server/Config.h"
+#include "config/Config.h"
 #include "utils/Log.h"
 
 namespace milvus {

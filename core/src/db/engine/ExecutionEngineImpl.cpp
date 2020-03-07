@@ -20,11 +20,11 @@
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "config/Config.h"
 #include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
-#include "server/Config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"

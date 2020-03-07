@@ -11,11 +11,10 @@
 
 #include <list>
 #include <random>
-#include "../Algorithm.h"
-#include "Action.h"
+#include "cache/GpuCacheMgr.h"
+#include "scheduler/Algorithm.h"
+#include "scheduler/action/Action.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
-#include "src/cache/GpuCacheMgr.h"
-#include "src/server/Config.h"
 
 namespace milvus {
 namespace scheduler {
