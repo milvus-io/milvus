@@ -700,7 +700,7 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
 
     milvus::engine::TableIndex index;
     index.metric_type_ = 2;
-    index.nlist_ = 1234;
+    index.extra_params_ = {{"nlist", 1234}};
     index.engine_type_ = 3;
     status = impl_->UpdateTableIndex(table_id, index);
     ASSERT_TRUE(status.ok());
@@ -740,14 +740,13 @@ TEST_F(MySqlMetaTest, INDEX_TEST) {
     milvus::engine::TableIndex index_out;
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
-    ASSERT_EQ(index_out.nlist_, index.nlist_);
+    ASSERT_EQ(index_out.extra_params_, index.extra_params_);
     ASSERT_EQ(index_out.engine_type_, index.engine_type_);
 
     status = impl_->DropTableIndex(table_id);
     ASSERT_TRUE(status.ok());
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
-    ASSERT_NE(index_out.nlist_, index.nlist_);
     ASSERT_NE(index_out.engine_type_, index.engine_type_);
 
     FIU_ENABLE_FIU("MySQLMetaImpl.DescribeTableIndex.null_connection");

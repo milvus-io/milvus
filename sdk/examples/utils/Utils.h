@@ -12,11 +12,14 @@
 #pragma once
 
 #include "MilvusApi.h"
+#include "thirdparty/nlohmann/json.hpp"
 
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+using JSON = nlohmann::json;
 
 namespace milvus_sdk {
 

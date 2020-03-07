@@ -43,22 +43,22 @@ namespace engine {
 namespace {
 
 Status
-MappingMetricType(MetricType metric_type, knowhere::METRICTYPE& kw_type) {
+MappingMetricType(MetricType metric_type, milvus::json& conf) {
     switch (metric_type) {
         case MetricType::IP:
-            kw_type = knowhere::METRICTYPE::IP;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
             break;
         case MetricType::L2:
-            kw_type = knowhere::METRICTYPE::L2;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
             break;
         case MetricType::HAMMING:
-            kw_type = knowhere::METRICTYPE::HAMMING;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::HAMMING;
             break;
         case MetricType::JACCARD:
-            kw_type = knowhere::METRICTYPE::JACCARD;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::JACCARD;
             break;
         case MetricType::TANIMOTO:
-            kw_type = knowhere::METRICTYPE::TANIMOTO;
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
             break;
         default:
             return Status(DB_ERROR, "Unsupported metric type");
@@ -94,8 +94,12 @@ class CachedQuantizer : public cache::DataObj {
 };
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, int32_t nlist)
-    : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
+                                         MetricType metric_type, const milvus::json& index_params)
+    : location_(location),
+      dim_(dimension),
+      index_type_(index_type),
+      metric_type_(metric_type),
+      index_params_(index_params) {
     EngineType tmp_index_type = server::ValidationUtil::IsBinaryMetricType((int32_t)metric_type)
                                     ? EngineType::FAISS_BIN_IDMAP
                                     : EngineType::FAISS_IDMAP;
@@ -104,16 +108,15 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    TempMetaConf temp_conf;
-    temp_conf.gpu_id = gpu_num_;
-    temp_conf.dim = dimension;
-    auto status = MappingMetricType(metric_type, temp_conf.metric_type);
-    if (!status.ok()) {
-        throw Exception(DB_ERROR, status.message());
-    }
-
+    milvus::json conf = index_params;
+    conf[knowhere::meta::DEVICEID] = gpu_num_;
+    conf[knowhere::meta::DIM] = dimension;
+    MappingMetricType(metric_type, conf);
+    ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->Match(temp_conf);
+    if (!adapter->CheckTrain(conf)) {
+        throw Exception(DB_ERROR, "Illegal index params");
+    }
 
     ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
     if (auto bf_index = std::dynamic_pointer_cast<BFIndex>(index_)) {
@@ -127,8 +130,12 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, int32_t nlist)
-    : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
+                                         MetricType metric_type, const milvus::json& index_params)
+    : index_(std::move(index)),
+      location_(location),
+      index_type_(index_type),
+      metric_type_(metric_type),
+      index_params_(index_params) {
 }
 
 VecIndexPtr
@@ -273,10 +280,9 @@ ExecutionEngineImpl::HybridLoad() const {
         auto best_index = std::distance(all_free_mem.begin(), max_e);
         auto best_device_id = gpus[best_index];
 
-        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-        quantizer_conf->mode = 1;
-        quantizer_conf->gpu_id = best_device_id;
+        milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
         auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        ENGINE_LOG_DEBUG << "Quantizer params: " << quantizer_conf.dump();
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
         }
@@ -403,19 +409,15 @@ ExecutionEngineImpl::Load(bool to_cache) {
         if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
-
-            TempMetaConf temp_conf;
-            temp_conf.gpu_id = gpu_num_;
-            temp_conf.dim = dim_;
-            auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
-            if (!status.ok()) {
-                return status;
+            milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
+            MappingMetricType(metric_type_, conf);
+            auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+            ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
+            if (!adapter->CheckTrain(conf)) {
+                throw Exception(DB_ERROR, "Illegal index params");
             }
 
-            auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-            auto conf = adapter->Match(temp_conf);
-
-            status = segment_reader_ptr->Load();
+            auto status = segment_reader_ptr->Load();
             if (!status.ok()) {
                 std::string msg = "Failed to load segment from " + location_;
                 ENGINE_LOG_ERROR << msg;
@@ -453,7 +455,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
 
-                int64_t index_size = vectors->GetCount() * conf->d * sizeof(float);
+                int64_t index_size = vectors->GetCount() * dim_ * sizeof(float);
                 int64_t bitset_size = vectors->GetCount() / 8;
                 index_->set_size(index_size + bitset_size);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
@@ -465,7 +467,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                                                                                      vectors_data.data(), Config());
                 status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
 
-                int64_t index_size = vectors->GetCount() * conf->d * sizeof(uint8_t);
+                int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t);
                 int64_t bitset_size = vectors->GetCount() / 8;
                 index_->set_size(index_size + bitset_size);
             }
@@ -548,9 +550,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 
             if (device_id != NOT_FOUND) {
                 // cache hit
-                auto config = std::make_shared<knowhere::QuantizerCfg>();
-                config->gpu_id = device_id;
-                config->mode = 2;
+                milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
                 auto new_index = index_->LoadData(quantizer, config);
                 index_ = new_index;
             }
@@ -723,19 +723,18 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
-    TempMetaConf temp_conf;
-    temp_conf.gpu_id = gpu_num_;
-    temp_conf.dim = Dimension();
-    temp_conf.nlist = nlist_;
-    temp_conf.size = Count();
-    auto status = MappingMetricType(metric_type_, temp_conf.metric_type);
-    if (!status.ok()) {
-        throw Exception(DB_ERROR, status.message());
-    }
-
+    milvus::json conf = index_params_;
+    conf[knowhere::meta::DIM] = Dimension();
+    conf[knowhere::meta::ROWS] = Count();
+    conf[knowhere::meta::DEVICEID] = gpu_num_;
+    MappingMetricType(metric_type_, conf);
+    ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
-    auto conf = adapter->Match(temp_conf);
-
+    if (!adapter->CheckTrain(conf)) {
+        throw Exception(DB_ERROR, "Illegal index params");
+    }
+    ENGINE_LOG_DEBUG << "Index config: " << conf.dump();
+    auto status = Status::OK();
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
     } else if (bin_from_index) {
@@ -746,7 +745,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     }
 
     ENGINE_LOG_DEBUG << "Finish build index file: " << location << " size: " << to_index->Size();
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
 
 // map offsets to ids
@@ -761,8 +760,8 @@ MapUids(const std::vector<segment::doc_id_t>& uids, int64_t* labels, size_t num)
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
-                            bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances,
+                            int64_t* labels, bool hybrid) {
 #if 0
     if (index_type_ == EngineType::FAISS_IVFSQ8H) {
         if (!hybrid) {
@@ -786,9 +785,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 
                 if (device_id != NOT_FOUND) {
                     // cache hit
-                    auto config = std::make_shared<knowhere::QuantizerCfg>();
-                    config->gpu_id = device_id;
-                    config->mode = 2;
+                    milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
                     auto new_index = index_->LoadData(quantizer, config);
                     index_ = new_index;
                 }
@@ -824,15 +821,13 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [k] " << k << " [nprobe] " << nprobe;
-
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-    temp_conf.k = k;
-    temp_conf.nprobe = nprobe;
-
+    milvus::json conf = extra_params;
+    conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
+    if (!adapter->CheckSearch(conf, index_->GetType())) {
+        throw Exception(DB_ERROR, "Illegal search params");
+    }
 
     if (hybrid) {
         HybridLoad();
@@ -858,8 +853,8 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t nprobe, float* distances,
-                            int64_t* labels, bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params,
+                            float* distances, int64_t* labels, bool hybrid) {
     TimeRecorder rc("ExecutionEngineImpl::Search uint8");
 
     if (index_ == nullptr) {
@@ -867,15 +862,13 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
-
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-    temp_conf.k = k;
-    temp_conf.nprobe = nprobe;
-
+    milvus::json conf = extra_params;
+    conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
+    if (!adapter->CheckSearch(conf, index_->GetType())) {
+        throw Exception(DB_ERROR, "Illegal search params");
+    }
 
     if (hybrid) {
         HybridLoad();
@@ -901,8 +894,8 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, int64_t n
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, int64_t nprobe, float* distances,
-                            int64_t* labels, bool hybrid) {
+ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t k, const milvus::json& extra_params,
+                            float* distances, int64_t* labels, bool hybrid) {
     TimeRecorder rc("ExecutionEngineImpl::Search vector of ids");
 
     if (index_ == nullptr) {
@@ -910,15 +903,13 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
         return Status(DB_ERROR, "index is null");
     }
 
-    ENGINE_LOG_DEBUG << "Search by ids Params: [k]  " << k << " [nprobe] " << nprobe;
-
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-    temp_conf.k = k;
-    temp_conf.nprobe = nprobe;
-
+    milvus::json conf = extra_params;
+    conf[knowhere::meta::TOPK] = k;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+    ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
+    if (!adapter->CheckSearch(conf, index_->GetType())) {
+        throw Exception(DB_ERROR, "Illegal search params");
+    }
 
     if (hybrid) {
         HybridLoad();
@@ -993,19 +984,13 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, float* vector, bool hybrid
         return Status(DB_ERROR, "index is null");
     }
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
-
     if (hybrid) {
         HybridLoad();
     }
 
     // Only one id for now
     std::vector<int64_t> ids{id};
-    auto status = index_->GetVectorById(1, ids.data(), vector, conf);
+    auto status = index_->GetVectorById(1, ids.data(), vector, milvus::json());
 
     if (hybrid) {
         HybridUnset();
@@ -1026,19 +1011,13 @@ ExecutionEngineImpl::GetVectorByID(const int64_t& id, uint8_t* vector, bool hybr
 
     ENGINE_LOG_DEBUG << "Get binary vector by id:  " << id;
 
-    // TODO(linxj): remove here. Get conf from function
-    TempMetaConf temp_conf;
-
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
-    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
-
     if (hybrid) {
         HybridLoad();
     }
 
     // Only one id for now
     std::vector<int64_t> ids{id};
-    auto status = index_->GetVectorById(1, ids.data(), vector, conf);
+    auto status = index_->GetVectorById(1, ids.data(), vector, milvus::json());
 
     if (hybrid) {
         HybridUnset();
@@ -1075,7 +1054,7 @@ ExecutionEngineImpl::Init() {
     std::vector<int64_t> gpu_ids;
     Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
     if (!s.ok()) {
-        gpu_num_ = knowhere::INVALID_VALUE;
+        gpu_num_ = -1;
         return s;
     }
     for (auto id : gpu_ids) {

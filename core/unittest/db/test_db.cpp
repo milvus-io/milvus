@@ -186,16 +186,20 @@ TEST_F(DBTest, DB_TEST) {
         std::stringstream ss;
         uint64_t count = 0;
         uint64_t prev_count = 0;
+        milvus::json json_params = {{"nprobe", 10}};
 
         for (auto j = 0; j < 10; ++j) {
             ss.str("");
             db_->Size(count);
             prev_count = count;
+            if (count == 0) {
+                continue;
+            }
 
             START_TIMER;
 
             std::vector<std::string> tags;
-            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, qxb, result_ids, result_distances);
+            stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, qxb, result_ids, result_distances);
             ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
@@ -306,37 +310,41 @@ TEST_F(DBTest, SEARCH_TEST) {
     stat = db_->InsertVectors(TABLE_NAME, "", xb);
     ASSERT_TRUE(stat.ok());
 
+    milvus::json json_params = {{"nprobe", 10}};
     milvus::engine::TableIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
-    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
-
-    {
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-    }
-
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
-    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
-
-    {
-        std::vector<std::string> tags;
-        milvus::engine::ResultIds result_ids;
-        milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
-        ASSERT_TRUE(stat.ok());
-    }
+    index.extra_params_ = {{"nlist", 16384}};
+//    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+//
+//    {
+//        std::vector<std::string> tags;
+//        milvus::engine::ResultIds result_ids;
+//        milvus::engine::ResultDistances result_distances;
+//        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
+//        ASSERT_TRUE(stat.ok());
+//    }
+//
+//    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+//    index.extra_params_ = {{"nlist", 16384}};
+//    db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
+//
+//    {
+//        std::vector<std::string> tags;
+//        milvus::engine::ResultIds result_ids;
+//        milvus::engine::ResultDistances result_distances;
+//        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
+//        ASSERT_TRUE(stat.ok());
+//    }
 
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.extra_params_ = {{"nlist", 16384}};
     db_->CreateIndex(TABLE_NAME, index);  // wait until build index finish
 
     {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -349,7 +357,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
     }
 #endif
@@ -365,16 +373,22 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, result_ids, result_distances);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k,
+                                  json_params,
+                                  xq,
+                                  result_ids,
+                                  result_distances);
         ASSERT_TRUE(stat.ok());
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, result_ids, result_distances);
+        stat =
+            db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_distances);
         ASSERT_FALSE(stat.ok());
         fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
         FIU_ENABLE_FIU("DBImpl.QueryByFileID.empty_files_array");
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, result_ids, result_distances);
+        stat =
+            db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_distances);
         ASSERT_FALSE(stat.ok());
         fiu_disable("DBImpl.QueryByFileID.empty_files_array");
     }
@@ -385,13 +399,13 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
 
         FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, 10, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, k, json_params, xq, result_ids, result_distances);
         ASSERT_FALSE(stat.ok());
         fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
     }
@@ -409,7 +423,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     {
         result_ids.clear();
         result_dists.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, partition_tag, k, 10, xq, result_ids, result_dists);
+        stat = db_->Query(dummy_context_, TABLE_NAME, partition_tag, k, json_params, xq, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -423,7 +437,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         }
         result_ids.clear();
         result_dists.clear();
-        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, 10, xq, result_ids, result_dists);
+        stat = db_->QueryByFileID(dummy_context_, TABLE_NAME, file_ids, k, json_params, xq, result_ids, result_dists);
         ASSERT_TRUE(stat.ok());
     }
 #endif
@@ -564,13 +578,27 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, xb, result_ids, result_distances);
+    milvus::json json_params = {{"nprobe", 1}};
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, json_params, xb, result_ids, result_distances);
     ASSERT_FALSE(stat.ok());
     std::vector<std::string> file_ids;
-    stat = db_->QueryByFileID(dummy_context_, table_info.table_id_, file_ids, 1, 1, xb, result_ids, result_distances);
+    stat = db_->QueryByFileID(dummy_context_,
+                              table_info.table_id_,
+                              file_ids,
+                              1,
+                              json_params,
+                              xb,
+                              result_ids,
+                              result_distances);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->Query(dummy_context_, table_info.table_id_, tags, 1, 1, milvus::engine::VectorsData(), result_ids,
+    stat = db_->Query(dummy_context_,
+                      table_info.table_id_,
+                      tags,
+                      1,
+                      json_params,
+                      milvus::engine::VectorsData(),
+                      result_ids,
                       result_distances);
     ASSERT_FALSE(stat.ok());
 
@@ -731,7 +759,7 @@ TEST_F(DBTest, INDEX_TEST) {
     stat = db_->DescribeIndex(table_info.table_id_, index_out);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(index.engine_type_, index_out.engine_type_);
-    ASSERT_EQ(index.nlist_, index_out.nlist_);
+    ASSERT_EQ(index.extra_params_, index_out.extra_params_);
     ASSERT_EQ(table_info.metric_type_, index_out.metric_type_);
 
     stat = db_->DropIndex(table_info.table_id_);
@@ -845,7 +873,9 @@ TEST_F(DBTest, PARTITION_TEST) {
         std::vector<std::string> tags = {"0", std::to_string(PARTITION_COUNT - 1)};
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nprobe, xq, result_ids, result_distances);
+        milvus::json json_params = {{"nprobe", nprobe}};
+
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -853,7 +883,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         tags.clear();
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nprobe, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
 
@@ -861,7 +891,7 @@ TEST_F(DBTest, PARTITION_TEST) {
         tags.push_back("\\d");
         result_ids.clear();
         result_distances.clear();
-        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, nprobe, xq, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, TABLE_NAME, tags, topk, json_params, xq, result_ids, result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids.size() / topk, nq);
     }
@@ -1074,11 +1104,12 @@ TEST_F(DBTestWAL, DB_STOP_TEST) {
 
     const int64_t topk = 10;
     const int64_t nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qxb;
     BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
 
@@ -1102,11 +1133,12 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
 
     const int64_t topk = 10;
     const int64_t nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
     milvus::engine::VectorsData qxb;
     BuildVectors(qb, 0, qxb);
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_NE(result_ids.size() / topk, qb);
 
@@ -1119,14 +1151,14 @@ TEST_F(DBTestWALRecovery, RECOVERY_WITH_NO_ERROR) {
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size(), 0);
 
     db_->Flush();
     result_ids.clear();
     result_distances.clear();
-    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, nprobe, qxb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, {}, topk, json_params, qxb, result_ids, result_distances);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids.size() / topk, qb);
 }
@@ -1312,6 +1344,7 @@ TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
     ASSERT_TRUE(stat.ok());
 
     int topk = 10, nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
 
     for (auto id : ids_to_search) {
         //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
@@ -1319,7 +1352,7 @@ TEST_F(DBTest2, SEARCH_WITH_DIFFERENT_INDEX) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, nprobe, id, result_ids,
+        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, id, result_ids,
 result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
@@ -1341,7 +1374,7 @@ result_distances);
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, nprobe, id, result_ids,
+        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, id, result_ids,
 result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);

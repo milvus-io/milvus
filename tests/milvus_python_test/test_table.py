@@ -1,9 +1,7 @@
-import random
 import pdb
 import pytest
 import logging
 import itertools
-import numpy
 from time import sleep
 from multiprocessing import Process
 from milvus import IndexType, MetricType
@@ -730,65 +728,69 @@ class TestTable:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
-                pytest.skip("sq8h not support in open source")
+                pytest.skip("sq8h not support in cpu mode")
         if request.param["index_type"] == IndexType.IVF_PQ:
             pytest.skip("Skip PQ Temporary")
         return request.param
 
     @pytest.mark.level(1)
-    def test_preload_table(self, connect, table, get_simple_index_params):
-        index_params = get_simple_index_params
+    def test_preload_table(self, connect, table, get_simple_index):
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(table, vectors)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_type, index_param)
         status = connect.preload_table(table)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_table_ip(self, connect, ip_table, get_simple_index_params):
-        index_params = get_simple_index_params
+    def test_preload_table_ip(self, connect, ip_table, get_simple_index):
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(ip_table, vectors)
-        status = connect.create_index(ip_table, index_params)
+        status = connect.create_index(ip_table, index_type, index_param)
         status = connect.preload_table(ip_table)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_table_jaccard(self, connect, jac_table, get_simple_index_params):
-        index_params = get_simple_index_params
+    def test_preload_table_jaccard(self, connect, jac_table, get_simple_index):
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(jac_table, vectors)
-        status = connect.create_index(jac_table, index_params)
+        status = connect.create_index(jac_table, index_type, index_param)
         status = connect.preload_table(jac_table)
         assert status.OK()
 
     @pytest.mark.level(1)
-    def test_preload_table_hamming(self, connect, ham_table, get_simple_index_params):
-        index_params = get_simple_index_params
+    def test_preload_table_hamming(self, connect, ham_table, get_simple_index):
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         status, ids = connect.add_vectors(ham_table, vectors)
-        status = connect.create_index(ham_table, index_params)
+        status = connect.create_index(ham_table, index_type, index_param)
         status = connect.preload_table(ham_table)
         assert status.OK()
 
-    @pytest.mark.level(1)
-    def test_preload_table_not_existed(self, connect, table):
+    @pytest.mark.level(2)
+    def test_preload_table_not_existed(self, connect, table, get_simple_index):
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         table_name = gen_unique_str()
-        nlist = 16384
-        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         status, ids = connect.add_vectors(table, vectors)
-        status = connect.create_index(table, index_param)
+        status = connect.create_index(table, index_type, index_param)
         status = connect.preload_table(table_name)
         assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_preload_table_not_existed_ip(self, connect, ip_table):
+    def test_preload_table_not_existed_ip(self, connect, ip_table, get_simple_index):
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         table_name = gen_unique_str()
-        nlist = 16384
-        index_param = {"index_type": IndexType.IVF_SQ8, "nlist": nlist}
         status, ids = connect.add_vectors(ip_table, vectors)
-        status = connect.create_index(ip_table, index_param)
+        status = connect.create_index(ip_table, index_type, index_param)
         status = connect.preload_table(table_name)
         assert not status.OK()
 
@@ -933,8 +935,8 @@ def search_table(connect, **params):
     status, result = connect.search_vectors(
         params["table_name"], 
         params["top_k"], 
-        params["nprobe"],
-        params["query_vectors"])
+        params["query_vectors"],
+        params={"nprobe": params["nprobe"]})
     return status
 
 def preload_table(connect, **params):
@@ -962,7 +964,7 @@ def rowcount(connect, **params):
     return status
 
 def create_index(connect, **params):
-    status = connect.create_index(params["table_name"], params["index_params"])
+    status = connect.create_index(params["table_name"], params["index_type"], params["index_param"])
     return status
 
 func_map = { 
@@ -1038,12 +1040,11 @@ class TestTableLogic(object):
         vectors = gen_vectors(2, dim)
         param = {'table_name': table_name,
                  'dimension': dim,
-                 'index_type': IndexType.IVFLAT,
                  'metric_type': MetricType.L2,
                  'nprobe': 1,
                  'top_k': top_k,
-                 'index_params': {
-                        'index_type': IndexType.IVF_SQ8,
+                 'index_type': IndexType.IVF_SQ8,
+                 'index_param': {
                         'nlist': 16384
                  },
                  'query_vectors': vectors}
