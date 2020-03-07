@@ -12,8 +12,11 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <fiu-local.h>
+#include <algorithm>
 #include <regex>
 #include <string>
+
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace server {
@@ -148,11 +151,21 @@ StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::stri
     // regex match
     std::regex pattern(pattern_str);
     std::smatch results;
-    if (std::regex_match(target_str, results, pattern)) {
-        return true;
-    } else {
-        return false;
+    return std::regex_match(target_str, results, pattern);
+}
+
+Status
+StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
+    auto status = ValidationUtil::ValidateStringIsBool(str);
+    if (!status.ok()) {
+        return status;
     }
+
+    std::string s = str;
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    value = s == "true" || s == "on" || s == "yes" || s == "1";
+
+    return Status::OK();
 }
 
 }  // namespace server
