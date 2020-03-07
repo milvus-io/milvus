@@ -65,6 +65,9 @@ class StringHelpFunctions {
     static bool
     IsRegexMatch(const std::string& target_str, const std::string& pattern);
 
+    // conversion rules refer to ValidationUtil::ValidateStringIsBool()
+    // "true", "on", "yes", "1" ==> true
+    // "false", "off", "no", "0", "" ==> false
     static Status
     ConvertToBoolean(const std::string& str, bool& value);
 };
