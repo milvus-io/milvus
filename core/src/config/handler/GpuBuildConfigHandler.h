@@ -11,43 +11,32 @@
 #ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include <limits>
 #include <vector>
 
-#include "config/handler/GpuResourcesHandler.h"
+#include "config/handler/GpuConfigHandler.h"
 
 namespace milvus {
 namespace server {
 
-class GpuSearchResHandler : virtual public GpuResourcesHandler {
+class GpuBuildConfigHandler : virtual public GpuConfigHandler {
  public:
-    GpuSearchResHandler();
+    GpuBuildConfigHandler();
 
-    ~GpuSearchResHandler();
+    ~GpuBuildConfigHandler();
 
  public:
     virtual void
-    OnGpuSearchThresholdChanged(int64_t threshold);
-
-    virtual void
-    OnGpuSearchResChanged(const std::vector<int64_t>& gpus);
+    OnGpuBuildResChanged(const std::vector<int64_t>& gpus);
 
  protected:
     void
-    AddGpuSearchThresholdListener();
+    AddGpuBuildResListener();
 
     void
-    AddGpuSearchResListener();
-
-    void
-    RemoveGpuSearchThresholdListener();
-
-    void
-    RemoveGpuSearchResListener();
+    RemoveGpuBuildResListener();
 
  protected:
-    int64_t threshold_ = std::numeric_limits<int64_t>::max();
-    std::vector<int64_t> search_gpus_;
+    std::vector<int64_t> build_gpus_;
 };
 
 }  // namespace server

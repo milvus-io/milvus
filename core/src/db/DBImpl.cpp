@@ -75,10 +75,14 @@ DBImpl::DBImpl(const DBOptions& options)
         wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
 
+    SetIdentity("DBImpl");
+    AddCacheInsertDataListener();
+
     Start();
 }
 
 DBImpl::~DBImpl() {
+    RemoveCacheInsertDataListener();
     Stop();
 }
 
@@ -2082,6 +2086,11 @@ DBImpl::BackgroundWalTask() {
             }
         }
     }
+}
+
+void
+DBImpl::OnCacheInsertDataChanged(bool value) {
+    options_.insert_cache_immediately_ = value;
 }
 
 }  // namespace engine

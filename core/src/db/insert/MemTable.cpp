@@ -30,6 +30,8 @@ namespace engine {
 
 MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
     : table_id_(table_id), meta_(meta), options_(options) {
+    SetIdentity("MemTable");
+    AddCacheInsertDataListener();
 }
 
 Status
@@ -379,6 +381,11 @@ MemTable::GetLSN() {
 void
 MemTable::SetLSN(uint64_t lsn) {
     lsn_ = lsn;
+}
+
+void
+MemTable::OnCacheInsertDataChanged(bool value) {
+    options_.insert_cache_immediately_ = value;
 }
 
 }  // namespace engine
