@@ -479,8 +479,8 @@ def gen_invaild_search_params():
                 search_params.append(ivf_search_params)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
         elif index_type == IndexType.HNSW:
-            for efConstruction in gen_invalid_params():
-                hnsw_search_param = {"index_type": index_type, "search_param": {"efConstruction": efConstruction}}
+            for ef in gen_invalid_params():
+                hnsw_search_param = {"index_type": index_type, "search_param": {"ef": ef}}
                 search_params.append(hnsw_search_param)
             search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
         # elif index_type == IndexType.RNSG:
@@ -541,6 +541,7 @@ def gen_index():
     ]
 
     nlists = [1, 1024, 16384]
+    pq_ms = [128, 64, 32, 16, 8, 4]
     Ms = [5, 24, 48]
     efConstructions = [100, 300, 500]
     search_lengths = [10, 100, 300]
@@ -552,10 +553,15 @@ def gen_index():
     for index_type in index_types:
         if index_type == IndexType.FLAT:
             index_params.append({"index_type": index_type, "index_param": {"nlist": 1024}})
-        elif index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+        elif index_type in [IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H]:
             ivf_params = [{"index_type": index_type, "index_param": {"nlist": nlist}} \
                           for nlist in nlists]
             index_params.extend(ivf_params)
+        elif index_type == IndexType.IVF_PQ:
+            ivf_pq_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
+                        for nlist in nlists \
+                        for m in pq_ms]
+            index_params.extend(ivf_pq_params)
         elif index_type == IndexType.HNSW:
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
                            for M in Ms \
@@ -589,7 +595,7 @@ def gen_simple_index():
         {"nlist": 1024},
         {"nlist": 1024},
         {"nlist": 1024},
-        {"nlist": 1024},
+        {"nlist": 1024, "m": 16},
         {"M": 16, "efConstruction": 500},
     #    {"search_length": 100, "out_degree": 40, "candidate_pool_size": 66, "knng": 100}
     ]

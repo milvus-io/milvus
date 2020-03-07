@@ -34,8 +34,9 @@ class TestIndexBase:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ Temporary")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -46,8 +47,9 @@ class TestIndexBase:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ Temporary")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     """
@@ -92,8 +94,6 @@ class TestIndexBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type == IndexType.IVF_PQ:
-            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
@@ -109,8 +109,6 @@ class TestIndexBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type == IndexType.IVF_PQ:
-            pytest.skip("Skip some PQ cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(table, tag)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
@@ -152,7 +150,125 @@ class TestIndexBase:
         assert len(result) == len(query_vecs)
         logging.getLogger().info(result)
 
-    # TODO: enable
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    @pytest.mark.level(2)
+    def test_create_index_multithread(self, connect, table, args):
+        '''
+        target: test create index interface with multiprocess
+        method: create table and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        status, ids = connect.add_vectors(table, vectors)
+
+        def build(connect):
+            status = connect.create_index(table, IndexType.IVFLAT, {"nlist": NLIST})
+            assert status.OK()
+
+        threads_num = 8
+        threads = []
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+
+        for i in range(threads_num):
+            m = get_milvus(args["handler"])
+            m.connect(uri=uri)
+            t = threading.Thread(target=build, args=(m,))
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+
+        query_vec = [vectors[0]]
+        top_k = 1
+        search_param = {"nprobe": nprobe}
+        status, result = connect.search_vectors(table, top_k, query_vec, params=search_param)
+        assert len(result) == 1
+        assert len(result[0]) == top_k
+        assert result[0][0].distance == 0.0
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_multithread_multitable(self, connect, args):
+        '''
+        target: test create index interface with multiprocess
+        method: create table and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        threads_num = 8
+        loop_num = 8
+        threads = []
+
+        table = []
+        j = 0
+        while j < (threads_num*loop_num):
+            table_name = gen_unique_str("test_create_index_multiprocessing")
+            table.append(table_name)
+            param = {'table_name': table_name,
+                     'dimension': dim,
+                     'index_type': IndexType.FLAT,
+                     'store_raw_vector': False}
+            connect.create_table(param)
+            j = j + 1
+
+        def create_index():
+            i = 0
+            while i < loop_num:
+                # assert connect.has_table(table[ids*process_num+i])
+                status, ids = connect.add_vectors(table[ids*threads_num+i], vectors)
+
+                status = connect.create_index(table[ids*threads_num+i], IndexType.IVFLAT, {"nlist": NLIST})
+                assert status.OK()
+                query_vec = [vectors[0]]
+                top_k = 1
+                search_param = {"nprobe": nprobe}
+                status, result = connect.search_vectors(table[ids*threads_num+i], top_k, query_vec, params=search_param)
+                assert len(result) == 1
+                assert len(result[0]) == top_k
+                assert result[0][0].distance == 0.0
+                i = i + 1
+
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+
+        for i in range(threads_num):
+            m = get_milvus(args["handler"])
+            m.connect(uri=uri)
+            ids = i
+            t = threading.Thread(target=create_index, args=(m,ids))
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    @pytest.mark.level(2)
+    def test_create_index_a_multithreads(self, connect, table, args):
+        status, ids = connect.add_vectors(table, vectors)
+        def build(connect):
+            status = connect.create_index(table, IndexType.IVFLAT, {"nlist": NLIST})
+            assert status.OK()
+        def count(connect):
+            status, count = connect.get_table_row_count(table)
+            assert status.OK()
+            assert count == nb
+
+        threads_num = 8
+        threads = []
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+        for i in range(threads_num):
+            m = get_milvus(args["handler"])
+            m.connect(uri=uri)
+            if(i % 2 == 0):
+                p = threading.Thread(target=build, args=(m,))
+            else:
+                p = threading.Thread(target=count, args=(m,))
+            threads.append(p)
+            p.start()
+            time.sleep(0.2)
+        for p in threads:
+            p.join()
+
+
+# TODO: enable
     @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.level(2)
     def _test_create_index_multiprocessing(self, connect, table, args):
@@ -279,8 +395,6 @@ class TestIndexBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type == IndexType.IVF_PQ:
-            pytest.skip("Skip some PQ cases")
         status = connect.create_index(table, index_type, index_param)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
@@ -294,8 +408,6 @@ class TestIndexBase:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type == IndexType.IVF_PQ:
-            pytest.skip("Skip some PQ cases")
         status = connect.create_index(table, index_type, index_param)
         status = connect.create_index(table, index_type, index_param)
         assert status.OK()
@@ -363,8 +475,6 @@ class TestIndexBase:
             connect.create_table(param)
             index_param = get_simple_index["index_param"]
             index_type = get_simple_index["index_type"]
-            if index_type == IndexType.IVF_PQ:
-                pytest.skip("Skip some PQ cases")
             logging.getLogger().info(get_simple_index)
             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
             status = connect.create_index(table_name, index_type, index_param)
@@ -576,8 +686,9 @@ class TestIndexIP:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ Temporary")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -588,8 +699,9 @@ class TestIndexIP:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ Temporary")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
         return request.param
     """
     ******************************************************************
@@ -607,8 +719,8 @@ class TestIndexIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_type, index_param)
         assert status.OK()
@@ -622,8 +734,8 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_table, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
@@ -653,8 +765,8 @@ class TestIndexIP:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         status, ids = connect.add_vectors(ip_table, vectors)
         status = connect.create_index(ip_table, index_type, index_param)
         logging.getLogger().info(connect.describe_index(ip_table))
@@ -776,8 +888,8 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         status = connect.create_index(ip_table, index_type, index_param)
         status, ids = connect.add_vectors(ip_table, vectors)
         assert status.OK()
@@ -862,8 +974,8 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_table, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
@@ -883,8 +995,8 @@ class TestIndexIP:
         new_tag = "new_tag"
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         logging.getLogger().info(get_simple_index)
         status = connect.create_partition(ip_table, tag)
         status = connect.create_partition(ip_table, new_tag)
@@ -916,8 +1028,8 @@ class TestIndexIP:
             connect.create_table(param)
             index_param = get_simple_index["index_param"]
             index_type = get_simple_index["index_type"]
-            if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-                pytest.skip("Skip some PQ cases")
+            if index_type in [IndexType.RNSG]:
+                pytest.skip("Skip some RNSG cases")
             logging.getLogger().info(get_simple_index)
             status, ids = connect.add_vectors(table_name=table_name, records=vectors)
             status = connect.create_index(table_name, index_type, index_param)
@@ -1002,8 +1114,8 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         status = connect.create_partition(ip_table, tag)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
         status = connect.create_index(ip_table, index_type, index_param)
@@ -1026,8 +1138,8 @@ class TestIndexIP:
         new_tag = "new_tag"
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         status = connect.create_partition(ip_table, tag)
         status = connect.create_partition(ip_table, new_tag)
         status, ids = connect.add_vectors(ip_table, vectors)
@@ -1105,8 +1217,8 @@ class TestIndexIP:
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
-        if index_type in [IndexType.IVF_PQ, IndexType.RNSG]:
-            pytest.skip("Skip some PQ cases")
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("Skip some RNSG cases")
         status, ids = connect.add_vectors(ip_table, vectors)
         for i in range(2):
             status = connect.create_index(ip_table, index_type, index_param)
@@ -1157,8 +1269,9 @@ class TestIndexJAC:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ or request.param["index_type"] == IndexType.HNSW:
-            pytest.skip("Skip PQ Temporary")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -1169,8 +1282,9 @@ class TestIndexJAC:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ or request.param["index_type"] == IndexType.HNSW:
-            pytest.skip("Skip PQ Temporary")
+        if str(connect._cmd("mode")[1]) == "GPU":
+            if request.param["index_type"] == IndexType.IVF_PQ:
+                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
