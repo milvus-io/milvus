@@ -15,9 +15,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "config/Config.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "server/web_impl/WebServer.h"

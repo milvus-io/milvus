@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <memory>
 
-#include "server/Config.h"
+#include "config/Config.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"

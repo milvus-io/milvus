@@ -15,6 +15,7 @@
 #include <boost/filesystem.hpp>
 #include <thread>
 
+#include "config/Config.h"
 #include "server/Server.h"
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/delivery/RequestScheduler.h"
@@ -26,7 +27,6 @@
 #include "grpc/gen-status/status.pb.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "server/grpc_impl/GrpcServer.h"

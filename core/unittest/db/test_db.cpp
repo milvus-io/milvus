@@ -18,6 +18,7 @@
 #include <thread>
 
 #include "cache/CpuCacheMgr.h"
+#include "config/Config.h"
 #include "db/Constants.h"
 #include "db/DB.h"
 #include "db/DBFactory.h"
@@ -25,7 +26,6 @@
 #include "db/IDGenerator.h"
 #include "db/meta/MetaConsts.h"
 #include "db/utils.h"
-#include "server/Config.h"
 #include "utils/CommonUtil.h"
 
 namespace {

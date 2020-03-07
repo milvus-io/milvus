@@ -24,7 +24,6 @@
 #include "optimizer/FaissIVFSQ8Pass.h"
 #include "optimizer/FallbackPass.h"
 #include "optimizer/Optimizer.h"
-#include "server/Config.h"
 
 #include <memory>
 #include <mutex>

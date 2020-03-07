@@ -11,11 +11,11 @@
 #ifdef MILVUS_GPU_VERSION
 #include "scheduler/optimizer/FaissIVFPQPass.h"
 #include "cache/GpuCacheMgr.h"
+#include "config/Config.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
-#include "server/Config.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>

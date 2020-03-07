@@ -31,8 +31,8 @@
 #include <vector>
 
 #include "GrpcRequestHandler.h"
+#include "config/Config.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
 #include "utils/Log.h"
@@ -75,16 +75,9 @@ Status
 GrpcServer::StartService() {
     Config& config = Config::GetInstance();
     std::string address, port;
-    Status s;
 
-    s = config.GetServerConfigAddress(address);
-    if (!s.ok()) {
-        return s;
-    }
-    s = config.GetServerConfigPort(port);
-    if (!s.ok()) {
-        return s;
-    }
+    CONFIG_CHECK(config.GetServerConfigAddress(address));
+    CONFIG_CHECK(config.GetServerConfigPort(port));
 
     std::string server_address(address + ":" + port);
 

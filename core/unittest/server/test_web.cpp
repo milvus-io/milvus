@@ -21,9 +21,9 @@
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
 
+#include "config/Config.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/delivery/RequestScheduler.h"
