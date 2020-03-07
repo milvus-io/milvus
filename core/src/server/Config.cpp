@@ -1059,7 +1059,7 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
         }
 
         std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
-        int64_t cache_size = std::stoll(str);
+        int64_t cache_size = std::stoll(str)* GB;
 
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
