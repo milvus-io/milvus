@@ -371,8 +371,10 @@ DBImpl::PreloadTable(const std::string& table_id) {
         } else {
             engine_type = (EngineType)file.engine_type_;
         }
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
-                                                         (MetricType)file.metric_type_, file.nlist_);
+
+        auto json = milvus::json::parse(file.index_params_);
+        ExecutionEnginePtr engine =
+            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
         fiu_do_on("DBImpl.PreloadTable.null_engine", engine = nullptr);
         if (engine == nullptr) {
             ENGINE_LOG_ERROR << "Invalid engine type";
@@ -382,7 +384,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
         size += engine->PhysicalSize();
         fiu_do_on("DBImpl.PreloadTable.exceed_cache", size = available_size + 1);
         if (size > available_size) {
-            ENGINE_LOG_DEBUG << "Pre-load canceled since cache almost full";
+            ENGINE_LOG_DEBUG << "Pre-load cancelled since cache is almost full";
             return Status(SERVER_CACHE_FULL, "Cache is full");
         } else {
             try {
@@ -1110,8 +1112,8 @@ DBImpl::DropIndex(const std::string& table_id) {
 
 Status
 DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, IDNumber vector_id,
-                  ResultIds& result_ids, ResultDistances& result_distances) {
+                  const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+                  IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1119,14 +1121,15 @@ DBImpl::QueryByID(const std::shared_ptr<server::Context>& context, const std::st
     VectorsData vectors_data = VectorsData();
     vectors_data.id_array_.emplace_back(vector_id);
     vectors_data.vector_count_ = 1;
-    Status result = Query(context, table_id, partition_tags, k, nprobe, vectors_data, result_ids, result_distances);
+    Status result =
+        Query(context, table_id, partition_tags, k, extra_params, vectors_data, result_ids, result_distances);
     return result;
 }
 
 Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-              ResultIds& result_ids, ResultDistances& result_distances) {
+              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+              const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1169,7 +1172,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1179,8 +1182,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
 Status
 DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                      const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                      ResultIds& result_ids, ResultDistances& result_distances) {
+                      const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
+                      const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_ctx = context->Child("Query by file id");
 
     if (!initialized_.load(std::memory_order_acquire)) {
@@ -1208,7 +1211,7 @@ DBImpl::QueryByFileID(const std::shared_ptr<server::Context>& context, const std
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = QueryAsync(query_ctx, table_id, files_array, k, nprobe, vectors, result_ids, result_distances);
+    status = QueryAsync(query_ctx, table_id, files_array, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
 
     query_ctx->GetTraceContext()->GetSpan()->Finish();
@@ -1230,8 +1233,8 @@ DBImpl::Size(uint64_t& result) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                   const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                   ResultIds& result_ids, ResultDistances& result_distances) {
+                   const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
+                   const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
     auto query_async_ctx = context->Child("Query Async");
 
     server::CollectQueryMetrics metrics(vectors.vector_count_);
@@ -1242,7 +1245,7 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, const std::s
     auto status = OngoingFileChecker::GetInstance().MarkOngoingFiles(files);
 
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size();
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, nprobe, vectors);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(query_async_ctx, k, extra_params, vectors);
     for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);

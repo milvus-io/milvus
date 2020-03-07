@@ -12,6 +12,7 @@
 #include "utils/ValidationUtil.h"
 #include "Log.h"
 #include "db/engine/ExecutionEngine.h"
+#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
@@ -32,9 +33,61 @@
 namespace milvus {
 namespace server {
 
+namespace {
 constexpr size_t TABLE_NAME_SIZE_LIMIT = 255;
 constexpr int64_t TABLE_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
+
+Status
+CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
+                    bool min_close = true, bool max_closed = true) {
+    if (json_params.find(param_name) == json_params.end()) {
+        std::string msg = "Parameter list must contain: ";
+        return Status(SERVER_INVALID_ARGUMENT, msg + param_name);
+    }
+
+    try {
+        int64_t value = json_params[param_name];
+        bool min_err = min_close ? value < min : value <= min;
+        bool max_err = max_closed ? value > max : value >= max;
+        if (min_err || max_err) {
+            std::string msg = "Invalid " + param_name + " value: " + std::to_string(value) + ". Valid range is " +
+                              (min_close ? "[" : "(") + std::to_string(min) + ", " + std::to_string(max) +
+                              (max_closed ? "]" : ")");
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    } catch (std::exception& e) {
+        std::string msg = "Invalid " + param_name + ": ";
+        return Status(SERVER_INVALID_ARGUMENT, msg + e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+CheckParameterExistence(const milvus::json& json_params, const std::string& param_name) {
+    if (json_params.find(param_name) == json_params.end()) {
+        std::string msg = "Parameter list must contain: ";
+        return Status(SERVER_INVALID_ARGUMENT, msg + param_name);
+    }
+
+    try {
+        int64_t value = json_params[param_name];
+        if (value < 0) {
+            std::string msg = "Invalid " + param_name + " value: " + std::to_string(value);
+            SERVER_LOG_ERROR << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    } catch (std::exception& e) {
+        std::string msg = "Invalid " + param_name + ": ";
+        return Status(SERVER_INVALID_ARGUMENT, msg + e.what());
+    }
+
+    return Status::OK();
+}
+
+}  // namespace
 
 Status
 ValidationUtil::ValidateTableName(const std::string& table_name) {
@@ -109,22 +162,112 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     return Status::OK();
 }
 
+Status
+ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engine::meta::TableSchema& table_schema,
+                                    int32_t index_type) {
+    switch (index_type) {
+        case (int32_t)engine::EngineType::FAISS_IDMAP:
+        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
+            break;
+        }
+        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
+        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
+        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
+        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 0, 999999, false);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+        case (int32_t)engine::EngineType::FAISS_PQ: {
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 0, 999999, false);
+            if (!status.ok()) {
+                return status;
+            }
+
+            status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
+            if (!status.ok()) {
+                return status;
+            }
+
+            break;
+        }
+        case (int32_t)engine::EngineType::NSG_MIX: {
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
+            if (!status.ok()) {
+                return status;
+            }
+            status = CheckParameterRange(index_params, knowhere::IndexParams::out_degree, 5, 300);
+            if (!status.ok()) {
+                return status;
+            }
+            status = CheckParameterRange(index_params, knowhere::IndexParams::candidate, 50, 1000);
+            if (!status.ok()) {
+                return status;
+            }
+            status = CheckParameterRange(index_params, knowhere::IndexParams::knng, 5, 300);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+        case (int32_t)engine::EngineType::HNSW: {
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 5, 48);
+            if (!status.ok()) {
+                return status;
+            }
+            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 100, 500);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+    }
+    return Status::OK();
+}
+
+Status
+ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
+                                     int64_t topk) {
+    switch (table_schema.engine_type_) {
+        case (int32_t)engine::EngineType::FAISS_IDMAP:
+        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
+            break;
+        }
+        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
+        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
+        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
+        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
+        case (int32_t)engine::EngineType::FAISS_PQ: {
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 999999);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+        case (int32_t)engine::EngineType::NSG_MIX: {
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_length, 10, 300);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+        case (int32_t)engine::EngineType::HNSW: {
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 1000);
+            if (!status.ok()) {
+                return status;
+            }
+            break;
+        }
+    }
+    return Status::OK();
+}
+
 bool
 ValidationUtil::IsBinaryIndexType(int32_t index_type) {
     return (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP)) ||
            (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT));
-}
-
-Status
-ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
-    if (nlist <= 0) {
-        std::string msg =
-            "Invalid index nlist: " + std::to_string(nlist) + ". " + "The index nlist must be greater than 0.";
-        SERVER_LOG_ERROR << msg;
-        return Status(SERVER_INVALID_INDEX_NLIST, msg);
-    }
-
-    return Status::OK();
 }
 
 Status
@@ -165,18 +308,6 @@ ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchem
             "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TOPK, msg);
-    }
-
-    return Status::OK();
-}
-
-Status
-ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema) {
-    if (nprobe <= 0 || nprobe > table_schema.nlist_) {
-        std::string msg = "Invalid nprobe: " + std::to_string(nprobe) + ". " +
-                          "The nprobe must be within the range of 1 ~ index nlist.";
-        SERVER_LOG_ERROR << msg;
-        return Status(SERVER_INVALID_NPROBE, msg);
     }
 
     return Status::OK();

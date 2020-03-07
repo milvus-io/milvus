@@ -16,6 +16,7 @@
 #include "IndexModel.h"
 #include "IndexType.h"
 #include "knowhere/common/BinarySet.h"
+#include "knowhere/common/Config.h"
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/preprocessor/Preprocessor.h"
 

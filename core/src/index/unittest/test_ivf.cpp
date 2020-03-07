@@ -62,7 +62,7 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type_);
-        conf->Dump();
+        // KNOWHERE_LOG_DEBUG << "conf: " << conf->dump();
     }
 
     void
@@ -109,7 +109,7 @@ TEST_P(IVFTest, ivf_basic) {
     EXPECT_EQ(index_->Dimension(), dim);
 
     auto result = index_->Search(query_dataset, conf);
-    AssertAnns(result, nq, conf->k);
+    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
     if (index_type.find("GPU") == std::string::npos && index_type.find("Hybrid") == std::string::npos &&
@@ -190,7 +190,7 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->set_index_model(model);
         index_->Add(base_dataset, conf);
         auto result = index_->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf->k);
+        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     }
 
     {
@@ -214,7 +214,7 @@ TEST_P(IVFTest, ivf_serialize) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
         auto result = index_->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf->k);
+        AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     }
 }
 
@@ -232,7 +232,7 @@ TEST_P(IVFTest, clone_test) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
     auto result = index_->Search(query_dataset, conf);
-    AssertAnns(result, nq, conf->k);
+    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
     auto AssertEqual = [&](knowhere::DatasetPtr p1, knowhere::DatasetPtr p2) {
@@ -254,7 +254,7 @@ TEST_P(IVFTest, clone_test) {
     //            EXPECT_NO_THROW({
     //                                auto clone_index = index_->Clone();
     //                                auto clone_result = clone_index->Search(query_dataset, conf);
-    //                                //AssertAnns(result, nq, conf->k);
+    //                                //AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
     //                                AssertEqual(result, clone_result);
     //                                std::cout << "inplace clone [" << index_type << "] success" << std::endl;
     //                            });
@@ -339,7 +339,7 @@ TEST_P(IVFTest, gpu_seal_test) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
     auto result = index_->Search(query_dataset, conf);
-    AssertAnns(result, nq, conf->k);
+    AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
 
     fiu_init(0);
     fiu_enable("IVF.Search.throw_std_exception", 1, nullptr, 0);
@@ -374,7 +374,7 @@ TEST_P(IVFTest, invalid_gpu_source) {
     }
 
     auto invalid_conf = ParamGenerator::GetInstance().Gen(parameter_type_);
-    invalid_conf->gpu_id = -1;
+    invalid_conf[knowhere::meta::DEVICEID] = -1;
 
     if (index_type == "GPUIVF") {
         // null faiss index
@@ -430,15 +430,6 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
     ASSERT_TRUE(index != nullptr);
     ASSERT_ANY_THROW(index->UnsetQuantizer());
 
-    knowhere::QuantizerConfig config = std::make_shared<knowhere::QuantizerCfg>();
-    config->gpu_id = knowhere::INVALID_VALUE;
-
-    // mode = -1
-    ASSERT_ANY_THROW(index->LoadQuantizer(config));
-    config->mode = 1;
-    ASSERT_ANY_THROW(index->LoadQuantizer(config));
-    config->gpu_id = DEVICEID;
-    //    index->LoadQuantizer(config);
     ASSERT_ANY_THROW(index->SetQuantizer(nullptr));
 }
 

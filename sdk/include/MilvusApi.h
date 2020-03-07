@@ -59,18 +59,10 @@ struct ConnectParam {
 struct TableSchema {
     std::string table_name;                   ///< Table name
     int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
-    int64_t index_file_size = 0;              ///< Index file size, must be a positive value
+    int64_t index_file_size = 1024;           ///< Index file size, must be a positive value, unit: MB
     MetricType metric_type = MetricType::L2;  ///< Index metric type
 };
 
-/**
- * @brief Range information
- * for DATE range, the format is like: 'year-month-day'
- */
-struct Range {
-    std::string start_value;  ///< Range start
-    std::string end_value;    ///< Range stop
-};
 
 /**
  * @brief Record inserted
@@ -90,12 +82,18 @@ struct QueryResult {
 using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
 
 /**
- * @brief index parameters
+ * @brief Index parameters
+ * Note: extra_params is extra parameters list, it must be json format
+ *       For different index type, parameter list is different accordingly, for example:
+ *       FLAT/IVFLAT/SQ8:  "{nlist: '16384'}"
+ *       IVFPQ:  "{nlist: '16384', nbits: "16"}"
+ *       NSG:  "{search_length: '100', out_degree:'40', pool_size:'66'}"
+ *       HNSW  "{M: '16', ef_construct:'500'}"
  */
 struct IndexParam {
-    std::string table_name;  ///< Table name for create index
-    IndexType index_type;    ///< Create index type
-    int32_t nlist;           ///< Index nlist
+    std::string table_name;             ///< Table name for create index
+    IndexType index_type;               ///< Index type
+    std::string extra_params;           ///< Extra parameters according to different index type, must be json format
 };
 
 /**
@@ -131,7 +129,7 @@ struct PartitionStat {
  * @brief table info
  */
 struct TableInfo {
-    int64_t total_row_count;                  ///< Table total row count
+    int64_t total_row_count;                      ///< Table total row count
     std::vector<PartitionStat> partitions_stat;   ///< Table's partitions statistics
 };
 
@@ -269,7 +267,7 @@ class Connection {
      * This method is used to insert vector array to table.
      *
      * @param table_name, target table's name.
-     * @param partition_tag, target partition's tag, keep empty if no partition.
+     * @param partition_tag, target partition's tag, keep empty if no partition specified.
      * @param record_array, vector array is inserted.
      * @param id_array,
      *  specify id for each vector,
@@ -318,19 +316,23 @@ class Connection {
      * This method is used to query vector in table.
      *
      * @param table_name, target table's name.
-     * @param partition_tags, target partitions, keep empty if no partition.
+     * @param partition_tag_array, target partitions, keep empty if no partition specified.
      * @param query_record_array, vectors to be queried.
-     * @param query_range_array, [deprecated] time ranges, if not specified, will search in whole table
-     * @param topk, how many similarity vectors will be searched.
-     * @param nprobe, the number of centroids choose to search.
-     * @param topk_query_result_array, result array.
+     * @param topk, how many similarity vectors will be returned.
+     * @param extra_params, extra search parameters according to different index type, must be json format.
+     * Note: extra_params is extra parameters list, it must be json format, for example:
+     *       For different index type, parameter list is different accordingly
+     *       FLAT/IVFLAT/SQ8/IVFPQ:  "{nprobe: '32'}"
+     *       NSG:  "{search_length:'100'}
+     *       HNSW  "{ef: '64'}
+     * @param topk_query_result, result array.
      *
      * @return Indicate if query is successful.
      */
     virtual Status
-    Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
+    Search(const std::string& table_name, const PartitionTagList& partition_tag_array,
            const std::vector<RowRecord>& query_record_array, int64_t topk,
-           int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
+           const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Search vector by ID
@@ -338,17 +340,17 @@ class Connection {
      * This method is used to query vector in table.
      *
      * @param table_name, target table's name.
-     * @param partition_tags, target partitions, keep empty if no partition.
-     * @param query_id_array, vector ids to be queried.
-     * @param topk, how many similarity vectors will be searched.
-     * @param nprobe, the number of centroids choose to search.
-     * @param topk_query_result_array, result array.
+     * @param partition_tag_array, target partitions, keep empty if no partition.
+     * @param query_id, vector id to be queried.
+     * @param topk, how many similarity vectors will be returned.
+     * @param extra_params, extra search parameters according to different index type, must be json format.
+     * @param topk_query_result, result array.
      *
      * @return Indicate if query is successful.
      */
     virtual Status
-    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
-               int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) = 0;
+    SearchByID(const std::string& table_name, const PartitionTagList& partition_tag_array, int64_t query_id,
+               int64_t topk, const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Show table description
@@ -510,12 +512,12 @@ class Connection {
      * This method is used to create table
      *
      * @param table_name, table name is going to be tested.
-     * @param partition_array, partition tag array of the table.
+     * @param partition_tag_array, partition tag array of the table.
      *
      * @return Indicate if this operation is successful
      */
     virtual Status
-    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const = 0;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_tag_array) const = 0;
 
     /**
      * @brief Delete partition method

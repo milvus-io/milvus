@@ -1,9 +1,9 @@
-import random
 import pdb
 import pytest
 import logging
 import itertools
 from time import sleep
+import threading
 from multiprocessing import Process
 from milvus import IndexType, MetricType
 from utils import *
@@ -12,6 +12,7 @@ dim = 128
 index_file_size = 10
 add_time_interval = 3
 tag = "1970-01-01"
+nb = 6000
 
 class TestTableCount:
     """
@@ -33,9 +34,9 @@ class TestTableCount:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in cpu mode")
@@ -53,7 +54,7 @@ class TestTableCount:
         nb = add_vectors_nb
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=table, records=vectors)
-        time.sleep(add_time_interval)
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
@@ -69,7 +70,7 @@ class TestTableCount:
         status = connect.create_partition(table, tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
-        time.sleep(add_time_interval)
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
@@ -87,7 +88,7 @@ class TestTableCount:
         status = connect.create_partition(table, new_tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors)
-        time.sleep(add_time_interval)
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
@@ -105,7 +106,7 @@ class TestTableCount:
         status = connect.create_partition(table, new_tag)
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
-        time.sleep(add_time_interval)
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
@@ -124,23 +125,23 @@ class TestTableCount:
         assert status.OK()
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=tag)
         res = connect.add_vectors(table_name=table, records=vectors, partition_tag=new_tag)
-        time.sleep(add_time_interval)
+        connect.flush([table])
         status, res = connect.get_table_row_count(table)
         assert res == nb * 2
 
-    def test_table_rows_count_after_index_created(self, connect, table, get_simple_index_params):
+    def test_table_rows_count_after_index_created(self, connect, table, get_simple_index):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params 
         expected: get_table_row_count raise exception
         '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         nb = 100
-        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=table, records=vectors)
-        time.sleep(add_time_interval)
-        # logging.getLogger().info(index_params)
-        connect.create_index(table, index_params)
+        connect.flush([table])
+        connect.create_index(table, index_type, index_param)
         status, res = connect.get_table_row_count(table)
         assert res == nb
 
@@ -221,7 +222,7 @@ class TestTableCount:
                      'metric_type': MetricType.L2}
             connect.create_table(param)
             res = connect.add_vectors(table_name=table_name, records=vectors)
-        time.sleep(2)
+        connect.flush(table_list)
         for i in range(20):
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
@@ -250,9 +251,9 @@ class TestTableCountIP:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
@@ -270,23 +271,23 @@ class TestTableCountIP:
         nb = add_vectors_nb
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=ip_table, records=vectors)
-        time.sleep(add_time_interval)
+        connect.flush([ip_table])
         status, res = connect.get_table_row_count(ip_table)
         assert res == nb
 
-    def test_table_rows_count_after_index_created(self, connect, ip_table, get_simple_index_params):
+    def test_table_rows_count_after_index_created(self, connect, ip_table, get_simple_index):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params
         expected: get_table_row_count raise exception
         '''
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         nb = 100
-        index_params = get_simple_index_params
         vectors = gen_vectors(nb, dim)
         res = connect.add_vectors(table_name=ip_table, records=vectors)
-        time.sleep(add_time_interval)
-        # logging.getLogger().info(index_params)
-        connect.create_index(ip_table, index_params)
+        connect.flush([ip_table])
+        connect.create_index(ip_table, index_type, index_param)
         status, res = connect.get_table_row_count(ip_table)
         assert res == nb
 
@@ -366,7 +367,7 @@ class TestTableCountIP:
                      'metric_type': MetricType.IP}
             connect.create_table(param)
             res = connect.add_vectors(table_name=table_name, records=vectors)
-        time.sleep(2)
+        connect.flush(table_list)
         for i in range(20):
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
@@ -395,9 +396,9 @@ class TestTableCountJAC:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_jaccard_index_params(self, request, connect):
+    def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
             return request.param
@@ -414,23 +415,23 @@ class TestTableCountJAC:
         nb = add_vectors_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
         res = connect.add_vectors(table_name=jac_table, records=vectors)
-        time.sleep(add_time_interval)
+        connect.flush([jac_table])
         status, res = connect.get_table_row_count(jac_table)
         assert res == nb
 
-    def test_table_rows_count_after_index_created(self, connect, jac_table, get_jaccard_index_params):
+    def test_table_rows_count_after_index_created(self, connect, jac_table, get_jaccard_index):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params
         expected: get_table_row_count raise exception
         '''
         nb = 100
-        index_params = get_jaccard_index_params
+        index_param = get_jaccard_index["index_param"]
+        index_type = get_jaccard_index["index_type"]
         tmp, vectors = gen_binary_vectors(nb, dim)
         res = connect.add_vectors(table_name=jac_table, records=vectors)
-        time.sleep(add_time_interval)
-        # logging.getLogger().info(index_params)
-        connect.create_index(jac_table, index_params)
+        connect.flush([jac_table])
+        connect.create_index(jac_table, index_type, index_param)
         status, res = connect.get_table_row_count(jac_table)
         assert res == nb
 
@@ -478,7 +479,7 @@ class TestTableCountJAC:
                      'metric_type': MetricType.JACCARD}
             connect.create_table(param)
             res = connect.add_vectors(table_name=table_name, records=vectors)
-        time.sleep(2)
+        connect.flush(table_list)
         for i in range(20):
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
@@ -506,9 +507,9 @@ class TestTableCountHAM:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_hamming_index_params(self, request, connect):
+    def get_hamming_index(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
             return request.param
@@ -525,23 +526,23 @@ class TestTableCountHAM:
         nb = add_vectors_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
         res = connect.add_vectors(table_name=ham_table, records=vectors)
-        time.sleep(add_time_interval)
+        connect.flush([ham_table])
         status, res = connect.get_table_row_count(ham_table)
         assert res == nb
 
-    def test_table_rows_count_after_index_created(self, connect, ham_table, get_hamming_index_params):
+    def test_table_rows_count_after_index_created(self, connect, ham_table, get_hamming_index):
         '''
         target: test get_table_row_count, after index have been created
         method: add vectors in db, and create index, then calling get_table_row_count with correct params
         expected: get_table_row_count raise exception
         '''
         nb = 100
-        index_params = get_hamming_index_params
+        index_type = get_hamming_index["index_type"]
+        index_param = get_hamming_index["index_param"]
         tmp, vectors = gen_binary_vectors(nb, dim)
         res = connect.add_vectors(table_name=ham_table, records=vectors)
-        time.sleep(add_time_interval)
-        # logging.getLogger().info(index_params)
-        connect.create_index(ham_table, index_params)
+        connect.flush([ham_table])
+        connect.create_index(ham_table, index_type, index_param)
         status, res = connect.get_table_row_count(ham_table)
         assert res == nb
 
@@ -589,7 +590,7 @@ class TestTableCountHAM:
                      'metric_type': MetricType.HAMMING}
             connect.create_table(param)
             res = connect.add_vectors(table_name=table_name, records=vectors)
-        time.sleep(2)
+        connect.flush(table_list)
         for i in range(20):
             status, res = connect.get_table_row_count(table_list[i])
             assert status.OK()
@@ -618,9 +619,9 @@ class TestTableCountTANIMOTO:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_tanimoto_index_params(self, request, connect):
+    def get_tanimoto_index(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
             return request.param
@@ -637,6 +638,7 @@ class TestTableCountTANIMOTO:
         nb = add_vectors_nb
         tmp, vectors = gen_binary_vectors(nb, dim)
         res = connect.add_vectors(table_name=tanimoto_table, records=vectors)
-        time.sleep(add_time_interval)
+        connect.flush([tanimoto_table])
         status, res = connect.get_table_row_count(tanimoto_table)
+        assert status.OK()
         assert res == nb

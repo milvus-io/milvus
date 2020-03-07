@@ -22,6 +22,7 @@
 
 #include "db/engine/ExecutionEngine.h"
 #include "segment/Types.h"
+#include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
@@ -35,8 +36,8 @@ typedef std::vector<faiss::Index::distance_t> ResultDistances;
 
 struct TableIndex {
     int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t nlist_ = 16384;
     int32_t metric_type_ = (int)MetricType::L2;
+    milvus::json extra_params_ = {{"nlist", 16384}};
 };
 
 struct VectorsData {
