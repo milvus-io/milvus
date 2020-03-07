@@ -10,38 +10,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "config/handler/GpuResourcesHandler.h"
+#include "config/handler/GpuConfigHandler.h"
 
 namespace milvus {
 namespace server {
 
-GpuResourcesHandler::GpuResourcesHandler() {
+GpuConfigHandler::GpuConfigHandler() {
     server::Config& config = server::Config::GetInstance();
     config.GetGpuResourceConfigEnable(gpu_enable_);
 }
 
-GpuResourcesHandler::~GpuResourcesHandler() {
+GpuConfigHandler::~GpuConfigHandler() {
     RemoveGpuEnableListener();
 }
 
 //////////////////////////////////////////////////////////////
 void
-GpuResourcesHandler::OnGpuEnableChanged(bool enable) {
+GpuConfigHandler::OnGpuEnableChanged(bool enable) {
     gpu_enable_ = enable;
 }
 
 void
-GpuResourcesHandler::SetIdentity(const std::string& identity) {
-    server::Config& config = server::Config::GetInstance();
-    config.GenUniqueIdentityID(identity, identity_);
-}
-
-void
-GpuResourcesHandler::AddGpuEnableListener() {
-    server::Config& config = server::Config::GetInstance();
+GpuConfigHandler::AddGpuEnableListener() {
+    auto& config = server::Config::GetInstance();
 
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
+        auto& config = server::Config::GetInstance();
         bool enable;
         auto status = config.GetGpuResourceConfigEnable(enable);
         if (status.ok()) {
@@ -54,7 +48,7 @@ GpuResourcesHandler::AddGpuEnableListener() {
 }
 
 void
-GpuResourcesHandler::RemoveGpuEnableListener() {
+GpuConfigHandler::RemoveGpuEnableListener() {
     server::Config& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
 }

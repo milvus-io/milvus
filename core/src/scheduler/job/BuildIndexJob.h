@@ -21,9 +21,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Job.h"
+#include "config/handler/CacheConfigHandler.h"
 #include "db/meta/Meta.h"
 #include "scheduler/Definition.h"
+#include "scheduler/job/Job.h"
 
 namespace milvus {
 namespace scheduler {
@@ -33,9 +34,11 @@ using engine::meta::TableFileSchemaPtr;
 using Id2ToIndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
 using Id2ToTableFileMap = std::unordered_map<size_t, TableFileSchema>;
 
-class BuildIndexJob : public Job {
+class BuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
     explicit BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options);
+
+    ~BuildIndexJob();
 
  public:
     bool
@@ -70,6 +73,10 @@ class BuildIndexJob : public Job {
     options() const {
         return options_;
     }
+
+ protected:
+    void
+    OnCacheInsertDataChanged(bool value) override;
 
  private:
     Id2ToIndexMap to_index_files_;

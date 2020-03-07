@@ -44,7 +44,8 @@ server_config:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # preload_table        | A comma-separated list of table names that need to be pre- | StringList |                 |
 #                      | loaded when Milvus server starts up.                       |            |                 |
-#                      | '*' means preload all existing tables.                     |            |                 |
+#                      | '*' means preload all existing tables (single-quote or     |            |                 |
+#                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # auto_flush_interval  | The interval, in seconds, at which Milvus automatically    | Integer    | 1 (s)           |
 #                      | flushes data to disk.                                      |            |                 |
