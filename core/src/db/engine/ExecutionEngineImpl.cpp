@@ -454,6 +454,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 status = std::static_pointer_cast<BFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                   float_vectors.data(), Config());
                 status = std::static_pointer_cast<BFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+
+                int64_t index_size = vectors->GetCount() * dim_ * sizeof(float);
+                int64_t bitset_size = vectors->GetCount() / 8;
+                index_->set_size(index_size + bitset_size);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
                 ec = std::static_pointer_cast<BinBFIndex>(index_)->Build(conf);
                 if (ec != KNOWHERE_SUCCESS) {
@@ -462,6 +466,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 status = std::static_pointer_cast<BinBFIndex>(index_)->AddWithoutIds(vectors->GetCount(),
                                                                                      vectors_data.data(), Config());
                 status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
+
+                int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t);
+                int64_t bitset_size = vectors->GetCount() / 8;
+                index_->set_size(index_size + bitset_size);
             }
             if (!status.ok()) {
                 return status;

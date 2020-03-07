@@ -22,7 +22,8 @@
 #include <thread>
 #include <vector>
 
-#include "DB.h"
+#include "config/handler/CacheConfigHandler.h"
+#include "db/DB.h"
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
 #include "db/Types.h"
@@ -37,7 +38,7 @@ namespace meta {
 class Meta;
 }
 
-class DBImpl : public DB {
+class DBImpl : public DB, public server::CacheConfigHandler {
  public:
     explicit DBImpl(const DBOptions& options);
     ~DBImpl();
@@ -146,6 +147,10 @@ class DBImpl : public DB {
     Status
     Size(uint64_t& result) override;
 
+ protected:
+    void
+    OnCacheInsertDataChanged(bool value) override;
+
  private:
     Status
     QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
@@ -226,7 +231,7 @@ class DBImpl : public DB {
     BackgroundWalTask();
 
  private:
-    const DBOptions options_;
+    DBOptions options_;
 
     std::atomic<bool> initialized_;
 
