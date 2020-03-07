@@ -64,6 +64,9 @@ class StringHelpFunctions {
     // regex grammar reference: http://www.cplusplus.com/reference/regex/ECMAScript/
     static bool
     IsRegexMatch(const std::string& target_str, const std::string& pattern);
+
+    static Status
+    ConvertToBoolean(const std::string& str, bool& value);
 };
 
 }  // namespace server
