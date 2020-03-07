@@ -8,43 +8,28 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
+
 #pragma once
 
-#include <exception>
-#include <limits>
 #include <string>
 
 #include "server/Config.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace server {
 
-class GpuResourcesHandler {
- public:
-    GpuResourcesHandler();
-
-    ~GpuResourcesHandler();
-
- protected:
-    virtual void
-    OnGpuEnableChanged(bool enable);
-
+class ConfigHandler {
  protected:
     void
-    SetIdentity(const std::string& identity);
-
-    void
-    AddGpuEnableListener();
-
-    void
-    RemoveGpuEnableListener();
+    SetIdentity(const std::string& identity) {
+        auto& config = server::Config::GetInstance();
+        config.GenUniqueIdentityID(identity, identity_);
+    }
 
  protected:
-    bool gpu_enable_ = true;
     std::string identity_;
 };
 
 }  // namespace server
 }  // namespace milvus
-#endif

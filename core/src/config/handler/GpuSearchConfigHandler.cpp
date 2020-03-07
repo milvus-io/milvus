@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "config/handler/GpuSearchResHandler.h"
+#include "config/handler/GpuSearchConfigHandler.h"
 
 #include <string>
 #include <vector>
@@ -19,7 +19,7 @@
 namespace milvus {
 namespace server {
 
-GpuSearchResHandler::GpuSearchResHandler() {
+GpuSearchConfigHandler::GpuSearchConfigHandler() {
     server::Config& config = server::Config::GetInstance();
 
     Status s = config.GetEngineConfigGpuSearchThreshold(threshold_);
@@ -30,24 +30,24 @@ GpuSearchResHandler::GpuSearchResHandler() {
     config.GetGpuResourceConfigSearchResources(search_gpus_);
 }
 
-GpuSearchResHandler::~GpuSearchResHandler() {
+GpuSearchConfigHandler::~GpuSearchConfigHandler() {
     RemoveGpuSearchThresholdListener();
     RemoveGpuSearchResListener();
 }
 
 ////////////////////////////////////////////////////////////////////////
 void
-GpuSearchResHandler::OnGpuSearchThresholdChanged(int64_t threshold) {
+GpuSearchConfigHandler::OnGpuSearchThresholdChanged(int64_t threshold) {
     threshold_ = threshold;
 }
 
 void
-GpuSearchResHandler::OnGpuSearchResChanged(const std::vector<int64_t>& gpus) {
+GpuSearchConfigHandler::OnGpuSearchResChanged(const std::vector<int64_t>& gpus) {
     search_gpus_ = gpus;
 }
 
 void
-GpuSearchResHandler::AddGpuSearchThresholdListener() {
+GpuSearchConfigHandler::AddGpuSearchThresholdListener() {
     server::Config& config = server::Config::GetInstance();
 
     server::ConfigCallBackF lambda_gpu_threshold = [this](const std::string& value) -> Status {
@@ -65,7 +65,7 @@ GpuSearchResHandler::AddGpuSearchThresholdListener() {
 }
 
 void
-GpuSearchResHandler::AddGpuSearchResListener() {
+GpuSearchConfigHandler::AddGpuSearchResListener() {
     server::Config& config = server::Config::GetInstance();
 
     server::ConfigCallBackF lambda_gpu_search_res = [this](const std::string& value) -> Status {
@@ -83,13 +83,13 @@ GpuSearchResHandler::AddGpuSearchResListener() {
 }
 
 void
-GpuSearchResHandler::RemoveGpuSearchThresholdListener() {
+GpuSearchConfigHandler::RemoveGpuSearchThresholdListener() {
     server::Config& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
 }
 
 void
-GpuSearchResHandler::RemoveGpuSearchResListener() {
+GpuSearchConfigHandler::RemoveGpuSearchResListener() {
     auto& config = server::Config::GetInstance();
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
 }

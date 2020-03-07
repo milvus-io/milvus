@@ -11,41 +11,45 @@
 #ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include <condition_variable>
-#include <deque>
 #include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
 #include <vector>
 
-#include "config/handler/GpuSearchConfigHandler.h"
-#include "scheduler/optimizer/Pass.h"
+#include "config/handler/GpuConfigHandler.h"
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
-class FaissIVFSQ8Pass : public Pass, public server::GpuSearchConfigHandler {
+class GpuSearchConfigHandler : virtual public GpuConfigHandler {
  public:
-    FaissIVFSQ8Pass() = default;
+    GpuSearchConfigHandler();
+
+    ~GpuSearchConfigHandler();
 
  public:
+    virtual void
+    OnGpuSearchThresholdChanged(int64_t threshold);
+
+    virtual void
+    OnGpuSearchResChanged(const std::vector<int64_t>& gpus);
+
+ protected:
     void
-    Init() override;
+    AddGpuSearchThresholdListener();
 
-    bool
-    Run(const TaskPtr& task) override;
+    void
+    AddGpuSearchResListener();
 
- private:
-    int64_t count_ = 0;
+    void
+    RemoveGpuSearchThresholdListener();
+
+    void
+    RemoveGpuSearchResListener();
+
+ protected:
+    int64_t threshold_ = std::numeric_limits<int64_t>::max();
+    std::vector<int64_t> search_gpus_;
 };
 
-using FaissIVFSQ8PassPtr = std::shared_ptr<FaissIVFSQ8Pass>;
-
-}  // namespace scheduler
+}  // namespace server
 }  // namespace milvus
 #endif

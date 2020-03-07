@@ -40,6 +40,13 @@ MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& met
         utils::GetParentPath(table_file_schema_.location_, directory);
         segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
+
+    SetIdentity("MemTableFile");
+    AddCacheInsertDataListener();
+}
+
+MemTableFile::~MemTableFile() {
+    RemoveCacheInsertDataListener();
 }
 
 Status
@@ -214,6 +221,11 @@ MemTableFile::Serialize(uint64_t wal_lsn) {
 const std::string&
 MemTableFile::GetSegmentId() const {
     return table_file_schema_.segment_id_;
+}
+
+void
+MemTableFile::OnCacheInsertDataChanged(bool value) {
+    options_.insert_cache_immediately_ = value;
 }
 
 }  // namespace engine
