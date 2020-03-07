@@ -745,7 +745,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
     } else if (bin_from_index) {
         status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
-        std::vector<segment::doc_id_t> uids = from_index->GetUids();
+        std::vector<segment::doc_id_t> uids = bin_from_index->GetUids();
         to_index->SetUids(uids);
         ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
     }
