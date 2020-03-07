@@ -144,7 +144,7 @@ static const MetaSchema TABLES_SCHEMA(META_TABLES, {
                                                        MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
                                                        MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
                                                        MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                       MetaField("nlist", "INT", "DEFAULT 16384 NOT NULL"),
+                                                       MetaField("index_params", "VARCHAR(512)", "NOT NULL"),
                                                        MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
                                                        MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
@@ -398,7 +398,7 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
             std::string flag = std::to_string(table_schema.flag_);
             std::string index_file_size = std::to_string(table_schema.index_file_size_);
             std::string engine_type = std::to_string(table_schema.engine_type_);
-            std::string nlist = std::to_string(table_schema.nlist_);
+            std::string& index_params = table_schema.index_params_;
             std::string metric_type = std::to_string(table_schema.metric_type_);
             std::string& owner_table = table_schema.owner_table_;
             std::string& partition_tag = table_schema.partition_tag_;
@@ -407,9 +407,9 @@ MySQLMetaImpl::CreateTable(TableSchema& table_schema) {
 
             createTableQuery << "INSERT INTO " << META_TABLES << " VALUES(" << id << ", " << mysqlpp::quote << table_id
                              << ", " << state << ", " << dimension << ", " << created_on << ", " << flag << ", "
-                             << index_file_size << ", " << engine_type << ", " << nlist << ", " << metric_type << ", "
-                             << mysqlpp::quote << owner_table << ", " << mysqlpp::quote << partition_tag << ", "
-                             << mysqlpp::quote << version << ", " << flush_lsn << ");";
+                             << index_file_size << ", " << engine_type << ", " << mysqlpp::quote << index_params << ", "
+                             << metric_type << ", " << mysqlpp::quote << owner_table << ", " << mysqlpp::quote
+                             << partition_tag << ", " << mysqlpp::quote << version << ", " << flush_lsn << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
@@ -446,8 +446,8 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
 
             mysqlpp::Query describeTableQuery = connectionPtr->query();
             describeTableQuery
-                << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, nlist, metric_type"
-                << " ,owner_table, partition_tag, version, flush_lsn"
+                << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, index_params"
+                << " , metric_type ,owner_table, partition_tag, version, flush_lsn"
                 << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_schema.table_id_
                 << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -465,7 +465,7 @@ MySQLMetaImpl::DescribeTable(TableSchema& table_schema) {
             table_schema.flag_ = resRow["flag"];
             table_schema.index_file_size_ = resRow["index_file_size"];
             table_schema.engine_type_ = resRow["engine_type"];
-            table_schema.nlist_ = resRow["nlist"];
+            resRow["index_params"].to_string(table_schema.index_params_);
             table_schema.metric_type_ = resRow["metric_type"];
             resRow["owner_table"].to_string(table_schema.owner_table_);
             resRow["partition_tag"].to_string(table_schema.partition_tag_);
@@ -534,7 +534,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             }
 
             mysqlpp::Query allTablesQuery = connectionPtr->query();
-            allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type"
+            allTablesQuery << "SELECT id, table_id, dimension, engine_type, index_params, index_file_size, metric_type"
                            << " ,owner_table, partition_tag, version, flush_lsn"
                            << " FROM " << META_TABLES << " WHERE state <> " << std::to_string(TableSchema::TO_DELETE)
                            << " AND owner_table = \"\";";
@@ -551,7 +551,7 @@ MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             table_schema.dimension_ = resRow["dimension"];
             table_schema.index_file_size_ = resRow["index_file_size"];
             table_schema.engine_type_ = resRow["engine_type"];
-            table_schema.nlist_ = resRow["nlist"];
+            resRow["index_params"].to_string(table_schema.index_params_);
             table_schema.metric_type_ = resRow["metric_type"];
             resRow["owner_table"].to_string(table_schema.owner_table_);
             resRow["partition_tag"].to_string(table_schema.partition_tag_);
@@ -673,6 +673,7 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.index_file_size_ = table_schema.index_file_size_;
+        file_schema.index_params_ = table_schema.index_params_;
 
         if (file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW ||
             file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW_MERGE) {
@@ -683,7 +684,6 @@ MySQLMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
             file_schema.engine_type_ = table_schema.engine_type_;
         }
 
-        file_schema.nlist_ = table_schema.nlist_;
         file_schema.metric_type_ = table_schema.metric_type_;
 
         std::string id = "NULL";  // auto-increment
@@ -785,7 +785,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
             resRow["segment_id"].to_string(file_schema.segment_id_);
             file_schema.index_file_size_ = table_schema.index_file_size_;
             file_schema.engine_type_ = resRow["engine_type"];
-            file_schema.nlist_ = table_schema.nlist_;
+            file_schema.index_params_ = table_schema.index_params_;
             file_schema.metric_type_ = table_schema.metric_type_;
             resRow["file_id"].to_string(file_schema.file_id_);
             file_schema.file_type_ = resRow["file_type"];
@@ -844,7 +844,7 @@ MySQLMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
                 resRow["segment_id"].to_string(file_schema.segment_id_);
                 file_schema.index_file_size_ = table_schema.index_file_size_;
                 file_schema.engine_type_ = resRow["engine_type"];
-                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.index_params_ = table_schema.index_params_;
                 file_schema.metric_type_ = table_schema.metric_type_;
                 resRow["file_id"].to_string(file_schema.file_id_);
                 file_schema.file_type_ = resRow["file_type"];
@@ -900,7 +900,8 @@ MySQLMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& i
 
                 updateTableIndexParamQuery << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
                                            << " ,dimension = " << dimension << " ,created_on = " << created_on
-                                           << " ,engine_type = " << index.engine_type_ << " ,nlist = " << index.nlist_
+                                           << " ,engine_type = " << index.engine_type_
+                                           << " ,index_params = " << mysqlpp::quote << index.extra_params_.dump()
                                            << " ,metric_type = " << index.metric_type_
                                            << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
@@ -1044,7 +1045,7 @@ MySQLMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& tab
             }
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
-            table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.index_params_ = groups[table_file.table_id_].index_params_;
             table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
 
             auto status = utils::GetTableFilePath(options_, table_file);
@@ -1263,7 +1264,7 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index
             }
 
             mysqlpp::Query describeTableIndexQuery = connectionPtr->query();
-            describeTableIndexQuery << "SELECT engine_type, nlist, index_file_size, metric_type"
+            describeTableIndexQuery << "SELECT engine_type, index_params, index_file_size, metric_type"
                                     << " FROM " << META_TABLES << " WHERE table_id = " << mysqlpp::quote << table_id
                                     << " AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -1275,7 +1276,9 @@ MySQLMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index
                 const mysqlpp::Row& resRow = res[0];
 
                 index.engine_type_ = resRow["engine_type"];
-                index.nlist_ = resRow["nlist"];
+                std::string str_index_params;
+                resRow["index_params"].to_string(str_index_params);
+                index.extra_params_ = milvus::json::parse(str_index_params);
                 index.metric_type_ = resRow["metric_type"];
             } else {
                 return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
@@ -1334,7 +1337,7 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
             // set table index type to raw
             dropTableIndexQuery << "UPDATE " << META_TABLES
                                 << " SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE)
-                                << " ,nlist = " << std::to_string(DEFAULT_NLIST)
+                                << " , index_params = '{}'"
                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
@@ -1426,7 +1429,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
 
             mysqlpp::Query allPartitionsQuery = connectionPtr->query();
             allPartitionsQuery << "SELECT table_id, id, state, dimension, created_on, flag, index_file_size,"
-                               << " engine_type, nlist, metric_type, partition_tag, version FROM " << META_TABLES
+                               << " engine_type, index_params, metric_type, partition_tag, version FROM " << META_TABLES
                                << " WHERE owner_table = " << mysqlpp::quote << table_id << " AND state <> "
                                << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -1445,7 +1448,7 @@ MySQLMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Tab
             partition_schema.flag_ = resRow["flag"];
             partition_schema.index_file_size_ = resRow["index_file_size"];
             partition_schema.engine_type_ = resRow["engine_type"];
-            partition_schema.nlist_ = resRow["nlist"];
+            resRow["index_params"].to_string(partition_schema.index_params_);
             partition_schema.metric_type_ = resRow["metric_type"];
             partition_schema.owner_table_ = table_id;
             resRow["partition_tag"].to_string(partition_schema.partition_tag_);
@@ -1562,7 +1565,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
             resRow["segment_id"].to_string(table_file.segment_id_);
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.engine_type_ = resRow["engine_type"];
-            table_file.nlist_ = table_schema.nlist_;
+            table_file.index_params_ = table_schema.index_params_;
             table_file.metric_type_ = table_schema.metric_type_;
             resRow["file_id"].to_string(table_file.file_id_);
             table_file.file_type_ = resRow["file_type"];
@@ -1644,7 +1647,7 @@ MySQLMetaImpl::FilesToMerge(const std::string& table_id, TableFilesSchema& files
             table_file.date_ = resRow["date"];
             table_file.index_file_size_ = table_schema.index_file_size_;
             table_file.engine_type_ = resRow["engine_type"];
-            table_file.nlist_ = table_schema.nlist_;
+            table_file.index_params_ = table_schema.index_params_;
             table_file.metric_type_ = table_schema.metric_type_;
             table_file.created_on_ = resRow["created_on"];
             table_file.dimension_ = table_schema.dimension_;
@@ -1722,7 +1725,7 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
             }
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
-            table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.index_params_ = groups[table_file.table_id_].index_params_;
             table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
 
             auto status = utils::GetTableFilePath(options_, table_file);
@@ -1809,7 +1812,7 @@ MySQLMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>& 
                 file_schema.created_on_ = resRow["created_on"];
 
                 file_schema.index_file_size_ = table_schema.index_file_size_;
-                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.index_params_ = table_schema.index_params_;
                 file_schema.metric_type_ = table_schema.metric_type_;
                 file_schema.dimension_ = table_schema.dimension_;
 

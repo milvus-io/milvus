@@ -336,9 +336,9 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST", "/collections/{collection_name}/indexes", CreateIndex,
-             PATH(String, collection_name), BODY_DTO(IndexRequestDto::ObjectWrapper, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() + "/indexes\'");
+    ENDPOINT("POST", "/tables/{collection_name}/indexes", CreateIndex,
+             PATH(String, collection_name), BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -369,15 +369,15 @@ class WebController : public oatpp::web::server::api::ApiController {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");
 
-        auto index_dto = IndexDto::createShared();
         auto handler = WebRequestHandler();
 
-        auto status_dto = handler.GetIndex(collection_name, index_dto);
+        OString result;
+        auto status_dto = handler.GetIndex(collection_name, result);
 
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, index_dto);
+                response = createResponse(Status::CODE_200, result);
                 break;
             case StatusCode::TABLE_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);

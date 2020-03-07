@@ -17,6 +17,7 @@
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "server/context/Context.h"
+#include "utils/Json.h"
 #include "utils/Status.h"
 
 #include <condition_variable>
@@ -73,17 +74,15 @@ struct TopKQueryResult {
 struct IndexParam {
     std::string table_name_;
     int64_t index_type_;
-    int64_t nlist_;
+    std::string extra_params_;
 
     IndexParam() {
         index_type_ = 0;
-        nlist_ = 0;
     }
 
-    IndexParam(const std::string& table_name, int64_t index_type, int64_t nlist) {
+    IndexParam(const std::string& table_name, int64_t index_type) {
         table_name_ = table_name;
         index_type_ = index_type;
-        nlist_ = nlist;
     }
 };
 

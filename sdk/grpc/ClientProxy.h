@@ -59,14 +59,14 @@ class ClientProxy : public Connection {
                     std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-           const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+    Search(const std::string& table_name, const std::vector<std::string>& partition_tag_array,
+           const std::vector<RowRecord>& query_record_array, int64_t topk, const std::string& extra_params,
            TopKQueryResult& topk_query_result) override;
 
     Status
-    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
+    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tag_array,
                int64_t query_id, int64_t topk,
-               int64_t nprobe, TopKQueryResult& topk_query_result) override;
+               const std::string& extra_params, TopKQueryResult& topk_query_result) override;
 
     Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
@@ -108,7 +108,7 @@ class ClientProxy : public Connection {
     CreatePartition(const PartitionParam& partition_param) override;
 
     Status
-    ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const override;
+    ShowPartitions(const std::string& table_name, PartitionTagList& partition_tag_array) const override;
 
     Status
     DropPartition(const PartitionParam& partition_param) override;

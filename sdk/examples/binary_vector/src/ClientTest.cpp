@@ -9,8 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "examples/binary_vector/src/ClientTest.h"
 #include "include/MilvusApi.h"
+#include "examples/binary_vector/src/ClientTest.h"
 #include "examples/utils/TimeRecorder.h"
 #include "examples/utils/Utils.h"
 
@@ -34,7 +34,6 @@ constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different, ensure less than BATCH_ROW_COUNT
 constexpr int64_t ADD_VECTOR_LOOP = 20;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
-constexpr int32_t N_LIST = 1024;
 
 milvus::TableSchema
 BuildTableSchema() {
@@ -44,7 +43,8 @@ BuildTableSchema() {
 
 milvus::IndexParam
 BuildIndexParam() {
-    milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, N_LIST};
+    JSON json_params = {{"nlist", 1024}};
+    milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, json_params.dump()};
     return index_param;
 }
 
@@ -123,7 +123,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         }
     }
 
-    milvus_sdk::Utils::Sleep(3);
+    {  // flush buffer
+        stat = conn->FlushTable(TABLE_NAME);
+        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    }
+
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;

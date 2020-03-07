@@ -211,7 +211,7 @@ GetParentPath(const std::string& path, std::string& parent_path) {
 
 bool
 IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
-    return index1.engine_type_ == index2.engine_type_ && index1.nlist_ == index2.nlist_ &&
+    return index1.engine_type_ == index2.engine_type_ && index1.extra_params_ == index2.extra_params_ &&
            index1.metric_type_ == index2.metric_type_;
 }
 

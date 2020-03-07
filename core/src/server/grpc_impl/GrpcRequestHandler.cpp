@@ -280,8 +280,16 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
 
-    Status status = request_handler_.CreateIndex(context_map_[context], request->table_name(),
-                                                 request->index().index_type(), request->index().nlist());
+    milvus::json json_params;
+    for (int i = 0; i < request->extra_params_size(); i++) {
+        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
+        if (extra.key() == EXTRA_PARAM_KEY) {
+            json_params = json::parse(extra.value());
+        }
+    }
+
+    Status status =
+        request_handler_.CreateIndex(context_map_[context], request->table_name(), request->index_type(), json_params);
 
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
@@ -366,14 +374,23 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
         partitions.emplace_back(partition);
     }
 
-    // step 3: search vectors
+    // step 3: parse extra parameters
+    milvus::json json_params;
+    for (int i = 0; i < request->extra_params_size(); i++) {
+        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
+        if (extra.key() == EXTRA_PARAM_KEY) {
+            json_params = json::parse(extra.value());
+        }
+    }
+
+    // step 4: search vectors
     std::vector<std::string> file_ids;
     TopKQueryResult result;
     fiu_do_on("GrpcRequestHandler.Search.not_empty_file_ids", file_ids.emplace_back("test_file_id"));
     Status status = request_handler_.Search(context_map_[context], request->table_name(), vectors, request->topk(),
-                                            request->nprobe(), partitions, file_ids, result);
+                                            json_params, partitions, file_ids, result);
 
-    // step 4: construct and return result
+    // step 5: construct and return result
     ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -392,12 +409,21 @@ GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::g
         partitions.emplace_back(partition);
     }
 
-    // step 2: search vectors
+    // step 2: parse extra parameters
+    milvus::json json_params;
+    for (int i = 0; i < request->extra_params_size(); i++) {
+        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
+        if (extra.key() == EXTRA_PARAM_KEY) {
+            json_params = json::parse(extra.value());
+        }
+    }
+
+    // step 3: search vectors
     TopKQueryResult result;
     Status status = request_handler_.SearchByID(context_map_[context], request->table_name(), request->id(),
-                                                request->topk(), request->nprobe(), partitions, result);
+                                                request->topk(), json_params, partitions, result);
 
-    // step 3: construct and return result
+    // step 4: construct and return result
     ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -429,13 +455,21 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
         partitions.emplace_back(partition);
     }
 
-    // step 4: search vectors
-    TopKQueryResult result;
-    Status status =
-        request_handler_.Search(context_map_[context], search_request->table_name(), vectors, search_request->topk(),
-                                search_request->nprobe(), partitions, file_ids, result);
+    // step 4: parse extra parameters
+    milvus::json json_params;
+    for (int i = 0; i < search_request->extra_params_size(); i++) {
+        const ::milvus::grpc::KeyValuePair& extra = search_request->extra_params(i);
+        if (extra.key() == EXTRA_PARAM_KEY) {
+            json_params = json::parse(extra.value());
+        }
+    }
 
-    // step 5: construct and return result
+    // step 5: search vectors
+    TopKQueryResult result;
+    Status status = request_handler_.Search(context_map_[context], search_request->table_name(), vectors,
+                                            search_request->topk(), json_params, partitions, file_ids, result);
+
+    // step 6: construct and return result
     ConstructResults(result, response);
 
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -549,8 +583,10 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
     IndexParam param;
     Status status = request_handler_.DescribeIndex(context_map_[context], request->table_name(), param);
     response->set_table_name(param.table_name_);
-    response->mutable_index()->set_index_type(param.index_type_);
-    response->mutable_index()->set_nlist(param.nlist_);
+    response->set_index_type(param.index_type_);
+    ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
+    kv->set_key(EXTRA_PARAM_KEY);
+    kv->set_value(param.extra_params_);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;

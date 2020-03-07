@@ -356,28 +356,31 @@ TEST_F(WebHandlerTest, INDEX) {
     auto collection_name = milvus::server::web::OString(TABLE_NAME) + RandomName().c_str();
     GenTable(collection_name->std_str(), 16, 10, "L2");
 
-    auto index_request_dto = milvus::server::web::IndexRequestDto::createShared();
-    index_request_dto->index_type = "FLAT";
-    index_request_dto->nlist = 10;
+    nlohmann::json index_json;
 
-    milvus::server::web::StatusDto::createShared();
+    index_json["index_type"] = "FLAT";
+    index_json["params"] = nlohmann::json::parse("{ \"nlist\": 10 }");
 
-    auto status_dto = handler->CreateIndex(collection_name, index_request_dto);
+    auto status_dto = handler->CreateIndex(collection_name, index_json.dump().c_str());
     ASSERT_EQ(0, status_dto->code->getValue());
 
     status_dto = handler->DropIndex(collection_name);
     ASSERT_EQ(0, status_dto->code->getValue());
 
+    // drop index
+    status_dto = handler->DropIndex(collection_name);
+    ASSERT_EQ(0, status_dto->code->getValue());
+
     // invalid index_type
-    index_request_dto->index_type = "AAA";
-    status_dto = handler->CreateIndex(collection_name, index_request_dto);
+    index_json["index_type"] = "AAA";
+    status_dto = handler->CreateIndex(collection_name, index_json.dump().c_str());
     ASSERT_NE(0, status_dto->code->getValue());
     ASSERT_EQ(StatusCode::ILLEGAL_INDEX_TYPE, status_dto->code->getValue());
 
     // invalid nlist
-    index_request_dto->index_type = "FLAT";
-    index_request_dto->nlist = -1;
-    status_dto = handler->CreateIndex(collection_name, index_request_dto);
+    index_json["index_type"] = "IVFFLAT";
+    index_json["params"] = nlohmann::json::parse("{ \"nlist\": -1 }");
+    status_dto = handler->CreateIndex(collection_name, index_json.dump().c_str());
     ASSERT_NE(0, status_dto->code->getValue());
     ASSERT_EQ(StatusCode::ILLEGAL_NLIST, status_dto->code->getValue());
 }
@@ -429,7 +432,7 @@ TEST_F(WebHandlerTest, SEARCH) {
     nlohmann::json search_pram_json;
     search_pram_json["vectors"] = RandomRecordsJson(TABLE_DIM, 10);
     search_pram_json["topk"] = 1;
-    search_pram_json["nprobe"] = 1;
+    search_pram_json["params"] = nlohmann::json::parse("{\"nprobe\": 10}");
 
     nlohmann::json search_json;
     search_json["search"] = search_pram_json;
@@ -644,8 +647,8 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/collections/{collection_name}/indexes", optionsIndexes, PATH(String, collection_name, "collection_name"))
 
-    API_CALL("POST", "/collections/{collection_name}/indexes", createIndex, PATH(String, collection_name, "collection_name"),
-             BODY_DTO(milvus::server::web::IndexRequestDto::ObjectWrapper, body))
+    API_CALL("POST", "/tables/{table_name}/indexes", createIndex, PATH(String, table_name, "table_name"),
+             BODY_STRING(OString, body))
 
     API_CALL("GET", "/collections/{collection_name}/indexes", getIndex, PATH(String, collection_name, "collection_name"))
 
@@ -1112,67 +1115,63 @@ TEST_F(WebControllerTest, INDEX) {
     GenTable(collection_name, 64, 100, "L2");
 
     // test index with imcomplete param
-    auto index_dto = milvus::server::web::IndexRequestDto::createShared();
-    auto response = client_ptr->createIndex(collection_name, index_dto, conncetion_ptr);
+    nlohmann::json index_json;
+    auto response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP);
+
+    // missing index `params`
+    response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    index_json["params"] = nlohmann::json::parse("{\"nlist\": 10}");
+    response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    auto create_index_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
-    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, create_index_dto->code);
 
     // drop index
     response = client_ptr->dropIndex(collection_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
-    index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
-
-    response = client_ptr->createIndex(collection_name, index_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    // drop index
-    response = client_ptr->dropIndex(collection_name, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-
-    // create index without existing collection
-    response = client_ptr->createIndex(collection_name + "fgafafafafafUUUUUUa124254", index_dto, conncetion_ptr);
+    // create index without existing table
+    response = client_ptr->createIndex(collection_name + "fgafafafafafUUUUUUa124254", index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 
-    index_dto->index_type = "J46";
-    response = client_ptr->createIndex(collection_name, index_dto, conncetion_ptr);
+    // invalid index type
+    index_json["index_type"] = "J46";
+    response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_INDEX_TYPE, result_dto->code);
 
-    index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
-    index_dto->nlist = 10;
-
-    response = client_ptr->createIndex(collection_name, index_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-
     // drop index
     response = client_ptr->dropIndex(collection_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
-    // invalid index type
-    index_dto->index_type = 100;
-    response = client_ptr->createIndex(collection_name, index_dto, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-
     // insert data and create index
-    response = client_ptr->dropIndex(collection_name, conncetion_ptr);
-    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-
     auto status = InsertData(collection_name, 64, 200);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    index_dto->index_type = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP).c_str();
-    response = client_ptr->createIndex(collection_name, index_dto, conncetion_ptr);
+    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IVFFLAT);
+    response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
     // get index
     response = client_ptr->getIndex(collection_name, conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    auto result_index_dto = response->readBodyToDto<milvus::server::web::IndexDto>(object_mapper.get());
-    ASSERT_EQ("FLAT", result_index_dto->index_type->std_str());
-    ASSERT_EQ(10, result_index_dto->nlist->getValue());
-    // get index of collection which not exists
+    auto result_index_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_index_json.contains("index_type"));
+    ASSERT_EQ("IVFFLAT", result_index_json["index_type"].get<std::string>());
+    ASSERT_TRUE(result_index_json.contains("params"));
+
+    // check index params
+    auto params_json = result_index_json["params"];
+    ASSERT_TRUE(params_json.contains("nlist"));
+    auto nlist_json = params_json["nlist"];
+    ASSERT_TRUE(nlist_json.is_number());
+    ASSERT_EQ(10, nlist_json.get<int64_t>());
+
+    // get index of table which not exists
     response = client_ptr->getIndex(collection_name + "dfaedXXXdfdfet4t343aa4", conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
     auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
@@ -1364,7 +1363,7 @@ TEST_F(WebControllerTest, SEARCH) {
     auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_NE(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
 
-    search_json["search"]["nprobe"] = 1;
+    search_json["search"]["params"]["nprobe"] = 1;
     response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
     error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::BODY_FIELD_LOSS, error_dto->code);
@@ -1429,7 +1428,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_NE(milvus::server::web::StatusCode::SUCCESS, result_dto->code);
 
-    search_json["search"]["nprobe"] = 1;
+    search_json["search"]["params"]["nprobe"] = 1;
     response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
     result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     ASSERT_NE(milvus::server::web::StatusCode::SUCCESS, result_dto->code);

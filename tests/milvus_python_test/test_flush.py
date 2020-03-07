@@ -1,5 +1,4 @@
 import time
-import random
 import pdb
 import threading
 import logging
@@ -29,9 +28,9 @@ class TestFlushBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] != IndexType.IVF_SQ8 or request.param["index_type"] != IndexType.IVFLAT or request.param["index_type"] != IndexType.FLAT:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
@@ -136,7 +135,7 @@ class TestFlushBase:
             status = connect.flush([table])
             assert status.OK()
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
+        status, res = connect.search_vectors(table, top_k, query_records=query_vecs)
         assert status.OK()
 
     def test_add_flush_auto(self, connect, table):
@@ -196,7 +195,7 @@ class TestFlushBase:
             status = connect.flush([table])
             assert status.OK()
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs)
+        status, res = connect.search_vectors(table, top_k, query_records=query_vecs)
         assert status.OK()
 
     # TODO: CI fail, LOCAL pass

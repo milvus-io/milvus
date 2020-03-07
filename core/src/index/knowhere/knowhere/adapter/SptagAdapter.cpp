@@ -43,7 +43,8 @@ std::vector<SPTAG::QueryResult>
 ConvertToQueryResult(const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset);
 
-    std::vector<SPTAG::QueryResult> query_results(rows, SPTAG::QueryResult(nullptr, config->k, true));
+    std::vector<SPTAG::QueryResult> query_results(rows,
+                                                  SPTAG::QueryResult(nullptr, config[meta::TOPK].get<int64_t>(), true));
     for (auto i = 0; i < rows; ++i) {
         query_results[i].SetTarget(&p_data[i * dim]);
     }

@@ -34,23 +34,23 @@ namespace milvus {
 namespace server {
 
 SearchByIDRequest::SearchByIDRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                                     int64_t vector_id, int64_t topk, int64_t nprobe,
+                                     int64_t vector_id, int64_t topk, const milvus::json& extra_params,
                                      const std::vector<std::string>& partition_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
       vector_id_(vector_id),
       topk_(topk),
-      nprobe_(nprobe),
+      extra_params_(extra_params),
       partition_list_(partition_list),
       result_(result) {
 }
 
 BaseRequestPtr
 SearchByIDRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id,
-                          int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
-                          TopKQueryResult& result) {
+                          int64_t topk, const milvus::json& extra_params,
+                          const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
-        new SearchByIDRequest(context, table_name, vector_id, topk, nprobe, partition_list, result));
+        new SearchByIDRequest(context, table_name, vector_id, topk, extra_params, partition_list, result));
 }
 
 Status
@@ -59,7 +59,7 @@ SearchByIDRequest::OnExecute() {
         auto pre_query_ctx = context_->Child("Pre query");
 
         std::string hdr = "SearchByIDRequest(table=" + table_name_ + ", id=" + std::to_string(vector_id_) +
-                          ", k=" + std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
+                          ", k=" + std::to_string(topk_) + ", extra_params=" + extra_params_.dump() + ")";
 
         TimeRecorder rc(hdr);
 
@@ -86,6 +86,11 @@ SearchByIDRequest::OnExecute() {
             if (!table_schema.owner_table_.empty()) {
                 return Status(SERVER_INVALID_TABLE_NAME, TableNotExistMsg(table_name_));
             }
+        }
+
+        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
+        if (!status.ok()) {
+            return status;
         }
 
         // Check whether GPU search resource is enabled
@@ -122,11 +127,6 @@ SearchByIDRequest::OnExecute() {
             return status;
         }
 
-        status = ValidationUtil::ValidateSearchNprobe(nprobe_, table_schema);
-        if (!status.ok()) {
-            return status;
-        }
-
         rc.RecordSection("check validation");
 
         // step 5: search vectors
@@ -140,8 +140,8 @@ SearchByIDRequest::OnExecute() {
 
         pre_query_ctx->GetTraceContext()->GetSpan()->Finish();
 
-        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, nprobe_, vector_id_,
-                                            result_ids, result_distances);
+        status = DBWrapper::DB()->QueryByID(context_, table_name_, partition_list_, (size_t)topk_, extra_params_,
+                                            vector_id_, result_ids, result_distances);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
