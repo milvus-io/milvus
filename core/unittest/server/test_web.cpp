@@ -382,7 +382,7 @@ TEST_F(WebHandlerTest, INDEX) {
     index_json["params"] = nlohmann::json::parse("{ \"nlist\": -1 }");
     status_dto = handler->CreateIndex(collection_name, index_json.dump().c_str());
     ASSERT_NE(0, status_dto->code->getValue());
-    ASSERT_EQ(StatusCode::ILLEGAL_NLIST, status_dto->code->getValue());
+    ASSERT_EQ(StatusCode::ILLEGAL_ARGUMENT, status_dto->code->getValue());
 }
 
 TEST_F(WebHandlerTest, PARTITION) {
