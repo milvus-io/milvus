@@ -90,6 +90,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
+-   \#1544 Update resources name in HTTP module
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat
