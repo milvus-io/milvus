@@ -72,42 +72,27 @@ Utils::GenTableName() {
 std::string
 Utils::MetricTypeName(const milvus::MetricType& metric_type) {
     switch (metric_type) {
-        case milvus::MetricType::L2:
-            return "L2 distance";
-        case milvus::MetricType::IP:
-            return "Inner product";
-        case milvus::MetricType::HAMMING:
-            return "Hamming distance";
-        case milvus::MetricType::JACCARD:
-            return "Jaccard distance";
-        case milvus::MetricType::TANIMOTO:
-            return "Tanimoto distance";
-        default:
-            return "Unknown metric type";
+        case milvus::MetricType::L2:return "L2 distance";
+        case milvus::MetricType::IP:return "Inner product";
+        case milvus::MetricType::HAMMING:return "Hamming distance";
+        case milvus::MetricType::JACCARD:return "Jaccard distance";
+        case milvus::MetricType::TANIMOTO:return "Tanimoto distance";
+        default:return "Unknown metric type";
     }
 }
 
 std::string
 Utils::IndexTypeName(const milvus::IndexType& index_type) {
     switch (index_type) {
-        case milvus::IndexType::FLAT:
-            return "FLAT";
-        case milvus::IndexType::IVFFLAT:
-            return "IVFFLAT";
-        case milvus::IndexType::IVFSQ8:
-            return "IVFSQ8";
-        case milvus::IndexType::RNSG:
-            return "NSG";
-        case milvus::IndexType::IVFSQ8H:
-            return "IVFSQ8H";
-        case milvus::IndexType::IVFPQ:
-            return "IVFPQ";
-        case milvus::IndexType::SPTAGKDT:
-            return "SPTAGKDT";
-        case milvus::IndexType::SPTAGBKT:
-            return "SPTAGBKT";
-        default:
-            return "Unknown index type";
+        case milvus::IndexType::FLAT:return "FLAT";
+        case milvus::IndexType::IVFFLAT:return "IVFFLAT";
+        case milvus::IndexType::IVFSQ8:return "IVFSQ8";
+        case milvus::IndexType::RNSG:return "NSG";
+        case milvus::IndexType::IVFSQ8H:return "IVFSQ8H";
+        case milvus::IndexType::IVFPQ:return "IVFPQ";
+        case milvus::IndexType::SPTAGKDT:return "SPTAGKDT";
+        case milvus::IndexType::SPTAGBKT:return "SPTAGBKT";
+        default:return "Unknown index type";
     }
 }
 
@@ -134,7 +119,7 @@ Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
     BLOCK_SPLITER
     std::cout << "Index table name: " << index_param.table_name << std::endl;
     std::cout << "Index type: " << IndexTypeName(index_param.index_type) << std::endl;
-    std::cout << "Index nlist: " << index_param.nlist << std::endl;
+    std::cout << "Index extra_params: " << index_param.extra_params << std::endl;
     BLOCK_SPLITER
 }
 
@@ -166,7 +151,7 @@ Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
     std::cout << "Returned result count: " << topk_query_result.size() << std::endl;
 
     if (topk_query_result.size() != search_record_array.size()) {
-        std::cout << "ERROR: Returned result count dones equal nq" << std::endl;
+        std::cout << "ERROR: Returned result count not equal nq" << std::endl;
         return;
     }
 
@@ -223,9 +208,10 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
 
     {
         BLOCK_SPLITER
+        JSON json_params = {{"nprobe", nprobe}};
         milvus_sdk::TimeRecorder rc("search");
         milvus::Status stat =
-            conn->Search(table_name, partition_tags, record_array, top_k, nprobe, topk_query_result);
+            conn->Search(table_name, partition_tags, record_array, top_k, json_params.dump(), topk_query_result);
         std::cout << "SearchVector function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }
@@ -242,10 +228,12 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
 
     {
         BLOCK_SPLITER
+        JSON json_params = {{"nprobe", nprobe}};
         for (auto& search_id : search_id_array) {
             milvus_sdk::TimeRecorder rc("search by id " + std::to_string(search_id));
             milvus::TopKQueryResult result;
-            milvus::Status stat = conn->SearchByID(table_name, partition_tags, search_id, top_k, nprobe, result);
+            milvus::Status
+                stat = conn->SearchByID(table_name, partition_tags, search_id, top_k, json_params.dump(), result);
             topk_query_result.insert(topk_query_result.end(), std::make_move_iterator(result.begin()),
                                      std::make_move_iterator(result.end()));
             std::cout << "SearchByID function call status: " << stat.message() << std::endl;

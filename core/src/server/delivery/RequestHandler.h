@@ -38,7 +38,7 @@ class RequestHandler {
 
     Status
     CreateIndex(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t index_type,
-                int64_t nlist);
+                const milvus::json& json_params);
 
     Status
     Insert(const std::shared_ptr<Context>& context, const std::string& table_name, engine::VectorsData& vectors,
@@ -60,12 +60,13 @@ class RequestHandler {
 
     Status
     Search(const std::shared_ptr<Context>& context, const std::string& table_name, const engine::VectorsData& vectors,
-           int64_t topk, int64_t nprobe, const std::vector<std::string>& partition_list,
+           int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
            const std::vector<std::string>& file_id_list, TopKQueryResult& result);
 
     Status
     SearchByID(const std::shared_ptr<Context>& context, const std::string& table_name, int64_t vector_id, int64_t topk,
-               int64_t nprobe, const std::vector<std::string>& partition_list, TopKQueryResult& result);
+               const milvus::json& extra_params, const std::vector<std::string>& partition_list,
+               TopKQueryResult& result);
 
     Status
     DescribeTable(const std::shared_ptr<Context>& context, const std::string& table_name, TableSchema& table_schema);

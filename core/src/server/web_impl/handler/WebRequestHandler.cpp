@@ -210,7 +210,7 @@ WebRequestHandler::GetTableMetaInfo(const std::string& table_name, nlohmann::jso
     json_out["dimension"] = schema.dimension_;
     json_out["index_file_size"] = schema.index_file_size_;
     json_out["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
-    json_out["nlist"] = index_param.nlist_;
+    json_out["index_params"] = index_param.extra_params_;
     json_out["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
     json_out["count"] = count;
 
@@ -469,11 +469,6 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     }
     int64_t topk = json["topk"];
 
-    if (!json.contains("nprobe")) {
-        return Status(BODY_FIELD_LOSS, "Field \'nprobe\' is required");
-    }
-    int64_t nprobe = json["nprobe"];
-
     std::vector<std::string> partition_tags;
     if (json.contains("partition_tags")) {
         auto tags = json["partition_tags"];
@@ -497,6 +492,10 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
         }
     }
 
+    if (!json.contains("params")) {
+        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
+    }
+
     bool bin_flag = false;
     auto status = IsBinaryTable(table_name, bin_flag);
     if (!status.ok()) {
@@ -514,8 +513,9 @@ WebRequestHandler::Search(const std::string& table_name, const nlohmann::json& j
     }
 
     TopKQueryResult result;
-    status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, nprobe, partition_tags, file_id_vec,
-                                     result);
+    status = request_handler_.Search(context_ptr_, table_name, vectors_data, topk, json["params"], partition_tags,
+                                     file_id_vec, result);
+
     if (!status.ok()) {
         return status;
     }
@@ -1010,33 +1010,41 @@ WebRequestHandler::DropTable(const OString& table_name) {
  */
 
 StatusDto::ObjectWrapper
-WebRequestHandler::CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param) {
-    if (nullptr == index_param->index_type.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required")
-    }
-    std::string index_type = index_param->index_type->std_str();
-    if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
-        RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
+WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
+    try {
+        auto request_json = nlohmann::json::parse(body->std_str());
+        if (!request_json.contains("index_type")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
+        }
+
+        std::string index_type = request_json["index_type"];
+        if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
+            RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
+        }
+        auto index = static_cast<int64_t>(IndexNameMap.at(index_type));
+        if (!request_json.contains("params")) {
+            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
+        }
+        auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index, request_json["params"]);
+        ASSIGN_RETURN_STATUS_DTO(status);
+    } catch (nlohmann::detail::parse_error& e) {
+    } catch (nlohmann::detail::type_error& e) {
     }
 
-    if (nullptr == index_param->nlist.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'nlist\' is required")
-    }
-
-    auto status =
-        request_handler_.CreateIndex(context_ptr_, table_name->std_str(),
-                                     static_cast<int64_t>(IndexNameMap.at(index_type)), index_param->nlist->getValue());
-    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(Status::OK())
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto) {
+WebRequestHandler::GetIndex(const OString& table_name, OString& result) {
     IndexParam param;
     auto status = request_handler_.DescribeIndex(context_ptr_, table_name->std_str(), param);
 
     if (status.ok()) {
-        index_dto->index_type = IndexMap.at(engine::EngineType(param.index_type_)).c_str();
-        index_dto->nlist = param.nlist_;
+        nlohmann::json json_out;
+        auto index_type = IndexMap.at(engine::EngineType(param.index_type_));
+        json_out["index_type"] = index_type;
+        json_out["params"] = nlohmann::json::parse(param.extra_params_);
+        result = json_out.dump().c_str();
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)

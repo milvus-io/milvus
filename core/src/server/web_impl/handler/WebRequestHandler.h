@@ -189,10 +189,10 @@ class WebRequestHandler {
      * Index
      */
     StatusDto::ObjectWrapper
-    CreateIndex(const OString& table_name, const IndexRequestDto::ObjectWrapper& index_param);
+    CreateIndex(const OString& table_name, const OString& body);
 
     StatusDto::ObjectWrapper
-    GetIndex(const OString& table_name, IndexDto::ObjectWrapper& index_dto);
+    GetIndex(const OString& table_name, OString& result);
 
     StatusDto::ObjectWrapper
     DropIndex(const OString& table_name);

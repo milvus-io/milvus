@@ -197,10 +197,12 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     request.set_table_name(TABLE_NAME);
     handler->CreateIndex(&context, &request, &response);
 
-    request.mutable_index()->set_index_type(1);
+    request.set_index_type(1);
     handler->CreateIndex(&context, &request, &response);
 
-    request.mutable_index()->set_nlist(16384);
+    ::milvus::grpc::KeyValuePair* kv = request.add_extra_params();
+    kv->set_key("param");
+    kv->set_value("{ \"nlist\": 16384 }");
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
     int error_code = response.error_code();
@@ -223,7 +225,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     fiu_disable("CreateIndexRequest.OnExecute.create_index_fail");
 
 #ifdef MILVUS_GPU_VERSION
-    request.mutable_index()->set_index_type(static_cast<int>(milvus::engine::EngineType::FAISS_PQ));
+    request.set_index_type(static_cast<int>(milvus::engine::EngineType::FAISS_PQ));
     fiu_enable("CreateIndexRequest.OnExecute.ip_meteric", 1, NULL, 0);
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_TRUE(grpc_status.ok());
@@ -361,7 +363,9 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     handler->Search(&context, &request, &response);
 
     // test empty query record array
-    request.set_nprobe(32);
+    milvus::grpc::KeyValuePair* kv = request.add_extra_params();
+    kv->set_key(milvus::server::grpc::EXTRA_PARAM_KEY);
+    kv->set_value("{ \"nprobe\": 32 }");
     handler->Search(&context, &request, &response);
 
     std::vector<std::vector<float>> record_array;

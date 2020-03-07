@@ -131,18 +131,18 @@ class DBImpl : public DB, public server::CacheConfigHandler {
 
     Status
     QueryByID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-              const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, IDNumber vector_id,
-              ResultIds& result_ids, ResultDistances& result_distances) override;
+              const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+              IDNumber vector_id, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Query(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-          const std::vector<std::string>& partition_tags, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-          ResultIds& result_ids, ResultDistances& result_distances) override;
+          const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+          const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     QueryByFileID(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-                  const std::vector<std::string>& file_ids, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-                  ResultIds& result_ids, ResultDistances& result_distances) override;
+                  const std::vector<std::string>& file_ids, uint64_t k, const milvus::json& extra_params,
+                  const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override;
 
     Status
     Size(uint64_t& result) override;
@@ -154,8 +154,8 @@ class DBImpl : public DB, public server::CacheConfigHandler {
  private:
     Status
     QueryAsync(const std::shared_ptr<server::Context>& context, const std::string& table_id,
-               const meta::TableFilesSchema& files, uint64_t k, uint64_t nprobe, const VectorsData& vectors,
-               ResultIds& result_ids, ResultDistances& result_distances);
+               const meta::TableFilesSchema& files, uint64_t k, const milvus::json& extra_params,
+               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
     GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, VectorsData& vector,

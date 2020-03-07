@@ -13,16 +13,9 @@
 
 #include <string>
 #include "knowhere/common/Dataset.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace knowhere {
-
-namespace meta {
-extern const char* DIM;
-extern const char* TENSOR;
-extern const char* ROWS;
-extern const char* IDS;
-extern const char* DISTANCE;
-};  // namespace meta
 
 #define GETTENSOR(dataset)                         \
     auto dim = dataset->Get<int64_t>(meta::DIM);   \
