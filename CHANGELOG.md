@@ -25,19 +25,22 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1152 Error log output continuously after server start
 -   \#1211 Server down caused by searching with index_type: HNSW
 -   \#1240 Update license declaration
--   \#1298 Unittest failed when on CPU2GPU case
+-   \#1298 Unit test failed when on CPU2GPU case
 -   \#1359 Negative distance value returned when searching with HNSW index type
--   \#1429 Server crashed when searching vectors using GPU
+-   \#1429 Server crashed when searching vectors with GPU
 -   \#1476 Fix vectors results bug when getting vectors from segments
 -   \#1484 Index type changed to IDMAP after compacted 
 -   \#1499 Fix duplicated ID number issue
 -   \#1491 Server crashed during adding vectors  
 -   \#1504 Avoid possible race condition between delete and search 
+-   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
 -   \#1518 Table count did not match after deleting vectors and compact
--   \#1530 Set table file with correct engine type in meta
+-   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
+-   \#1530 Set table file with correct engine type in meta
+-   \#1535 Degradation searching performance with metric_type: binary_idmap
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -77,13 +80,14 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1105 Error message is not clear when creating IVFSQ8H index without gpu resources
 -   \#740, #849, #878, #972, #1033, #1161, #1173, #1199, #1190, #1223, #1222, #1257, #1264, #1269, #1164, #1303, #1304, #1324, #1388, #1459 Various fixes and improvements for Milvus documentation.
 -   \#1297 Hide partition_name parameter, avid user directly access partition table
--   \#1310 Add default partition tag for a table
 -   \#1234 Do S3 server validation check when Milvus startup
 -   \#1263 Allow system conf modifiable and some take effect directly
+-   \#1310 Add default partition tag for a table
 -   \#1320 Remove debug logging from faiss
 -   \#1426 Support to configure whether to enabled autoflush and the autoflush interval
 -   \#1444 Improve delete
 -   \#1480 Add return code for AVX512 selection
+-   \#1524 Update config "preload_table" description
 -   \#1537 Optimize raw vector and uids read/write
 
 ## Task

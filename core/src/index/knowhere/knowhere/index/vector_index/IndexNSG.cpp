@@ -73,9 +73,6 @@ NSG::Load(const BinarySet& index_binary) {
 DatasetPtr
 NSG::Search(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
-    //    if (build_cfg != nullptr) {
-    //        build_cfg->CheckValid();  // throw exception
-    //    }
 
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
@@ -120,7 +117,6 @@ NSG::Train(const DatasetPtr& dataset, const Config& config) {
         preprocess_index->Add(dataset, config);
         preprocess_index->GenGraph(raw_data, build_cfg->knng, knng, config);
     } else {
-        // TODO(linxj): use ivf instead?
         auto gpu_idx = cloner::CopyCpuToGpu(idmap, build_cfg->gpu_id, config);
         auto gpu_idmap = std::dynamic_pointer_cast<GPUIDMAP>(gpu_idx);
         gpu_idmap->GenGraph(raw_data, build_cfg->knng, knng, config);

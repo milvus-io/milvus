@@ -184,6 +184,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetDBConfigArchiveDaysThreshold(int64_val).ok());
     ASSERT_TRUE(int64_val == db_archive_days_threshold);
 
+    int64_t db_auto_flush_interval = 1;
+    ASSERT_TRUE(config.SetDBConfigAutoFlushInterval(std::to_string(db_auto_flush_interval)).ok());
+    ASSERT_TRUE(config.GetDBConfigAutoFlushInterval(int64_val).ok());
+    ASSERT_TRUE(int64_val == db_auto_flush_interval);
+
     /* storage config */
     std::string storage_primary_path = "/home/zilliz";
     ASSERT_TRUE(config.SetStorageConfigPrimaryPath(storage_primary_path).ok());
@@ -573,6 +578,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetDBConfigArchiveDaysThreshold("0x10").ok());
 
+    ASSERT_FALSE(config.SetDBConfigAutoFlushInterval("0.1").ok());
+
     /* storage config */
     ASSERT_FALSE(config.SetStorageConfigPrimaryPath("").ok());
 
@@ -851,10 +858,10 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("ValidationUtil.GetGpuMemory.return_error");
 
-    fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
-    s = config.GetCacheConfigCpuCacheCapacity(value);
-    ASSERT_FALSE(s.ok());
-    fiu_disable("check_config_insert_buffer_size_fail");
+    // fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
+    // s = config.GetCacheConfigCpuCacheCapacity(value);
+    // ASSERT_FALSE(s.ok());
+    // fiu_disable("check_config_insert_buffer_size_fail");
 
     fiu_enable("Config.CheckCacheConfigCpuCacheCapacity.large_insert_buffer", 1, NULL, 0);
     s = config.GetCacheConfigCpuCacheCapacity(value);
@@ -943,6 +950,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_backend_url_fail");
 
+    fiu_enable("check_config_preload_table_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_preload_table_fail");
+
     fiu_enable("check_config_archive_disk_threshold_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
@@ -952,6 +964,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_RESET_DEFAULT_CONFIG_FAIL_TEST) {
     s = config.ResetDefaultConfig();
     ASSERT_FALSE(s.ok());
     fiu_disable("check_config_archive_days_threshold_fail");
+
+    fiu_enable("check_config_auto_flush_interval_fail", 1, NULL, 0);
+    s = config.ResetDefaultConfig();
+    ASSERT_FALSE(s.ok());
+    fiu_disable("check_config_auto_flush_interval_fail");
 
     fiu_enable("check_config_insert_buffer_size_fail", 1, NULL, 0);
     s = config.ResetDefaultConfig();

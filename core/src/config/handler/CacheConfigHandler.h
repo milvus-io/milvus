@@ -8,37 +8,54 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include <vector>
+#include <string>
 
-#include "config/handler/GpuResourcesHandler.h"
+#include "config/handler/ConfigHandler.h"
 
 namespace milvus {
 namespace server {
 
-class GpuBuildResHandler : virtual public GpuResourcesHandler {
+class CacheConfigHandler : virtual public ConfigHandler {
  public:
-    GpuBuildResHandler();
+    CacheConfigHandler();
+    ~CacheConfigHandler();
 
-    ~GpuBuildResHandler();
-
- public:
+ protected:
     virtual void
-    OnGpuBuildResChanged(const std::vector<int64_t>& gpus);
+    OnCpuCacheCapacityChanged(int64_t value);
+
+    virtual void
+    OnInsertBufferSizeChanged(int64_t value);
+
+    virtual void
+    OnCacheInsertDataChanged(bool value);
 
  protected:
     void
-    AddGpuBuildResListener();
+    AddCpuCacheCapacityListener();
 
     void
-    RemoveGpuBuildResListener();
+    AddInsertBufferSizeListener();
 
- protected:
-    std::vector<int64_t> build_gpus_;
+    void
+    AddCacheInsertDataListener();
+
+    void
+    RemoveCpuCacheCapacityListener();
+
+    void
+    RemoveInsertBufferSizeListener();
+
+    void
+    RemoveCacheInsertDataListener();
+
+ private:
+    int64_t cpu_cache_capacity_ = 4 /*GiB*/;
+    int64_t insert_buffer_size_ = 1 /*GiB*/;
+    bool cache_insert_data_ = false;
 };
 
 }  // namespace server
 }  // namespace milvus
-#endif
