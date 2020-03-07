@@ -549,9 +549,14 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
     // convert value string to standard string stored in yaml file
     std::string value_str;
     if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA || child_key == CONFIG_STORAGE_S3_ENABLE ||
-        child_key == CONFIG_METRIC_ENABLE_MONITOR || child_key == CONFIG_GPU_RESOURCE_ENABLE) {
-        value_str =
-            (value == "True" || value == "true" || value == "On" || value == "on" || value == "1") ? "true" : "false";
+        child_key == CONFIG_METRIC_ENABLE_MONITOR || child_key == CONFIG_GPU_RESOURCE_ENABLE ||
+        child_key == CONFIG_WAL_ENABLE || child_key == CONFIG_WAL_RECOVERY_ERROR_IGNORE) {
+        bool ok = false;
+        status = StringHelpFunctions::ConvertToBoolean(value, ok);
+        if (!status.ok()) {
+            return status;
+        }
+        value_str = ok ? "true" : "false";
     } else if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES ||
                child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
         std::vector<std::string> vec;
@@ -593,7 +598,6 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
     }
 
     // values of gpu resources are sequences, need to remove old here
-    std::regex reg("\\S*");
     if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES || child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
         while (getline(conf_fin, line)) {
             if (line.find("- gpu") != std::string::npos)
@@ -1853,7 +1857,8 @@ Config::SetDBConfigBackendUrl(const std::string& value) {
 Status
 Config::SetDBConfigPreloadTable(const std::string& value) {
     CONFIG_CHECK(CheckDBConfigPreloadTable(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, value);
+    std::string cor_value = value == "*" ? "\'*\'" : value;
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, cor_value);
 }
 
 Status

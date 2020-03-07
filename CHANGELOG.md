@@ -39,6 +39,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1518 Table count did not match after deleting vectors and compact
 -   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
+-   \#1529 Fix server crash when cache_insert_data enabled
 -   \#1530 Set table file with correct engine type in meta
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
 
@@ -89,6 +90,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
+-   \#1544 Update resources name in HTTP module
 -   \#1546 Move Config.cpp to config directory
 
 ## Task
