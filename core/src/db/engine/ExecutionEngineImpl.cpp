@@ -738,17 +738,17 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     auto conf = adapter->Match(temp_conf);
 
+    std::vector<segment::doc_id_t> uids;
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
-        std::vector<segment::doc_id_t> uids = from_index->GetUids();
-        to_index->SetUids(uids);
-        ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
+        uids = from_index->GetUids();
     } else if (bin_from_index) {
         status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
-        std::vector<segment::doc_id_t> uids = bin_from_index->GetUids();
-        to_index->SetUids(uids);
-        ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
+        uids = bin_from_index->GetUids();
     }
+    to_index->SetUids(uids);
+    ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
+
     if (!status.ok()) {
         throw Exception(DB_ERROR, status.message());
     }
