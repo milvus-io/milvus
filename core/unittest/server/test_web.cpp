@@ -450,7 +450,6 @@ TEST_F(WebHandlerTest, SYSTEM_INFO) {
 
     auto status_dto = handler->SystemInfo("status", query_params, result);
     ASSERT_EQ(0, status_dto->code->getValue());
-//    ASSERT_EQ("OK", cmd_dto->reply->std_str());
 
     status_dto = handler->SystemInfo("version", query_params, result);
     ASSERT_EQ(0, status_dto->code->getValue());
