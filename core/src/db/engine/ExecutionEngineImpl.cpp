@@ -406,7 +406,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
         utils::GetParentPath(location_, segment_dir);
         auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
 
-        if (index_type_ == EngineType::FAISS_IDMAP || index_type_ == EngineType::FAISS_BIN_IDMAP) {
+        if (utils::IsRawIndexType((int32_t)index_type_)) {
             index_ = index_type_ == EngineType::FAISS_IDMAP ? GetVecIndexFactory(IndexType::FAISS_IDMAP)
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};

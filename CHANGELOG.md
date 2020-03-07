@@ -40,6 +40,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
 -   \#1530 Set table file with correct engine type in meta
+-   \#1532 Search with ivf_flat failed with open-dataset: sift-256-hamming
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
 
 ## Feature
