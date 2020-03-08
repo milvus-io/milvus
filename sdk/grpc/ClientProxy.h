@@ -64,11 +64,6 @@ class ClientProxy : public Connection {
            TopKQueryResult& topk_query_result) override;
 
     Status
-    SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tag_array,
-               int64_t query_id, int64_t topk,
-               const std::string& extra_params, TopKQueryResult& topk_query_result) override;
-
-    Status
     DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
 
     Status

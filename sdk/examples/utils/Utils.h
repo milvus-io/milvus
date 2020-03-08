@@ -71,12 +71,6 @@ class Utils {
              milvus::TopKQueryResult& topk_query_result);
 
     static void
-    DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
-             const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-             const std::vector<int64_t>& search_id_array,
-             milvus::TopKQueryResult& topk_query_result);
-
-    static void
     PrintTableInfo(const milvus::TableInfo& info);
 };
 
