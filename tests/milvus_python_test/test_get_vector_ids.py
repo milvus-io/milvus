@@ -149,9 +149,9 @@ class TestGetVectorIdsBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
@@ -160,14 +160,15 @@ class TestGetVectorIdsBase:
         return request.param
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_A(self, connect, table, get_simple_index_params):
+    def test_get_vector_ids_with_index_A(self, connect, table, get_simple_index):
         '''
         target: get vector ids when there is index
         method: call get_vector_ids and check if the segment contains vectors
         expected: status ok
         '''
-        index_params = get_simple_index_params
-        status = connect.create_index(table, index_params) 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(table, vectors)
@@ -183,7 +184,7 @@ class TestGetVectorIdsBase:
             assert vector_ids[i] == ids[i]
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_B(self, connect, table, get_simple_index_params):
+    def test_get_vector_ids_with_index_B(self, connect, table, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
         method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
@@ -191,8 +192,9 @@ class TestGetVectorIdsBase:
         '''
         status = connect.create_partition(table, tag)
         assert status.OK()
-        index_params = get_simple_index_params
-        status = connect.create_index(table, index_params) 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
@@ -281,9 +283,9 @@ class TestGetVectorIdsIP:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
@@ -292,14 +294,15 @@ class TestGetVectorIdsIP:
         return request.param
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_A(self, connect, ip_table, get_simple_index_params):
+    def test_get_vector_ids_with_index_A(self, connect, ip_table, get_simple_index):
         '''
         target: get vector ids when there is index
         method: call get_vector_ids and check if the segment contains vectors
         expected: status ok
         '''
-        index_params = get_simple_index_params
-        status = connect.create_index(ip_table, index_params) 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(ip_table, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(ip_table, vectors)
@@ -315,7 +318,7 @@ class TestGetVectorIdsIP:
             assert vector_ids[i] == ids[i]
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_B(self, connect, ip_table, get_simple_index_params):
+    def test_get_vector_ids_with_index_B(self, connect, ip_table, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
         method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
@@ -323,8 +326,9 @@ class TestGetVectorIdsIP:
         '''
         status = connect.create_partition(ip_table, tag)
         assert status.OK()
-        index_params = get_simple_index_params
-        status = connect.create_index(ip_table, index_params) 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(ip_table, index_type, index_param)
         assert status.OK()
         vectors = gen_vector(10, dim)
         status, ids = connect.add_vectors(ip_table, vectors, partition_tag=tag)
@@ -413,9 +417,9 @@ class TestGetVectorIdsJAC:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_jaccard_index_params(self, request, connect):
+    def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
             return request.param
@@ -423,14 +427,15 @@ class TestGetVectorIdsJAC:
             pytest.skip("Skip index Temporary")
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_A(self, connect, jac_table, get_jaccard_index_params):
+    def test_get_vector_ids_with_index_A(self, connect, jac_table, get_jaccard_index):
         '''
         target: get vector ids when there is index
         method: call get_vector_ids and check if the segment contains vectors
         expected: status ok
         '''
-        index_params = get_jaccard_index_params
-        status = connect.create_index(jac_table, index_params) 
+        index_param = get_jaccard_index["index_param"]
+        index_type = get_jaccard_index["index_type"]
+        status = connect.create_index(jac_table, index_type, index_param)
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
         status, ids = connect.add_vectors(jac_table, vectors)
@@ -446,7 +451,7 @@ class TestGetVectorIdsJAC:
             assert vector_ids[i] == ids[i]
 
     @pytest.mark.timeout(GET_TIMEOUT)
-    def test_get_vector_ids_with_index_B(self, connect, jac_table, get_jaccard_index_params):
+    def test_get_vector_ids_with_index_B(self, connect, jac_table, get_jaccard_index):
         '''
         target: get vector ids when there is index and with partition
         method: create partition, add vectors to it and call get_vector_ids, check if the segment contains vectors
@@ -454,8 +459,9 @@ class TestGetVectorIdsJAC:
         '''
         status = connect.create_partition(jac_table, tag)
         assert status.OK()
-        index_params = get_jaccard_index_params
-        status = connect.create_index(jac_table, index_params) 
+        index_param = get_jaccard_index["index_param"]
+        index_type = get_jaccard_index["index_type"]
+        status = connect.create_index(jac_table, index_type, index_param)
         assert status.OK()
         tmp, vectors = gen_binary_vectors(10, dim)
         status, ids = connect.add_vectors(jac_table, vectors, partition_tag=tag)

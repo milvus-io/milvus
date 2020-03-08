@@ -89,21 +89,15 @@ ConnectionImpl::GetVectorByID(const std::string& table_name, int64_t vector_id, 
 
 Status
 ConnectionImpl::GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
-                std::vector<int64_t>& id_array) {
+                                std::vector<int64_t>& id_array) {
     return client_proxy_->GetIDsInSegment(table_name, segment_name, id_array);
 }
 
 Status
 ConnectionImpl::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                       const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+                       const std::vector<RowRecord>& query_record_array, int64_t topk, const std::string& extra_params,
                        TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(table_name, partition_tags, query_record_array, topk, nprobe, topk_query_result);
-}
-
-Status
-ConnectionImpl::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                           int64_t query_id, int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
-    return client_proxy_->SearchByID(table_name, partition_tags, query_id, topk, nprobe, topk_query_result);
+    return client_proxy_->Search(table_name, partition_tags, query_record_array, topk, extra_params, topk_query_result);
 }
 
 Status

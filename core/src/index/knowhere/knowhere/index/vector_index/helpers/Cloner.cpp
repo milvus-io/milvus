@@ -24,7 +24,10 @@ namespace cloner {
 VectorIndexPtr
 CopyGpuToCpu(const VectorIndexPtr& index, const Config& config) {
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
-        return device_index->CopyGpuToCpu(config);
+        VectorIndexPtr result = device_index->CopyGpuToCpu(config);
+        auto uids = index->GetUids();
+        result->SetUids(uids);
+        return result;
     } else {
         KNOWHERE_THROW_MSG("index type is not gpuindex");
     }

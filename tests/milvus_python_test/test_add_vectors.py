@@ -1,8 +1,7 @@
 import time
-import random
-import pdb
 import threading
 import logging
+import threading
 from multiprocessing import Pool, Process
 import pytest
 from milvus import IndexType, MetricType
@@ -13,21 +12,22 @@ dim = 128
 index_file_size = 10
 table_id = "test_add"
 ADD_TIMEOUT = 60
-nprobe = 1
 tag = "1970-01-01"
+add_interval_time = 1.5
+nb = 6000
 
 
 class TestAddBase:
     """
     ******************************************************************
-      The following cases are used to test `add_vectors / index / search / delete` mixed function
+      The following cases are used to test `add_vectors` function
     ******************************************************************
     """
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in cpu mode")
@@ -126,7 +126,8 @@ class TestAddBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(1)
+        assert status.OK()
+        connect.flush([table])
         status = connect.delete_table(table)
         assert status.OK()
 
@@ -144,64 +145,68 @@ class TestAddBase:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(1)
+        connect.flush([table])
         status = connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector(self, connect, table, get_simple_index_params):
+    def test_create_index_add_vector(self, connect, table, get_simple_index):
         '''
         target: test add vector after build index
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
-        status = connect.create_index(table, index_param)
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(table, index_type, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector_another(self, connect, table, get_simple_index_params):
+    def test_create_index_add_vector_another(self, connect, table, get_simple_index):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
-        status = connect.create_index(table, index_param)
+        status = connect.create_index(table, index_type, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
         connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index(self, connect, table, get_simple_index_params):
+    def test_add_vector_create_index(self, connect, table, get_simple_index):
         '''
         target: test build index add after vector
         method: add vector and build index
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         logging.getLogger().info(index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status = connect.create_index(table, index_param)
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index_another(self, connect, table, get_simple_index_params):
+    def test_add_vector_create_index_another(self, connect, table, get_simple_index):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
@@ -209,31 +214,33 @@ class TestAddBase:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status = connect.create_index(param['table_name'], index_param)
+        status = connect.create_index(param['table_name'], index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index(self, connect, table, get_simple_index_params):
+    def test_add_vector_sleep_create_index(self, connect, table, get_simple_index):
         '''
         target: test build index add after vector for a while
         method: add vector and build index
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(1)
-        status = connect.create_index(table, index_param)
+        connect.flush([table])
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index_another(self, connect, table, get_simple_index_params):
+    def test_add_vector_sleep_create_index_another(self, connect, table, get_simple_index):
         '''
         target: test add vector to table_2 after build index for table_1 for a while
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
@@ -241,8 +248,8 @@ class TestAddBase:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(1)
-        status = connect.create_index(param['table_name'], index_param)
+        connect.flush([table])
+        status = connect.create_index(param['table_name'], index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -253,7 +260,7 @@ class TestAddBase:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(table, 1, nprobe, vector)
+        status, result = connect.search_vectors(table, 1, vector)
         status, ids = connect.add_vectors(table, vector)
         assert status.OK()
 
@@ -270,7 +277,7 @@ class TestAddBase:
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(table, 1, nprobe, vector)
+        status, result = connect.search_vectors(table, 1, vector)
         status, ids = connect.add_vectors(param['table_name'], vector)
         assert status.OK()
 
@@ -283,7 +290,9 @@ class TestAddBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status, result = connect.search_vectors(table, 1, nprobe, vector)
+        assert status.OK()
+        connect.flush([table])
+        status, result = connect.search_vectors(table, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -300,7 +309,7 @@ class TestAddBase:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
+        status, result = connect.search_vectors(param['table_name'], 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -312,8 +321,8 @@ class TestAddBase:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(1)
-        status, result = connect.search_vectors(table, 1, nprobe, vector)
+        connect.flush([table])
+        status, result = connect.search_vectors(table, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -330,8 +339,8 @@ class TestAddBase:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(table, vector)
-        time.sleep(1)
-        status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
+        connect.flush([table])
+        status, result = connect.search_vectors(param['table_name'], 1, vector)
         assert status.OK()
 
     """
@@ -347,15 +356,14 @@ class TestAddBase:
         method: create table and add vectors in it, check the ids returned and the table length after vectors added
         expected: the length of ids and the table row count
         '''
-        nq = 5; top_k = 1; nprobe = 1
+        nq = 5; top_k = 1;
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.add_vectors(table, vectors, ids)
-        time.sleep(2)
+        connect.flush([table])
         assert status.OK()
         assert len(ids) == nq
-        # check search result
-        status, result = connect.search_vectors(table, top_k, nprobe, vectors)
+        status, result = connect.search_vectors(table, top_k, query_records=vectors)
         logging.getLogger().info(result)
         assert len(result) == nq
         for i in range(nq):
@@ -368,7 +376,7 @@ class TestAddBase:
         method: test add vectors twice, use customize ids first, and then use no ids
         expected: status not OK 
         '''
-        nq = 5; top_k = 1; nprobe = 1
+        nq = 5; top_k = 1;
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.add_vectors(table, vectors, ids)
@@ -385,7 +393,7 @@ class TestAddBase:
         method: test add vectors twice, use not ids first, and then use customize ids
         expected: status not OK 
         '''
-        nq = 5; top_k = 1; nprobe = 1
+        nq = 5; top_k = 1;
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.add_vectors(table, vectors)
@@ -566,8 +574,8 @@ class TestAddBase:
         nq = 5
         vectors = gen_vectors(nq, dim)
         status, ids = connect.add_vectors(table, vectors)
-        time.sleep(3)
-        status, result = connect.search_vectors(table, 1, nprobe, [vectors[0]])
+        connect.flush([table])
+        status, result = connect.search_vectors(table, 1, [vectors[0]])
         assert status.OK()
         assert len(result) == 1
 
@@ -612,6 +620,44 @@ class TestAddBase:
         status, count = milvus.get_table_row_count(table)
         assert count == process_num * loop_num
 
+    @pytest.mark.level(2)
+    @pytest.mark.timeout(30)
+    def test_table_add_rows_count_multi_threading(self, args):
+        '''
+        target: test table rows_count is correct or not with multi threading
+        method: create table and add vectors in it(idmap),
+            assert the value returned by get_table_row_count method is equal to length of vectors
+        expected: the count is equal to the length of vectors
+        '''
+        thread_num = 8
+        threads = []
+        table = gen_unique_str()
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+        param = {'table_name': table,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.L2}
+        milvus = get_milvus(args["handler"])
+        milvus.connect(uri=uri)
+        milvus.create_table(param)
+        vectors = gen_vectors(nb, dim)
+        def add(thread_i):
+            logging.getLogger().info("In thread-%d" % thread_i)
+            milvus = get_milvus()
+            milvus.connect(uri=uri)
+            status, result = milvus.add_vectors(table, records=vectors)
+            assert status.OK()
+            status = milvus.flush([table])
+            assert status.OK()
+        for i in range(thread_num):
+            x = threading.Thread(target=add, args=(i, ))
+            threads.append(x)
+            x.start()
+        for th in threads:
+            th.join()
+        status, res = milvus.get_table_row_count(table)
+        assert res == thread_num * nb
+
     def test_add_vector_multi_tables(self, connect):
         '''
         target: test add vectors is correct or not with multiple tables of L2
@@ -629,7 +675,6 @@ class TestAddBase:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_table(param)
-        time.sleep(5)
         for j in range(5):
             for i in range(20):
                 status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
@@ -643,9 +688,9 @@ class TestAddIP:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in cpu mode")
@@ -745,7 +790,7 @@ class TestAddIP:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        time.sleep(1)
+        connect.flush([ip_table])
         status = connect.delete_table(ip_table)
         assert status.OK()
 
@@ -763,67 +808,71 @@ class TestAddIP:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        time.sleep(1)
+        connect.flush([ip_table])
         status = connect.delete_table(param['table_name'])
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector(self, connect, ip_table, get_simple_index_params):
+    def test_create_index_add_vector(self, connect, ip_table, get_simple_index):
         '''
         target: test add vector after build index
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
-        status = connect.create_index(ip_table, index_param)
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(ip_table, index_type, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_create_index_add_vector_another(self, connect, ip_table, get_simple_index_params):
+    def test_create_index_add_vector_another(self, connect, ip_table, get_simple_index):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"] 
         param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
-        status = connect.create_index(ip_table, index_param)
+        status = connect.create_index(ip_table, index_type, index_param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index(self, connect, ip_table, get_simple_index_params):
+    def test_add_vector_create_index(self, connect, ip_table, get_simple_index):
         '''
         target: test build index add after vector
         method: add vector and build index
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
         status, mode = connect._cmd("mode")
         assert status.OK()
-        status = connect.create_index(ip_table, index_param)
-        if str(mode) == "GPU" and (index_param["index_type"] == IndexType.IVF_PQ):
+        status = connect.create_index(ip_table, index_type, index_param)
+        if str(mode) == "GPU" and (index_type == IndexType.IVF_PQ):
             assert not status.OK()
         else:
             assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_create_index_another(self, connect, ip_table, get_simple_index_params):
+    def test_add_vector_create_index_another(self, connect, ip_table, get_simple_index):
         '''
         target: test add vector to table_2 after build index for table_1
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
@@ -831,33 +880,36 @@ class TestAddIP:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status = connect.create_index(param['table_name'], index_param)
+        status = connect.create_index(param['table_name'], index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index(self, connect, ip_table, get_simple_index_params):
+    def test_add_vector_sleep_create_index(self, connect, ip_table, get_simple_index):
         '''
         target: test build index add after vector for a while
         method: add vector and build index
         expected: status ok
         '''
-        index_param = get_simple_index_params
-        if index_param["index_type"] == IndexType.IVF_PQ:
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        if index_type == IndexType.IVF_PQ:
             pytest.skip("Skip some PQ cases")
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        time.sleep(1)
-        status = connect.create_index(ip_table, index_param)
+        assert status.OK()
+        time.sleep(add_interval_time)
+        status = connect.create_index(ip_table, index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_add_vector_sleep_create_index_another(self, connect, ip_table, get_simple_index_params):
+    def test_add_vector_sleep_create_index_another(self, connect, ip_table, get_simple_index):
         '''
         target: test add vector to table_2 after build index for table_1 for a while
         method: build index and add vector
         expected: status ok
         '''
-        index_param = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         param = {'table_name': gen_unique_str(),
                  'dimension': dim,
                  'index_file_size': index_file_size,
@@ -865,8 +917,8 @@ class TestAddIP:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        time.sleep(1)
-        status = connect.create_index(param['table_name'], index_param)
+        connect.flush([ip_table])
+        status = connect.create_index(param['table_name'], index_type, index_param)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -877,7 +929,7 @@ class TestAddIP:
         expected: status ok
         '''
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(ip_table, 1, nprobe, vector)
+        status, result = connect.search_vectors(ip_table, 1, vector)
         status, ids = connect.add_vectors(ip_table, vector)
         assert status.OK()
 
@@ -894,7 +946,7 @@ class TestAddIP:
                  'metric_type': MetricType.L2}
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
-        status, result = connect.search_vectors(ip_table, 1, nprobe, vector)
+        status, result = connect.search_vectors(ip_table, 1, vector)
         status, ids = connect.add_vectors(param['table_name'], vector)
         assert status.OK()
 
@@ -907,7 +959,9 @@ class TestAddIP:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status, result = connect.search_vectors(ip_table, 1, nprobe, vector)
+        assert status.OK()
+        connect.flush([ip_table])
+        status, result = connect.search_vectors(ip_table, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -924,7 +978,8 @@ class TestAddIP:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
+        connect.flush([ip_table])
+        status, result = connect.search_vectors(param['table_name'], 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -936,8 +991,8 @@ class TestAddIP:
         '''
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        time.sleep(1)
-        status, result = connect.search_vectors(ip_table, 1, nprobe, vector)
+        time.sleep(add_interval_time)
+        status, result = connect.search_vectors(ip_table, 1, vector)
         assert status.OK()
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -954,8 +1009,9 @@ class TestAddIP:
         status = connect.create_table(param)
         vector = gen_single_vector(dim)
         status, ids = connect.add_vectors(ip_table, vector)
-        time.sleep(1)
-        status, result = connect.search_vectors(param['table_name'], 1, nprobe, vector)
+        assert status.OK()
+        time.sleep(add_interval_time)
+        status, result = connect.search_vectors(param['table_name'], 1, vector)
         assert status.OK()
 
     """
@@ -971,15 +1027,15 @@ class TestAddIP:
         method: create table and add vectors in it, check the ids returned and the table length after vectors added
         expected: the length of ids and the table row count
         '''
-        nq = 5; top_k = 1; nprobe = 1
+        nq = 5; top_k = 1
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.add_vectors(ip_table, vectors, ids)
-        time.sleep(2)
         assert status.OK()
+        connect.flush([ip_table])
         assert len(ids) == nq
         # check search result
-        status, result = connect.search_vectors(ip_table, top_k, nprobe, vectors)
+        status, result = connect.search_vectors(ip_table, top_k, vectors)
         logging.getLogger().info(result)
         assert len(result) == nq
         for i in range(nq):
@@ -992,7 +1048,7 @@ class TestAddIP:
         method: test add vectors twice, use customize ids first, and then use no ids
         expected: status not OK 
         '''
-        nq = 5; top_k = 1; nprobe = 1
+        nq = 5; top_k = 1
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.add_vectors(ip_table, vectors, ids)
@@ -1009,7 +1065,7 @@ class TestAddIP:
         method: test add vectors twice, use not ids first, and then use customize ids
         expected: status not OK 
         '''
-        nq = 5; top_k = 1; nprobe = 1
+        nq = 5; top_k = 1
         vectors = gen_vectors(nq, dim)
         ids = [i for i in range(nq)]
         status, ids = connect.add_vectors(ip_table, vectors)
@@ -1108,8 +1164,8 @@ class TestAddIP:
         nq = 5
         vectors = gen_vectors(nq, dim)
         status, ids = connect.add_vectors(ip_table, vectors)
-        time.sleep(3)
-        status, result = connect.search_vectors(ip_table, 1, nprobe, [vectors[0]])
+        time.sleep(add_interval_time)
+        status, result = connect.search_vectors(ip_table, 1, [vectors[0]])
         assert status.OK()
         assert len(result) == 1
 
@@ -1130,7 +1186,6 @@ class TestAddIP:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.IP}
             connect.create_table(param)
-        time.sleep(2)
         for j in range(10):
             for i in range(20):
                 status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)

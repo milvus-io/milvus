@@ -1,5 +1,4 @@
 import time
-import random
 import pdb
 import threading
 import logging
@@ -182,9 +181,9 @@ class TestCompactBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
@@ -192,20 +191,21 @@ class TestCompactBase:
             pytest.skip("Only support CPU mode")
         return request.param
 
-    def test_compact_after_index_created(self, connect, table, get_simple_index_params):
+    def test_compact_after_index_created(self, connect, table, get_simple_index):
         '''
         target: test compact table after index created
         method: add vectors, create index, delete part of vectors and compact
         expected: status ok, index description no change, data size smaller after compact
         '''
         count = 10
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vector(count, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params) 
+        status = connect.create_index(table, index_type, index_param) 
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -361,7 +361,7 @@ class TestCompactBase:
         assert status.OK()
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    def test_index_creation_after_compact(self, connect, table, get_simple_index_params):
+    def test_index_creation_after_compact(self, connect, table, get_simple_index):
         '''
         target: test index creation after compact
         method: after compact operation, create index
@@ -376,9 +376,13 @@ class TestCompactBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        index_params = get_simple_index_params
-        status = connect.create_index(table, index_params) 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(table, index_type, index_param) 
         assert status.OK()
+        status, result = connect.describe_index(table)
+        assert result._table_name == table
+        assert result._index_type == index_type
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_delete_vectors_after_compact(self, connect, table):
@@ -418,7 +422,7 @@ class TestCompactBase:
         status = connect.flush([table])
         assert status.OK()
         query_vecs = [vectors[0]]
-        status, res = connect.search_vectors(table, top_k, nprobe, query_vecs) 
+        status, res = connect.search_vectors(table, top_k, query_records=query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()
 
@@ -656,7 +660,7 @@ class TestCompactJAC:
         expected: status ok
         '''
         nq = 100
-        num_tables = 50
+        num_tables = 10
         tmp, vectors = gen_binary_vectors(nq, dim)
         table_list = []
         for i in range(num_tables):
@@ -670,6 +674,10 @@ class TestCompactJAC:
         time.sleep(6)
         for i in range(num_tables):
             status, ids = connect.add_vectors(table_name=table_list[i], records=vectors)
+            assert status.OK()
+            status = connect.delete_by_id(table_list[i], [ids[0], ids[-1]])
+            assert status.OK()
+            status = connect.flush([table_list[i]])
             assert status.OK()
             status = connect.compact(table_list[i])
             assert status.OK()
@@ -741,7 +749,7 @@ class TestCompactJAC:
         status = connect.flush([jac_table])
         assert status.OK()
         query_vecs = [vectors[0]]
-        status, res = connect.search_vectors(jac_table, top_k, nprobe, query_vecs) 
+        status, res = connect.search_vectors(jac_table, top_k, query_records=query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()
 
@@ -1036,6 +1044,6 @@ class TestCompactIP:
         status = connect.flush([ip_table])
         assert status.OK()
         query_vecs = [vectors[0]]
-        status, res = connect.search_vectors(ip_table, top_k, nprobe, query_vecs) 
+        status, res = connect.search_vectors(ip_table, top_k, query_records=query_vecs) 
         logging.getLogger().info(res)
         assert status.OK()

@@ -68,7 +68,8 @@ StoragePrototype(const std::string& path) {
                    make_column("created_on", &TableSchema::created_on_),
                    make_column("flag", &TableSchema::flag_, default_value(0)),
                    make_column("index_file_size", &TableSchema::index_file_size_),
-                   make_column("engine_type", &TableSchema::engine_type_), make_column("nlist", &TableSchema::nlist_),
+                   make_column("engine_type", &TableSchema::engine_type_),
+                   make_column("index_params", &TableSchema::index_params_),
                    make_column("metric_type", &TableSchema::metric_type_),
                    make_column("owner_table", &TableSchema::owner_table_, default_value("")),
                    make_column("partition_tag", &TableSchema::partition_tag_, default_value("")),
@@ -213,7 +214,7 @@ SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
         auto groups = ConnectorPtr->select(
             columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
-                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
+                    &TableSchema::index_params_, &TableSchema::metric_type_, &TableSchema::owner_table_,
                     &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::flush_lsn_),
             where(c(&TableSchema::table_id_) == table_schema.table_id_ and
                   c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
@@ -226,7 +227,7 @@ SqliteMetaImpl::DescribeTable(TableSchema& table_schema) {
             table_schema.flag_ = std::get<4>(groups[0]);
             table_schema.index_file_size_ = std::get<5>(groups[0]);
             table_schema.engine_type_ = std::get<6>(groups[0]);
-            table_schema.nlist_ = std::get<7>(groups[0]);
+            table_schema.index_params_ = std::get<7>(groups[0]);
             table_schema.metric_type_ = std::get<8>(groups[0]);
             table_schema.owner_table_ = std::get<9>(groups[0]);
             table_schema.partition_tag_ = std::get<10>(groups[0]);
@@ -272,7 +273,7 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
         auto selected = ConnectorPtr->select(
             columns(&TableSchema::id_, &TableSchema::table_id_, &TableSchema::dimension_, &TableSchema::created_on_,
                     &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
-                    &TableSchema::nlist_, &TableSchema::metric_type_, &TableSchema::owner_table_,
+                    &TableSchema::index_params_, &TableSchema::metric_type_, &TableSchema::owner_table_,
                     &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::flush_lsn_),
             where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE and c(&TableSchema::owner_table_) == ""));
         for (auto& table : selected) {
@@ -284,7 +285,7 @@ SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             schema.flag_ = std::get<4>(table);
             schema.index_file_size_ = std::get<5>(table);
             schema.engine_type_ = std::get<6>(table);
-            schema.nlist_ = std::get<7>(table);
+            schema.index_params_ = std::get<7>(table);
             schema.metric_type_ = std::get<8>(table);
             schema.owner_table_ = std::get<9>(table);
             schema.partition_tag_ = std::get<10>(table);
@@ -373,17 +374,8 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.index_file_size_ = table_schema.index_file_size_;
-
-        if (file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW ||
-            file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW_MERGE) {
-            file_schema.engine_type_ = server::ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)
-                                           ? (int32_t)EngineType::FAISS_BIN_IDMAP
-                                           : (int32_t)EngineType::FAISS_IDMAP;
-        } else {
-            file_schema.engine_type_ = table_schema.engine_type_;
-        }
-
-        file_schema.nlist_ = table_schema.nlist_;
+        file_schema.index_params_ = table_schema.index_params_;
+        file_schema.engine_type_ = table_schema.engine_type_;
         file_schema.metric_type_ = table_schema.metric_type_;
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
@@ -436,7 +428,7 @@ SqliteMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<siz
             file_schema.created_on_ = std::get<8>(file);
             file_schema.dimension_ = table_schema.dimension_;
             file_schema.index_file_size_ = table_schema.index_file_size_;
-            file_schema.nlist_ = table_schema.nlist_;
+            file_schema.index_params_ = table_schema.index_params_;
             file_schema.metric_type_ = table_schema.metric_type_;
 
             utils::GetTableFilePath(options_, file_schema);
@@ -486,7 +478,7 @@ SqliteMetaImpl::GetTableFilesBySegmentId(const std::string& segment_id,
                 file_schema.created_on_ = std::get<9>(file);
                 file_schema.dimension_ = table_schema.dimension_;
                 file_schema.index_file_size_ = table_schema.index_file_size_;
-                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.index_params_ = table_schema.index_params_;
                 file_schema.metric_type_ = table_schema.metric_type_;
 
                 utils::GetTableFilePath(options_, file_schema);
@@ -601,7 +593,7 @@ SqliteMetaImpl::GetTableFilesByFlushLSN(uint64_t flush_lsn, TableFilesSchema& ta
             }
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
-            table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.index_params_ = groups[table_file.table_id_].index_params_;
             table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
             table_files.push_back(table_file);
         }
@@ -721,7 +713,7 @@ SqliteMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& 
             table_schema.partition_tag_ = std::get<7>(tables[0]);
             table_schema.version_ = std::get<8>(tables[0]);
             table_schema.engine_type_ = index.engine_type_;
-            table_schema.nlist_ = index.nlist_;
+            table_schema.index_params_ = index.extra_params_.dump();
             table_schema.metric_type_ = index.metric_type_;
 
             ConnectorPtr->update(table_schema);
@@ -773,12 +765,12 @@ SqliteMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& inde
         fiu_do_on("SqliteMetaImpl.DescribeTableIndex.throw_exception", throw std::exception());
 
         auto groups = ConnectorPtr->select(
-            columns(&TableSchema::engine_type_, &TableSchema::nlist_, &TableSchema::metric_type_),
+            columns(&TableSchema::engine_type_, &TableSchema::index_params_, &TableSchema::metric_type_),
             where(c(&TableSchema::table_id_) == table_id and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
 
         if (groups.size() == 1) {
             index.engine_type_ = std::get<0>(groups[0]);
-            index.nlist_ = std::get<1>(groups[0]);
+            index.extra_params_ = milvus::json::parse(std::get<1>(groups[0]));
             index.metric_type_ = std::get<2>(groups[0]);
         } else {
             return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
@@ -813,7 +805,7 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
 
         // set table index type to raw
         ConnectorPtr->update_all(
-            set(c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE, c(&TableSchema::nlist_) = DEFAULT_NLIST),
+            set(c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE, c(&TableSchema::index_params_) = "{}"),
             where(c(&TableSchema::table_id_) == table_id));
 
         ENGINE_LOG_DEBUG << "Successfully drop table index, table id = " << table_id;
@@ -886,13 +878,14 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
         server::MetricCollector metric;
         fiu_do_on("SqliteMetaImpl.ShowPartitions.throw_exception", throw std::exception());
 
-        auto partitions =
-            ConnectorPtr->select(columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_,
-                                         &TableSchema::created_on_, &TableSchema::flag_, &TableSchema::index_file_size_,
-                                         &TableSchema::engine_type_, &TableSchema::nlist_, &TableSchema::metric_type_,
-                                         &TableSchema::partition_tag_, &TableSchema::version_, &TableSchema::table_id_),
-                                 where(c(&TableSchema::owner_table_) == table_id and
-                                       c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+        auto partitions = ConnectorPtr->select(
+            columns(&TableSchema::id_, &TableSchema::state_, &TableSchema::dimension_, &TableSchema::created_on_,
+                    &TableSchema::flag_, &TableSchema::index_file_size_, &TableSchema::engine_type_,
+                    &TableSchema::index_params_, &TableSchema::metric_type_, &TableSchema::partition_tag_,
+                    &TableSchema::version_, &TableSchema::table_id_),
+            where(c(&TableSchema::owner_table_) == table_id and
+                  c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+
         for (size_t i = 0; i < partitions.size(); i++) {
             meta::TableSchema partition_schema;
             partition_schema.id_ = std::get<0>(partitions[i]);
@@ -902,7 +895,7 @@ SqliteMetaImpl::ShowPartitions(const std::string& table_id, std::vector<meta::Ta
             partition_schema.flag_ = std::get<4>(partitions[i]);
             partition_schema.index_file_size_ = std::get<5>(partitions[i]);
             partition_schema.engine_type_ = std::get<6>(partitions[i]);
-            partition_schema.nlist_ = std::get<7>(partitions[i]);
+            partition_schema.index_params_ = std::get<7>(partitions[i]);
             partition_schema.metric_type_ = std::get<8>(partitions[i]);
             partition_schema.owner_table_ = table_id;
             partition_schema.partition_tag_ = std::get<9>(partitions[i]);
@@ -995,7 +988,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<siz
             table_file.engine_type_ = std::get<8>(file);
             table_file.dimension_ = table_schema.dimension_;
             table_file.index_file_size_ = table_schema.index_file_size_;
-            table_file.nlist_ = table_schema.nlist_;
+            table_file.index_params_ = table_schema.index_params_;
             table_file.metric_type_ = table_schema.metric_type_;
 
             auto status = utils::GetTableFilePath(options_, table_file);
@@ -1063,7 +1056,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& table_id, TableFilesSchema& file
             table_file.created_on_ = std::get<8>(file);
             table_file.dimension_ = table_schema.dimension_;
             table_file.index_file_size_ = table_schema.index_file_size_;
-            table_file.nlist_ = table_schema.nlist_;
+            table_file.index_params_ = table_schema.index_params_;
             table_file.metric_type_ = table_schema.metric_type_;
 
             auto status = utils::GetTableFilePath(options_, table_file);
@@ -1134,7 +1127,7 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema& files) {
             }
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
-            table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.index_params_ = groups[table_file.table_id_].index_params_;
             table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
             files.push_back(table_file);
         }
@@ -1192,7 +1185,7 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
 
                 file_schema.dimension_ = table_schema.dimension_;
                 file_schema.index_file_size_ = table_schema.index_file_size_;
-                file_schema.nlist_ = table_schema.nlist_;
+                file_schema.index_params_ = table_schema.index_params_;
                 file_schema.metric_type_ = table_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
@@ -1423,8 +1416,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                     // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
                     // Else, we can only delete the single file
                     // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
-                    if (table_file.engine_type_ == (int32_t)EngineType::FAISS_IDMAP ||
-                        table_file.engine_type_ == (int32_t)EngineType::FAISS_BIN_IDMAP) {
+                    if (utils::IsRawIndexType(table_file.engine_type_)) {
                         utils::DeleteSegment(options_, table_file);
                         std::string segment_dir;
                         utils::GetParentPath(table_file.location_, segment_dir);

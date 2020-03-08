@@ -36,6 +36,8 @@ TEST(TaskTest, INVALID_INDEX) {
     dummy_context->SetTraceContext(trace_context);
 
     TableFileSchemaPtr dummy_file = std::make_shared<engine::meta::TableFileSchema>();
+    dummy_file->index_params_ = "{ \"nlist\": 16384 }";
+    dummy_file->dimension_ = 64;
     auto search_task =
         std::make_shared<XSearchTask>(dummy_context, dummy_file, nullptr);
     search_task->Load(LoadType::TEST, 10);
@@ -50,6 +52,8 @@ TEST(TaskTest, TEST_TASK) {
     auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
 
     auto file = std::make_shared<TableFileSchema>();
+    file->index_params_ = "{ \"nlist\": 16384 }";
+    file->dimension_ = 64;
     auto label = std::make_shared<BroadcastLabel>();
 
     TestTask task(dummy_context, file, label);
@@ -90,16 +94,18 @@ TEST(TaskTest, TEST_TASK) {
     build_index_task.Execute();
     // always enable 'create_table_success'
     fiu_enable("XBuildIndexTask.Execute.create_table_success", 1, NULL, 0);
+
+    milvus::json json = {{"nlist", 16384}};
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
 
     build_index_task.Execute();
 
     fiu_enable("XBuildIndexTask.Execute.build_index_fail", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.build_index_fail");
 
@@ -107,13 +113,13 @@ TEST(TaskTest, TEST_TASK) {
     fiu_enable("XBuildIndexTask.Execute.has_table", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
 
     fiu_enable("XBuildIndexTask.Execute.throw_std_exception", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.throw_std_exception");
 
@@ -121,13 +127,13 @@ TEST(TaskTest, TEST_TASK) {
     fiu_enable("XBuildIndexTask.Execute.save_index_file_success", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
 
     fiu_enable("XBuildIndexTask.Execute.update_table_file_fail", 1, NULL, 0);
     build_index_task.to_index_engine_ =
         EngineFactory::Build(file->dimension_, file->location_, (EngineType)file->engine_type_,
-                             (MetricType)file->metric_type_, file->nlist_);
+                             (MetricType)file->metric_type_, json);
     build_index_task.Execute();
     fiu_disable("XBuildIndexTask.Execute.update_table_file_fail");
 

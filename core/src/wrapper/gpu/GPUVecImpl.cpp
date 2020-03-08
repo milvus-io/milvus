@@ -38,7 +38,7 @@ IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, co
         fiu_do_on("IVFMixIndex.BuildAll.throw_knowhere_exception", throw knowhere::KnowhereException(""));
         fiu_do_on("IVFMixIndex.BuildAll.throw_std_exception", throw std::exception());
 
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
         index_->set_preprocessor(preprocessor);

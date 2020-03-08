@@ -40,7 +40,7 @@ using ResultDistances = engine::ResultDistances;
 
 class SearchJob : public Job {
  public:
-    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, uint64_t nprobe,
+    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
               const engine::VectorsData& vectors);
 
  public:
@@ -79,9 +79,9 @@ class SearchJob : public Job {
         return vectors_.vector_count_;
     }
 
-    uint64_t
-    nprobe() const {
-        return nprobe_;
+    const milvus::json&
+    extra_params() const {
+        return extra_params_;
     }
 
     const engine::VectorsData&
@@ -103,7 +103,7 @@ class SearchJob : public Job {
     const std::shared_ptr<server::Context> context_;
 
     uint64_t topk_ = 0;
-    uint64_t nprobe_ = 0;
+    milvus::json extra_params_;
     // TODO: smart pointer
     const engine::VectorsData& vectors_;
 

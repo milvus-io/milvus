@@ -15,6 +15,7 @@ top_k = 1
 epsilon = 0.0001
 tag = "1970-01-01"
 nb = 6000
+nlist = 1024
 
 
 class TestTableInfoBase:
@@ -193,9 +194,9 @@ class TestTableInfoBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
@@ -204,19 +205,20 @@ class TestTableInfoBase:
         return request.param
     
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_index_created(self, connect, table, get_simple_index_params):
+    def test_get_table_info_after_index_created(self, connect, table, get_simple_index):
         '''
         target: test table info after index created
         method: create table, add vectors, create index and call table_info 
         expected: status ok, index created and shown in segments_stat
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params) 
+        status = connect.create_index(table, index_type, index_param) 
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
@@ -224,39 +226,38 @@ class TestTableInfoBase:
         assert status.OK()
         logging.getLogger().info(info)
         index_string = info.partitions_stat[0].segments_stat[0].index_name
-        index_type = index_params["index_type"]
         match = self.index_string_convert(index_string, index_type)
         assert match
         assert nb == info.partitions_stat[0].segments_stat[0].count
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_create_same_index_repeatedly(self, connect, table, get_simple_index_params):
+    def test_get_table_info_after_create_same_index_repeatedly(self, connect, table, get_simple_index):
         '''
         target: test table info after index created repeatedly
         method: create table, add vectors, create index and call table_info multiple times 
         expected: status ok, index info shown in segments_stat
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params)
-        status = connect.create_index(table, index_params)
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         status, info = connect.table_info(table)
         assert status.OK()
         logging.getLogger().info(info)
         index_string = info.partitions_stat[0].segments_stat[0].index_name
-        index_type = index_params["index_type"]
         match = self.index_string_convert(index_string, index_type)
         assert match
         assert nb == info.partitions_stat[0].segments_stat[0].count
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_create_different_index_repeatedly(self, connect, table, get_simple_index_params):
+    def test_get_table_info_after_create_different_index_repeatedly(self, connect, table, get_simple_index):
         '''
         target: test table info after index created repeatedly
         method: create table, add vectors, create index and call table_info multiple times 
@@ -267,22 +268,14 @@ class TestTableInfoBase:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        nlist = 16384
-        index_type_1 = IndexType.IVF_SQ8
-        index_type_2 = IndexType.IVFLAT
-        index_type_3 = IndexType.FLAT
-        index_params = [
-            {"index_type": index_type_1, "nlist": nlist}, 
-            {"index_type": index_type_2, "nlist": nlist},
-            {"index_type": index_type_3, "nlist": nlist}]
-        for index_param in index_params:
-            status = connect.create_index(table, index_param)
+        index_param = {"nlist": nlist} 
+        for index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8]:
+            status = connect.create_index(table, index_type, index_param)
             assert status.OK()
             status, info = connect.table_info(table)
             assert status.OK()
             logging.getLogger().info(info)
             index_string = info.partitions_stat[0].segments_stat[0].index_name
-            index_type = index_param["index_type"]
             match = self.index_string_convert(index_string, index_type)
             assert match
             assert nb == info.partitions_stat[0].segments_stat[0].count

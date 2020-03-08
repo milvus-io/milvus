@@ -235,3 +235,17 @@ TEST(DBMiscTest, CHECKER_TEST) {
         ASSERT_FALSE(checker.IsIgnored(schema));
     }
 }
+
+TEST(DBMiscTest, IDGENERATOR_TEST) {
+    milvus::engine::SimpleIDGenerator gen;
+    size_t n = 1000000;
+    milvus::engine::IDNumbers ids;
+    gen.GetNextIDNumbers(n, ids);
+
+    std::set<int64_t> unique_ids;
+    for (size_t i = 0; i < ids.size(); i++) {
+        unique_ids.insert(ids[i]);
+    }
+
+    ASSERT_EQ(ids.size(), unique_ids.size());
+}

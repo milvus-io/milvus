@@ -17,14 +17,34 @@
 
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
-//#define GRPC_MULTIPLE_THREAD;
 #define MILVUS_SDK_VERSION "0.7.0";
 
 namespace milvus {
+
+static const char* EXTRA_PARAM_KEY = "params";
+
 bool
 UriCheck(const std::string& uri) {
     size_t index = uri.find_first_of(':', 0);
     return (index != std::string::npos);
+}
+
+template<typename T>
+void
+ConstructSearchParam(const std::string& table_name,
+                     const std::vector<std::string>& partition_tag_array,
+                     int64_t topk,
+                     const std::string& extra_params,
+                     T& search_param) {
+    search_param.set_table_name(table_name);
+    search_param.set_topk(topk);
+    milvus::grpc::KeyValuePair* kv = search_param.add_extra_params();
+    kv->set_key(EXTRA_PARAM_KEY);
+    kv->set_value(extra_params);
+
+    for (auto& tag : partition_tag_array) {
+        search_param.add_partition_tag_array(tag);
+    }
 }
 
 void
@@ -152,8 +172,10 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
     try {
         ::milvus::grpc::IndexParam grpc_index_param;
         grpc_index_param.set_table_name(index_param.table_name);
-        grpc_index_param.mutable_index()->set_index_type(static_cast<int32_t>(index_param.index_type));
-        grpc_index_param.mutable_index()->set_nlist(index_param.nlist);
+        grpc_index_param.set_index_type(static_cast<int32_t>(index_param.index_type));
+        milvus::grpc::KeyValuePair* kv = grpc_index_param.add_extra_params();
+        kv->set_key(EXTRA_PARAM_KEY);
+        kv->set_value(index_param.extra_params);
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));
@@ -165,47 +187,6 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
                     const std::vector<RowRecord>& record_array, std::vector<int64_t>& id_array) {
     Status status = Status::OK();
     try {
-////////////////////////////////////////////////////////////////////////////
-#ifdef GRPC_MULTIPLE_THREAD
-        std::vector<std::thread> threads;
-        int thread_count = 10;
-
-        std::shared_ptr<::milvus::grpc::InsertInfos> insert_info_array(
-            new ::milvus::grpc::InsertInfos[thread_count], std::default_delete<::milvus::grpc::InsertInfos[]>());
-
-        std::shared_ptr<::milvus::grpc::VectorIds> vector_ids_array(new ::milvus::grpc::VectorIds[thread_count],
-                                                                    std::default_delete<::milvus::grpc::VectorIds[]>());
-
-        int64_t record_count = record_array.size() / thread_count;
-
-        for (size_t i = 0; i < thread_count; i++) {
-            insert_info_array.get()[i].set_table_name(table_name);
-            for (size_t j = i * record_count; j < record_count * (i + 1); j++) {
-                ::milvus::grpc::RowRecord* grpc_record = insert_info_array.get()[i].add_row_record_array();
-                for (size_t k = 0; k < record_array[j].data.size(); k++) {
-                    grpc_record->add_vector_data(record_array[j].data[k]);
-                }
-            }
-        }
-
-        std::cout << "*****************************************************\n";
-        auto start = std::chrono::high_resolution_clock::now();
-        for (size_t j = 0; j < thread_count; j++) {
-            threads.push_back(std::thread(&GrpcClient::InsertVector, client_ptr_, std::ref(vector_ids_array.get()[j]),
-                                          std::ref(insert_info_array.get()[j]), std::ref(status)));
-        }
-        std::for_each(threads.begin(), threads.end(), std::mem_fn(&std::thread::join));
-        auto finish = std::chrono::high_resolution_clock::now();
-        std::cout << "InsertVector cost: "
-                  << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
-        std::cout << "*****************************************************\n";
-
-        for (size_t i = 0; i < thread_count; i++) {
-            for (size_t j = 0; j < vector_ids_array.get()[i].vector_id_array_size(); j++) {
-                id_array.push_back(vector_ids_array.get()[i].vector_id_array(j));
-            }
-        }
-#else
         ::milvus::grpc::InsertParam insert_param;
         insert_param.set_table_name(table_name);
         insert_param.set_partition_tag(partition_tag);
@@ -228,7 +209,6 @@ ClientProxy::Insert(const std::string& table_name, const std::string& partition_
             /* return Milvus generated ids back to user */
             id_array.insert(id_array.end(), vector_ids.vector_id_array().begin(), vector_ids.vector_id_array().end());
         }
-#endif
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to add vector: " + std::string(ex.what()));
     }
@@ -291,18 +271,18 @@ ClientProxy::GetIDsInSegment(const std::string& table_name, const std::string& s
 }
 
 Status
-ClientProxy::Search(const std::string& table_name, const std::vector<std::string>& partition_tags,
-                    const std::vector<RowRecord>& query_record_array, int64_t topk, int64_t nprobe,
+ClientProxy::Search(const std::string& table_name, const std::vector<std::string>& partition_tag_array,
+                    const std::vector<RowRecord>& query_record_array, int64_t topk, const std::string& extra_params,
                     TopKQueryResult& topk_query_result) {
     try {
         // step 1: convert vectors data
         ::milvus::grpc::SearchParam search_param;
-        search_param.set_table_name(table_name);
-        search_param.set_topk(topk);
-        search_param.set_nprobe(nprobe);
-        for (auto& tag : partition_tags) {
-            search_param.add_partition_tag_array(tag);
-        }
+        ConstructSearchParam(table_name,
+                             partition_tag_array,
+                             topk,
+                             extra_params,
+                             search_param);
+
         for (auto& record : query_record_array) {
             ::milvus::grpc::RowRecord* row_record = search_param.add_query_record_array();
             CopyRowRecord(row_record, record);
@@ -316,46 +296,6 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
         }
 
         // step 3: convert result array
-        topk_query_result.reserve(result.row_num());
-        int64_t nq = result.row_num();
-        int64_t topk = result.ids().size() / nq;
-        for (int64_t i = 0; i < result.row_num(); i++) {
-            milvus::QueryResult one_result;
-            one_result.ids.resize(topk);
-            one_result.distances.resize(topk);
-            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
-            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
-            topk_query_result.emplace_back(one_result);
-        }
-
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to search vectors: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::SearchByID(const std::string& table_name, const std::vector<std::string>& partition_tags, int64_t query_id,
-                        int64_t topk, int64_t nprobe, TopKQueryResult& topk_query_result) {
-    try {
-        // step 1: convert vector id array
-        ::milvus::grpc::SearchByIDParam search_param;
-        search_param.set_table_name(table_name);
-        search_param.set_topk(topk);
-        search_param.set_nprobe(nprobe);
-        for (auto& tag : partition_tags) {
-            search_param.add_partition_tag_array(tag);
-        }
-        search_param.set_id(query_id);
-
-        // step 2: search vectors
-        ::milvus::grpc::TopKQueryResult result;
-        Status status = client_ptr_->SearchByID(search_param, result);
-        if (result.row_num() == 0) {
-            return status;
-        }
-
-        // step 4: convert result array
         topk_query_result.reserve(result.row_num());
         int64_t nq = result.row_num();
         int64_t topk = result.ids().size() / nq;
@@ -523,10 +463,17 @@ ClientProxy::DescribeIndex(const std::string& table_name, IndexParam& index_para
     try {
         ::milvus::grpc::TableName grpc_table_name;
         grpc_table_name.set_table_name(table_name);
+
         ::milvus::grpc::IndexParam grpc_index_param;
         Status status = client_ptr_->DescribeIndex(grpc_table_name, grpc_index_param);
-        index_param.index_type = static_cast<IndexType>(grpc_index_param.mutable_index()->index_type());
-        index_param.nlist = grpc_index_param.mutable_index()->nlist();
+        index_param.index_type = static_cast<IndexType>(grpc_index_param.index_type());
+
+        for (int i = 0; i < grpc_index_param.extra_params_size(); i++) {
+            const milvus::grpc::KeyValuePair& kv = grpc_index_param.extra_params(i);
+            if (kv.key() == EXTRA_PARAM_KEY) {
+                index_param.extra_params = kv.value();
+            }
+        }
 
         return status;
     } catch (std::exception& ex) {
@@ -560,15 +507,15 @@ ClientProxy::CreatePartition(const PartitionParam& partition_param) {
 }
 
 Status
-ClientProxy::ShowPartitions(const std::string& table_name, PartitionTagList& partition_array) const {
+ClientProxy::ShowPartitions(const std::string& table_name, PartitionTagList& partition_tag_array) const {
     try {
         ::milvus::grpc::TableName grpc_table_name;
         grpc_table_name.set_table_name(table_name);
         ::milvus::grpc::PartitionList grpc_partition_list;
         Status status = client_ptr_->ShowPartitions(grpc_table_name, grpc_partition_list);
-        partition_array.resize(grpc_partition_list.partition_tag_array_size());
+        partition_tag_array.resize(grpc_partition_list.partition_tag_array_size());
         for (uint64_t i = 0; i < grpc_partition_list.partition_tag_array_size(); ++i) {
-            partition_array[i] = grpc_partition_list.partition_tag_array(i);
+            partition_tag_array[i] = grpc_partition_list.partition_tag_array(i);
         }
         return status;
     } catch (std::exception& ex) {
