@@ -26,6 +26,7 @@
 #include <fiu-local.h>
 #include <chrono>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -43,16 +44,11 @@ using stdclock = std::chrono::high_resolution_clock;
 
 IndexModelPtr
 IVF::Train(const DatasetPtr& dataset, const Config& config) {
-    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (build_cfg != nullptr) {
-        build_cfg->CheckValid();  // throw exception
-    }
-
     GETTENSOR(dataset)
 
     faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, build_cfg->nlist,
-                                                       GetMetricType(build_cfg->metric_type));
+    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
+                                                       GetMetricType(config[Metric::TYPE].get<std::string>()));
     index->train(rows, (float*)p_data);
 
     // TODO(linxj): override here. train return model or not.
@@ -106,24 +102,19 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (search_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("not support this kind of config");
-    }
-
     GETTENSOR(dataset)
 
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
         fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
-        auto elems = rows * search_cfg->k;
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        search_impl(rows, (float*)p_data, search_cfg->k, p_dist, p_id, config);
+        search_impl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, config);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -163,9 +154,8 @@ std::shared_ptr<faiss::IVFSearchParameters>
 IVF::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFSearchParameters>();
 
-    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    params->nprobe = search_cfg->nprobe;
-    // params->max_codes = config.get_with_default("max_codes", size_t(0));
+    params->nprobe = config[IndexParams::nprobe];
+    // params->max_codes = config["max_codes"];
 
     return params;
 }
@@ -185,7 +175,7 @@ IVF::GenGraph(const float* data, const int64_t& k, Graph& graph, const Config& c
     int64_t K = k + 1;
     auto ntotal = Count();
 
-    size_t dim = config->d;
+    size_t dim = config[meta::DIM];
     auto batch_size = 1000;
     auto tail_batch_size = ntotal % batch_size;
     auto batch_search_count = ntotal / batch_size;
@@ -279,12 +269,6 @@ IVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (search_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("not support this kind of config");
-    }
-
-    // auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
     auto elems = dataset->Get<int64_t>(meta::DIM);
 
@@ -311,16 +295,11 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
-    if (search_cfg == nullptr) {
-        KNOWHERE_THROW_MSG("not support this kind of config");
-    }
-
     auto rows = dataset->Get<int64_t>(meta::ROWS);
     auto p_data = dataset->Get<const int64_t*>(meta::IDS);
 
     try {
-        auto elems = rows * search_cfg->k;
+        auto elems = rows * config[meta::TOPK].get<int64_t>();
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
@@ -330,7 +309,7 @@ IVF::SearchById(const DatasetPtr& dataset, const Config& config) {
         // todo: enable search by id (zhiru)
         //        auto blacklist = dataset->Get<faiss::ConcurrentBitsetPtr>("bitset");
         auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->search_by_id(rows, p_data, search_cfg->k, p_dist, p_id, bitset_);
+        index_ivf->search_by_id(rows, p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, bitset_);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {

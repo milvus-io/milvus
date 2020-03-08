@@ -54,7 +54,7 @@ struct TableSchema {
     int64_t flag_ = 0;
     int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
-    int32_t nlist_ = DEFAULT_NLIST;
+    std::string index_params_ = "{ \"nlist\": 16384 }";
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
     std::string owner_table_;
     std::string partition_tag_;
@@ -89,7 +89,7 @@ struct TableFileSchema {
     int64_t created_on_ = 0;
     int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
-    int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
+    std::string index_params_;                   // not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
     uint64_t flush_lsn_ = 0;
 };  // TableFileSchema

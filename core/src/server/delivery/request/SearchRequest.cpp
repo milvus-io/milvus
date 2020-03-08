@@ -26,14 +26,14 @@ namespace milvus {
 namespace server {
 
 SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std::string& table_name,
-                             const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                             const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                              const std::vector<std::string>& partition_list,
                              const std::vector<std::string>& file_id_list, TopKQueryResult& result)
     : BaseRequest(context, DQL_REQUEST_GROUP),
       table_name_(table_name),
       vectors_data_(vectors),
       topk_(topk),
-      nprobe_(nprobe),
+      extra_params_(extra_params),
       partition_list_(partition_list),
       file_id_list_(file_id_list),
       result_(result) {
@@ -41,11 +41,11 @@ SearchRequest::SearchRequest(const std::shared_ptr<Context>& context, const std:
 
 BaseRequestPtr
 SearchRequest::Create(const std::shared_ptr<Context>& context, const std::string& table_name,
-                      const engine::VectorsData& vectors, int64_t topk, int64_t nprobe,
+                      const engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
                       const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
                       TopKQueryResult& result) {
     return std::shared_ptr<BaseRequest>(
-        new SearchRequest(context, table_name, vectors, topk, nprobe, partition_list, file_id_list, result));
+        new SearchRequest(context, table_name, vectors, topk, extra_params, partition_list, file_id_list, result));
 }
 
 Status
@@ -56,7 +56,7 @@ SearchRequest::OnExecute() {
         auto pre_query_ctx = context_->Child("Pre query");
 
         std::string hdr = "SearchRequest(table=" + table_name_ + ", nq=" + std::to_string(vector_count) +
-                          ", k=" + std::to_string(topk_) + ", nprob=" + std::to_string(nprobe_) + ")";
+                          ", k=" + std::to_string(topk_) + ", extra_params=" + extra_params_.dump() + ")";
 
         TimeRecorder rc(hdr);
 
@@ -84,13 +84,13 @@ SearchRequest::OnExecute() {
             }
         }
 
-        // step 3: check search parameter
-        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
+        status = ValidationUtil::ValidateSearchParams(extra_params_, table_schema, topk_);
         if (!status.ok()) {
             return status;
         }
 
-        status = ValidationUtil::ValidateSearchNprobe(nprobe_, table_schema);
+        // step 3: check search parameter
+        status = ValidationUtil::ValidateSearchTopk(topk_, table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -150,10 +150,10 @@ SearchRequest::OnExecute() {
                 return status;
             }
 
-            status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, nprobe_,
+            status = DBWrapper::DB()->Query(context_, table_name_, partition_list_, (size_t)topk_, extra_params_,
                                             vectors_data_, result_ids, result_distances);
         } else {
-            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, nprobe_,
+            status = DBWrapper::DB()->QueryByFileID(context_, table_name_, file_id_list_, (size_t)topk_, extra_params_,
                                                     vectors_data_, result_ids, result_distances);
         }
 

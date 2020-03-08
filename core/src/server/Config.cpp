@@ -549,9 +549,14 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
     // convert value string to standard string stored in yaml file
     std::string value_str;
     if (child_key == CONFIG_CACHE_CACHE_INSERT_DATA || child_key == CONFIG_STORAGE_S3_ENABLE ||
-        child_key == CONFIG_METRIC_ENABLE_MONITOR || child_key == CONFIG_GPU_RESOURCE_ENABLE) {
-        value_str =
-            (value == "True" || value == "true" || value == "On" || value == "on" || value == "1") ? "true" : "false";
+        child_key == CONFIG_METRIC_ENABLE_MONITOR || child_key == CONFIG_GPU_RESOURCE_ENABLE ||
+        child_key == CONFIG_WAL_ENABLE || child_key == CONFIG_WAL_RECOVERY_ERROR_IGNORE) {
+        bool ok = false;
+        status = StringHelpFunctions::ConvertToBoolean(value, ok);
+        if (!status.ok()) {
+            return status;
+        }
+        value_str = ok ? "true" : "false";
     } else if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES ||
                child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
         std::vector<std::string> vec;
@@ -593,7 +598,6 @@ Config::UpdateFileConfigFromMem(const std::string& parent_key, const std::string
     }
 
     // values of gpu resources are sequences, need to remove old here
-    std::regex reg("\\S*");
     if (child_key == CONFIG_GPU_RESOURCE_SEARCH_RESOURCES || child_key == CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) {
         while (getline(conf_fin, line)) {
             if (line.find("- gpu") != std::string::npos)
@@ -1009,8 +1013,7 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
             std::cerr << "WARNING: cpu cache capacity value is too big" << std::endl;
         }
 
-        std::string str =
-            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT);
+        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_INSERT_BUFFER_SIZE, "0");
         int64_t buffer_value = std::stoll(str);
 
         int64_t insert_buffer_size = buffer_value * GB;
@@ -1059,9 +1062,8 @@ Config::CheckCacheConfigInsertBufferSize(const std::string& value) {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        std::string str =
-            GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
-        int64_t cache_size = std::stoll(str);
+        std::string str = GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, "0");
+        int64_t cache_size = std::stoll(str) * GB;
 
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
@@ -1855,7 +1857,8 @@ Config::SetDBConfigBackendUrl(const std::string& value) {
 Status
 Config::SetDBConfigPreloadTable(const std::string& value) {
     CONFIG_CHECK(CheckDBConfigPreloadTable(value));
-    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, value);
+    std::string cor_value = value == "*" ? "\'*\'" : value;
+    return SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, cor_value);
 }
 
 Status

@@ -46,24 +46,19 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         Generate(256, 1000000 / 100, 1);
         index_ = std::make_shared<knowhere::NSG>();
 
-        auto tmp_conf = std::make_shared<knowhere::NSGCfg>();
-        tmp_conf->gpu_id = DEVICEID;
-        tmp_conf->d = 256;
-        tmp_conf->knng = 20;
-        tmp_conf->nprobe = 8;
-        tmp_conf->nlist = 163;
-        tmp_conf->search_length = 40;
-        tmp_conf->out_degree = 30;
-        tmp_conf->candidate_pool_size = 100;
-        tmp_conf->metric_type = knowhere::METRICTYPE::L2;
-        train_conf = tmp_conf;
-        train_conf->Dump();
+        train_conf = knowhere::Config{{knowhere::meta::DIM, 256},
+                                      {knowhere::IndexParams::nlist, 163},
+                                      {knowhere::IndexParams::nprobe, 8},
+                                      {knowhere::IndexParams::knng, 20},
+                                      {knowhere::IndexParams::search_length, 40},
+                                      {knowhere::IndexParams::out_degree, 30},
+                                      {knowhere::IndexParams::candidate, 100},
+                                      {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
-        auto tmp2_conf = std::make_shared<knowhere::NSGCfg>();
-        tmp2_conf->k = k;
-        tmp2_conf->search_length = 30;
-        search_conf = tmp2_conf;
-        search_conf->Dump();
+        search_conf = knowhere::Config{
+            {knowhere::meta::TOPK, k},
+            {knowhere::IndexParams::search_length, 30},
+        };
     }
 
     void
@@ -87,9 +82,9 @@ TEST_F(NSGInterfaceTest, basic_test) {
         ASSERT_ANY_THROW(index_->Search(query_dataset, search_conf));
         ASSERT_ANY_THROW(index_->Serialize());
     }
-    train_conf->gpu_id = knowhere::INVALID_VALUE;
-    auto model_invalid_gpu = index_->Train(base_dataset, train_conf);
-    train_conf->gpu_id = DEVICEID;
+    // train_conf->gpu_id = knowhere::INVALID_VALUE;
+    // auto model_invalid_gpu = index_->Train(base_dataset, train_conf);
+    train_conf[knowhere::meta::DEVICEID] = DEVICEID;
     auto model = index_->Train(base_dataset, train_conf);
     auto result = index_->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);

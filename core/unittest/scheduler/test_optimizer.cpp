@@ -63,6 +63,8 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
 
     auto file = std::make_shared<TableFileSchema>();
     file->engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
+    file->index_params_ = "{ \"nlist\": 100 }";
+    file->dimension_ = 64;
     auto search_task = std::make_shared<XSearchTask>(nullptr, file, nullptr);
     ASSERT_FALSE(faiss_ivf_pq_pass.Run(search_task));
 

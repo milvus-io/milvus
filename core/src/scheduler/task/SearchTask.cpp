@@ -115,8 +115,12 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
             engine_type = (EngineType)file->engine_type_;
         }
 
+        milvus::json json_params;
+        if (!file_->index_params_.empty()) {
+            json_params = milvus::json::parse(file_->index_params_);
+        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-                                             (MetricType)file_->metric_type_, file_->nlist_);
+                                             (MetricType)file_->metric_type_, json_params);
     }
 }
 
@@ -217,7 +221,8 @@ XSearchTask::Execute() {
         // step 1: allocate memory
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
-        uint64_t nprobe = search_job->nprobe();
+        const milvus::json& extra_params = search_job->extra_params();
+        ENGINE_LOG_DEBUG << "Search job extra params: " << extra_params.dump();
         const engine::VectorsData& vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
@@ -235,13 +240,13 @@ XSearchTask::Execute() {
             }
             Status s;
             if (!vectors.float_data_.empty()) {
-                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, nprobe, output_distance.data(),
+                s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
             } else if (!vectors.binary_data_.empty()) {
-                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, nprobe, output_distance.data(),
+                s = index_engine_->Search(nq, vectors.binary_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
             } else if (!vectors.id_array_.empty()) {
-                s = index_engine_->Search(nq, vectors.id_array_, topk, nprobe, output_distance.data(),
+                s = index_engine_->Search(nq, vectors.id_array_, topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
             }
 

@@ -25,7 +25,7 @@ Status
 BinVecImpl::BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                      const uint8_t* xt) {
     try {
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
 
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nb);
@@ -47,15 +47,13 @@ BinVecImpl::BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, c
 Status
 BinVecImpl::Search(const int64_t& nq, const uint8_t* xq, float* dist, int64_t* ids, const Config& cfg) {
     try {
-        auto k = cfg->k;
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nq);
         ret_ds->Set(knowhere::meta::DIM, dim);
         ret_ds->Set(knowhere::meta::TENSOR, xq);
 
-        Config search_cfg = cfg;
-
-        auto res = index_->Search(ret_ds, search_cfg);
+        auto res = index_->Search(ret_ds, cfg);
         //{
         //    auto& ids = ids_array;
         //    auto& dists = dis_array;
@@ -150,9 +148,7 @@ BinVecImpl::GetVectorById(const int64_t n, const int64_t* ids, uint8_t* x, const
         ret_ds->Set(knowhere::meta::DIM, dim);
         ret_ds->Set(knowhere::meta::IDS, ids);
 
-        Config search_cfg = cfg;
-
-        auto res = index_->GetVectorById(ret_ds, search_cfg);
+        auto res = index_->GetVectorById(ret_ds, cfg);
 
         // TODO(linxj): avoid copy here.
         auto res_x = res->Get<uint8_t*>(knowhere::meta::TENSOR);
@@ -176,15 +172,13 @@ BinVecImpl::SearchById(const int64_t& nq, const int64_t* xq, float* dist, int64_
         throw WrapperException("not support");
     }
     try {
-        auto k = cfg->k;
+        int64_t k = cfg[knowhere::meta::TOPK];
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nq);
         ret_ds->Set(knowhere::meta::DIM, dim);
         ret_ds->Set(knowhere::meta::IDS, xq);
 
-        Config search_cfg = cfg;
-
-        auto res = index_->SearchById(ret_ds, search_cfg);
+        auto res = index_->SearchById(ret_ds, cfg);
         //{
         //    auto& ids = ids_array;
         //    auto& dists = dis_array;
@@ -235,7 +229,7 @@ BinVecImpl::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
 ErrorCode
 BinBFIndex::Build(const Config& cfg) {
     try {
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
         std::static_pointer_cast<knowhere::BinaryIDMAP>(index_)->Train(cfg);
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -251,7 +245,7 @@ Status
 BinBFIndex::BuildAll(const int64_t& nb, const uint8_t* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
                      const uint8_t* xt) {
     try {
-        dim = cfg->d;
+        dim = cfg[knowhere::meta::DIM];
         auto ret_ds = std::make_shared<knowhere::Dataset>();
         ret_ds->Set(knowhere::meta::ROWS, nb);
         ret_ds->Set(knowhere::meta::DIM, dim);

@@ -123,9 +123,6 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
 IndexModelPtr
 CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
-    if (train_config != nullptr) {
-        train_config->CheckValid();  // throw exception
-    }
 
     DatasetPtr dataset = origin;  // TODO(linxj): copy or reference?
 
@@ -159,62 +156,56 @@ CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
 
 void
 CPUSPTAGRNG::SetParameters(const Config& config) {
-#define Assign(param_name, str_name)                                                                              \
-    conf->param_name == INVALID_VALUE ? index_ptr_->SetParameter(str_name, std::to_string(build_cfg->param_name)) \
-                                      : index_ptr_->SetParameter(str_name, std::to_string(conf->param_name))
+#define Assign(param_name, str_name) \
+    index_ptr_->SetParameter(str_name, std::to_string(build_cfg[param_name].get<int64_t>()))
 
     if (index_type_ == SPTAG::IndexAlgoType::KDT) {
-        auto conf = std::dynamic_pointer_cast<KDTCfg>(config);
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetKDTParameters();
 
-        Assign(kdtnumber, "KDTNumber");
-        Assign(numtopdimensionkdtsplit, "NumTopDimensionKDTSplit");
-        Assign(samples, "Samples");
-        Assign(tptnumber, "TPTNumber");
-        Assign(tptleafsize, "TPTLeafSize");
-        Assign(numtopdimensiontptsplit, "NumTopDimensionTPTSplit");
-        Assign(neighborhoodsize, "NeighborhoodSize");
-        Assign(graphneighborhoodscale, "GraphNeighborhoodScale");
-        Assign(graphcefscale, "GraphCEFScale");
-        Assign(refineiterations, "RefineIterations");
-        Assign(cef, "CEF");
-        Assign(maxcheckforrefinegraph, "MaxCheckForRefineGraph");
-        Assign(numofthreads, "NumberOfThreads");
-        Assign(maxcheck, "MaxCheck");
-        Assign(thresholdofnumberofcontinuousnobetterpropagation, "ThresholdOfNumberOfContinuousNoBetterPropagation");
-        Assign(numberofinitialdynamicpivots, "NumberOfInitialDynamicPivots");
-        Assign(numberofotherdynamicpivots, "NumberOfOtherDynamicPivots");
+        Assign("kdtnumber", "KDTNumber");
+        Assign("numtopdimensionkdtsplit", "NumTopDimensionKDTSplit");
+        Assign("samples", "Samples");
+        Assign("tptnumber", "TPTNumber");
+        Assign("tptleafsize", "TPTLeafSize");
+        Assign("numtopdimensiontptsplit", "NumTopDimensionTPTSplit");
+        Assign("neighborhoodsize", "NeighborhoodSize");
+        Assign("graphneighborhoodscale", "GraphNeighborhoodScale");
+        Assign("graphcefscale", "GraphCEFScale");
+        Assign("refineiterations", "RefineIterations");
+        Assign("cef", "CEF");
+        Assign("maxcheckforrefinegraph", "MaxCheckForRefineGraph");
+        Assign("numofthreads", "NumberOfThreads");
+        Assign("maxcheck", "MaxCheck");
+        Assign("thresholdofnumberofcontinuousnobetterpropagation", "ThresholdOfNumberOfContinuousNoBetterPropagation");
+        Assign("numberofinitialdynamicpivots", "NumberOfInitialDynamicPivots");
+        Assign("numberofotherdynamicpivots", "NumberOfOtherDynamicPivots");
     } else {
-        auto conf = std::dynamic_pointer_cast<BKTCfg>(config);
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetBKTParameters();
 
-        Assign(bktnumber, "BKTNumber");
-        Assign(bktkmeansk, "BKTKMeansK");
-        Assign(bktleafsize, "BKTLeafSize");
-        Assign(samples, "Samples");
-        Assign(tptnumber, "TPTNumber");
-        Assign(tptleafsize, "TPTLeafSize");
-        Assign(numtopdimensiontptsplit, "NumTopDimensionTPTSplit");
-        Assign(neighborhoodsize, "NeighborhoodSize");
-        Assign(graphneighborhoodscale, "GraphNeighborhoodScale");
-        Assign(graphcefscale, "GraphCEFScale");
-        Assign(refineiterations, "RefineIterations");
-        Assign(cef, "CEF");
-        Assign(maxcheckforrefinegraph, "MaxCheckForRefineGraph");
-        Assign(numofthreads, "NumberOfThreads");
-        Assign(maxcheck, "MaxCheck");
-        Assign(thresholdofnumberofcontinuousnobetterpropagation, "ThresholdOfNumberOfContinuousNoBetterPropagation");
-        Assign(numberofinitialdynamicpivots, "NumberOfInitialDynamicPivots");
-        Assign(numberofotherdynamicpivots, "NumberOfOtherDynamicPivots");
+        Assign("bktnumber", "BKTNumber");
+        Assign("bktkmeansk", "BKTKMeansK");
+        Assign("bktleafsize", "BKTLeafSize");
+        Assign("samples", "Samples");
+        Assign("tptnumber", "TPTNumber");
+        Assign("tptleafsize", "TPTLeafSize");
+        Assign("numtopdimensiontptsplit", "NumTopDimensionTPTSplit");
+        Assign("neighborhoodsize", "NeighborhoodSize");
+        Assign("graphneighborhoodscale", "GraphNeighborhoodScale");
+        Assign("graphcefscale", "GraphCEFScale");
+        Assign("refineiterations", "RefineIterations");
+        Assign("cef", "CEF");
+        Assign("maxcheckforrefinegraph", "MaxCheckForRefineGraph");
+        Assign("numofthreads", "NumberOfThreads");
+        Assign("maxcheck", "MaxCheck");
+        Assign("thresholdofnumberofcontinuousnobetterpropagation", "ThresholdOfNumberOfContinuousNoBetterPropagation");
+        Assign("numberofinitialdynamicpivots", "NumberOfInitialDynamicPivots");
+        Assign("numberofotherdynamicpivots", "NumberOfOtherDynamicPivots");
     }
 }
 
 DatasetPtr
 CPUSPTAGRNG::Search(const DatasetPtr& dataset, const Config& config) {
     SetParameters(config);
-    //    if (config != nullptr) {
-    //        config->CheckValid();  // throw exception
-    //    }
 
     auto p_data = dataset->Get<const float*>(meta::TENSOR);
     for (auto i = 0; i < 10; ++i) {

@@ -25,7 +25,7 @@ namespace web {
 class TableRequestDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableRequestDto, Object)
 
-    DTO_FIELD(String, table_name, "table_name");
+    DTO_FIELD(String, collection_name, "collection_name");
     DTO_FIELD(Int64, dimension, "dimension");
     DTO_FIELD(Int64, index_file_size, "index_file_size") = VALUE_TABLE_INDEX_FILE_SIZE_DEFAULT;
     DTO_FIELD(String, metric_type, "metric_type") = VALUE_TABLE_METRIC_TYPE_DEFAULT;
@@ -34,25 +34,25 @@ class TableRequestDto : public oatpp::data::mapping::type::Object {
 class TableFieldsDto : public oatpp::data::mapping::type::Object {
  DTO_INIT(TableFieldsDto, Object)
 
-    DTO_FIELD(String, table_name);
+    DTO_FIELD(String, collection_name);
     DTO_FIELD(Int64, dimension);
     DTO_FIELD(Int64, index_file_size);
     DTO_FIELD(String, metric_type);
     DTO_FIELD(Int64, count);
     DTO_FIELD(String, index);
-    DTO_FIELD(Int64, nlist);
+    DTO_FIELD(String, index_params);
 };
 
 class TableListDto : public OObject {
  DTO_INIT(TableListDto, Object)
 
-    DTO_FIELD(List<String>::ObjectWrapper, table_names);
+    DTO_FIELD(List<String>::ObjectWrapper, collection_names);
 };
 
 class TableListFieldsDto : public OObject {
     DTO_INIT(TableListFieldsDto, Object)
 
-    DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, tables);
+    DTO_FIELD(List<TableFieldsDto::ObjectWrapper>::ObjectWrapper, collections);
     DTO_FIELD(Int64, count) = 0;
 };
 

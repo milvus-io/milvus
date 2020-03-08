@@ -45,6 +45,9 @@ GetParentPath(const std::string& path, std::string& parent_path);
 bool
 IsSameIndex(const TableIndex& index1, const TableIndex& index2);
 
+bool
+IsRawIndexType(int32_t type);
+
 meta::DateT
 GetDate(const std::time_t& t, int day_delta = 0);
 meta::DateT

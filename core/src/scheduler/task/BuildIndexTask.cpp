@@ -41,8 +41,9 @@ XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
             engine_type = (EngineType)file->engine_type_;
         }
 
+        auto json = milvus::json::parse(file_->index_params_);
         to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-                                                (MetricType)file_->metric_type_, file_->nlist_);
+                                                (MetricType)file_->metric_type_, json);
     }
 }
 

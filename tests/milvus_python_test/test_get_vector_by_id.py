@@ -181,9 +181,9 @@ class TestGetIndexedVectors:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index_params()
+        params=gen_simple_index()
     )
-    def get_simple_index_params(self, request, connect):
+    def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
                 logging.getLogger().info(request.param["index_type"])
@@ -205,19 +205,20 @@ class TestGetIndexedVectors:
     def get_id(self, request):
         yield request.param
 
-    def test_get_vectors_after_index_created(self, connect, table, get_simple_index_params, get_id):
+    def test_get_vectors_after_index_created(self, connect, table, get_simple_index, get_id):
         '''
         target: test get vector after index created
         method: add vector, create index and get vector
         expected: status ok
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params) 
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         id = get_id
         status, res = connect.get_vector_by_id(table, ids[id])
@@ -226,19 +227,20 @@ class TestGetIndexedVectors:
         assert status.OK()
         assert_equal_vector(res, vectors[id])
 
-    def test_get_vector_after_delete(self, connect, table, get_simple_index_params, get_id):
+    def test_get_vector_after_delete(self, connect, table, get_simple_index, get_id):
         '''
         target: test get_vector_by_id
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vectors(nb, dim)
         status, ids = connect.add_vectors(table, vectors)
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         id = get_id
         status = connect.delete_by_id(table, [ids[id]])
@@ -249,13 +251,14 @@ class TestGetIndexedVectors:
         assert status.OK()
         assert not res
 
-    def test_get_vector_partition(self, connect, table, get_simple_index_params, get_id):
+    def test_get_vector_partition(self, connect, table, get_simple_index, get_id):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
-        index_params = get_simple_index_params
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
         vectors = gen_vectors(nb, dim)
         status = connect.create_partition(table, tag)
         ids = [i for i in range(nb)] 
@@ -263,7 +266,7 @@ class TestGetIndexedVectors:
         assert status.OK()
         status = connect.flush([table])
         assert status.OK()
-        status = connect.create_index(table, index_params)
+        status = connect.create_index(table, index_type, index_param)
         assert status.OK()
         id = get_id
         status, res = connect.get_vector_by_id(table, ids[id])
