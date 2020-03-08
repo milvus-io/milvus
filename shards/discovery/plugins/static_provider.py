@@ -29,8 +29,6 @@ class StaticDiscovery(object):
 
     def __init__(self, config, readonly_topo, **kwargs):
         self.readonly_topo = readonly_topo
-        # _, self.default_group = self.readonly_topo.create(name='default')
-        # assert self.default_group is not None
         hosts = env.list('DISCOVERY_STATIC_HOSTS', [])
         self.port = env.int('DISCOVERY_STATIC_PORT', 19530)
         self.hosts = [resolve_address(host, self.port) for host in hosts]
@@ -66,7 +64,7 @@ class StaticDiscovery(object):
         return ok
 
     def delete_pod(self, name):
-        pool = self.default_group.remove(name)
+        pool = self.readonly_topo.delete_group(name)
         return True
 
     @classmethod
