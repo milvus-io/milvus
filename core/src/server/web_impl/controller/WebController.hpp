@@ -336,7 +336,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST", "/tables/{collection_name}/indexes", CreateIndex,
+    ENDPOINT("POST", "/collections/{collection_name}/indexes", CreateIndex,
              PATH(String, collection_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");

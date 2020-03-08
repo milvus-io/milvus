@@ -646,7 +646,7 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/collections/{collection_name}/indexes", optionsIndexes, PATH(String, collection_name, "collection_name"))
 
-    API_CALL("POST", "/tables/{table_name}/indexes", createIndex, PATH(String, table_name, "table_name"),
+    API_CALL("POST", "/collections/{collection_name}/indexes", createIndex, PATH(String, collection_name, "collection_name"),
              BODY_STRING(OString, body))
 
     API_CALL("GET", "/collections/{collection_name}/indexes", getIndex, PATH(String, collection_name, "collection_name"))
