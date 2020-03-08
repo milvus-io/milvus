@@ -69,7 +69,7 @@ StoragePrototype(const std::string& path) {
                    make_column("flag", &TableSchema::flag_, default_value(0)),
                    make_column("index_file_size", &TableSchema::index_file_size_),
                    make_column("engine_type", &TableSchema::engine_type_),
-                   make_column("index_params", &TableSchema::index_params_),
+                   make_column("index_params", &TableSchema::index_params_, default_value("")),
                    make_column("metric_type", &TableSchema::metric_type_),
                    make_column("owner_table", &TableSchema::owner_table_, default_value("")),
                    make_column("partition_tag", &TableSchema::partition_tag_, default_value("")),
@@ -1425,8 +1425,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                     // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
                     // Else, we can only delete the single file
                     // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
-                    if (table_file.engine_type_ == (int32_t)EngineType::FAISS_IDMAP ||
-                        table_file.engine_type_ == (int32_t)EngineType::FAISS_BIN_IDMAP) {
+                    if (utils::IsRawIndexType(table_file.engine_type_)) {
                         utils::DeleteSegment(options_, table_file);
                         std::string segment_dir;
                         utils::GetParentPath(table_file.location_, segment_dir);

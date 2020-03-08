@@ -812,7 +812,7 @@ DBImpl::CompactFile(const std::string& table_id, const meta::TableFileSchema& fi
     // Update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
-    if (compacted_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (!utils::IsRawIndexType(compacted_file.engine_type_)) {
         compacted_file.file_type_ = (segment_writer_ptr->Size() >= compacted_file.index_file_size_)
                                         ? meta::TableFileSchema::TO_INDEX
                                         : meta::TableFileSchema::RAW;
@@ -1468,7 +1468,7 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::TableFilesSchema& fi
     // step 4: update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
     // else set file type to RAW, no need to build index
-    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (!utils::IsRawIndexType(table_file.engine_type_)) {
         table_file.file_type_ = (segment_writer_ptr->Size() >= table_file.index_file_size_)
                                     ? meta::TableFileSchema::TO_INDEX
                                     : meta::TableFileSchema::RAW;
@@ -1770,7 +1770,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
-    if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
+    if (utils::IsRawIndexType(index.engine_type_)) {
         file_types = {
             static_cast<int32_t>(meta::TableFileSchema::NEW),
             static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
@@ -1792,7 +1792,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
 
     while (!table_files.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
-        if (index.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        if (!utils::IsRawIndexType(index.engine_type_)) {
             status = meta_ptr_->UpdateTableFilesToIndex(table_id);
         }
 

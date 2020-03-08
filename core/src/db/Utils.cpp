@@ -215,6 +215,11 @@ IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
            index1.metric_type_ == index2.metric_type_;
 }
 
+bool
+IsRawIndexType(int32_t type) {
+    return (type == (int32_t)EngineType::FAISS_IDMAP) || (type == (int32_t)EngineType::FAISS_BIN_IDMAP);
+}
+
 meta::DateT
 GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;
