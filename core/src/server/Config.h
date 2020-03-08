@@ -192,6 +192,9 @@ class Config {
     SetConfigCli(const std::string& parent_key, const std::string& child_key, const std::string& value);
 
     Status
+    CheckDuplicatePort();
+
+    Status
     UpdateFileConfigFromMem(const std::string& parent_key, const std::string& child_key);
 
     ///////////////////////////////////////////////////////////////////////////

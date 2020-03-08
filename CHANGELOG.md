@@ -42,6 +42,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1529 Fix server crash when cache_insert_data enabled
 -   \#1530 Set table file with correct engine type in meta
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
+-   \#1549 Fix server/wal config setting bug
 
 ## Feature
 -   \#216 Add CLI to get server info

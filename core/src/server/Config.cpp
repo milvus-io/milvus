@@ -2013,7 +2013,7 @@ Config::SetWalConfigEnable(const std::string& value) {
 Status
 Config::SetWalConfigRecoveryErrorIgnore(const std::string& value) {
     CONFIG_CHECK(CheckWalConfigRecoveryErrorIgnore(value));
-    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT, value);
+    return SetConfigValueInMem(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, value);
 }
 
 Status
