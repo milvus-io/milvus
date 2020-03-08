@@ -108,7 +108,7 @@ cache_config:
 #                      | compared with 'nq' to decide if OpenBLAS should be used.   |            |                 |
 #                      | If nq >= use_blas_threshold, OpenBLAS will be used, search |            |                 |
 #                      | response times will be stable but the search speed will be |            |                 |
-#                      | slower; if nq < use_blas_threshold, SSE will be used,      |            |                 |
+#                      | slower; if nq < use_blas_threshold, AVX will be used,      |            |                 |
 #                      | search speed will be faster but search response times will |            |                 |
 #                      | fluctuate.                                                 |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
