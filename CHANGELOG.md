@@ -94,6 +94,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
 -   \#1544 Update resources name in HTTP module
+-   \#1567 Update yaml config description
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat
