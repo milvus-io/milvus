@@ -31,7 +31,7 @@ namespace engine {
 #define GPU_MAX_NRPOBE 1024
 #endif
 
-#define DEFAULT_MAX_DIM 16384
+#define DEFAULT_MAX_DIM 32768
 #define DEFAULT_MIN_DIM 1
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
