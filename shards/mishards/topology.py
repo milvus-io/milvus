@@ -1,4 +1,5 @@
 import logging
+import threading
 import enum
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class TopoGroup:
     def __init__(self, name):
         self.name = name
         self.items = {}
+        self.cv = threading.Condition()
 
     def on_duplicate(self, topo_object):
         logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
@@ -37,19 +39,20 @@ class TopoGroup:
     def on_added(self, topo_object):
         return True
 
-    def _add(self, topo_object):
+    def _add_no_lock(self, topo_object):
         if topo_object.name in self.items:
             return StatusType.DUPLICATED
         logger.info('Adding topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
         self.items[topo_object.name] = topo_object
         ok = self.on_added(topo_object)
         if not ok:
-            self.remove(topo_object.name)
+            self._remove_no_lock(topo_object.name)
 
         return StatusType.OK if ok else StatusType.ADD_ERROR
 
     def add(self, topo_object):
-        return self._add(topo_object)
+        with self.cv:
+            return self._add_no_lock(topo_object)
 
     def __len__(self):
         return len(self.items)
@@ -60,13 +63,19 @@ class TopoGroup:
     def get(self, name):
         return self.items.get(name, None)
 
-    def remove(self, name):
+    def _remove_no_lock(self, name):
+        logger.info('Removing topo_object \"{}\" from group \"{}\"'.format(name, self.name))
         return self.items.pop(name, None)
+
+    def remove(self, name):
+        with self.cv:
+            return self._remove_no_lock(name)
 
 
 class Topology:
     def __init__(self):
         self.topo_groups = {}
+        self.cv = threading.Condition()
 
     def on_duplicated_group(self, group):
         logger.warning('Duplicated group \"{}\" found!'.format(group))
@@ -87,12 +96,16 @@ class Topology:
         key = group if isinstance(group, str) else group.name
         return key in self.topo_groups
 
+    def _add_group_no_lock(self, group):
+        logger.info('Adding group \"{}\"'.format(group))
+        self.topo_groups[group.name] = group
+
     def add_group(self, group):
         self.on_pre_add_group(group)
         if self.has_group(group):
             return self.on_duplicated_group(group)
-        logger.info('Adding group \"{}\"'.format(group))
-        self.topo_groups[group.name] = group
+        with self.cv:
+            self._add_group_no_lock(group)
         return self.on_post_add_group(group)
 
     def on_delete_not_existed_group(self, group):
@@ -104,14 +117,15 @@ class Topology:
     def on_post_delete_group(self, group):
         logger.debug('Post delete group \"{}\"'.format(group))
 
-    def _delete_group(self, group):
+    def _delete_group_no_lock(self, group):
+        logger.info('Deleting group \"{}\"'.format(group))
         delete_key = group if isinstance(group, str) else group.name
         return self.topo_groups.pop(delete_key, None)
 
     def delete_group(self, group):
         self.on_pre_delete_group(group)
-        logger.info('Deleting group \"{}\"'.format(group))
-        deleted_group = self._delete_group(group)
+        with self.cv:
+            deleted_group = self._delete_group_lock(group)
         if not deleted_group:
             return self.on_delete_not_existed_group(group)
         return self.on_post_delete_group(group)
@@ -119,36 +133,3 @@ class Topology:
     @property
     def group_names(self):
         return self.topo_groups.keys()
-
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
-    o1 = TopoObject('x1')
-    o2 = TopoObject('x1')
-    print(o1==o2)
-
-    s = set()
-    print(s.add(o1))
-    print(len(s))
-    s.add(o1)
-    print(len(s))
-    s.add(o2)
-    print(len(s))
-    n = 'x1'
-    print(s.add(n))
-    print(len(s))
-    print(n in s)
-
-    group = TopoGroup('g1')
-    print(len(group))
-
-    group.add(o1)
-    print(len(group))
-    group.add(o2)
-    print(len(group))
-
-    topo = Topology()
-    topo.add_group(group)
-    topo.delete_group('x2')
-
-    topo.delete_group('g1')

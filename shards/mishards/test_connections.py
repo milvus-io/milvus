@@ -1,6 +1,7 @@
 import logging
 import pytest
 import mock
+import random
 import threading
 
 from milvus import Milvus
@@ -163,6 +164,45 @@ class TestConnection:
         assert len(w_topo.group_names) == 1
 
     def test_connection_pool(self):
+        ConnectionGroup.on_added = mock.MagicMock(return_value=(True,))
+
+        def choaz_mp_fetch(capacity, count, tnum):
+            threads_num = 5
+            topo = ConnectionTopology()
+            _, tg = topo.create('tg')
+            pool_size = 20
+            pool_names = ['p{}:19530'.format(i) for i in range(pool_size)]
+
+            threads = []
+            def Worker(group, cnt, capacity):
+                ori_cnt = cnt
+                assert cnt < 100
+                while cnt >= 0:
+                    name = pool_names[random.randint(0, pool_size-1)]
+                    cnt -= 1
+                    remove = (random.randint(1,4)%4 == 0)
+                    if remove:
+                        pool = group.get(name=name)
+                        # if name.startswith("p1:"):
+                        #     logger.error('{} CNT={} [Remove] Group \"{}\" has pool of SIZE={} ACTIVE={}'.format(threading.get_ident(), ori_cnt-cnt, name, len(pool), pool.active_num))
+                        group.remove(name)
+
+                    else:
+                        group.create(name=name, uri=name, capacity=capacity)
+                        pool = group.get(name=name)
+                        assert pool is not None
+                        conn = pool.fetch(timeout=0.01)
+                        # if name.startswith("p1:"):
+                        #     logger.error('{} CNT={} [Adding] Group \"{}\" has pool of SIZE={} ACTIVE={}'.format(threading.get_ident(), ori_cnt-cnt, name, len(pool), pool.active_num))
+
+            for _ in range(threads_num):
+                t = threading.Thread(target=Worker, args=(tg, count, tnum))
+                threads.append(t)
+                t.start()
+
+            for t in threads:
+                t.join()
+        choaz_mp_fetch(4, 40, 8)
 
         def check_mp_fetch(capacity=-1):
             w2 = ConnectionPool(name='w2', uri='127.0.0.1:19530', max_retry=2, capacity=capacity)
