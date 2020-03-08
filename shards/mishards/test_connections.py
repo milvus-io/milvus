@@ -103,22 +103,37 @@ class TestConnection:
         assert len(errors) == 1
 
     def test_topology(self):
-        topo = ConnectionTopology()
-        g1_group = ConnectionGroup(name='g1')
-        # w1 = ConnectionPool(name='w1', uri='127.0.0.1:19530', max_retry=2)
-        # w1_1 = w1.create()
-        # ret = w1.add_connection(w1_1)
-        # assert ret == ConnectionPool.StatusType.OK
-        # assert len(w1) == 1
+        w_topo = ConnectionTopology()
+        wg1 = ConnectionGroup(name='wg1')
+        w_topo.add_group(wg1)
+        assert w_topo.has_group(wg1)
 
-        # ret = w1.add_connection(w1_1)
-        # assert ret == ConnectionPool.StatusType.DUPLICATE_ERROR
+        fetched_group = w_topo.get_group('wg1')
+        assert id(fetched_group) == id(wg1)
 
-        # w2 = ConnectionPool(name='w2', uri='127.0.0.1:19531', capacity=0)
-        # w2_1 = w2.create()
-        # ret = w2.add_connection(w2_1)
-        # assert ret == ConnectionPool.StatusType.NO_RESOURCE_ERROR
+        wg1_p1 = ConnectionPool(name='wg1_p1', uri='127.0.0.1:19530')
+        wg1.add(wg1_p1)
 
+        assert len(wg1) == 1
+
+        fetched_p1 = wg1.get(wg1_p1.name)
+        assert fetched_p1 == wg1_p1
+
+        fetched_p1 = w_topo.get_group('wg1').get('wg1_p1')
+
+        conn1 = fetched_p1.fetch()
+        assert len(fetched_p1) == 1
+        assert fetched_p1.active_num == 1
+
+        conn2 = fetched_p1.fetch()
+        assert len(fetched_p1) == 2
+        assert fetched_p1.active_num == 2
+
+        conn2.release()
+        assert len(fetched_p1) == 2
+        assert fetched_p1.active_num == 1
+
+    def test_connection_pool(self):
 
         def check_mp_fetch(capacity=-1):
             w2 = ConnectionPool(name='w2', uri='127.0.0.1:19530', max_retry=2, capacity=capacity)

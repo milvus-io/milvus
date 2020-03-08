@@ -23,26 +23,27 @@ class TopoObject:
 class TopoGroup:
     def __init__(self, name):
         self.name = name
-        self.items = set()
+        self.items = {}
 
     def _add(self, topo_object):
-        if topo_object in self.items:
+        if topo_object.name in self.items:
             logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
             return False
-        logger.warning('Adding topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
-        self.items.add(topo_object)
+        logger.info('Adding topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
+        self.items[topo_object.name] = topo_object
+        return True
 
     def add(self, topo_object):
-        if isinstance(topo_object, str):
-            return self._add(TopoObject(topo_object))
-        else:
-            return self._add(topo_object)
+        return self._add(topo_object)
 
     def __len__(self):
         return len(self.items)
 
     def __str__(self):
         return '<TopoGroup: {}>'.format(self.name)
+
+    def get(self, name):
+        return self.items.get(name, None)
 
 
 class Topology:
@@ -58,8 +59,11 @@ class Topology:
     def on_post_add_group(self, group):
         logger.debug('Post add group \"{}\"'.format(group))
 
+    def get_group(self, name):
+        return self.topo_groups.get(name, None)
+
     def has_group(self, group):
-        key = group if isinstance(group, str) else group
+        key = group if isinstance(group, str) else group.name
         return key in self.topo_groups
 
     def add_group(self, group):

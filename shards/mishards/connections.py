@@ -117,14 +117,6 @@ class ScopedConnection(ProxyMixin):
 
 
 class ConnectionPool(topology.TopoObject):
-    class StatusType(enum.Enum):
-        OK = 1
-        NO_RESOURCE_ERROR = 2
-        NAME_ERROR = 3
-        DUPLICATE_ERROR = 4
-
-        DO_NOTHING = 5
-
     def __init__(self, name, uri, max_retry=1, capacity=-1, **kwargs):
         super().__init__(name)
         self.capacity = capacity
@@ -176,34 +168,6 @@ class ConnectionPool(topology.TopoObject):
             self.active_pool.remove(connection)
             self.pending_pool.add(connection)
 
-    def add_connection(self, connection):
-        assert isinstance(connection, Connection), 'Expected connection of type \"Connection\"'
-        if connection.name != self.name:
-            logger.error('Cannot add connection \"{}\" into pool \"{}\"'.format(connection.name, self.name))
-            return self.StatusType.NAME_ERROR
-        if self.capacity >= 0 and len(self.pool) >= self.capacity:
-            logger.debug('ConnectionPool \"{}\" has reached max capacity: {}'.format(self.name, self.capacity))
-            return self.StatusType.NO_RESOURCE_ERROR
-        tid = threading.get_ident()
-        if tid in self.pool:
-            logger.error('Cannot add more than 1 connection \"{}\" into pool for same thread'.format(connection.name))
-            return self.StatusType.DUPLICATE_ERROR
-        logger.info('Adding connection \"{}\" into pool'.format(connection.name))
-
-        self.pool[tid] = connection
-        return self.StatusType.OK
-
-    def remove_connection(self):
-        if len(self) == 0:
-            return self.StatusType.DO_NOTHING, None
-
-        tid = threading.get_ident()
-        if tid not in self.pool:
-            return self.StatusType.DO_NOTHING, None
-
-        connection = self.pool.pop(tid)
-        return self.StatusType.OK, connection
-
     def create(self):
         connection = Connection(name=self.name, uri=self.uri, max_retry=self.max_retry, **self.kwargs)
         return connection
@@ -214,9 +178,7 @@ class ConnectionGroup(topology.TopoGroup):
         super().__init__(name)
 
 
-@singleton
 class ConnectionTopology(topology.Topology):
-    DEFAULT_GROUP = 'default'
     def __init__(self):
         super().__init__()
 
