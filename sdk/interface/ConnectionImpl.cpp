@@ -101,16 +101,6 @@ ConnectionImpl::Search(const std::string& table_name, const std::vector<std::str
 }
 
 Status
-ConnectionImpl::SearchByID(const std::string& table_name,
-                           const std::vector<std::string>& partition_tags,
-                           int64_t query_id,
-                           int64_t topk,
-                           const std::string& extra_params,
-                           TopKQueryResult& topk_query_result) {
-    return client_proxy_->SearchByID(table_name, partition_tags, query_id, topk, extra_params, topk_query_result);
-}
-
-Status
 ConnectionImpl::DescribeTable(const std::string& table_name, TableSchema& table_schema) {
     return client_proxy_->DescribeTable(table_name, table_schema);
 }
