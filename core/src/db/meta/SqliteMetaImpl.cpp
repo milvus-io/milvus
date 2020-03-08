@@ -69,7 +69,7 @@ StoragePrototype(const std::string& path) {
                    make_column("flag", &TableSchema::flag_, default_value(0)),
                    make_column("index_file_size", &TableSchema::index_file_size_),
                    make_column("engine_type", &TableSchema::engine_type_),
-                   make_column("index_params", &TableSchema::index_params_, default_value("")),
+                   make_column("index_params", &TableSchema::index_params_),
                    make_column("metric_type", &TableSchema::metric_type_),
                    make_column("owner_table", &TableSchema::owner_table_, default_value("")),
                    make_column("partition_tag", &TableSchema::partition_tag_, default_value("")),
