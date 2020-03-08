@@ -1,10 +1,11 @@
 import logging
 import threading
+import enum
 from functools import wraps
 from milvus import Milvus
 from milvus.client.hooks import BaseSearchHook
 
-from mishards import (settings, exceptions)
+from mishards import (settings, exceptions, topology)
 from utils import singleton
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,144 @@ class Connection:
                 else:
                     raise e
         return inner
+
+    def __str__(self):
+        return '<Connection: {}:{}>'.format(self.name, id(self))
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class ProxyMixin:
+    def __getattr__(self, name):
+        target = self.__dict__.get(name, None)
+        if target or not self.connection:
+            return target
+        return getattr(self.connection, name)
+
+
+class ScopedConnection(ProxyMixin):
+    def __init__(self, pool, connection):
+        self.pool = pool
+        self.connection = connection
+
+    def __del__(self):
+        self.release()
+
+    def __str__(self):
+        return self.connection.__str__()
+
+    def release(self):
+        if not self.pool or not self.connection:
+            return
+        self.pool.release(self.connection)
+        self.pool = None
+        self.connection = None
+
+
+class ConnectionPool(topology.TopoObject):
+    class StatusType(enum.Enum):
+        OK = 1
+        NO_RESOURCE_ERROR = 2
+        NAME_ERROR = 3
+        DUPLICATE_ERROR = 4
+
+        DO_NOTHING = 5
+
+    def __init__(self, name, uri, max_retry=1, capacity=-1, **kwargs):
+        super().__init__(name)
+        self.capacity = capacity
+        self.pending_pool = set()
+        self.active_pool = set()
+        self.connection_ownership = {}
+        self.uri = uri
+        self.max_retry = max_retry
+        self.kwargs = kwargs
+        self.cv = threading.Condition()
+
+    def __len__(self):
+        return len(self.pending_pool) + len(self.active_pool)
+
+    @property
+    def active_num(self):
+        return len(self.active_pool)
+
+    def _is_full(self):
+        if self.capacity < 0:
+            return False
+        return len(self) >= self.capacity
+
+    def fetch(self, timeout=1):
+        with self.cv:
+            timeout_times = 0
+            while (len(self.pending_pool) == 0 and self._is_full() and timeout_times < 1):
+                self.cv.notifyAll()
+                self.cv.wait(timeout)
+                timeout_times += 1
+
+            connection = None
+            if timeout_times >= 1:
+                return connection
+
+            if len(self.pending_pool) == 0:
+                connection = self.create()
+            else:
+                connection = self.pending_pool.pop()
+            self.active_pool.add(connection)
+        scoped_connection = ScopedConnection(self, connection)
+        return scoped_connection
+
+    def release(self, connection):
+        with self.cv:
+            if connection not in self.active_pool:
+                raise RuntimeError('\"{}\" not found in pool \"{}\"'.format(connection, self.name))
+            logger.debug('Releasing \"{}\" from pool \"{}\"'.format(connection, self.name))
+            self.active_pool.remove(connection)
+            self.pending_pool.add(connection)
+
+    def add_connection(self, connection):
+        assert isinstance(connection, Connection), 'Expected connection of type \"Connection\"'
+        if connection.name != self.name:
+            logger.error('Cannot add connection \"{}\" into pool \"{}\"'.format(connection.name, self.name))
+            return self.StatusType.NAME_ERROR
+        if self.capacity >= 0 and len(self.pool) >= self.capacity:
+            logger.debug('ConnectionPool \"{}\" has reached max capacity: {}'.format(self.name, self.capacity))
+            return self.StatusType.NO_RESOURCE_ERROR
+        tid = threading.get_ident()
+        if tid in self.pool:
+            logger.error('Cannot add more than 1 connection \"{}\" into pool for same thread'.format(connection.name))
+            return self.StatusType.DUPLICATE_ERROR
+        logger.info('Adding connection \"{}\" into pool'.format(connection.name))
+
+        self.pool[tid] = connection
+        return self.StatusType.OK
+
+    def remove_connection(self):
+        if len(self) == 0:
+            return self.StatusType.DO_NOTHING, None
+
+        tid = threading.get_ident()
+        if tid not in self.pool:
+            return self.StatusType.DO_NOTHING, None
+
+        connection = self.pool.pop(tid)
+        return self.StatusType.OK, connection
+
+    def create(self):
+        connection = Connection(name=self.name, uri=self.uri, max_retry=self.max_retry, **self.kwargs)
+        return connection
+
+
+class ConnectionGroup(topology.TopoGroup):
+    def __init__(self, name):
+        super().__init__(name)
+
+
+@singleton
+class ConnectionTopology(topology.Topology):
+    DEFAULT_GROUP = 'default'
+    def __init__(self):
+        super().__init__()
 
 
 @singleton

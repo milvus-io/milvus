@@ -1,9 +1,11 @@
 import logging
 import pytest
 import mock
+import threading
 
 from milvus import Milvus
-from mishards.connections import (ConnectionMgr, Connection)
+from mishards.connections import (ConnectionMgr, Connection,
+        ConnectionPool, ConnectionTopology, ConnectionGroup)
 from mishards import exceptions
 
 logger = logging.getLogger(__name__)
@@ -99,3 +101,79 @@ class TestConnection:
         this_connect = c.connect(func=None, exception_handler=error_handler)
         this_connect()
         assert len(errors) == 1
+
+    def test_topology(self):
+        topo = ConnectionTopology()
+        g1_group = ConnectionGroup(name='g1')
+        # w1 = ConnectionPool(name='w1', uri='127.0.0.1:19530', max_retry=2)
+        # w1_1 = w1.create()
+        # ret = w1.add_connection(w1_1)
+        # assert ret == ConnectionPool.StatusType.OK
+        # assert len(w1) == 1
+
+        # ret = w1.add_connection(w1_1)
+        # assert ret == ConnectionPool.StatusType.DUPLICATE_ERROR
+
+        # w2 = ConnectionPool(name='w2', uri='127.0.0.1:19531', capacity=0)
+        # w2_1 = w2.create()
+        # ret = w2.add_connection(w2_1)
+        # assert ret == ConnectionPool.StatusType.NO_RESOURCE_ERROR
+
+
+        def check_mp_fetch(capacity=-1):
+            w2 = ConnectionPool(name='w2', uri='127.0.0.1:19530', max_retry=2, capacity=capacity)
+            connections = []
+            def GetConnection(pool):
+                conn = pool.fetch(timeout=0.1)
+                if conn:
+                    connections.append(conn)
+
+            threads = []
+            threads_num = 10 if capacity < 0 else 2*capacity
+            for _ in range(threads_num):
+                t = threading.Thread(target=GetConnection, args=(w2,))
+                threads.append(t)
+                t.start()
+
+            for t in threads:
+                t.join()
+
+            expected_size = threads_num if capacity < 0 else capacity
+
+            assert len(connections) == expected_size
+
+        check_mp_fetch(5)
+        check_mp_fetch()
+
+        w1 = ConnectionPool(name='w1', uri='127.0.0.1:19530', max_retry=2, capacity=2)
+        w1_1 = w1.fetch()
+        assert len(w1) == 1
+        assert w1.active_num == 1
+        w1_2 = w1.fetch()
+        assert len(w1) == 2
+        assert w1.active_num == 2
+        w1_3 = w1.fetch()
+        assert w1_3 is None
+        assert len(w1) == 2
+        assert w1.active_num == 2
+
+        w1_1.release()
+        assert len(w1) == 2
+        assert w1.active_num == 1
+
+        def check(pool, expected_size, expected_active_num):
+            w = pool.fetch()
+            assert len(pool) == expected_size
+            assert pool.active_num == expected_active_num
+
+        check(w1, 2, 2)
+
+        assert len(w1) == 2
+        assert w1.active_num == 1
+
+        wild_w = w1.create()
+        with pytest.raises(RuntimeError):
+            w1.release(wild_w)
+
+        ret = w1_2.can_retry
+        assert ret == w1_2.connection.can_retry
