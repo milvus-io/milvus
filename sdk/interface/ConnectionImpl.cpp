@@ -130,11 +130,6 @@ ConnectionImpl::ServerStatus() const {
     return client_proxy_->ServerStatus();
 }
 
-std::string
-ConnectionImpl::DumpTaskTables() const {
-    return client_proxy_->DumpTaskTables();
-}
-
 Status
 ConnectionImpl::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) {
     return client_proxy_->DeleteByID(table_name, id_array);
