@@ -13,7 +13,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#977 Server crash when create tables concurrently
 -   \#990 Check gpu resources setting when assign repeated value
 -   \#995 table count set to 0 if no tables found
--   \#1010 improve error message when offset or page_size is equal 0
+-   \#1010 Improve error message when offset or page_size is equal 0
 -   \#1022 check if partition name is legal
 -   \#1028 check if table exists when show partitions
 -   \#1029 check if table exists when try to delete partition
@@ -43,6 +43,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1530 Set table file with correct engine type in meta
 -   \#1532 Search with ivf_flat failed with open-dataset: sift-256-hamming
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
+-   \#1556 Index file not created after table and index created
 
 ## Feature
 -   \#216 Add CLI to get server info
