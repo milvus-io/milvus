@@ -1,4 +1,5 @@
 import logging
+import enum
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +20,25 @@ class TopoObject:
     def __str__(self):
         return '<TopoObject: {}>'.format(self.name)
 
+class StatusType(enum.Enum):
+    OK = 1
+    DUPLICATED = 2
+
 
 class TopoGroup:
     def __init__(self, name):
         self.name = name
         self.items = {}
 
+    def on_duplicate(self, topo_object):
+        logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
+
     def _add(self, topo_object):
         if topo_object.name in self.items:
-            logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
-            return False
+            return StatusType.DUPLICATED
         logger.info('Adding topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
         self.items[topo_object.name] = topo_object
-        return True
+        return StatusType.OK
 
     def add(self, topo_object):
         return self._add(topo_object)
@@ -45,6 +52,9 @@ class TopoGroup:
     def get(self, name):
         return self.items.get(name, None)
 
+    def remove(self, name):
+        return self.items.pop(name, None)
+
 
 class Topology:
     def __init__(self):
@@ -52,12 +62,15 @@ class Topology:
 
     def on_duplicated_group(self, group):
         logger.warning('Duplicated group \"{}\" found!'.format(group))
+        return StatusType.DUPLICATED
 
     def on_pre_add_group(self, group):
         logger.debug('Pre add group \"{}\"'.format(group))
+        return StatusType.OK
 
     def on_post_add_group(self, group):
         logger.debug('Post add group \"{}\"'.format(group))
+        return StatusType.OK
 
     def get_group(self, name):
         return self.topo_groups.get(name, None)
@@ -69,7 +82,7 @@ class Topology:
     def add_group(self, group):
         self.on_pre_add_group(group)
         if self.has_group(group):
-            return on_duplicated_group(group)
+            return self.on_duplicated_group(group)
         logger.info('Adding group \"{}\"'.format(group))
         self.topo_groups[group.name] = group
         return self.on_post_add_group(group)

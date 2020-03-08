@@ -7,6 +7,7 @@ import logging
 import socket
 from environs import Env
 from mishards.exceptions import ConnectionConnectError
+from mishards.topology import StatusType
 
 logger = logging.getLogger(__name__)
 env = Env()
@@ -26,8 +27,10 @@ def resolve_address(addr, default_port):
 class StaticDiscovery(object):
     name = 'static'
 
-    def __init__(self, config, conn_mgr, **kwargs):
-        self.conn_mgr = conn_mgr
+    def __init__(self, config, topo, **kwargs):
+        self.topo = topo
+        self.default_group = self.topo.create(name='default')
+        assert self.default_group is not None
         hosts = env.list('DISCOVERY_STATIC_HOSTS', [])
         self.port = env.int('DISCOVERY_STATIC_PORT', 19530)
         self.hosts = [resolve_address(host, self.port) for host in hosts]
@@ -47,23 +50,26 @@ class StaticDiscovery(object):
             self.delete_pod(host)
 
     def add_pod(self, name, addr):
-        ok = False
+        ok = True
+        status = StatusType.OK
         try:
-            ok = self.conn_mgr.register(name, 'tcp://{}'.format(addr))
+            uri = 'tcp://{}'.format(addr)
+            status, _ = self.default_group.create(name=name, uri=uri)
         except ConnectionConnectError as exc:
             ok = False
             logger.error('Connection error to: {}'.format(addr))
 
-        ok and logger.debug('StaticDiscovery Add Static Address: {}'.format(addr))
+        if ok and status == StatusType.OK:
+            logger.info('StaticDiscovery Add Static Address: {}'.format(addr))
         return ok
 
     def delete_pod(self, name):
-        ok = self.conn_mgr.unregister(name)
+        ok = self.topo.unregister(name)
         return ok
 
     @classmethod
-    def Create(cls, conn_mgr, plugin_config, **kwargs):
-        discovery = cls(config=plugin_config, conn_mgr=conn_mgr, **kwargs)
+    def Create(cls, topo, plugin_config, **kwargs):
+        discovery = cls(config=plugin_config, topo=topo, **kwargs)
         return discovery
 
 

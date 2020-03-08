@@ -6,6 +6,7 @@ import threading
 from milvus import Milvus
 from mishards.connections import (ConnectionMgr, Connection,
         ConnectionPool, ConnectionTopology, ConnectionGroup)
+from mishards.topology import StatusType
 from mishards import exceptions
 
 logger = logging.getLogger(__name__)
@@ -104,16 +105,41 @@ class TestConnection:
 
     def test_topology(self):
         w_topo = ConnectionTopology()
-        wg1 = ConnectionGroup(name='wg1')
-        w_topo.add_group(wg1)
+        status, wg1 = w_topo.create(name='wg1')
         assert w_topo.has_group(wg1)
+        assert status == StatusType.OK
+
+        status, wg1_dup = w_topo.create(name='wg1')
+        assert wg1_dup is None
+        assert status == StatusType.DUPLICATED
 
         fetched_group = w_topo.get_group('wg1')
         assert id(fetched_group) == id(wg1)
 
-        wg1_p1 = ConnectionPool(name='wg1_p1', uri='127.0.0.1:19530')
-        wg1.add(wg1_p1)
+        with pytest.raises(RuntimeError):
+            wg1.create(name='wg1_p1')
 
+        status, wg1_p1 = wg1.create(name='wg1_p1', uri='127.0.0.1:19530')
+        assert status == StatusType.OK
+        assert wg1_p1 is not None
+        assert len(wg1) == 1
+
+        status, wg1_p1_dup = wg1.create(name='wg1_p1', uri='127.0.0.1:19530')
+        assert status == StatusType.DUPLICATED
+        assert wg1_p1_dup is None
+        assert len(wg1) == 1
+
+        status, wg1_p2 = wg1.create('wg1_p2', uri='127.0.0.1:19530')
+        assert status == StatusType.OK
+        assert wg1_p2 is not None
+        assert len(wg1) == 2
+
+        poped = wg1.remove('wg1_p3')
+        assert poped is None
+        assert len(wg1) == 2
+
+        poped = wg1.remove('wg1_p2')
+        assert poped.name == 'wg1_p2'
         assert len(wg1) == 1
 
         fetched_p1 = wg1.get(wg1_p1.name)

@@ -15,12 +15,14 @@ def create_app(testing_config=None):
                pool_recycle=config.SQL_POOL_RECYCLE, pool_timeout=config.SQL_POOL_TIMEOUT,
                pool_pre_ping=config.SQL_POOL_PRE_PING, max_overflow=config.SQL_MAX_OVERFLOW)
 
-    from mishards.connections import ConnectionMgr
+    from mishards.connections import ConnectionMgr, ConnectionTopology
+
     connect_mgr = ConnectionMgr()
+    topo = ConnectionTopology()
 
     from discovery.factory import DiscoveryFactory
     discover = DiscoveryFactory(config.DISCOVERY_PLUGIN_PATH).create(config.DISCOVERY_CLASS_NAME,
-                                                                     conn_mgr=connect_mgr)
+                                                                     topo=topo)
 
     from mishards.grpc_utils import GrpcSpanDecorator
     from tracer.factory import TracerFactory

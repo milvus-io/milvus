@@ -177,10 +177,27 @@ class ConnectionGroup(topology.TopoGroup):
     def __init__(self, name):
         super().__init__(name)
 
+    def create(self, name, **kwargs):
+        uri = kwargs.get('uri', None)
+        if not uri:
+            raise RuntimeError('\"uri\" is required to create connection pool')
+        pool = ConnectionPool(name=name, **kwargs)
+        status = self.add(pool)
+        if status == topology.StatusType.DUPLICATED:
+            pool = None
+        return status, pool
+
 
 class ConnectionTopology(topology.Topology):
     def __init__(self):
         super().__init__()
+
+    def create(self, name):
+        group = ConnectionGroup(name)
+        status = self.add_group(group)
+        if status == topology.StatusType.DUPLICATED:
+            group = None
+        return status, group
 
 
 @singleton
