@@ -104,6 +104,7 @@ class TestConnection:
         assert len(errors) == 1
 
     def test_topology(self):
+        ConnectionGroup.on_added = mock.MagicMock(return_value=(True,))
         w_topo = ConnectionTopology()
         status, wg1 = w_topo.create(name='wg1')
         assert w_topo.has_group(wg1)
@@ -158,6 +159,8 @@ class TestConnection:
         conn2.release()
         assert len(fetched_p1) == 2
         assert fetched_p1.active_num == 1
+
+        assert len(w_topo.group_names) == 1
 
     def test_connection_pool(self):
 

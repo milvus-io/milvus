@@ -23,6 +23,7 @@ class TopoObject:
 class StatusType(enum.Enum):
     OK = 1
     DUPLICATED = 2
+    ADD_ERROR = 3
 
 
 class TopoGroup:
@@ -33,12 +34,19 @@ class TopoGroup:
     def on_duplicate(self, topo_object):
         logger.warning('Duplicated topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
 
+    def on_added(self, topo_object):
+        return True
+
     def _add(self, topo_object):
         if topo_object.name in self.items:
             return StatusType.DUPLICATED
         logger.info('Adding topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
         self.items[topo_object.name] = topo_object
-        return StatusType.OK
+        ok = self.on_added(topo_object)
+        if not ok:
+            self.remove(topo_object.name)
+
+        return StatusType.OK if ok else StatusType.ADD_ERROR
 
     def add(self, topo_object):
         return self._add(topo_object)
@@ -107,6 +115,10 @@ class Topology:
         if not deleted_group:
             return self.on_delete_not_existed_group(group)
         return self.on_post_delete_group(group)
+
+    @property
+    def group_names(self):
+        return self.topo_groups.keys()
 
 
 if __name__ == '__main__':

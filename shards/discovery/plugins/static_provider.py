@@ -27,10 +27,10 @@ def resolve_address(addr, default_port):
 class StaticDiscovery(object):
     name = 'static'
 
-    def __init__(self, config, topo, **kwargs):
-        self.topo = topo
-        self.default_group = self.topo.create(name='default')
-        assert self.default_group is not None
+    def __init__(self, config, readonly_topo, **kwargs):
+        self.readonly_topo = readonly_topo
+        # _, self.default_group = self.readonly_topo.create(name='default')
+        # assert self.default_group is not None
         hosts = env.list('DISCOVERY_STATIC_HOSTS', [])
         self.port = env.int('DISCOVERY_STATIC_PORT', 19530)
         self.hosts = [resolve_address(host, self.port) for host in hosts]
@@ -54,22 +54,24 @@ class StaticDiscovery(object):
         status = StatusType.OK
         try:
             uri = 'tcp://{}'.format(addr)
-            status, _ = self.default_group.create(name=name, uri=uri)
+            status, group = self.readonly_topo.create(name=name)
+            if status == StatusType.OK:
+                status, pool = group.create(name=name, uri=uri)
         except ConnectionConnectError as exc:
             ok = False
             logger.error('Connection error to: {}'.format(addr))
 
         if ok and status == StatusType.OK:
-            logger.info('StaticDiscovery Add Static Address: {}'.format(addr))
+            logger.info('StaticDiscovery Add Static Group \"{}\" Of 1 Address: {}'.format(name, addr))
         return ok
 
     def delete_pod(self, name):
-        ok = self.topo.unregister(name)
-        return ok
+        pool = self.default_group.remove(name)
+        return True
 
     @classmethod
-    def Create(cls, topo, plugin_config, **kwargs):
-        discovery = cls(config=plugin_config, topo=topo, **kwargs)
+    def Create(cls, readonly_topo, plugin_config, **kwargs):
+        discovery = cls(config=plugin_config, readonly_topo=readonly_topo, **kwargs)
         return discovery
 
 

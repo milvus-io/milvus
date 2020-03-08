@@ -24,7 +24,8 @@ class Server:
         self.exit_flag = False
 
     def init_app(self,
-                 conn_mgr,
+                 writable_topo,
+                 readonly_topo,
                  tracer,
                  router,
                  discover,
@@ -32,7 +33,8 @@ class Server:
                  max_workers=10,
                  **kwargs):
         self.port = int(port)
-        self.conn_mgr = conn_mgr
+        self.writable_topo = writable_topo
+        self.readonly_topo = readonly_topo
         self.tracer = tracer
         self.router = router
         self.discover = discover
@@ -53,8 +55,8 @@ class Server:
         url = urlparse(woserver)
         ip = socket.gethostbyname(url.hostname)
         socket.inet_pton(socket.AF_INET, ip)
-        self.conn_mgr.register(
-            'WOSERVER', '{}://{}:{}'.format(url.scheme, ip, url.port or 80))
+        _, group = self.writable_topo.create('default')
+        group.create(name='WOSERVER', uri='{}://{}:{}'.format(url.scheme, ip, url.port or 80))
 
     def register_pre_run_handler(self, func):
         logger.info('Regiterring {} into server pre_run_handlers'.format(func))

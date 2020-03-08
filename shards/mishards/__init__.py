@@ -17,12 +17,12 @@ def create_app(testing_config=None):
 
     from mishards.connections import ConnectionMgr, ConnectionTopology
 
-    connect_mgr = ConnectionMgr()
-    topo = ConnectionTopology()
+    readonly_topo = ConnectionTopology()
+    writable_topo = ConnectionTopology()
 
     from discovery.factory import DiscoveryFactory
     discover = DiscoveryFactory(config.DISCOVERY_PLUGIN_PATH).create(config.DISCOVERY_CLASS_NAME,
-                                                                     topo=topo)
+                                                                     readonly_topo=readonly_topo)
 
     from mishards.grpc_utils import GrpcSpanDecorator
     from tracer.factory import TracerFactory
@@ -32,9 +32,11 @@ def create_app(testing_config=None):
 
     from mishards.router.factory import RouterFactory
     router = RouterFactory(config.ROUTER_PLUGIN_PATH).create(config.ROUTER_CLASS_NAME,
-                                                             conn_mgr=connect_mgr)
+                                                             readonly_topo=readonly_topo,
+                                                             writable_topo=writable_topo)
 
-    grpc_server.init_app(conn_mgr=connect_mgr,
+    grpc_server.init_app(writable_topo=writable_topo,
+                         readonly_topo=readonly_topo,
                          tracer=tracer,
                          router=router,
                          discover=discover,

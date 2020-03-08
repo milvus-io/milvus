@@ -152,10 +152,12 @@ class ConnectionPool(topology.TopoObject):
             if timeout_times >= 1:
                 return connection
 
+            # logger.debug('[Connection] Pool \"{}\" SIZE={} ACTIVE={}'.format(self.name, len(self), self.active_num))
             if len(self.pending_pool) == 0:
                 connection = self.create()
             else:
                 connection = self.pending_pool.pop()
+            # logger.debug('[Connection] Registerring \"{}\" into pool \"{}\"'.format(connection, self.name))
             self.active_pool.add(connection)
         scoped_connection = ScopedConnection(self, connection)
         return scoped_connection
@@ -164,7 +166,8 @@ class ConnectionPool(topology.TopoObject):
         with self.cv:
             if connection not in self.active_pool:
                 raise RuntimeError('\"{}\" not found in pool \"{}\"'.format(connection, self.name))
-            logger.debug('Releasing \"{}\" from pool \"{}\"'.format(connection, self.name))
+            # logger.debug('[Connection] Releasing \"{}\" from pool \"{}\"'.format(connection, self.name))
+            # logger.debug('[Connection] Pool \"{}\" SIZE={} ACTIVE={}'.format(self.name, len(self), self.active_num))
             self.active_pool.remove(connection)
             self.pending_pool.add(connection)
 
@@ -176,6 +179,15 @@ class ConnectionPool(topology.TopoObject):
 class ConnectionGroup(topology.TopoGroup):
     def __init__(self, name):
         super().__init__(name)
+
+    def on_added(self, topo_object):
+        conn = topo_object.fetch()
+        conn.on_connect(metadata=None)
+        status, _ = conn.conn.server_version()
+        if not status.OK():
+            logger.error('Cannot connect to newly added address: {}. Remove it now'.format(topo_object.name))
+            return False
+        return True
 
     def create(self, name, **kwargs):
         uri = kwargs.get('uri', None)
