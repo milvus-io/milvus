@@ -160,13 +160,6 @@ ClientTest::SearchVectors(const std::string& table_name, int64_t topk, int64_t n
 }
 
 void
-ClientTest::SearchVectorsByIds(const std::string& table_name, int64_t topk, int64_t nprobe) {
-    std::vector<std::string> partition_tags;
-    milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_, topk_query_result);
-}
-
-void
 ClientTest::CreateIndex(const std::string& table_name, milvus::IndexType type, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
@@ -245,7 +238,6 @@ ClientTest::Test() {
 
     GetVectorById(table_name, search_id_array_[0]);
     SearchVectors(table_name, TOP_K, NPROBE);
-    SearchVectorsByIds(table_name, TOP_K, NPROBE);
 
     CreateIndex(table_name, INDEX_TYPE, NLIST);
     ShowTableInfo(table_name);

@@ -29,36 +29,49 @@ class ClientTest {
  private:
     void
     ShowServerVersion();
+
     void
     ShowSdkVersion();
+
     void
     ShowTables(std::vector<std::string>&);
+
     void
     CreateTable(const std::string&, int64_t, milvus::MetricType);
+
     void
     DescribeTable(const std::string&);
+
     void
     InsertVectors(const std::string&, int64_t);
+
     void
     BuildSearchVectors(int64_t, int64_t);
+
     void
     Flush(const std::string&);
+
     void
     ShowTableInfo(const std::string&);
+
     void
     GetVectorById(const std::string&, int64_t);
+
     void
     SearchVectors(const std::string&, int64_t, int64_t);
-    void
-    SearchVectorsByIds(const std::string&, int64_t, int64_t);
+
     void
     CreateIndex(const std::string&, milvus::IndexType, int64_t);
+
     void
     PreloadTable(const std::string&);
+
     void
     DeleteByIds(const std::string&, const std::vector<int64_t>&);
+
     void
     DropIndex(const std::string&);
+
     void
     DropTable(const std::string&);
 

@@ -60,9 +60,6 @@ class GrpcClient {
     Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
 
     Status
-    SearchByID(const grpc::SearchByIDParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
-
-    Status
     DescribeTable(const std::string& table_name, grpc::TableSchema& grpc_schema);
 
     int64_t
