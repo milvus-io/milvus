@@ -26,7 +26,7 @@ class ConnectionImpl : public Connection {
 
     // Implementations of the Connection interface
     Status
-    Connect(const ConnectParam& param) override;
+    Connect(const ConnectParam& connect_param) override;
 
     Status
     Connect(const std::string& uri) override;
@@ -36,46 +36,6 @@ class ConnectionImpl : public Connection {
 
     Status
     Disconnect() override;
-
-    Status
-    CreateTable(const TableSchema& param) override;
-
-    bool
-    HasTable(const std::string& table_name) override;
-
-    Status
-    DropTable(const std::string& table_name) override;
-
-    Status
-    CreateIndex(const IndexParam& index_param) override;
-
-    Status
-    Insert(const std::string& table_name, const std::string& partition_tag, const std::vector<RowRecord>& record_array,
-           std::vector<int64_t>& id_array) override;
-
-    Status
-    GetVectorByID(const std::string& table_name, int64_t vector_id, RowRecord& vector_data) override;
-
-    Status
-    GetIDsInSegment(const std::string& table_name, const std::string& segment_name,
-                    std::vector<int64_t>& id_array) override;
-
-    Status
-    Search(const std::string& table_name, const std::vector<std::string>& partition_tag_array,
-           const std::vector<RowRecord>& query_record_array, int64_t topk,
-           const std::string& extra_params, TopKQueryResult& topk_query_result) override;
-
-    Status
-    DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
-
-    Status
-    CountTable(const std::string& table_name, int64_t& row_count) override;
-
-    Status
-    ShowTables(std::vector<std::string>& table_array) override;
-
-    Status
-    ShowTableInfo(const std::string& table_name, TableInfo& table_info) override;
 
     std::string
     ClientVersion() const override;
@@ -87,40 +47,82 @@ class ConnectionImpl : public Connection {
     ServerStatus() const override;
 
     Status
-    DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) override;
-
-    Status
-    PreloadTable(const std::string& table_name) const override;
-
-    Status
-    DescribeIndex(const std::string& table_name, IndexParam& index_param) const override;
-
-    Status
-    DropIndex(const std::string& table_name) const override;
-
-    Status
-    CreatePartition(const PartitionParam& param) override;
-
-    Status
-    ShowPartitions(const std::string& table_name, PartitionTagList& partition_tag_array) const override;
-
-    Status
-    DropPartition(const PartitionParam& param) override;
-
-    Status
     GetConfig(const std::string& node_name, std::string& value) const override;
 
     Status
     SetConfig(const std::string& node_name, const std::string& value) const override;
 
     Status
-    FlushTable(const std::string& table_name) override;
+    CreateCollection(const CollectionParam& param) override;
+
+    bool
+    HasCollection(const std::string& collection_name) override;
+
+    Status
+    DropCollection(const std::string& collection_name) override;
+
+    Status
+    CreateIndex(const IndexParam& index_param) override;
+
+    Status
+    Insert(const std::string& collection_name,
+           const std::string& partition_tag,
+           const std::vector<Entity>& entity_array,
+           std::vector<int64_t>& id_array) override;
+
+    Status
+    GetEntityByID(const std::string& collection_name, int64_t entity_id, Entity& entity_data) override;
+
+    Status
+    GetIDsInSegment(const std::string& collection_name, const std::string& segment_name,
+                    std::vector<int64_t>& id_array) override;
+
+    Status
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
+           const std::vector<Entity>& entity_array, int64_t topk,
+           const std::string& extra_params, TopKQueryResult& topk_query_result) override;
+
+    Status
+    DescribeCollection(const std::string& collection_name, CollectionParam& collection_schema) override;
+
+    Status
+    CountCollection(const std::string& collection_name, int64_t& entity_count) override;
+
+    Status
+    ShowCollections(std::vector<std::string>& collection_array) override;
+
+    Status
+    ShowCollectionInfo(const std::string& collection_name, CollectionInfo& collection_info) override;
+
+    Status
+    DeleteByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
+
+    Status
+    PreloadCollection(const std::string& collection_name) const override;
+
+    Status
+    DescribeIndex(const std::string& collection_name, IndexParam& index_param) const override;
+
+    Status
+    DropIndex(const std::string& collection_name) const override;
+
+    Status
+    CreatePartition(const PartitionParam& partition_param) override;
+
+    Status
+    ShowPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
+
+    Status
+    DropPartition(const PartitionParam& partition_param) override;
+
+    Status
+    FlushCollection(const std::string& collection_name) override;
 
     Status
     Flush() override;
 
     Status
-    CompactTable(const std::string& table_name) override;
+    CompactCollection(const std::string& collection_name) override;
 
  private:
     std::shared_ptr<ClientProxy> client_proxy_;

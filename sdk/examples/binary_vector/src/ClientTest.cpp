@@ -22,52 +22,53 @@
 
 namespace {
 
-const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
+const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t TABLE_DIMENSION = 512;
-constexpr int64_t TABLE_INDEX_FILE_SIZE = 128;
-constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::TANIMOTO;
-constexpr int64_t BATCH_ROW_COUNT = 100000;
+constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 128;
+constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::TANIMOTO;
+constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
-constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different, ensure less than BATCH_ROW_COUNT
-constexpr int64_t ADD_VECTOR_LOOP = 20;
+constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different, ensure less than BATCH_ENTITY_COUNT
+constexpr int64_t ADD_ENTITY_LOOP = 20;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 
-milvus::TableSchema
-BuildTableSchema() {
-    milvus::TableSchema tb_schema = {TABLE_NAME, TABLE_DIMENSION, TABLE_INDEX_FILE_SIZE, TABLE_METRIC_TYPE};
-    return tb_schema;
+milvus::CollectionParam
+BuildCollectionParam() {
+    milvus::CollectionParam
+        collection_param = {COLLECTION_NAME, COLLECTION_DIMENSION, COLLECTION_INDEX_FILE_SIZE, COLLECTION_METRIC_TYPE};
+    return collection_param;
 }
 
 milvus::IndexParam
 BuildIndexParam() {
     JSON json_params = {{"nlist", 1024}};
-    milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, json_params.dump()};
+    milvus::IndexParam index_param = {COLLECTION_NAME, INDEX_TYPE, json_params.dump()};
     return index_param;
 }
 
 void
-BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::RowRecord>& vector_record_array,
-                   std::vector<int64_t>& record_ids, int64_t dimension) {
+BuildBinaryVectors(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array,
+                   std::vector<int64_t>& entity_ids, int64_t dimension) {
     if (to <= from) {
         return;
     }
 
-    vector_record_array.clear();
-    record_ids.clear();
+    entity_array.clear();
+    entity_ids.clear();
 
     int64_t dim_byte = dimension/8;
     for (int64_t k = from; k < to; k++) {
-        milvus::RowRecord record;
-        record.binary_data.resize(dim_byte);
+        milvus::Entity entity;
+        entity.binary_data.resize(dim_byte);
         for (int64_t i = 0; i < dim_byte; i++) {
-            record.binary_data[i] = (uint8_t)lrand48();
+            entity.binary_data[i] = (uint8_t)lrand48();
         }
 
-        vector_record_array.emplace_back(record);
-        record_ids.push_back(k);
+        entity_array.emplace_back(entity);
+        entity_ids.push_back(k);
     }
 }
 
@@ -84,54 +85,54 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
 
-    {  // create table
-        milvus::TableSchema tb_schema = BuildTableSchema();
-        stat = conn->CreateTable(tb_schema);
-        std::cout << "CreateTable function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintTableSchema(tb_schema);
+    {  // create collection
+        milvus::CollectionParam collection_param = BuildCollectionParam();
+        stat = conn->CreateCollection(collection_param);
+        std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
+        milvus_sdk::Utils::PrintCollectionParam(collection_param);
 
-        bool has_table = conn->HasTable(tb_schema.table_name);
-        if (has_table) {
-            std::cout << "Table is created" << std::endl;
+        bool has_collection = conn->HasCollection(collection_param.collection_name);
+        if (has_collection) {
+            std::cout << "Collection is created" << std::endl;
         }
     }
 
-    std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
+    std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array;
     {  // insert vectors
-        for (int i = 0; i < ADD_VECTOR_LOOP; i++) {
-            std::vector<milvus::RowRecord> record_array;
-            std::vector<int64_t> record_ids;
-            int64_t begin_index = i * BATCH_ROW_COUNT;
+        for (int i = 0; i < ADD_ENTITY_LOOP; i++) {
+            std::vector<milvus::Entity> entity_array;
+            std::vector<int64_t> entity_ids;
+            int64_t begin_index = i * BATCH_ENTITY_COUNT;
             {  // generate vectors
-                milvus_sdk::TimeRecorder rc("Build vectors No." + std::to_string(i));
+                milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
                 BuildBinaryVectors(begin_index,
-                                   begin_index + BATCH_ROW_COUNT,
-                                   record_array,
-                                   record_ids,
-                                   TABLE_DIMENSION);
+                                   begin_index + BATCH_ENTITY_COUNT,
+                                   entity_array,
+                                   entity_ids,
+                                   COLLECTION_DIMENSION);
             }
 
-            if (search_record_array.size() < NQ) {
-                search_record_array.push_back(std::make_pair(record_ids[SEARCH_TARGET], record_array[SEARCH_TARGET]));
+            if (search_entity_array.size() < NQ) {
+                search_entity_array.push_back(std::make_pair(entity_ids[SEARCH_TARGET], entity_array[SEARCH_TARGET]));
             }
 
-            std::string title = "Insert " + std::to_string(record_array.size()) + " vectors No." + std::to_string(i);
+            std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
             milvus_sdk::TimeRecorder rc(title);
-            stat = conn->Insert(TABLE_NAME, "", record_array, record_ids);
-            std::cout << "InsertVector function call status: " << stat.message() << std::endl;
-            std::cout << "Returned id array count: " << record_ids.size() << std::endl;
+            stat = conn->Insert(COLLECTION_NAME, "", entity_array, entity_ids);
+            std::cout << "Insert function call status: " << stat.message() << std::endl;
+            std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
         }
     }
 
     {  // flush buffer
-        stat = conn->FlushTable(TABLE_NAME);
-        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+        stat = conn->FlushCollection(COLLECTION_NAME);
+        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
     }
 
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
     }
 
@@ -144,7 +145,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
         milvus::IndexParam index2;
-        stat = conn->DescribeIndex(TABLE_NAME, index2);
+        stat = conn->DescribeIndex(COLLECTION_NAME, index2);
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintIndexParam(index2);
     }
@@ -152,13 +153,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {  // search vectors
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
     }
 
-    {  // drop table
-        stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DropTable function call status: " << stat.message() << std::endl;
+    {  // drop collection
+        stat = conn->DropCollection(COLLECTION_NAME);
+        std::cout << "DropCollection function call status: " << stat.message() << std::endl;
     }
 
     milvus::Connection::Destroy(conn);
