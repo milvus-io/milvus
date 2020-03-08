@@ -335,24 +335,6 @@ class Connection {
            const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
 
     /**
-     * @brief Search vector by ID
-     *
-     * This method is used to query vector in table.
-     *
-     * @param table_name, target table's name.
-     * @param partition_tag_array, target partitions, keep empty if no partition.
-     * @param query_id, vector id to be queried.
-     * @param topk, how many similarity vectors will be returned.
-     * @param extra_params, extra search parameters according to different index type, must be json format.
-     * @param topk_query_result, result array.
-     *
-     * @return Indicate if query is successful.
-     */
-    virtual Status
-    SearchByID(const std::string& table_name, const PartitionTagList& partition_tag_array, int64_t query_id,
-               int64_t topk, const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
-
-    /**
      * @brief Show table description
      *
      * This method is used to show table information.

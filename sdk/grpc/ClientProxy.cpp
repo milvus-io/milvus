@@ -315,49 +315,6 @@ ClientProxy::Search(const std::string& table_name, const std::vector<std::string
 }
 
 Status
-ClientProxy::SearchByID(const std::string& table_name,
-                        const std::vector<std::string>& partition_tag_array,
-                        int64_t query_id,
-                        int64_t topk,
-                        const std::string& extra_params,
-                        TopKQueryResult& topk_query_result) {
-    try {
-        // step 1: convert vector id array
-        ::milvus::grpc::SearchByIDParam search_param;
-        ConstructSearchParam(table_name,
-                             partition_tag_array,
-                             topk,
-                             extra_params,
-                             search_param);
-        search_param.set_id(query_id);
-
-        // step 2: search vectors
-        ::milvus::grpc::TopKQueryResult result;
-        Status status = client_ptr_->SearchByID(search_param, result);
-        if (result.row_num() == 0) {
-            return status;
-        }
-
-        // step 4: convert result array
-        topk_query_result.reserve(result.row_num());
-        int64_t nq = result.row_num();
-        int64_t topk = result.ids().size() / nq;
-        for (int64_t i = 0; i < result.row_num(); i++) {
-            milvus::QueryResult one_result;
-            one_result.ids.resize(topk);
-            one_result.distances.resize(topk);
-            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
-            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
-            topk_query_result.emplace_back(one_result);
-        }
-
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to search vectors: " + std::string(ex.what()));
-    }
-}
-
-Status
 ClientProxy::DescribeTable(const std::string& table_name, TableSchema& table_schema) {
     try {
         ::milvus::grpc::TableSchema grpc_schema;
