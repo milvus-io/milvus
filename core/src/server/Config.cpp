@@ -1529,8 +1529,7 @@ Status
 Config::GetStorageConfigS3Enable(bool& value) {
     std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, CONFIG_STORAGE_S3_ENABLE_DEFAULT);
     CONFIG_CHECK(CheckStorageConfigS3Enable(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    value = (str == "true" || str == "on" || str == "yes" || str == "1");
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
@@ -1569,8 +1568,7 @@ Status
 Config::GetMetricConfigEnableMonitor(bool& value) {
     std::string str = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
     CONFIG_CHECK(CheckMetricConfigEnableMonitor(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    value = (str == "true" || str == "on" || str == "yes" || str == "1");
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
@@ -1671,8 +1669,7 @@ Status
 Config::GetGpuResourceConfigEnable(bool& value) {
     std::string str = GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, CONFIG_GPU_RESOURCE_ENABLE_DEFAULT);
     CONFIG_CHECK(CheckGpuResourceConfigEnable(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    value = (str == "true" || str == "on" || str == "yes" || str == "1");
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 
@@ -1774,8 +1771,7 @@ Status
 Config::GetWalConfigEnable(bool& wal_enable) {
     std::string str = GetConfigStr(CONFIG_WAL, CONFIG_WAL_ENABLE, CONFIG_WAL_ENABLE_DEFAULT);
     CONFIG_CHECK(CheckWalConfigEnable(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    wal_enable = (str == "true" || str == "on" || str == "yes" || str == "1");
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, wal_enable));
     return Status::OK();
 }
 
@@ -1784,8 +1780,7 @@ Config::GetWalConfigRecoveryErrorIgnore(bool& recovery_error_ignore) {
     std::string str =
         GetConfigStr(CONFIG_WAL, CONFIG_WAL_RECOVERY_ERROR_IGNORE, CONFIG_WAL_RECOVERY_ERROR_IGNORE_DEFAULT);
     CONFIG_CHECK(CheckWalConfigRecoveryErrorIgnore(str));
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    recovery_error_ignore = (str == "true" || str == "on" || str == "yes" || str == "1");
+    CONFIG_CHECK(StringHelpFunctions::ConvertToBoolean(str, recovery_error_ignore));
     return Status::OK();
 }
 
