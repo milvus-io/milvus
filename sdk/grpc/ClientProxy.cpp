@@ -415,21 +415,6 @@ ClientProxy::ServerStatus() const {
     }
 }
 
-std::string
-ClientProxy::DumpTaskTables() const {
-    if (channel_ == nullptr) {
-        return "not connected to server";
-    }
-
-    try {
-        std::string dummy;
-        Status status = client_ptr_->Cmd("tasktable", dummy);
-        return dummy;
-    } catch (std::exception& ex) {
-        return "connection lost";
-    }
-}
-
 Status
 ClientProxy::DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) {
     try {

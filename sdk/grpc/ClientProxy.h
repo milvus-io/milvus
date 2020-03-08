@@ -84,9 +84,6 @@ class ClientProxy : public Connection {
     std::string
     ServerStatus() const override;
 
-    std::string
-    DumpTaskTables() const override;
-
     Status
     DeleteByID(const std::string& table_name, const std::vector<int64_t>& id_array) override;
 
