@@ -107,10 +107,10 @@ cache_config:
 # use_blas_threshold   | A Milvus performance tuning parameter. This value will be  | Integer    | 1100            |
 #                      | compared with 'nq' to decide if OpenBLAS should be used.   |            |                 |
 #                      | If nq >= use_blas_threshold, OpenBLAS will be used, search |            |                 |
-#                      | response times will be stable but the search speed will be |            |                 |
-#                      | slower; if nq < use_blas_threshold, SSE will be used,      |            |                 |
-#                      | search speed will be faster but search response times will |            |                 |
-#                      | fluctuate.                                                 |            |                 |
+#                      | response time will be stable but the search speed will be  |            |                 |
+#                      | slower; if nq < use_blas_threshold, AVX or SSE will be     |            |                 |
+#                      | used, search speed will be faster but search response time |            |                 |
+#                      | will fluctuate.                                            |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # gpu_search_threshold | A Milvus performance tuning parameter. This value will be  | Integer    | 1000            |
 #                      | compared with 'nq' to decide if the search computation will|            |                 |
