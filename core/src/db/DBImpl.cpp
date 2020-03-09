@@ -731,7 +731,7 @@ DBImpl::Compact(const std::string& table_id) {
                 break;
             }
         } else {
-            ENGINE_LOG_ERROR << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
+            ENGINE_LOG_DEBUG << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
         }
     }
 
