@@ -500,6 +500,29 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection" -H "accept
 {"collection_name":"test_collection","dimension":1,"index_file_size":10,"metric_type":"L2","count":0,"index":"FLAT","nlist":16384}
 ```
 
+##### Request
+
+```shell
+$ curl -X GET "http://192.168.1.65:19121/collections/test_collection?info=stat" -H "accept: application/json"
+```
+
+##### Response
+
+```json
+{
+   "count":150000,
+   "partitions_stat":[
+      {
+         "count":1000,"partition_tag":"_default",
+         "segments_stat":[
+            {"count":1000,"index":"IVFFLAT","segment_name":"1583727170217439000","size":5284922}
+         ]
+      }
+   ]
+}
+```
+
+
 ### `/collections/{collection_name}` (DELETE)
 
 Drops a collection by name.
