@@ -375,16 +375,7 @@ SqliteMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.index_file_size_ = table_schema.index_file_size_;
         file_schema.index_params_ = table_schema.index_params_;
-
-        if (file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW ||
-            file_schema.file_type_ == TableFileSchema::FILE_TYPE::NEW_MERGE) {
-            file_schema.engine_type_ = server::ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)
-                                           ? (int32_t)EngineType::FAISS_BIN_IDMAP
-                                           : (int32_t)EngineType::FAISS_IDMAP;
-        } else {
-            file_schema.engine_type_ = table_schema.engine_type_;
-        }
-
+        file_schema.engine_type_ = table_schema.engine_type_;
         file_schema.metric_type_ = table_schema.metric_type_;
 
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
@@ -1425,8 +1416,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                     // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
                     // Else, we can only delete the single file
                     // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
-                    if (table_file.engine_type_ == (int32_t)EngineType::FAISS_IDMAP ||
-                        table_file.engine_type_ == (int32_t)EngineType::FAISS_BIN_IDMAP) {
+                    if (utils::IsRawIndexType(table_file.engine_type_)) {
                         utils::DeleteSegment(options_, table_file);
                         std::string segment_dir;
                         utils::GetParentPath(table_file.location_, segment_dir);
