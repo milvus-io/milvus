@@ -13,7 +13,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#977 Server crash when create tables concurrently
 -   \#990 Check gpu resources setting when assign repeated value
 -   \#995 table count set to 0 if no tables found
--   \#1010 improve error message when offset or page_size is equal 0
+-   \#1010 Improve error message when offset or page_size is equal 0
 -   \#1022 check if partition name is legal
 -   \#1028 check if table exists when show partitions
 -   \#1029 check if table exists when try to delete partition
@@ -29,18 +29,22 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1359 Negative distance value returned when searching with HNSW index type
 -   \#1429 Server crashed when searching vectors with GPU
 -   \#1476 Fix vectors results bug when getting vectors from segments
--   \#1484 Index type changed to IDMAP after compacted 
+-   \#1484 Index type changed to IDMAP after compacted
+-   \#1491 Server crashed during adding vectors
 -   \#1499 Fix duplicated ID number issue
--   \#1491 Server crashed during adding vectors  
--   \#1504 Avoid possible race condition between delete and search 
+-   \#1504 Avoid possible race condition between delete and search
 -   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
 -   \#1518 Table count did not match after deleting vectors and compact
 -   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
+-   \#1529 Fix server crash when cache_insert_data enabled
 -   \#1530 Set table file with correct engine type in meta
+-   \#1532 Search with ivf_flat failed with open-dataset: sift-256-hamming
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
+-   \#1556 Index file not created after table and index created
+-   \#1560 Search crashed with Super-high dimensional binary vector
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -89,6 +93,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
+-   \#1544 Update resources name in HTTP module
+-   \#1567 Update yaml config description
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat

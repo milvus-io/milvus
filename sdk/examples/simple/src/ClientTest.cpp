@@ -19,20 +19,19 @@
 #include <utility>
 #include <vector>
 
-
 namespace {
 
-const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
+const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t TABLE_DIMENSION = 512;
-constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
-constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ROW_COUNT = 100000;
+constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
+constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
+constexpr int64_t BATCH_ENTITY_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
-constexpr int64_t ADD_VECTOR_LOOP = 5;
+constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
 
@@ -63,199 +62,201 @@ ClientTest::ShowSdkVersion() {
 }
 
 void
-ClientTest::ShowTables(std::vector<std::string>& tables) {
-    milvus::Status stat = conn_->ShowTables(tables);
-    std::cout << "ShowTables function call status: " << stat.message() << std::endl;
-    std::cout << "All tables: " << std::endl;
-    for (auto& table : tables) {
-        int64_t row_count = 0;
-        stat = conn_->CountTable(table, row_count);
-        std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
+ClientTest::ShowCollections(std::vector<std::string>& collection_array) {
+    milvus::Status stat = conn_->ShowCollections(collection_array);
+    std::cout << "ShowCollections function call status: " << stat.message() << std::endl;
+    std::cout << "All collections: " << std::endl;
+    for (auto& collection : collection_array) {
+        int64_t entity_count = 0;
+        stat = conn_->CountCollection(collection, entity_count);
+        std::cout << "\t" << collection << "(" << entity_count << " entities)" << std::endl;
     }
 }
 
 void
-ClientTest::CreateTable(const std::string& table_name, int64_t dim, milvus::MetricType type) {
-    milvus::TableSchema tb_schema = {table_name, dim, TABLE_INDEX_FILE_SIZE, type};
-    milvus::Status stat = conn_->CreateTable(tb_schema);
-    std::cout << "CreateTable function call status: " << stat.message() << std::endl;
-    milvus_sdk::Utils::PrintTableSchema(tb_schema);
+ClientTest::CreateCollection(const std::string& collection_name, int64_t dim, milvus::MetricType type) {
+    milvus::CollectionParam collection_param = {collection_name, dim, COLLECTION_INDEX_FILE_SIZE, type};
+    milvus::Status stat = conn_->CreateCollection(collection_param);
+    std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
+    milvus_sdk::Utils::PrintCollectionParam(collection_param);
 
-    bool has_table = conn_->HasTable(tb_schema.table_name);
+    bool has_table = conn_->HasCollection(collection_param.collection_name);
     if (has_table) {
-        std::cout << "Table is created" << std::endl;
+        std::cout << "Collection is created" << std::endl;
     }
 }
 
 void
-ClientTest::DescribeTable(const std::string& table_name) {
-    milvus::TableSchema tb_schema;
-    milvus::Status stat = conn_->DescribeTable(table_name, tb_schema);
-    std::cout << "DescribeTable function call status: " << stat.message() << std::endl;
-    milvus_sdk::Utils::PrintTableSchema(tb_schema);
+ClientTest::DescribeCollection(const std::string& collection_name) {
+    milvus::CollectionParam collection_param;
+    milvus::Status stat = conn_->DescribeCollection(collection_name, collection_param);
+    std::cout << "DescribeCollection function call status: " << stat.message() << std::endl;
+    milvus_sdk::Utils::PrintCollectionParam(collection_param);
 }
 
 void
-ClientTest::InsertVectors(const std::string& table_name, int64_t dim) {
-    for (int i = 0; i < ADD_VECTOR_LOOP; i++) {
-        std::vector<milvus::RowRecord> record_array;
+ClientTest::InsertEntities(const std::string& collection_name, int64_t dim) {
+    for (int i = 0; i < ADD_ENTITY_LOOP; i++) {
+        std::vector<milvus::Entity> entity_array;
         std::vector<int64_t> record_ids;
-        int64_t begin_index = i * BATCH_ROW_COUNT;
+        int64_t begin_index = i * BATCH_ENTITY_COUNT;
         {  // generate vectors
-            milvus_sdk::TimeRecorder rc("Build vectors No." + std::to_string(i));
-            milvus_sdk::Utils::BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array, record_ids, dim);
+            milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
+            milvus_sdk::Utils::BuildEntities(begin_index,
+                                             begin_index + BATCH_ENTITY_COUNT,
+                                             entity_array,
+                                             record_ids,
+                                             dim);
         }
 
-        std::string title = "Insert " + std::to_string(record_array.size()) + " vectors No." + std::to_string(i);
+        std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
         milvus_sdk::TimeRecorder rc(title);
-        milvus::Status stat = conn_->Insert(table_name, "", record_array, record_ids);
-        std::cout << "InsertVector function call status: " << stat.message() << std::endl;
+        milvus::Status stat = conn_->Insert(collection_name, "", entity_array, record_ids);
+        std::cout << "InsertEntities function call status: " << stat.message() << std::endl;
         std::cout << "Returned id array count: " << record_ids.size() << std::endl;
     }
 }
 
 void
-ClientTest::BuildSearchVectors(int64_t nq, int64_t dim) {
-    search_record_array_.clear();
+ClientTest::BuildSearchEntities(int64_t nq, int64_t dim) {
+    search_entity_array_.clear();
     search_id_array_.clear();
     for (int64_t i = 0; i < nq; i++) {
-        std::vector<milvus::RowRecord> record_array;
+        std::vector<milvus::Entity> entity_array;
         std::vector<int64_t> record_ids;
-        int64_t index = i * BATCH_ROW_COUNT + SEARCH_TARGET;
-        milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, dim);
-        search_record_array_.push_back(std::make_pair(record_ids[0], record_array[0]));
+        int64_t index = i * BATCH_ENTITY_COUNT + SEARCH_TARGET;
+        milvus_sdk::Utils::BuildEntities(index, index + 1, entity_array, record_ids, dim);
+        search_entity_array_.push_back(std::make_pair(record_ids[0], entity_array[0]));
         search_id_array_.push_back(record_ids[0]);
     }
 }
 
 void
-ClientTest::Flush(const std::string& table_name) {
+ClientTest::Flush(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Flush");
-    milvus::Status stat = conn_->FlushTable(table_name);
-    std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+    milvus::Status stat = conn_->FlushCollection(collection_name);
+    std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::ShowTableInfo(const std::string& table_name) {
-    milvus::TableInfo table_info;
-    milvus::Status stat = conn_->ShowTableInfo(table_name, table_info);
-    milvus_sdk::Utils::PrintTableInfo(table_info);
-    std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
+ClientTest::ShowCollectionInfo(const std::string& collection_name) {
+    milvus::CollectionInfo collection_info;
+    milvus::Status stat = conn_->ShowCollectionInfo(collection_name, collection_info);
+    milvus_sdk::Utils::PrintCollectionInfo(collection_info);
+    std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::GetVectorById(const std::string& table_name, int64_t id) {
-    milvus::RowRecord vector_data;
-    milvus::Status stat = conn_->GetVectorByID(table_name, id, vector_data);
-    std::cout << "The vector " << id << " has " << vector_data.float_data.size() << " float elements" << std::endl;
-    std::cout << "GetVectorByID function call status: " << stat.message() << std::endl;
+ClientTest::GetEntityById(const std::string& collection_name, int64_t id) {
+    milvus::Entity entity;
+    milvus::Status stat = conn_->GetEntityByID(collection_name, id, entity);
+    std::cout << "The entity " << id << " has " << entity.float_data.size() << " float elements" << std::endl;
+    std::cout << "GetEntityById function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::SearchVectors(const std::string& table_name, int64_t topk, int64_t nprobe) {
+ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int64_t nprobe) {
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_record_array_,
+    milvus_sdk::Utils::DoSearch(conn_, collection_name, partition_tags, topk, nprobe, search_entity_array_,
                                 topk_query_result);
 }
 
 void
-ClientTest::SearchVectorsByIds(const std::string& table_name, int64_t topk, int64_t nprobe) {
-    std::vector<std::string> partition_tags;
-    milvus::TopKQueryResult topk_query_result;
-    milvus_sdk::Utils::DoSearch(conn_, table_name, partition_tags, topk, nprobe, search_id_array_, topk_query_result);
-}
-
-void
-ClientTest::CreateIndex(const std::string& table_name, milvus::IndexType type, int64_t nlist) {
+ClientTest::CreateIndex(const std::string& collection_name, milvus::IndexType type, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
     JSON json_params = {{"nlist", nlist}};
-    milvus::IndexParam index1 = {table_name, type, json_params.dump()};
+    milvus::IndexParam index1 = {collection_name, type, json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
     milvus::IndexParam index2;
-    stat = conn_->DescribeIndex(table_name, index2);
+    stat = conn_->DescribeIndex(collection_name, index2);
     std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
     milvus_sdk::Utils::PrintIndexParam(index2);
 }
 
 void
-ClientTest::PreloadTable(const std::string& table_name) {
-    milvus::Status stat = conn_->PreloadTable(table_name);
-    std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
+ClientTest::PreloadCollection(const std::string& collection_name) {
+    milvus::Status stat = conn_->PreloadCollection(collection_name);
+    std::cout << "PreloadCollection function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::DeleteByIds(const std::string& table_name, const std::vector<int64_t>& id_array) {
-    milvus::Status stat = conn_->DeleteByID(table_name, id_array);
+ClientTest::DeleteByIds(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+    std::cout << "Delete entity: ";
+    for (auto id : id_array) {
+        std::cout << "\t" << id;
+    }
+    std::cout << std::endl;
+
+    milvus::Status stat = conn_->DeleteByID(collection_name, id_array);
     std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
 
     {
         milvus_sdk::TimeRecorder rc("Flush");
-        stat = conn_->FlushTable(table_name);
-        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+        stat = conn_->FlushCollection(collection_name);
+        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
     }
 
     {
         // compact table
         milvus_sdk::TimeRecorder rc1("Compact");
-        stat = conn_->CompactTable(table_name);
-        std::cout << "CompactTable function call status: " << stat.message() << std::endl;
+        stat = conn_->CompactCollection(collection_name);
+        std::cout << "CompactCollection function call status: " << stat.message() << std::endl;
     }
 }
 
 void
-ClientTest::DropIndex(const std::string& table_name) {
-    milvus::Status stat = conn_->DropIndex(table_name);
+ClientTest::DropIndex(const std::string& collection_name) {
+    milvus::Status stat = conn_->DropIndex(collection_name);
     std::cout << "DropIndex function call status: " << stat.message() << std::endl;
 
     int64_t row_count = 0;
-    stat = conn_->CountTable(table_name, row_count);
-    std::cout << table_name << "(" << row_count << " rows)" << std::endl;
+    stat = conn_->CountCollection(collection_name, row_count);
+    std::cout << collection_name << "(" << row_count << " rows)" << std::endl;
 }
 
 void
-ClientTest::DropTable(const std::string& table_name) {
-    milvus::Status stat = conn_->DropTable(table_name);
-    std::cout << "DropTable function call status: " << stat.message() << std::endl;
+ClientTest::DropCollection(const std::string& collection_name) {
+    milvus::Status stat = conn_->DropCollection(collection_name);
+    std::cout << "DropCollection function call status: " << stat.message() << std::endl;
 }
 
 void
 ClientTest::Test() {
-    std::string table_name = TABLE_NAME;
-    int64_t dim = TABLE_DIMENSION;
-    milvus::MetricType metric_type = TABLE_METRIC_TYPE;
+    std::string collection_name = COLLECTION_NAME;
+    int64_t dim = COLLECTION_DIMENSION;
+    milvus::MetricType metric_type = COLLECTION_METRIC_TYPE;
 
     ShowServerVersion();
     ShowSdkVersion();
 
     std::vector<std::string> table_array;
-    ShowTables(table_array);
+    ShowCollections(table_array);
 
-    CreateTable(table_name, dim, metric_type);
-    DescribeTable(table_name);
+    CreateCollection(collection_name, dim, metric_type);
+    DescribeCollection(collection_name);
 
-    InsertVectors(table_name, dim);
-    BuildSearchVectors(NQ, dim);
-    Flush(table_name);
-    ShowTableInfo(table_name);
+    InsertEntities(collection_name, dim);
+    BuildSearchEntities(NQ, dim);
+    Flush(collection_name);
+    ShowCollectionInfo(collection_name);
 
-    GetVectorById(table_name, search_id_array_[0]);
-    SearchVectors(table_name, TOP_K, NPROBE);
-    SearchVectorsByIds(table_name, TOP_K, NPROBE);
+    GetEntityById(collection_name, search_id_array_[0]);
+    SearchEntities(collection_name, TOP_K, NPROBE);
 
-    CreateIndex(table_name, INDEX_TYPE, NLIST);
-    ShowTableInfo(table_name);
+    CreateIndex(collection_name, INDEX_TYPE, NLIST);
+    ShowCollectionInfo(collection_name);
 
-    PreloadTable(table_name);
+    PreloadCollection(collection_name);
 
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-    DeleteByIds(table_name, delete_ids);
-    SearchVectors(table_name, TOP_K, NPROBE);
+    DeleteByIds(collection_name, delete_ids);
+    SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
-    DropIndex(table_name);
-    DropTable(table_name);
+    DropIndex(collection_name);
+    DropCollection(collection_name);
 }
