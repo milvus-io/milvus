@@ -21,14 +21,14 @@
 
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
-#include "store/Directory.h"
+#include "src/storage/disk/DiskOperation.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace segment {
 
 SegmentReader::SegmentReader(const std::string& directory) {
-    directory_ptr_ = std::make_shared<store::Directory>(directory);
+    directory_ptr_ = std::make_shared<storage::DiskOperation>(directory);
     segment_ptr_ = std::make_shared<Segment>();
 }
 
@@ -43,7 +43,7 @@ SegmentReader::Load() {
     // TODO(zhiru)
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        directory_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read(directory_ptr_, segment_ptr_->vectors_ptr_);
         default_codec.GetDeletedDocsFormat()->read(directory_ptr_, segment_ptr_->deleted_docs_ptr_);
     } catch (std::exception& e) {
@@ -56,7 +56,7 @@ Status
 SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        directory_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read_vectors(directory_ptr_, offset, num_bytes, raw_vectors);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
@@ -70,7 +70,7 @@ Status
 SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        directory_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read_uids(directory_ptr_, uids);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load uids: " + std::string(e.what());
@@ -90,7 +90,7 @@ Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        directory_ptr_->CreateDirectory();
         default_codec.GetIdBloomFilterFormat()->read(directory_ptr_, id_bloom_filter_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -104,7 +104,7 @@ Status
 SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     codec::DefaultCodec default_codec;
     try {
-        directory_ptr_->Create();
+        directory_ptr_->CreateDirectory();
         default_codec.GetDeletedDocsFormat()->read(directory_ptr_, deleted_docs_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load deleted docs: " + std::string(e.what());

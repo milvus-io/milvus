@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "segment/Types.h"
-#include "store/Directory.h"
+#include "src/storage/disk/DiskOperation.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -70,7 +70,7 @@ class SegmentWriter {
     WriteDeletedDocs();
 
  private:
-    store::DirectoryPtr directory_ptr_;
+    storage::OperationPtr directory_ptr_;
     SegmentPtr segment_ptr_;
 };
 
