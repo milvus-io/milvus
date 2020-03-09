@@ -12,16 +12,16 @@ Please mark all change in change log and use the issue from GitHub
 -   \#831 Judge branch error in CommonUtil.cpp
 -   \#977 Server crash when create tables concurrently
 -   \#990 Check gpu resources setting when assign repeated value
--   \#995 table count set to 0 if no tables found
+-   \#995 Table count set to 0 if no tables found
 -   \#1010 Improve error message when offset or page_size is equal 0
--   \#1022 check if partition name is legal
--   \#1028 check if table exists when show partitions
--   \#1029 check if table exists when try to delete partition
--   \#1066 optimize http insert and search speed
+-   \#1022 Check if partition name is legal
+-   \#1028 Check if table exists when show partitions
+-   \#1029 Check if table exists when try to delete partition
+-   \#1066 Optimize http insert and search speed
 -   \#1067 Add binary vectors support in http server
 -   \#1075 Improve error message when page size or offset is illegal
 -   \#1082 Check page_size or offset value to avoid float
--   \#1115 http server support load table into memory
+-   \#1115 Http server support load table into memory
 -   \#1152 Error log output continuously after server start
 -   \#1211 Server down caused by searching with index_type: HNSW
 -   \#1240 Update license declaration
