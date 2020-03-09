@@ -50,6 +50,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1571 Meta engine type become IDMAP after dropping index for BINARY table
 -   \#1574 Set all existing bitset in cache when applying deletes
 -   \#1577 Row count incorrect if delete vectors then create index
+-   \#1590 Server down caused by failed to write file during concurrent mixed operations
 
 ## Feature
 -   \#216 Add CLI to get server info
