@@ -21,7 +21,6 @@
 #include "storage/s3/S3ClientWrapper.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
-#include "storage/IStorage.h"
 #include "storage/utils.h"
 
 INITIALIZE_EASYLOGGINGPP
