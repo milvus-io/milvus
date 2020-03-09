@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "segment/Types.h"
-#include "src/storage/disk/DiskOperation.h"
+#include "storage/FSHandler.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -55,7 +55,7 @@ class SegmentReader {
     GetSegment(SegmentPtr& segment_ptr);
 
  private:
-    storage::OperationPtr directory_ptr_;
+    storage::FSHandlerPtr fs_ptr_;
     SegmentPtr segment_ptr_;
 };
 

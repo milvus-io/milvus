@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 
 namespace milvus {
@@ -30,6 +31,8 @@ class IOWriter {
     virtual void
     close() = 0;
 };
+
+using IOWriterPtr = std::shared_ptr<IOWriter>;
 
 }  // namespace storage
 }  // namespace milvus
