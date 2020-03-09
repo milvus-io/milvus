@@ -146,8 +146,8 @@ def gen_invalid_uris():
     return uris
 
 
-def gen_invalid_table_names():
-    table_names = [
+def gen_invalid_collection_names():
+    collection_names = [
             "12-s",
             "12/s",
             " ",
@@ -166,7 +166,7 @@ def gen_invalid_table_names():
             "中文",
             "a".join("a" for i in range(256))
     ]
-    return table_names
+    return collection_names
 
 
 def gen_invalid_top_ks():
@@ -617,8 +617,8 @@ def get_search_param(index_type):
         logging.getLogger().info("Invalid index_type.")
 
 
-def assert_has_table(conn, table_name):
-    status, ok = conn.has_table(table_name)
+def assert_has_collection(conn, collection_name):
+    status, ok = conn.has_collection(collection_name)
     return status.OK() and ok
 
 

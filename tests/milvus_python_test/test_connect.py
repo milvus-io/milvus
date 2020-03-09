@@ -285,7 +285,7 @@ class TestConnect:
             b. data_set not too large incase disconnection happens when data is underd-preparing
             c. data_set not too small incase disconnection happens when data has already been transferred
             d. make sure disconnection happens when data is in-transport
-        Expected: Failure, get_table_row_count == 0
+        Expected: Failure, count_collection == 0
 
         '''
         pass

@@ -28,7 +28,7 @@ class TestCacheConfig:
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
-        reset configs so the tests are stable
+        reset configs so the tests are scollection
         '''
         status, reply = connect.set_config("cache_config", "cpu_cache_capacity", 4)
         assert status.OK()
@@ -40,7 +40,7 @@ class TestCacheConfig:
         assert config_value == '1'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_cpu_cache_capacity_invalid_parent_key(self, connect, table):
+    def test_get_cpu_cache_capacity_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: cache_config
@@ -53,7 +53,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_cpu_cache_capacity_invalid_child_key(self, connect, table):
+    def test_get_cpu_cache_capacity_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: cpu_cache_capacity
@@ -66,7 +66,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_cpu_cache_capacity_valid(self, connect, table):
+    def test_get_cpu_cache_capacity_valid(self, connect, collection):
         '''
         target: get cpu_cache_capacity
         method: call get_config correctly
@@ -76,7 +76,7 @@ class TestCacheConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_insert_buffer_size_invalid_parent_key(self, connect, table):
+    def test_get_insert_buffer_size_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: cache_config
@@ -89,7 +89,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_get_insert_buffer_size_invalid_child_key(self, connect, table):
+    def test_get_insert_buffer_size_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: insert_buffer_size
@@ -102,7 +102,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_insert_buffer_size_valid(self, connect, table):
+    def test_get_insert_buffer_size_valid(self, connect, collection):
         '''
         target: get insert_buffer_size
         method: call get_config correctly
@@ -112,7 +112,7 @@ class TestCacheConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_cache_insert_data_invalid_parent_key(self, connect, table):
+    def test_get_cache_insert_data_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: cache_config
@@ -125,7 +125,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_get_cache_insert_data_invalid_child_key(self, connect, table):
+    def test_get_cache_insert_data_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: cache_insert_data
@@ -138,7 +138,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_cache_insert_data_valid(self, connect, table):
+    def test_get_cache_insert_data_valid(self, connect, collection):
         '''
         target: get cache_insert_data
         method: call get_config correctly
@@ -164,7 +164,7 @@ class TestCacheConfig:
         return int(mem_available / 1024 / 1024 / 1024)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cpu_cache_capacity_invalid_parent_key(self, connect, table):
+    def test_set_cpu_cache_capacity_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: cache_config
@@ -178,7 +178,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_config_invalid_child_key(self, connect, table):
+    def test_set_cache_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -191,7 +191,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cpu_cache_capacity_valid(self, connect, table):
+    def test_set_cpu_cache_capacity_valid(self, connect, collection):
         '''
         target: set cpu_cache_capacity
         method: call set_config correctly
@@ -204,7 +204,7 @@ class TestCacheConfig:
         assert status.OK()
         assert config_value == '8'
 
-    def test_set_cpu_cache_capacity_valid_multiple_times(self, connect, table):
+    def test_set_cpu_cache_capacity_valid_multiple_times(self, connect, collection):
         '''
         target: set cpu_cache_capacity
         method: call set_config correctly and repeatedly
@@ -225,7 +225,7 @@ class TestCacheConfig:
             assert config_value == '8'
 
     @pytest.mark.level(2)
-    def test_set_insert_buffer_size_invalid_parent_key(self, connect, table):
+    def test_set_insert_buffer_size_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: cache_config
@@ -239,7 +239,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_insert_buffer_size_valid(self, connect, table):
+    def test_set_insert_buffer_size_valid(self, connect, collection):
         '''
         target: set insert_buffer_size
         method: call get_config correctly
@@ -253,7 +253,7 @@ class TestCacheConfig:
         assert config_value == '2'
 
     @pytest.mark.level(2)
-    def test_set_insert_buffer_size_valid_multiple_times(self, connect, table):
+    def test_set_insert_buffer_size_valid_multiple_times(self, connect, collection):
         '''
         target: set insert_buffer_size
         method: call get_config correctly and repeatedly
@@ -274,7 +274,7 @@ class TestCacheConfig:
             assert config_value == '2'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_config_out_of_memory_value_A(self, connect, table):
+    def test_set_cache_config_out_of_memory_value_A(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
         method: call set_config with child values bigger than current system memory
@@ -289,7 +289,7 @@ class TestCacheConfig:
         assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_config_out_of_memory_value_B(self, connect, table):
+    def test_set_cache_config_out_of_memory_value_B(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
         method: call set_config with invalid values
@@ -307,7 +307,7 @@ class TestCacheConfig:
         status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_available - int(cpu_cache_capacity) + 1)
         assert not status.OK()
 
-    def test_set_cache_config_out_of_memory_value_C(self, connect, table):
+    def test_set_cache_config_out_of_memory_value_C(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
         method: call set_config multiple times
@@ -330,7 +330,7 @@ class TestCacheConfig:
         self.reset_configs(connect)
 
     @pytest.mark.level(2)
-    def test_set_cache_insert_data_invalid_parent_key(self, connect, table):
+    def test_set_cache_insert_data_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: cache_config
@@ -344,7 +344,7 @@ class TestCacheConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_insert_data_valid(self, connect, table):
+    def test_set_cache_insert_data_valid(self, connect, collection):
         '''
         target: set cache_insert_data
         method: call get_config correctly
@@ -368,7 +368,7 @@ class TestEngineConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_use_blas_threshold_invalid_parent_key(self, connect, table):
+    def test_get_use_blas_threshold_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: engine_config
@@ -381,7 +381,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_use_blas_threshold_invalid_child_key(self, connect, table):
+    def test_get_use_blas_threshold_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: use_blas_threshold
@@ -394,7 +394,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_use_blas_threshold_valid(self, connect, table):
+    def test_get_use_blas_threshold_valid(self, connect, collection):
         '''
         target: get use_blas_threshold
         method: call get_config correctly
@@ -404,7 +404,7 @@ class TestEngineConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_gpu_search_threshold_invalid_parent_key(self, connect, table):
+    def test_get_gpu_search_threshold_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: engine_config
@@ -419,7 +419,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_get_gpu_search_threshold_invalid_child_key(self, connect, table):
+    def test_get_gpu_search_threshold_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: gpu_search_threshold
@@ -434,7 +434,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_gpu_search_threshold_valid(self, connect, table):
+    def test_get_gpu_search_threshold_valid(self, connect, collection):
         '''
         target: get gpu_search_threshold
         method: call get_config correctly
@@ -452,7 +452,7 @@ class TestEngineConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_use_blas_threshold_invalid_parent_key(self, connect, table):
+    def test_set_use_blas_threshold_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: engine_config
@@ -465,7 +465,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_engine_config_invalid_child_key(self, connect, table):
+    def test_set_engine_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -477,7 +477,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_use_blas_threshold_valid(self, connect, table):
+    def test_set_use_blas_threshold_valid(self, connect, collection):
         '''
         target: set use_blas_threshold
         method: call set_config correctly
@@ -490,7 +490,7 @@ class TestEngineConfig:
         assert config_value == '2000'
 
     @pytest.mark.level(2)
-    def test_set_use_blas_threshold_valid_multiple_times(self, connect, table):
+    def test_set_use_blas_threshold_valid_multiple_times(self, connect, collection):
         '''
         target: set use_blas_threshold
         method: call set_config correctly and repeatedly
@@ -504,7 +504,7 @@ class TestEngineConfig:
             assert config_value == str(i * 100)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_gpu_search_threshold_invalid_parent_key(self, connect, table):
+    def test_set_gpu_search_threshold_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: engine_config
@@ -519,7 +519,7 @@ class TestEngineConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_gpu_search_threshold_valid(self, connect, table):
+    def test_set_gpu_search_threshold_valid(self, connect, collection):
         '''
         target: set gpu_search_threshold
         method: call set_config correctly
@@ -534,7 +534,7 @@ class TestEngineConfig:
         assert config_value == '2000'
 
     @pytest.mark.level(2)
-    def test_set_gpu_search_threshold_valid_multiple_times(self, connect, table):
+    def test_set_gpu_search_threshold_valid_multiple_times(self, connect, collection):
         '''
         target: set gpu_search_threshold
         method: call set_config correctly and repeatedly
@@ -553,7 +553,7 @@ class TestEngineConfig:
             assert status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_engine_config_invalid_values(self, connect, table):
+    def test_set_engine_config_invalid_values(self, connect, collection):
         '''
         target: set engine_config
         method: call set_config with invalid child values
@@ -576,7 +576,7 @@ class TestGPUResourceConfig:
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
-        reset configs so the tests are stable
+        reset configs so the tests are scollection
         '''
         status, reply = connect.set_config("gpu_resource_config", "enable", "true")
         assert status.OK()
@@ -596,7 +596,7 @@ class TestGPUResourceConfig:
         assert config_value == 'gpu0'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_gpu_enable_invalid_parent_key(self, connect, table):
+    def test_get_gpu_enable_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: gpu_resource_config
@@ -611,7 +611,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_gpu_enable_invalid_child_key(self, connect, table):
+    def test_get_gpu_enable_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: enable
@@ -625,7 +625,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_gpu_enable_valid(self, connect, table):
+    def test_get_gpu_enable_valid(self, connect, collection):
         '''
         target: get enable status
         method: call get_config correctly
@@ -638,7 +638,7 @@ class TestGPUResourceConfig:
         assert config_value == "true" or config_value == "false"
 
     @pytest.mark.level(2)
-    def test_get_cache_capacity_invalid_parent_key(self, connect, table):
+    def test_get_cache_capacity_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: gpu_resource_config
@@ -653,7 +653,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_get_cache_capacity_invalid_child_key(self, connect, table):
+    def test_get_cache_capacity_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: cache_capacity
@@ -667,7 +667,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_cache_capacity_valid(self, connect, table):
+    def test_get_cache_capacity_valid(self, connect, collection):
         '''
         target: get cache_capacity
         method: call get_config correctly
@@ -679,7 +679,7 @@ class TestGPUResourceConfig:
         assert status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_search_resources_invalid_parent_key(self, connect, table):
+    def test_get_search_resources_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: gpu_resource_config
@@ -694,7 +694,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_search_resources_invalid_child_key(self, connect, table):
+    def test_get_search_resources_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: search_resources
@@ -708,7 +708,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_search_resources_valid(self, connect, table):
+    def test_get_search_resources_valid(self, connect, collection):
         '''
         target: get search_resources
         method: call get_config correctly
@@ -721,7 +721,7 @@ class TestGPUResourceConfig:
         assert status.OK()
     
     @pytest.mark.level(2)
-    def test_get_build_index_resources_invalid_parent_key(self, connect, table):
+    def test_get_build_index_resources_invalid_parent_key(self, connect, collection):
         '''
         target: get invalid parent key
         method: call get_config without parent_key: gpu_resource_config
@@ -736,7 +736,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.level(2)
-    def test_get_build_index_resources_invalid_child_key(self, connect, table):
+    def test_get_build_index_resources_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: build_index_resources
@@ -750,7 +750,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_build_index_resources_valid(self, connect, table):
+    def test_get_build_index_resources_valid(self, connect, collection):
         '''
         target: get build_index_resources
         method: call get_config correctly
@@ -769,7 +769,7 @@ class TestGPUResourceConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_gpu_enable_invalid_parent_key(self, connect, table):
+    def test_set_gpu_enable_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: gpu_resource_config
@@ -784,7 +784,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_gpu_resource_config_invalid_child_key(self, connect, table):
+    def test_set_gpu_resource_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -799,7 +799,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_gpu_enable_invalid_values(self, connect, table):
+    def test_set_gpu_enable_invalid_values(self, connect, collection):
         '''
         target: set "enable" param
         method: call set_config with invalid child values
@@ -812,7 +812,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_gpu_enable_valid(self, connect, table):
+    def test_set_gpu_enable_valid(self, connect, collection):
         '''
         target: set "enable" param
         method: call set_config correctly
@@ -829,7 +829,7 @@ class TestGPUResourceConfig:
             assert config_value == str(config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_capacity_invalid_parent_key(self, connect, table):
+    def test_set_cache_capacity_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: gpu_resource_config
@@ -844,7 +844,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_capacity_valid(self, connect, table):
+    def test_set_cache_capacity_valid(self, connect, collection):
         '''
         target: set cache_capacity
         method: call set_config correctly
@@ -856,7 +856,7 @@ class TestGPUResourceConfig:
         assert status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_cache_capacity_invalid_values(self, connect, table):
+    def test_set_cache_capacity_invalid_values(self, connect, collection):
         '''
         target: set cache_capacity
         method: call set_config with invalid child values
@@ -870,7 +870,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_search_resources_invalid_parent_key(self, connect, table):
+    def test_set_search_resources_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: gpu_resource_config
@@ -885,7 +885,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_search_resources_valid(self, connect, table):
+    def test_set_search_resources_valid(self, connect, collection):
         '''
         target: set search_resources
         method: call set_config correctly
@@ -899,7 +899,7 @@ class TestGPUResourceConfig:
         assert config_value == "gpu0"
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_search_resources_invalid_values(self, connect, table):
+    def test_set_search_resources_invalid_values(self, connect, collection):
         '''
         target: set search_resources
         method: call set_config with invalid child values
@@ -912,7 +912,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_build_index_resources_invalid_parent_key(self, connect, table):
+    def test_set_build_index_resources_invalid_parent_key(self, connect, collection):
         '''
         target: set invalid parent key
         method: call set_config without parent_key: gpu_resource_config
@@ -927,7 +927,7 @@ class TestGPUResourceConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_build_index_resources_valid(self, connect, table):
+    def test_set_build_index_resources_valid(self, connect, collection):
         '''
         target: set build_index_resources
         method: call set_config correctly
@@ -941,7 +941,7 @@ class TestGPUResourceConfig:
         assert config_value == "gpu0"
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_build_index_resources_invalid_values(self, connect, table):
+    def test_set_build_index_resources_invalid_values(self, connect, collection):
         '''
         target: set build_index_resources
         method: call set_config with invalid child values
@@ -962,7 +962,7 @@ class TestServerConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_address_invalid_child_key(self, connect, table):
+    def test_get_address_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: address
@@ -974,7 +974,7 @@ class TestServerConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_address_valid(self, connect, table):
+    def test_get_address_valid(self, connect, collection):
         '''
         target: get address
         method: call get_config correctly
@@ -984,7 +984,7 @@ class TestServerConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_port_invalid_child_key(self, connect, table):
+    def test_get_port_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: port
@@ -996,7 +996,7 @@ class TestServerConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_port_valid(self, connect, table):
+    def test_get_port_valid(self, connect, collection):
         '''
         target: get port
         method: call get_config correctly
@@ -1006,7 +1006,7 @@ class TestServerConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_deploy_mode_invalid_child_key(self, connect, table):
+    def test_get_deploy_mode_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: deploy_mode
@@ -1018,7 +1018,7 @@ class TestServerConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_deploy_mode_valid(self, connect, table):
+    def test_get_deploy_mode_valid(self, connect, collection):
         '''
         target: get deploy_mode
         method: call get_config correctly
@@ -1028,7 +1028,7 @@ class TestServerConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_time_zone_invalid_child_key(self, connect, table):
+    def test_get_time_zone_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: time_zone
@@ -1040,7 +1040,7 @@ class TestServerConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_time_zone_valid(self, connect, table):
+    def test_get_time_zone_valid(self, connect, collection):
         '''
         target: get time_zone
         method: call get_config correctly
@@ -1051,7 +1051,7 @@ class TestServerConfig:
         assert "UTC" in config_value
 
     @pytest.mark.level(2)
-    def test_get_web_port_invalid_child_key(self, connect, table):
+    def test_get_web_port_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: web_port
@@ -1063,7 +1063,7 @@ class TestServerConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_web_port_valid(self, connect, table):
+    def test_get_web_port_valid(self, connect, collection):
         '''
         target: get web_port
         method: call get_config correctly
@@ -1087,7 +1087,7 @@ class TestServerConfig:
         return time_zones
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_server_config_invalid_child_key(self, connect, table):
+    def test_set_server_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -1097,7 +1097,7 @@ class TestServerConfig:
         assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_address_valid(self, connect, table):
+    def test_set_address_valid(self, connect, collection):
         '''
         target: set address
         method: call set_config correctly
@@ -1109,7 +1109,7 @@ class TestServerConfig:
         assert status.OK()
         assert config_value == '0.0.0.0'
 
-    def test_set_port_valid(self, connect, table):
+    def test_set_port_valid(self, connect, collection):
         '''
         target: set port
         method: call set_config correctly
@@ -1122,7 +1122,7 @@ class TestServerConfig:
             assert status.OK()
             assert config_value == str(valid_port)
     
-    def test_set_port_invalid(self, connect, table):
+    def test_set_port_invalid(self, connect, collection):
         '''
         target: set port
         method: call set_config with port number out of range(1024, 65535)
@@ -1133,20 +1133,20 @@ class TestServerConfig:
             status, reply = connect.set_config("server_config", "port", invalid_port)
             assert not status.OK()
 
-    def test_set_deploy_mode_valid(self, connect, table):
+    def test_set_deploy_mode_valid(self, connect, collection):
         '''
         target: set deploy_mode
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_deploy_mode in ["cluster_readonly", "cluster_writable", "single"]:
+        for valid_deploy_mode in ["cluster_readonly", "cluster_wricollection", "single"]:
             status, reply = connect.set_config("server_config", "deploy_mode", valid_deploy_mode)
             assert status.OK()
             status, config_value = connect.get_config("server_config", "deploy_mode")
             assert status.OK()
             assert config_value == valid_deploy_mode
     
-    def test_set_deploy_mode_invalid(self, connect, table):
+    def test_set_deploy_mode_invalid(self, connect, collection):
         '''
         target: set deploy_mode
         method: call set_config with invalid deploy_mode
@@ -1156,7 +1156,7 @@ class TestServerConfig:
             status, reply = connect.set_config("server_config", "deploy_mode", invalid_deploy_mode)
             assert not status.OK()
 
-    def test_set_time_zone_valid(self, connect, table):
+    def test_set_time_zone_valid(self, connect, collection):
         '''
         target: set time_zone
         method: call set_config correctly
@@ -1172,7 +1172,7 @@ class TestServerConfig:
         status, reply = connect.set_config("server_config", "time_zone", "UTC+8")
         assert status.OK()
     
-    def test_set_time_zone_invalid(self, connect, table):
+    def test_set_time_zone_invalid(self, connect, collection):
         '''
         target: set time_zone
         method: call set_config with invalid time_zone
@@ -1183,7 +1183,7 @@ class TestServerConfig:
             status, reply = connect.set_config("server_config", "time_zone", invalid_time_zone)
             assert not status.OK()
 
-    def test_set_web_port_valid(self, connect, table):
+    def test_set_web_port_valid(self, connect, collection):
         '''
         target: set web_port
         method: call set_config correctly
@@ -1196,7 +1196,7 @@ class TestServerConfig:
             assert status.OK()
             assert config_value == str(valid_web_port)
     
-    def test_set_web_port_invalid(self, connect, table):
+    def test_set_web_port_invalid(self, connect, collection):
         '''
         target: set web_port
         method: call set_config with web_port number out of range(1024, 65535)
@@ -1214,7 +1214,7 @@ class TestDBConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_backend_url_invalid_child_key(self, connect, table):
+    def test_get_backend_url_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: backend_url
@@ -1226,7 +1226,7 @@ class TestDBConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_backend_url_valid(self, connect, table):
+    def test_get_backend_url_valid(self, connect, collection):
         '''
         target: get backend_url
         method: call get_config correctly
@@ -1236,29 +1236,29 @@ class TestDBConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_preload_table_invalid_child_key(self, connect, table):
+    def test_get_preload_collection_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
-        method: call get_config without child_key: preload_table
+        method: call get_config without child_key: preload_collection
         expected: status not ok
         '''
-        invalid_configs = ["preloadtable", "preload_table "]
+        invalid_configs = ["preloadcollection", "preload_collection "]
         for config in invalid_configs:
             status, config_value = connect.get_config("db_config", config)
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_preload_table_valid(self, connect, table):
+    def test_get_preload_collection_valid(self, connect, collection):
         '''
-        target: get preload_table
+        target: get preload_collection
         method: call get_config correctly
         expected: status ok
         '''
-        status, config_value = connect.get_config("db_config", "preload_table")
+        status, config_value = connect.get_config("db_config", "preload_collection")
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_auto_flush_interval_invalid_child_key(self, connect, table):
+    def test_get_auto_flush_interval_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: auto_flush_interval
@@ -1270,7 +1270,7 @@ class TestDBConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_auto_flush_interval_valid(self, connect, table):
+    def test_get_auto_flush_interval_valid(self, connect, collection):
         '''
         target: get auto_flush_interval
         method: call get_config correctly
@@ -1286,7 +1286,7 @@ class TestDBConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_db_config_invalid_child_key(self, connect, table):
+    def test_set_db_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -1296,7 +1296,7 @@ class TestDBConfig:
         assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_backend_url_valid(self, connect, table):
+    def test_set_backend_url_valid(self, connect, collection):
         '''
         target: set backend_url
         method: call set_config correctly
@@ -1308,19 +1308,19 @@ class TestDBConfig:
         assert status.OK()
         assert config_value == 'sqlite://:@:/'
 
-    def test_set_preload_table_valid(self, connect, table):
+    def test_set_preload_collection_valid(self, connect, collection):
         '''
-        target: set preload_table
+        target: set preload_collection
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        status, reply = connect.set_config("db_config", "preload_table", "")
+        status, reply = connect.set_config("db_config", "preload_collection", "")
         assert status.OK()
-        status, config_value = connect.get_config("db_config", "preload_table")
+        status, config_value = connect.get_config("db_config", "preload_collection")
         assert status.OK()
         assert config_value == ""
 
-    def test_set_auto_flush_interval_valid(self, connect, table):
+    def test_set_auto_flush_interval_valid(self, connect, collection):
         '''
         target: set auto_flush_interval
         method: call set_config correctly
@@ -1333,7 +1333,7 @@ class TestDBConfig:
             assert status.OK()
             assert config_value == str(valid_auto_flush_interval)
     
-    def test_set_auto_flush_interval_invalid(self, connect, table):
+    def test_set_auto_flush_interval_invalid(self, connect, collection):
         '''
         target: set auto_flush_interval
         method: call set_config with invalid auto_flush_interval
@@ -1351,7 +1351,7 @@ class TestStorageConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_primary_path_invalid_child_key(self, connect, table):
+    def test_get_primary_path_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: primary_path
@@ -1363,7 +1363,7 @@ class TestStorageConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_primary_path_valid(self, connect, table):
+    def test_get_primary_path_valid(self, connect, collection):
         '''
         target: get primary_path
         method: call get_config correctly
@@ -1373,7 +1373,7 @@ class TestStorageConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_secondary_path_invalid_child_key(self, connect, table):
+    def test_get_secondary_path_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: secondary_path
@@ -1385,7 +1385,7 @@ class TestStorageConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_secondary_path_valid(self, connect, table):
+    def test_get_secondary_path_valid(self, connect, collection):
         '''
         target: get secondary_path
         method: call get_config correctly
@@ -1401,7 +1401,7 @@ class TestStorageConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_storage_config_invalid_child_key(self, connect, table):
+    def test_set_storage_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -1411,7 +1411,7 @@ class TestStorageConfig:
         assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_primary_path_valid(self, connect, table):
+    def test_set_primary_path_valid(self, connect, collection):
         '''
         target: set primary_path
         method: call set_config correctly
@@ -1424,7 +1424,7 @@ class TestStorageConfig:
         assert config_value == '/var/lib/milvus'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_secondary_path_valid(self, connect, table):
+    def test_set_secondary_path_valid(self, connect, collection):
         '''
         target: set secondary_path
         method: call set_config correctly
@@ -1444,7 +1444,7 @@ class TestMetricConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_enable_monitor_invalid_child_key(self, connect, table):
+    def test_get_enable_monitor_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: enable_monitor
@@ -1456,7 +1456,7 @@ class TestMetricConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_enable_monitor_valid(self, connect, table):
+    def test_get_enable_monitor_valid(self, connect, collection):
         '''
         target: get enable_monitor
         method: call get_config correctly
@@ -1466,7 +1466,7 @@ class TestMetricConfig:
         assert status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_address_invalid_child_key(self, connect, table):
+    def test_get_address_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: address
@@ -1478,7 +1478,7 @@ class TestMetricConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_address_valid(self, connect, table):
+    def test_get_address_valid(self, connect, collection):
         '''
         target: get address
         method: call get_config correctly
@@ -1488,7 +1488,7 @@ class TestMetricConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_port_invalid_child_key(self, connect, table):
+    def test_get_port_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: port
@@ -1500,7 +1500,7 @@ class TestMetricConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_port_valid(self, connect, table):
+    def test_get_port_valid(self, connect, collection):
         '''
         target: get port
         method: call get_config correctly
@@ -1516,7 +1516,7 @@ class TestMetricConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_metric_config_invalid_child_key(self, connect, table):
+    def test_set_metric_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -1525,7 +1525,7 @@ class TestMetricConfig:
         status, reply = connect.set_config("metric_config", "child_key", 19530)
         assert not status.OK()
 
-    def test_set_enable_monitor_valid(self, connect, table):
+    def test_set_enable_monitor_valid(self, connect, collection):
         '''
         target: set enable_monitor
         method: call set_config correctly
@@ -1539,7 +1539,7 @@ class TestMetricConfig:
             assert config_value == str(valid_enable_monitor)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_address_valid(self, connect, table):
+    def test_set_address_valid(self, connect, collection):
         '''
         target: set address
         method: call set_config correctly
@@ -1551,7 +1551,7 @@ class TestMetricConfig:
         assert status.OK()
         assert config_value == '127.0.0.1'
 
-    def test_set_port_valid(self, connect, table):
+    def test_set_port_valid(self, connect, collection):
         '''
         target: set port
         method: call set_config correctly
@@ -1564,7 +1564,7 @@ class TestMetricConfig:
             assert status.OK()
             assert config_value == str(valid_port)
     
-    def test_set_port_invalid(self, connect, table):
+    def test_set_port_invalid(self, connect, collection):
         '''
         target: set port
         method: call set_config with port number out of range(1024, 65535), or same as web_port number
@@ -1582,7 +1582,7 @@ class TestTracingConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_json_config_path_invalid_child_key(self, connect, table):
+    def test_get_json_config_path_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: json_config_path
@@ -1594,7 +1594,7 @@ class TestTracingConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_json_config_path_valid(self, connect, table):
+    def test_get_json_config_path_valid(self, connect, collection):
         '''
         target: get json_config_path
         method: call get_config correctly
@@ -1610,7 +1610,7 @@ class TestTracingConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_tracing_config_invalid_child_key(self, connect, table):
+    def test_set_tracing_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -1620,7 +1620,7 @@ class TestTracingConfig:
         assert not status.OK()
 
     @pytest.mark.skip(reason="Currently not supported")
-    def test_set_json_config_path_valid(self, connect, table):
+    def test_set_json_config_path_valid(self, connect, collection):
         '''
         target: set json_config_path
         method: call set_config correctly
@@ -1640,7 +1640,7 @@ class TestWALConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_enable_invalid_child_key(self, connect, table):
+    def test_get_enable_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: enable
@@ -1652,7 +1652,7 @@ class TestWALConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_enable_valid(self, connect, table):
+    def test_get_enable_valid(self, connect, collection):
         '''
         target: get enable
         method: call get_config correctly
@@ -1662,7 +1662,7 @@ class TestWALConfig:
         assert status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_recovery_error_ignore_invalid_child_key(self, connect, table):
+    def test_get_recovery_error_ignore_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: recovery_error_ignore
@@ -1674,7 +1674,7 @@ class TestWALConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_recovery_error_ignore_valid(self, connect, table):
+    def test_get_recovery_error_ignore_valid(self, connect, collection):
         '''
         target: get recovery_error_ignore
         method: call get_config correctly
@@ -1684,7 +1684,7 @@ class TestWALConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_buffer_size_invalid_child_key(self, connect, table):
+    def test_get_buffer_size_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: buffer_size
@@ -1696,7 +1696,7 @@ class TestWALConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_buffer_size_valid(self, connect, table):
+    def test_get_buffer_size_valid(self, connect, collection):
         '''
         target: get buffer_size
         method: call get_config correctly
@@ -1706,7 +1706,7 @@ class TestWALConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_wal_path_invalid_child_key(self, connect, table):
+    def test_get_wal_path_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: wal_path
@@ -1718,7 +1718,7 @@ class TestWALConfig:
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_wal_path_valid(self, connect, table):
+    def test_get_wal_path_valid(self, connect, collection):
         '''
         target: get wal_path
         method: call get_config correctly
@@ -1734,7 +1734,7 @@ class TestWALConfig:
     ******************************************************************
     """
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_wal_config_invalid_child_key(self, connect, table):
+    def test_set_wal_config_invalid_child_key(self, connect, collection):
         '''
         target: set invalid child key
         method: call set_config with invalid child_key
@@ -1743,7 +1743,7 @@ class TestWALConfig:
         status, reply = connect.set_config("wal_config", "child_key", 256)
         assert not status.OK()
 
-    def test_set_enable_valid(self, connect, table):
+    def test_set_enable_valid(self, connect, collection):
         '''
         target: set enable
         method: call set_config correctly
@@ -1756,7 +1756,7 @@ class TestWALConfig:
             assert status.OK()
             assert config_value == str(valid_enable)
 
-    def test_set_recovery_error_ignore_valid(self, connect, table):
+    def test_set_recovery_error_ignore_valid(self, connect, collection):
         '''
         target: set recovery_error_ignore
         method: call set_config correctly
@@ -1769,7 +1769,7 @@ class TestWALConfig:
             assert status.OK()
             assert config_value == valid_recovery_error_ignore
 
-    def test_set_buffer_size_valid_A(self, connect, table):
+    def test_set_buffer_size_valid_A(self, connect, collection):
         '''
         target: set buffer_size
         method: call set_config correctly
@@ -1783,7 +1783,7 @@ class TestWALConfig:
             assert config_value == str(valid_buffer_size)
         
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_wal_path_valid(self, connect, table):
+    def test_set_wal_path_valid(self, connect, collection):
         '''
         target: set wal_path
         method: call set_config correctly
