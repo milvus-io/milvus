@@ -233,7 +233,7 @@ class TestFlushBase:
         assert res == 0
 
 
-class TestcollectionNameInvalid(object):
+class TestCollectionNameInvalid(object):
     """
     Test adding vectors with invalid collection names
     """

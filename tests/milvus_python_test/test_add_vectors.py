@@ -1302,7 +1302,7 @@ class TestNameInvalid(object):
         assert not status.OK()
 
 
-class TestAddcollectionVectorsInvalid(object):
+class TestAddCollectionVectorsInvalid(object):
     single_vector = gen_single_vector(dim)
     vectors = gen_vectors(2, dim)
 

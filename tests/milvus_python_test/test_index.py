@@ -1659,7 +1659,7 @@ class TestIndexHAM:
         assert result._collection_name == ham_collection
         assert result._index_type == IndexType.FLAT
 
-class TestIndexcollectionInvalid(object):
+class TestIndexCollectionInvalid(object):
     """
     Test create / describe / drop index interfaces with invalid collection names
     """
