@@ -32,13 +32,13 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     DefaultIdBloomFilterFormat() = default;
 
     void
-    read(const storage::OperationPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    read(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     void
-    write(const storage::OperationPtr& directory_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     void
-    create(const storage::OperationPtr& directory_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     // No copy and move
     DefaultIdBloomFilterFormat(const DefaultIdBloomFilterFormat&) = delete;

@@ -32,16 +32,16 @@ class DefaultVectorsFormat : public VectorsFormat {
     DefaultVectorsFormat() = default;
 
     void
-    read(const storage::OperationPtr& directory_ptr, segment::VectorsPtr& vectors_read) override;
+    read(const storage::FSHandlerPtr& fs_ptr, segment::VectorsPtr& vectors_read) override;
 
     void
-    write(const storage::OperationPtr& directory_ptr, const segment::VectorsPtr& vectors) override;
+    write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorsPtr& vectors) override;
 
     void
-    read_uids(const storage::OperationPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) override;
+    read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<segment::doc_id_t>& uids) override;
 
     void
-    read_vectors(const storage::OperationPtr& directory_ptr, off_t offset, size_t num_bytes,
+    read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t offset, size_t num_bytes,
                  std::vector<uint8_t>& raw_vectors) override;
 
     // No copy and move

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 
 namespace milvus {
@@ -33,6 +34,8 @@ class IOReader {
     virtual void
     close() = 0;
 };
+
+using IOReaderPtr = std::shared_ptr<IOReader>;
 
 }  // namespace storage
 }  // namespace milvus
