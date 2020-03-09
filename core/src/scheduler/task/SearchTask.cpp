@@ -101,7 +101,8 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
     if (file_) {
         // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
         // similarity -- infinity value means two vectors equal, descending reduce, IP
-        if (file_->metric_type_ == static_cast<int>(MetricType::IP)) {
+        if (file_->metric_type_ == static_cast<int>(MetricType::IP) &&
+            file_->engine_type_ != static_cast<int>(EngineType::FAISS_PQ)) {
             ascending_reduce = false;
         }
 
