@@ -106,7 +106,7 @@ def table(request, connect):
     def teardown():
         status, table_names = connect.show_tables()
         for table_name in table_names:
-            connect.delete_table(table_name)
+            connect.drop_collection(table_name)
 
     request.addfinalizer(teardown)
 
@@ -130,7 +130,7 @@ def ip_table(request, connect):
     def teardown():
         status, table_names = connect.show_tables()
         for table_name in table_names:
-            connect.delete_table(table_name)
+            connect.drop_collection(table_name)
 
     request.addfinalizer(teardown)
 
@@ -154,7 +154,7 @@ def jac_table(request, connect):
     def teardown():
         status, table_names = connect.show_tables()
         for table_name in table_names:
-            connect.delete_table(table_name)
+            connect.drop_collection(table_name)
 
     request.addfinalizer(teardown)
 
@@ -177,7 +177,7 @@ def ham_table(request, connect):
     def teardown():
         status, table_names = connect.show_tables()
         for table_name in table_names:
-            connect.delete_table(table_name)
+            connect.drop_collection(table_name)
 
     request.addfinalizer(teardown)
 
@@ -200,7 +200,7 @@ def tanimoto_table(request, connect):
     def teardown():
         status, table_names = connect.show_tables()
         for table_name in table_names:
-            connect.delete_table(table_name)
+            connect.drop_collection(table_name)
 
     request.addfinalizer(teardown)
 
