@@ -45,6 +45,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
 -   \#1556 Index file not created after table and index created
 -   \#1560 Search crashed with Super-high dimensional binary vector
+-   \#1574 Set all existing bitset in cache when applying deletes
 
 ## Feature
 -   \#216 Add CLI to get server info
