@@ -163,6 +163,12 @@ class TestCacheConfig:
         mem_available = mem_total - mem_used
         return int(mem_available / 1024 / 1024 / 1024)
 
+    def get_memory_total(self, connect):
+        _, info = connect._cmd("get_system_info")
+        mem_info = ujson.loads(info)
+        mem_total = int(mem_info["memory_total"])
+        return int(mem_total / 1024 / 1024 / 1024)
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cpu_cache_capacity_invalid_parent_key(self, connect, collection):
         '''
@@ -281,14 +287,14 @@ class TestCacheConfig:
         expected: status not ok (cpu_cache_capacity + insert_buffer_size < system memory)
         '''
         self.reset_configs(connect)
-        mem_available = self.get_memory_available(connect)
-        logging.getLogger().info(mem_available)
-        status, reply = connect.set_config("cache_config", "cpu_cache_capacity", mem_available + 1)
+        mem_total = self.get_memory_total(connect)
+        logging.getLogger().info(mem_total)
+        status, reply = connect.set_config("cache_config", "cpu_cache_capacity", mem_total + 1)
         assert not status.OK()
-        status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_available + 1)
+        status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_total + 1)
         assert not status.OK()
 
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
+    @pytest.skip(reason="Still needs discussion")
     def test_set_cache_config_out_of_memory_value_B(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
@@ -309,6 +315,7 @@ class TestCacheConfig:
         status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_available - int(cpu_cache_capacity) + 1)
         assert not status.OK()
 
+    @pytest.skip(reason="Still needs discussion")
     def test_set_cache_config_out_of_memory_value_C(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
