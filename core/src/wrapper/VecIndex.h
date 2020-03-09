@@ -12,10 +12,10 @@
 #pragma once
 
 #include <faiss/utils/ConcurrentBitset.h>
-#include <thirdparty/nlohmann/json.hpp>
 
 #include <memory>
 #include <string>
+#include <thirdparty/nlohmann/json.hpp>
 #include <utility>
 #include <vector>
 
@@ -180,13 +180,14 @@ class VecIndex : public cache::DataObj {
 
     virtual Status
     SetBlacklist(faiss::ConcurrentBitsetPtr list) {
-        ENGINE_LOG_ERROR << "SetBlacklist not support";
+        // ENGINE_LOG_ERROR << "SetBlacklist not support";
         return Status::OK();
     }
 
     virtual Status
     GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
-        ENGINE_LOG_ERROR << "GetBlacklist not support";
+        // ENGINE_LOG_ERROR << "GetBlacklist not support";
+        ENGINE_LOG_WARNING << "Deletion on unsupported index type";
         return Status::OK();
     }
 
