@@ -69,7 +69,7 @@ Checks whether the web server is running.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/state" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/state" -H "accept: application/json"
 ```
 
 ##### Response
@@ -104,7 +104,7 @@ Gets CPU/GPU information from the host.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/devices" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/devices" -H "accept: application/json"
 ```
 
 ##### Response
@@ -138,7 +138,7 @@ Gets the values of parameters in `cache_config` and `engine_config` of the Milvu
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/config/advanced" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/config/advanced" -H "accept: application/json"
 ```
 
 ##### Response
@@ -192,7 +192,7 @@ Updates the values of parameters in `cache_config` and `engine_config` of the Mi
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/config/advanced" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"cpu_cache_capacity\":4,\"cache_insert_data\":false,\"use_blas_threshold\":1100,\"gpu_search_threshold\":1000}"
+$ curl -X PUT "http://127.0.0.1:19121/config/advanced" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"cpu_cache_capacity\":4,\"cache_insert_data\":false,\"use_blas_threshold\":1100,\"gpu_search_threshold\":1000}"
 ```
 
 ##### Response
@@ -221,7 +221,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/config/advanced"
+$ curl -X OPTIONS "http://127.0.0.1:19121/config/advanced"
 ```
 
 ### `/config/gpu_resources` (GET)
@@ -251,7 +251,7 @@ Gets the parameter values in `gpu_resource_config` of the Milvus configuration f
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/config/gpu_resources" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/config/gpu_resources" -H "accept: application/json"
 ```
 
 ##### Response
@@ -306,7 +306,7 @@ Updates the parameter values in `gpu_resource_config` of the Milvus configuratio
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/config/gpu_resources" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"enable\":true,\"cache_capacity\":1,\"search_resources\":[\"GPU0\"],\"build_index_resources\":[\"GPU0\"]}"
+$ curl -X PUT "http://127.0.0.1:19121/config/gpu_resources" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"enable\":true,\"cache_capacity\":1,\"search_resources\":[\"GPU0\"],\"build_index_resources\":[\"GPU0\"]}"
 ```
 
 ##### Response
@@ -335,7 +335,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/config/gpu_resources"
+$ curl -X OPTIONS "http://127.0.0.1:19121/config/gpu_resources"
 ```
 
 ### `/collections` (GET)
@@ -371,7 +371,7 @@ Gets all collections starting from `offset` and ends with `page_size`.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections?offset=0&page_size=1" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections?offset=0&page_size=1" -H "accept: application/json"
 ```
 
 ##### Response
@@ -424,7 +424,7 @@ Creates a collection.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19121/collections" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"collection_name\":\"test_collection\",\"dimension\":1,\"index_file_size\":10,\"metric_type\":\"L2\"}"
+$ curl -X POST "http://127.0.0.1:19121/collections" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"collection_name\":\"test_collection\",\"dimension\":1,\"index_file_size\":10,\"metric_type\":\"L2\"}"
 ```
 
 ##### Response
@@ -453,7 +453,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/collections"
+$ curl -X OPTIONS "http://127.0.0.1:19121/collections"
 ```
 
 ### `/collections/{collection_name}` (GET)
@@ -491,19 +491,19 @@ Gets all information about a collection by name.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection" -H "accept: application/json"
 ```
 
 ##### Response
 
 ```json
-{"collection_name":"test_collection","dimension":1,"index_file_size":10,"metric_type":"L2","count":0,"index":"FLAT","nlist":16384}
+{"collection_name":"test_collection","dimension":1,"index_file_size":10,"metric_type":"L2","count":0,"index":"FLAT", "index_params":{}}
 ```
 
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection?info=stat" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection?info=stat" -H "accept: application/json"
 ```
 
 ##### Response
@@ -556,7 +556,7 @@ Drops a collection by name.
 
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19121/collections/test_collection" -H "accept: application/json"
+$ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection" -H "accept: application/json"
 ```
 
 If the deletion is successful, no message will be returned.
@@ -586,7 +586,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/collections/test_collection"
+$ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection"
 ```
 
 ### `/collections/{collection_name}/indexes` (GET)
@@ -621,14 +621,14 @@ Gets the index type and nlist of a collection.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection/indexes" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/indexes" -H "accept: application/json"
 ```
 
 ##### Response
 
 
 ```json
-{"index_type":"FLAT","nlist":16384}
+{"index_type":"FLAT","params":{"nlist":4096}}
 ```
 
 ### `/collections/{collection_name}/indexes` (POST)
@@ -674,20 +674,12 @@ Updates the index type and nlist of a collection.
 | 400     | The request is incorrect. Refer to the error message for details. |
 | 404     | The required resource does not exist. |
 
-#### Response
-
-| Status code    | Description |
-|-----------------|---|
-| 201     | Created |
-| 400     | The request is incorrect. Refer to the error message for details. |
-| 404     | The required resource does not exist. |
-
 #### Example
 
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19121/collections/test_collection/indexes" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"index_type\":\"FLAT\",\"nlist\":16384}"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/indexes" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"index_type\":\"IVFFLAT\",\"params\": {\"nlist\":4096}}"
 ```
 
 ##### Response
@@ -729,7 +721,7 @@ Drops an index for a collection.
 ##### Request
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19121/collections/test_collection/indexes" -H "accept: application/json"
+$ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/indexes" -H "accept: application/json"
 ```
 
 If the deletion is successful, no message will be returned.
@@ -759,7 +751,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/collections/test_collection/indexes"
+$ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection/indexes"
 ```
 
 ### `/collections/{collection_name}/partitions` (GET)
@@ -796,13 +788,13 @@ Gets all partitions in a collection starting from `offset` and ends with `page_s
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection/partitions?offset=0&page_size=3" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/partitions?offset=0&page_size=3" -H "accept: application/json"
 ```
 
 ##### Response
 
 ```json
-{"partitions":[{"partition_name":"partition_1","partition_tag":"test_tag"},{"partition_name":"partition_2","partition_tag":"test_2"},{"partition_name":"partition_3","partition_tag":"test_3"}]}
+{"partitions":[{"partition_tag": "_default"},{"partition_tag":"test_tag"},{"partition_tag":"test_2"}], "count":10}
 ```
 
 ### `/collections/{collection_name}/partitions` (POST)
@@ -831,7 +823,7 @@ Creates a partition in a collection.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19121/collections/test_collection/partitions" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"partition_name\": \"partition_1\",\"partition_tag\": \"test\"}"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/partitions" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"partition_tag\": \"test\"}"
 ```
 
 ##### Response
@@ -865,7 +857,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/collections/test_collection/partitions"
+$ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection/partitions"
 ```
 
 ### `/collections/{collection_name}/partitions` (DELETE)
@@ -907,7 +899,7 @@ Deletes a partition by tag.
 ##### Request
 
 ```shell
-$ curl -X DELETE "http://192.168.1.65:19121/collections/test_collection/partitions/tags_01" -H "accept: application/json"
+$ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/partitions -H "accept: application/json" -d "{\"partition_tag\": \"tags_01\"}"
 ```
 
 The deletion is successful if no information is returned.
@@ -947,7 +939,7 @@ Gets all segments in a collection starting from `offset` and ends with `page_siz
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments?offset=0&page_size=3" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments?offset=0&page_size=1" -H "accept: application/json"
 ```
 
 ##### Response
@@ -1004,7 +996,7 @@ Gets all vectors of segment in a collection starting from `offset` and ends with
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/1583727470444700000/vectors?offset=0&page_size=1" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/1583727470444700000/vectors?offset=0&page_size=1" -H "accept: application/json"
 ```
 
 ##### Response
@@ -1058,7 +1050,7 @@ Gets all vector ids of segment in a collection starting from `offset` and ends w
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/1583727470444700000/ids?offset=0&page_size=1" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/1583727470444700000/ids?offset=0&page_size=1" -H "accept: application/json"
 ```
 
 ##### Response
@@ -1129,7 +1121,7 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/15
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"topk\":2,\"nprobe\":16,\"records\":[[0.1]]}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"topk\":2,\"vectors\":[[0.1]], \"params\":{\"nprobe\":16}}"
 ```
 
 ##### Response
@@ -1182,7 +1174,7 @@ $ curl -X PUT "http://192.168.1.65:19121/collections/test_collection/vectors" -H
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{"delete": {"ids": ["1578989029645098000"]}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{"delete": {"ids": ["1578989029645098000"]}}"
 ```
 
 ##### Response
@@ -1205,7 +1197,7 @@ Inserts vectors to a collection.
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
-  "tag": string,
+  "partition_tag": string,
   "vectors": [[number($float/$uint8)]],
   "ids": [integer($int64)]
 }
@@ -1217,7 +1209,7 @@ Inserts vectors to a collection.
 
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
-| `tag`     |  Tag of the partition to insert vectors to.   | No   |
+| `partition_tag`     |  Tag of the partition to insert vectors to.   | No   |
 | `vectors`  |  Vectors to insert to the collection.  |  Yes  |
 | `ids`    |  IDs of the vectors to insert to the collection. If you assign IDs to the vectors, you must provide IDs for all vectors in the collection. If you do not specify this parameter, Milvus automatically assigns IDs to the vectors. |  No |
 
@@ -1242,7 +1234,7 @@ Inserts vectors to a collection.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"vectors\":[[0.1],[0.2],[0.3],[0.4]]}"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"vectors\":[[0.1],[0.2],[0.3],[0.4]]}"
 ```
 
 ##### Response
@@ -1285,7 +1277,7 @@ Obtain a vector to by ID.
 ##### Request
 
 ```shell
-$ curl -X POST "http://192.168.1.65:19121/collections/test_collection/vectors?id=1578989029645098000" -H "accept: application/json" -H "Content-Type: application/json"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors?id=1578989029645098000" -H "accept: application/json" -H "Content-Type: application/json"
 ```
 
 ##### Response
@@ -1320,7 +1312,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://192.168.1.65:19121/collections/test_collection/vectors"
+$ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection/vectors"
 ```
 
 ### `/system/{msg}` (GET)
@@ -1354,7 +1346,7 @@ Gets information about the Milvus server.
 ##### Request
 
 ```shell
-$ curl -X GET "http://192.168.1.65:19121/system/version" -H "accept: application/json"
+$ curl -X GET "http://127.0.0.1:19121/system/version" -H "accept: application/json"
 ```
 
 ##### Response
@@ -1395,7 +1387,7 @@ $ curl -X GET "http://192.168.1.65:19121/system/version" -H "accept: application
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/system/task" -H "accept: application/json" -d "{\"flush\": {\"collection_names\": [test_collection]}}"
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"flush\": {\"collection_names\": [\"test_collection\"]}}"
 ```
 
 ##### Response
@@ -1434,7 +1426,7 @@ $ curl -X PUT "http://192.168.1.65:19121/system/task" -H "accept: application/js
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/system/task" -H "accept: application/json" -d "{\"compact\": {\"collection_name\": test_collection}}"
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"compact\": {\"collection_name\": \"test_collection\"}}"
 ```
 
 ##### Response
@@ -1473,7 +1465,7 @@ $ curl -X PUT "http://192.168.1.65:19121/system/task" -H "accept: application/js
 ##### Request
 
 ```shell
-$ curl -X PUT "http://192.168.1.65:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": test_collection}}"
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": \"test_collection\"}}"
 ```
 
 ##### Response
