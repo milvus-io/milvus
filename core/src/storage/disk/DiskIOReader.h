@@ -20,8 +20,20 @@ namespace storage {
 
 class DiskIOReader : public IOReader {
  public:
-    explicit DiskIOReader(const std::string& name);
-    ~DiskIOReader();
+    DiskIOReader() = default;
+    ~DiskIOReader() = default;
+
+    // No copy and move
+    DiskIOReader(const DiskIOReader&) = delete;
+    DiskIOReader(DiskIOReader&&) = delete;
+
+    DiskIOReader&
+    operator=(const DiskIOReader&) = delete;
+    DiskIOReader&
+    operator=(DiskIOReader&&) = delete;
+
+    void
+    open(const std::string& name) override;
 
     void
     read(void* ptr, size_t size) override;
@@ -32,7 +44,11 @@ class DiskIOReader : public IOReader {
     size_t
     length() override;
 
+    void
+    close() override;
+
  public:
+    std::string name_;
     std::fstream fs_;
 };
 

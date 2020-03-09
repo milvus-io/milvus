@@ -18,9 +18,8 @@ namespace storage {
 
 class IOReader {
  public:
-    explicit IOReader(const std::string& name) : name_(name) {
-    }
-    ~IOReader() = default;
+    virtual void
+    open(const std::string& name) = 0;
 
     virtual void
     read(void* ptr, size_t size) = 0;
@@ -31,8 +30,8 @@ class IOReader {
     virtual size_t
     length() = 0;
 
- public:
-    std::string name_;
+    virtual void
+    close() = 0;
 };
 
 }  // namespace storage
