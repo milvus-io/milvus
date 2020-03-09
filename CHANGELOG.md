@@ -50,6 +50,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1571 Meta engine type become IDMAP after dropping index for BINARY table
 -   \#1574 Set all existing bitset in cache when applying deletes
 -   \#1577 Row count incorrect if delete vectors then create index
+-   \#1580 Old segment folder not removed after merge/compact if create_index is called before adding data
 
 ## Feature
 -   \#216 Add CLI to get server info
