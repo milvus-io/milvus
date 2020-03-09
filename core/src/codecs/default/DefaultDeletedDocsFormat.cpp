@@ -35,10 +35,10 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
+DefaultDeletedDocsFormat::read(const storage::OperationPtr& directory_ptr, segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
@@ -75,10 +75,11 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
 }
 
 void
-DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) {
+DefaultDeletedDocsFormat::write(const storage::OperationPtr& directory_ptr,
+                                const segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     // Create a temporary file from the existing file

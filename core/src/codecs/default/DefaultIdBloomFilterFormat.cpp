@@ -30,11 +30,11 @@ constexpr unsigned int bloom_filter_capacity = 500000;
 constexpr double bloom_filter_error_rate = 0.01;
 
 void
-DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
+DefaultIdBloomFilterFormat::read(const storage::OperationPtr& directory_ptr,
                                  segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
@@ -48,11 +48,11 @@ DefaultIdBloomFilterFormat::read(const store::DirectoryPtr& directory_ptr,
 }
 
 void
-DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
+DefaultIdBloomFilterFormat::write(const storage::OperationPtr& directory_ptr,
                                   const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
         std::string err_msg =
@@ -63,9 +63,9 @@ DefaultIdBloomFilterFormat::write(const store::DirectoryPtr& directory_ptr,
 }
 
 void
-DefaultIdBloomFilterFormat::create(const store::DirectoryPtr& directory_ptr,
+DefaultIdBloomFilterFormat::create(const storage::OperationPtr& directory_ptr,
                                    segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());

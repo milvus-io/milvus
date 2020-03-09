@@ -102,10 +102,10 @@ DefaultVectorsFormat::read_uids_internal(const std::string& file_path, std::vect
 }
 
 void
-DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
+DefaultVectorsFormat::read(const storage::OperationPtr& directory_ptr, segment::VectorsPtr& vectors_read) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         ENGINE_LOG_ERROR << err_msg;
@@ -134,10 +134,10 @@ DefaultVectorsFormat::read(const store::DirectoryPtr& directory_ptr, segment::Ve
 }
 
 void
-DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segment::VectorsPtr& vectors) {
+DefaultVectorsFormat::write(const storage::OperationPtr& directory_ptr, const segment::VectorsPtr& vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
 
     const std::string rv_file_path = dir_path + "/" + vectors->GetName() + raw_vector_extension_;
     const std::string uid_file_path = dir_path + "/" + vectors->GetName() + user_id_extension_;
@@ -197,10 +197,10 @@ DefaultVectorsFormat::write(const store::DirectoryPtr& directory_ptr, const segm
 }
 
 void
-DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
+DefaultVectorsFormat::read_uids(const storage::OperationPtr& directory_ptr, std::vector<segment::doc_id_t>& uids) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         ENGINE_LOG_ERROR << err_msg;
@@ -221,11 +221,11 @@ DefaultVectorsFormat::read_uids(const store::DirectoryPtr& directory_ptr, std::v
 }
 
 void
-DefaultVectorsFormat::read_vectors(const store::DirectoryPtr& directory_ptr, off_t offset, size_t num_bytes,
+DefaultVectorsFormat::read_vectors(const storage::OperationPtr& directory_ptr, off_t offset, size_t num_bytes,
                                    std::vector<uint8_t>& raw_vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = directory_ptr->GetDirPath();
+    std::string dir_path = directory_ptr->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         ENGINE_LOG_ERROR << err_msg;
