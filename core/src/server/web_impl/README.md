@@ -31,6 +31,7 @@
     - [`/collections/{collection_name}/segments/{segment_name}/ids` (GET)](#collectionscollection_namesegmentssegment_nameids-get)
     - [`/collections/{collection_name}/vectors` (PUT)](#collectionscollection_namevectors-put)
     - [`/collections/{collection_name}/vectors` (POST)](#collectionscollection_namevectors-post)
+    - [`/collections/{collection_name}/vectors` (GET)](#collectionscollection_namevectorsidvector_id-get)
     - [`/collections/{collection_name}/vectors` (OPTIONS)](#collectionscollection_namevectors-options)
     - [`/system/{msg}` (GET)](#systemmsg-get)
     - [`system/{op}` (PUT)](#systemop-put)
@@ -620,7 +621,9 @@ Updates the index type and nlist of a collection.
 <tr><td>Body</td><td><pre><code>
 {
   "index_type": string,
-  "nlist": integer($int64)
+  "params": {
+      ......
+  }
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
@@ -632,7 +635,7 @@ Updates the index type and nlist of a collection.
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
 | `index_type`     | The type of indexing method to query the collection. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT".  | No   |
-| `nlist`     |  Number of vector buckets in a file. The default is 16384.   | No   |
+| `params`     | The extra params of indexing method to query the collection. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT".  | No   |
 
 ##### Query Parameters
 
@@ -990,8 +993,8 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/15
    "count":2,
    "vectors": [
       {
-         "vector": [], 
-         "id": ""
+         "vector": [0.1], 
+         "id": "1583727470435045000"
       }
    ]
 }
@@ -1039,8 +1042,8 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/15
 
 ```json
 {
-   "ids": [],
-   "count": 0
+   "ids": ["1583727470435045000"],
+   "count": 10000
 }
 ```
 
@@ -1059,7 +1062,7 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/15
 {
   "search": {
       "topk": integer($int64),
-      "tags": [string],
+      "partition_tags": [string],
       "file_ids": [string],
       "vectors": [[number($float/$uint8)]]
       "params": {
@@ -1078,8 +1081,8 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/15
 | `topk`     |  The top k most similar results of each query vector.   | Yes   |
 | `tags`    |  Tags of partitions that you need to search. You do not have to specify this value if the collection is not partitioned or you wish to search the whole collection.   |  No |
 | `file_ids`    |  IDs of the vector files. You do not have to specify this value if you do not use Milvus in distributed scenarios. Also, if you assign a value to `file_ids`, the value of `tags` is ignored.    |   No  |
-| `records`  |  Numeric vectors to insert to the collection.  |  Yes  |
-| `records_bin` | Binary vectors to insert to the collection. |    Yes   |
+| `vectors`  |  Vectors to query.  |  Yes  |
+| `params`  |  Extra params for search.  |  Yes  |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
 
@@ -1224,6 +1227,57 @@ $ curl -X POST "http://192.168.1.65:19121/collections/test_collection/vectors" -
 ```json
 {"ids":["1578989029645098000","1578989029645098001","1578989029645098002","1578989029645098003"]}
 ```
+
+### `/collections/{collection_name}/vectors?id={vector_id}` (GET)
+
+Obtain a vector to by ID.
+
+#### Request
+
+| Request Component     | Value  |
+|-----------------|-----------|
+| Name     | `/collections/{collection_name}/vectors`  |
+| Header  | `accept: application/json`  |
+| Body    |   N/A |
+| Method    |   GET |
+
+#### Query Parameters
+
+| Parameter  | Description  |  Required? |
+|-----------------|---|------|
+| `collection_name` |  Name of the collection.      |   Yes     |
+| `vector_id` | Vector id.   | Yes   |
+
+
+#### Response
+
+| Status code    | Description |
+|-----------------|---|
+| 201     | Created |
+| 400     | The request is incorrect. Refer to the error message for details. |
+| 404     | The required resource does not exist. |
+
+#### Example
+
+##### Request
+
+```shell
+$ curl -X POST "http://192.168.1.65:19121/collections/test_collection/vectors?id=1578989029645098000" -H "accept: application/json" -H "Content-Type: application/json"
+```
+
+##### Response
+
+```json
+{
+   "vectors": [
+      {
+         "id": "1578989029645098000",
+         "vector": [0.1]
+      }
+   ]
+}
+```
+
 
 ### `/collections/{collection_name}/vectors` (OPTIONS)
 
