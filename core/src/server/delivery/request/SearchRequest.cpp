@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/SearchRequest.h"
+#include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -103,7 +104,7 @@ SearchRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 4: check metric type
-        if (ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
+        if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
             // check prepared binary data
             if (vectors_data_.binary_data_.size() % vector_count != 0) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY,

@@ -366,8 +366,8 @@ DBImpl::PreloadTable(const std::string& table_id) {
         if (file.file_type_ == meta::TableFileSchema::FILE_TYPE::RAW ||
             file.file_type_ == meta::TableFileSchema::FILE_TYPE::TO_INDEX ||
             file.file_type_ == meta::TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = server::ValidationUtil::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                        : EngineType::FAISS_IDMAP;
+            engine_type =
+                utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
         } else {
             engine_type = (EngineType)file.engine_type_;
         }
@@ -1019,7 +1019,7 @@ DBImpl::GetVectorByIdHelper(const std::string& table_id, IDNumber vector_id, Vec
                 auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
                 if (deleted == deleted_docs.end()) {
                     // Load raw vector
-                    bool is_binary = server::ValidationUtil::IsBinaryMetricType(file.metric_type_);
+                    bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
                     size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
                     std::vector<uint8_t> raw_vector;
                     status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
