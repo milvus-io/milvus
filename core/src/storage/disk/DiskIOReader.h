@@ -9,29 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/file/FileIOWriter.h"
+#pragma once
+
+#include <fstream>
+#include <string>
+#include "storage/IOReader.h"
 
 namespace milvus {
 namespace storage {
 
-FileIOWriter::FileIOWriter(const std::string& name) : IOWriter(name) {
-    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
-}
+class DiskIOReader : public IOReader {
+ public:
+    explicit DiskIOReader(const std::string& name);
+    ~DiskIOReader();
 
-FileIOWriter::~FileIOWriter() {
-    fs_.close();
-}
+    void
+    read(void* ptr, size_t size) override;
 
-void
-FileIOWriter::write(void* ptr, size_t size) {
-    fs_.write(reinterpret_cast<char*>(ptr), size);
-    len_ += size;
-}
+    void
+    seekg(size_t pos) override;
 
-size_t
-FileIOWriter::length() {
-    return len_;
-}
+    size_t
+    length() override;
+
+ public:
+    std::fstream fs_;
+};
 
 }  // namespace storage
 }  // namespace milvus

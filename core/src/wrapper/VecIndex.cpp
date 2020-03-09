@@ -23,8 +23,8 @@
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "server/Config.h"
-#include "storage/file/FileIOReader.h"
-#include "storage/file/FileIOWriter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
@@ -181,7 +181,7 @@ read_index(const std::string& location) {
     if (s3_enable) {
         reader_ptr = std::make_shared<storage::S3IOReader>(location);
     } else {
-        reader_ptr = std::make_shared<storage::FileIOReader>(location);
+        reader_ptr = std::make_shared<storage::DiskIOReader>(location);
     }
 
     recorder.RecordSection("Start");
@@ -254,7 +254,7 @@ write_index(VecIndexPtr index, const std::string& location) {
         if (s3_enable) {
             writer_ptr = std::make_shared<storage::S3IOWriter>(location);
         } else {
-            writer_ptr = std::make_shared<storage::FileIOWriter>(location);
+            writer_ptr = std::make_shared<storage::DiskIOWriter>(location);
         }
 
         recorder.RecordSection("Start");
