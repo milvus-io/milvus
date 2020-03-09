@@ -68,7 +68,7 @@ TEST_F(DeleteTest, delete_in_mem) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -81,7 +81,7 @@ TEST_F(DeleteTest, delete_in_mem) {
         xb.id_array_.push_back(i);
     }
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
@@ -105,7 +105,7 @@ TEST_F(DeleteTest, delete_in_mem) {
         ids_to_delete.emplace_back(kv.first);
     }
 
-    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
@@ -113,7 +113,7 @@ TEST_F(DeleteTest, delete_in_mem) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - search_vectors.size());
 
@@ -124,7 +124,7 @@ TEST_F(DeleteTest, delete_in_mem) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -136,7 +136,7 @@ TEST_F(DeleteTest, delete_on_disk) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -149,7 +149,7 @@ TEST_F(DeleteTest, delete_on_disk) {
         xb.id_array_.push_back(i);
     }
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
@@ -173,7 +173,7 @@ TEST_F(DeleteTest, delete_on_disk) {
     ASSERT_TRUE(stat.ok());
 
     for (auto& kv : search_vectors) {
-        stat = db_->DeleteVector(GetTableName(), kv.first);
+        stat = db_->DeleteVector(table_info.table_id_, kv.first);
         ASSERT_TRUE(stat.ok());
     }
 
@@ -181,7 +181,7 @@ TEST_F(DeleteTest, delete_on_disk) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - search_vectors.size());
 
@@ -192,7 +192,7 @@ TEST_F(DeleteTest, delete_on_disk) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -204,7 +204,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -217,7 +217,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
         xb.id_array_.push_back(i);
     }
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
@@ -243,7 +243,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         std::vector<int64_t> to_delete{pair.first};
-        stat = db_->DeleteVectors(GetTableName(), to_delete);
+        stat = db_->DeleteVectors(table_info.table_id_, to_delete);
         ASSERT_TRUE(stat.ok());
 
         stat = db_->Flush();
@@ -254,7 +254,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -267,7 +267,7 @@ TEST_F(DeleteTest, delete_with_index) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -280,7 +280,7 @@ TEST_F(DeleteTest, delete_with_index) {
         xb.id_array_.push_back(i);
     }
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
@@ -302,7 +302,7 @@ TEST_F(DeleteTest, delete_with_index) {
     milvus::engine::TableIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
-    stat = db_->CreateIndex(GetTableName(), index);
+    stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
@@ -313,13 +313,13 @@ TEST_F(DeleteTest, delete_with_index) {
     for (auto& kv : search_vectors) {
         ids_to_delete.emplace_back(kv.first);
     }
-    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
@@ -330,7 +330,84 @@ TEST_F(DeleteTest, delete_with_index) {
         std::vector<std::string> tags;
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
-        stat = db_->Query(dummy_context_, GetTableName(), tags, topk, nprobe, search, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
+        ASSERT_NE(result_ids[0], pair.first);
+        //        ASSERT_LT(result_distances[0], 1e-4);
+        ASSERT_GT(result_distances[0], 1);
+    }
+}
+
+TEST_F(DeleteTest, delete_multiple_times_with_index) {
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
+    auto stat = db_->CreateTable(table_info);
+
+    milvus::engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = table_info.table_id_;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    int64_t nb = 100000;
+    milvus::engine::VectorsData xb;
+    BuildVectors(nb, xb);
+
+    for (int64_t i = 0; i < nb; i++) {
+        xb.id_array_.push_back(i);
+    }
+
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
+    ASSERT_TRUE(stat.ok());
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int64_t> dis(0, nb - 1);
+
+    int64_t num_query = 10;
+    std::map<int64_t, milvus::engine::VectorsData> search_vectors;
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = dis(gen);
+        milvus::engine::VectorsData search;
+        search.vector_count_ = 1;
+        for (int64_t j = 0; j < TABLE_DIM; j++) {
+            search.float_data_.push_back(xb.float_data_[index * TABLE_DIM + j]);
+        }
+        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+    }
+
+    //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
+    milvus::engine::TableIndex index;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    index.extra_params_ = {{"nlist", 1}};
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+    int deleted = 0;
+    for (auto& pair : search_vectors) {
+        std::vector<int64_t> to_delete{pair.first};
+        stat = db_->DeleteVectors(table_info.table_id_, to_delete);
+        ASSERT_TRUE(stat.ok());
+
+        stat = db_->Flush();
+        ASSERT_TRUE(stat.ok());
+
+        ++deleted;
+
+        uint64_t row_count;
+        stat = db_->GetTableRowCount(table_info.table_id_, row_count);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(row_count, nb - deleted);
+
+        auto& search = pair.second;
+
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, {{"nprobe", nprobe}}, search, result_ids, result_distances);
+        ASSERT_TRUE(stat.ok());
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
@@ -342,7 +419,7 @@ TEST_F(DeleteTest, delete_single_vector) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -351,21 +428,21 @@ TEST_F(DeleteTest, delete_single_vector) {
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DeleteVectors(GetTableName(), xb.id_array_);
+    stat = db_->DeleteVectors(table_info.table_id_, xb.id_array_);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, 0);
 
@@ -375,7 +452,7 @@ TEST_F(DeleteTest, delete_single_vector) {
     std::vector<std::string> tags;
     milvus::engine::ResultIds result_ids;
     milvus::engine::ResultDistances result_distances;
-    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, xb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, xb, result_ids, result_distances);
     ASSERT_TRUE(result_ids.empty());
     ASSERT_TRUE(result_distances.empty());
     // ASSERT_EQ(result_ids[0], -1);
@@ -388,7 +465,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -397,7 +474,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     // stat = db_->Flush();
@@ -405,27 +482,27 @@ TEST_F(DeleteTest, delete_add_create_index) {
     milvus::engine::TableIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
-    stat = db_->CreateIndex(GetTableName(), index);
+    stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
-    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::VectorsData xb2 = xb;
     xb2.id_array_.clear();  // same vector, different id
 
-    stat = db_->InsertVectors(GetTableName(), "", xb2);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb2);
     ASSERT_TRUE(stat.ok());
 
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    stat = db_->CreateIndex(GetTableName(), index);
+    stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * 2 - 1);
 
@@ -439,14 +516,14 @@ TEST_F(DeleteTest, delete_add_create_index) {
     qb.float_data_.resize(TABLE_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
-    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, qb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, qb, result_ids, result_distances);
 
     ASSERT_EQ(result_ids[0], xb2.id_array_.front());
     ASSERT_LT(result_distances[0], 1e-4);
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, json_params, ids_to_delete.front(), result_ids,
+    stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, ids_to_delete.front(), result_ids,
                           result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
@@ -457,7 +534,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -466,7 +543,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -475,28 +552,28 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     // ASSERT_TRUE(stat.ok());
     // milvus::engine::TableIndex index;
     // index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    // stat = db_->CreateIndex(GetTableName(), index);
+    // stat = db_->CreateIndex(table_info.table_id_, index);
     // ASSERT_TRUE(stat.ok());
 
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
-    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::VectorsData xb2 = xb;
     xb2.id_array_.clear();  // same vector, different id
 
-    stat = db_->InsertVectors(GetTableName(), "", xb2);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb2);
     ASSERT_TRUE(stat.ok());
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
-    // stat = db_->CreateIndex(GetTableName(), index);
+    // stat = db_->CreateIndex(table_info.table_id_, index);
     // ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb * 2 - 1);
 
@@ -510,14 +587,14 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     qb.float_data_.resize(TABLE_DIM);
     qb.vector_count_ = 1;
     qb.id_array_.clear();
-    stat = db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, qb, result_ids, result_distances);
+    stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, qb, result_ids, result_distances);
 
     ASSERT_EQ(result_ids[0], xb2.id_array_.front());
     ASSERT_LT(result_distances[0], 1e-4);
 
     result_ids.clear();
     result_distances.clear();
-    stat = db_->QueryByID(dummy_context_, GetTableName(), tags, topk, nprobe, ids_to_delete.front(), result_ids,
+    stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, {{"nprobe", nprobe}}, ids_to_delete.front(), result_ids,
                           result_distances);
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
@@ -528,7 +605,7 @@ TEST_F(CompactTest, compact_basic) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -537,7 +614,7 @@ TEST_F(CompactTest, compact_basic) {
     milvus::engine::VectorsData xb;
     BuildVectors(nb, xb);
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
@@ -546,18 +623,18 @@ TEST_F(CompactTest, compact_basic) {
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
     ids_to_delete.emplace_back(xb.id_array_.back());
-    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - 2);
 
-    stat = db_->Compact(GetTableName());
+    stat = db_->Compact(table_info.table_id_);
     ASSERT_TRUE(stat.ok());
 
     const int topk = 1, nprobe = 1;
@@ -570,7 +647,7 @@ TEST_F(CompactTest, compact_basic) {
 
     for (auto& id : ids_to_delete) {
         stat =
-            db_->QueryByID(dummy_context_, GetTableName(), tags, topk, json_params, id, result_ids, result_distances);
+            db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, id, result_ids, result_distances);
         ASSERT_EQ(result_ids[0], -1);
         ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
     }
@@ -583,7 +660,7 @@ TEST_F(CompactTest, compact_with_index) {
     auto stat = db_->CreateTable(table_info);
 
     milvus::engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = GetTableName();
+    table_info_get.table_id_ = table_info.table_id_;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
@@ -597,7 +674,7 @@ TEST_F(CompactTest, compact_with_index) {
         xb.id_array_.emplace_back(i);
     }
 
-    stat = db_->InsertVectors(GetTableName(), "", xb);
+    stat = db_->InsertVectors(table_info.table_id_, "", xb);
     ASSERT_TRUE(stat.ok());
 
     std::random_device rd;
@@ -618,7 +695,7 @@ TEST_F(CompactTest, compact_with_index) {
 
     milvus::engine::TableIndex index;
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    stat = db_->CreateIndex(GetTableName(), index);
+    stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
@@ -628,25 +705,25 @@ TEST_F(CompactTest, compact_with_index) {
     for (auto& kv : search_vectors) {
         ids_to_delete.emplace_back(kv.first);
     }
-    stat = db_->DeleteVectors(GetTableName(), ids_to_delete);
+    stat = db_->DeleteVectors(table_info.table_id_, ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
-    stat = db_->Compact(GetTableName());
+    stat = db_->Compact(table_info.table_id_);
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->GetTableRowCount(GetTableName(), row_count);
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - ids_to_delete.size());
 
     milvus::engine::TableIndex table_index;
-    stat = db_->DescribeIndex(GetTableName(), table_index);
+    stat = db_->DescribeIndex(table_info.table_id_, table_index);
     ASSERT_TRUE(stat.ok());
     ASSERT_FLOAT_EQ(table_index.engine_type_, index.engine_type_);
 
@@ -660,7 +737,7 @@ TEST_F(CompactTest, compact_with_index) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
         stat =
-            db_->Query(dummy_context_, GetTableName(), tags, topk, json_params, search, result_ids, result_distances);
+            db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, search, result_ids, result_distances);
         ASSERT_NE(result_ids[0], pair.first);
         //        ASSERT_LT(result_distances[0], 1e-4);
         ASSERT_GT(result_distances[0], 1);
