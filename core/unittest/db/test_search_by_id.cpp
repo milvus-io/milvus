@@ -108,7 +108,8 @@ TEST_F(SearchByIdTest, basic) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, i, result_ids, result_distances);
+        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, i, result_ids,
+                              result_distances);
         ASSERT_EQ(result_ids[0], i);
         ASSERT_LT(result_distances[0], 1e-4);
     }
@@ -165,7 +166,8 @@ TEST_F(SearchByIdTest, with_index) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, i, result_ids, result_distances);
+        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, i, result_ids,
+                              result_distances);
         ASSERT_EQ(result_ids[0], i);
         ASSERT_LT(result_distances[0], 1e-3);
     }
@@ -225,7 +227,8 @@ TEST_F(SearchByIdTest, with_delete) {
         milvus::engine::ResultIds result_ids;
         milvus::engine::ResultDistances result_distances;
 
-        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, i, result_ids, result_distances);
+        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, i, result_ids,
+                              result_distances);
         ASSERT_EQ(result_ids[0], -1);
         ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
     }
@@ -280,8 +283,8 @@ TEST_F(GetVectorByIdTest, basic) {
         stat = db_->GetVectorByID(table_info.table_id_, id, vector);
         ASSERT_TRUE(stat.ok());
 
-        stat =
-            db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, vector, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, vector, result_ids,
+                          result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
         ASSERT_LT(result_distances[0], 1e-4);
@@ -343,8 +346,8 @@ TEST_F(GetVectorByIdTest, with_index) {
         stat = db_->GetVectorByID(table_info.table_id_, id, vector);
         ASSERT_TRUE(stat.ok());
 
-        stat =
-            db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, vector, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, vector, result_ids,
+                          result_distances);
         ASSERT_EQ(result_ids[0], id);
         ASSERT_LT(result_distances[0], 1e-3);
     }
@@ -483,8 +486,8 @@ TEST_F(SearchByIdTest, BINARY) {
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(vector.vector_count_, 1);
 
-        stat =
-            db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, vector, result_ids, result_distances);
+        stat = db_->Query(dummy_context_, table_info.table_id_, tags, topk, json_params, vector, result_ids,
+                          result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
         ASSERT_LT(result_distances[0], 1e-4);
@@ -493,8 +496,8 @@ TEST_F(SearchByIdTest, BINARY) {
         result_ids.clear();
         result_distances.clear();
 
-        stat =
-            db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, id, result_ids, result_distances);
+        stat = db_->QueryByID(dummy_context_, table_info.table_id_, tags, topk, json_params, id, result_ids,
+                              result_distances);
         ASSERT_TRUE(stat.ok());
         ASSERT_EQ(result_ids[0], id);
         ASSERT_LT(result_distances[0], 1e-4);
