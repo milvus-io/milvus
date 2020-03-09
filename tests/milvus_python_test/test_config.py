@@ -1115,11 +1115,7 @@ class TestServerConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        status, web_port = connect.get_config("server_config", "web_port")
         for valid_port in [1025, 65534, 12345, "19530"]:
-            if str(web_port) == str(valid_port):
-                # cannot be the same
-                continue
             status, reply = connect.set_config("server_config", "port", valid_port)
             assert status.OK()
             status, config_value = connect.get_config("server_config", "port")
@@ -1129,16 +1125,13 @@ class TestServerConfig:
     def test_set_port_invalid(self, connect, table):
         '''
         target: set port
-        method: call set_config with port number out of range(1024, 65535), or same as web_port number
+        method: call set_config with port number out of range(1024, 65535)
         expected: status not ok
         '''
-        for invalid_port in [1024, 65535, "0", "True", "19530 ", "10000000000"]:
+        for invalid_port in [1024, 65535, "0", "True", "19530 ", "100000"]:
+            logging.getLogger().info(invalid_port)
             status, reply = connect.set_config("server_config", "port", invalid_port)
             assert not status.OK()
-        status, web_port = connect.get_config("server_config", "web_port")
-        logging.getLogger().info(web_port)
-        status, reply = connect.set_config("server_config", "port", web_port)
-        assert not status.OK()
 
     def test_set_deploy_mode_valid(self, connect, table):
         '''
@@ -1185,7 +1178,7 @@ class TestServerConfig:
         method: call set_config with invalid time_zone
         expected: status not ok
         '''
-        for invalid_time_zone in ["utc+8", "UTC8", "UTC-13", "UTC+15", "UTC+8:30"]:
+        for invalid_time_zone in ["utc+8", "UTC++8", "GMT+8"]:
             logging.getLogger().info(invalid_time_zone)
             status, reply = connect.set_config("server_config", "time_zone", invalid_time_zone)
             assert not status.OK()
@@ -1196,10 +1189,7 @@ class TestServerConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        status, port = connect.get_config("server_config", "port")
-        for valid_web_port in [1025, 65534, 19121, "19530"]:
-            if str(valid_web_port) == str(port):
-                continue
+        for valid_web_port in [1025, 65534, "12345", 19121]:
             status, reply = connect.set_config("server_config", "web_port", valid_web_port)
             assert status.OK()
             status, config_value = connect.get_config("server_config", "web_port")
@@ -1209,16 +1199,12 @@ class TestServerConfig:
     def test_set_web_port_invalid(self, connect, table):
         '''
         target: set web_port
-        method: call set_config with web_port number out of range(1024, 65535), or same as port number
+        method: call set_config with web_port number out of range(1024, 65535)
         expected: status not ok
         '''
-        for invalid_web_port in [1024, 65535, "0", "True", "19530 ", "10000000000"]:
+        for invalid_web_port in [1024, 65535, "0", "True", "19530 ", "1000000"]:
             status, reply = connect.set_config("server_config", "web_port", invalid_web_port)
             assert not status.OK()
-        status, port = connect.get_config("server_config", "port")
-        logging.getLogger().info(port)
-        status, reply = connect.set_config("server_config", "web_port", port)
-        assert not status.OK()
 
 
 class TestDBConfig:
@@ -1584,7 +1570,7 @@ class TestMetricConfig:
         method: call set_config with port number out of range(1024, 65535), or same as web_port number
         expected: status not ok
         '''
-        for invalid_port in [1024, 65535, "0", "True", "19530 ", "10000000000"]:
+        for invalid_port in [1024, 65535, "0", "True", "19530 ", "100000"]:
             status, reply = connect.set_config("metric_config", "port", invalid_port)
             assert not status.OK()
 
