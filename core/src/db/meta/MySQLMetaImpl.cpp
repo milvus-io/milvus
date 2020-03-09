@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
