@@ -110,8 +110,8 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, TableF
         if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
             file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
             file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                         : EngineType::FAISS_IDMAP;
+            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                : EngineType::FAISS_IDMAP;
         } else {
             engine_type = (EngineType)file->engine_type_;
         }
