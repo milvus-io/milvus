@@ -12,6 +12,7 @@
 #include "scheduler/task/BuildIndexTask.h"
 
 #include <fiu-local.h>
+
 #include <memory>
 #include <string>
 #include <thread>
@@ -206,7 +207,7 @@ XBuildIndexTask::Execute() {
         // step 6: update meta
         table_file.file_type_ = engine::meta::TableFileSchema::INDEX;
         table_file.file_size_ = index->PhysicalSize();
-        table_file.row_count_ = index->Count();
+        table_file.row_count_ = file_->row_count_;  // index->Count();
 
         auto origin_file = *file_;
         origin_file.file_type_ = engine::meta::TableFileSchema::BACKUP;
