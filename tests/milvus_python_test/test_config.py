@@ -294,7 +294,7 @@ class TestCacheConfig:
         status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_total + 1)
         assert not status.OK()
 
-    @pytest.skip(reason="Still needs discussion")
+    @pytest.mark.skip(reason="Still needs discussion")
     def test_set_cache_config_out_of_memory_value_B(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
@@ -315,7 +315,7 @@ class TestCacheConfig:
         status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_available - int(cpu_cache_capacity) + 1)
         assert not status.OK()
 
-    @pytest.skip(reason="Still needs discussion")
+    @pytest.mark.skip(reason="Still needs discussion")
     def test_set_cache_config_out_of_memory_value_C(self, connect, collection):
         '''
         target: set cpu_cache_capacity / insert_buffer_size to be out-of-memory
