@@ -674,15 +674,15 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(SystemOp)
 
-    ENDPOINT("PUT", "/system/{Op}", SystemOp, PATH(String, Op), BODY_STRING(String, body_str)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + Op->std_str() + "\'");
+    ENDPOINT("PUT", "/system/{op}", SystemOp, PATH(String, op), BODY_STRING(String, body_str)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + op->std_str() + "\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         String response_str;
-        auto status_dto = handler.SystemOp(Op, body_str, response_str);
+        auto status_dto = handler.SystemOp(op, body_str, response_str);
 
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {
