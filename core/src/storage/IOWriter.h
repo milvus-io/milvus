@@ -18,9 +18,8 @@ namespace storage {
 
 class IOWriter {
  public:
-    explicit IOWriter(const std::string& name) : name_(name), len_(0) {
-    }
-    ~IOWriter() = default;
+    virtual void
+    open(const std::string& name) = 0;
 
     virtual void
     write(void* ptr, size_t size) = 0;
@@ -28,9 +27,8 @@ class IOWriter {
     virtual size_t
     length() = 0;
 
- public:
-    std::string name_;
-    size_t len_;
+    virtual void
+    close() = 0;
 };
 
 }  // namespace storage

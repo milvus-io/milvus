@@ -20,8 +20,20 @@ namespace storage {
 
 class DiskIOWriter : public IOWriter {
  public:
-    explicit DiskIOWriter(const std::string& name);
-    ~DiskIOWriter();
+    DiskIOWriter() = default;
+    ~DiskIOWriter() = default;
+
+    // No copy and move
+    DiskIOWriter(const DiskIOWriter&) = delete;
+    DiskIOWriter(DiskIOWriter&&) = delete;
+
+    DiskIOWriter&
+    operator=(const DiskIOWriter&) = delete;
+    DiskIOWriter&
+    operator=(DiskIOWriter&&) = delete;
+
+    void
+    open(const std::string& name) override;
 
     void
     write(void* ptr, size_t size) override;
@@ -29,7 +41,12 @@ class DiskIOWriter : public IOWriter {
     size_t
     length() override;
 
+    void
+    close() override;
+
  public:
+    std::string name_;
+    size_t len_;
     std::fstream fs_;
 };
 

@@ -14,12 +14,10 @@
 namespace milvus {
 namespace storage {
 
-DiskIOReader::DiskIOReader(const std::string& name) : IOReader(name) {
+void
+DiskIOReader::open(const std::string& name) {
+    name_ = name;
     fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
-}
-
-DiskIOReader::~DiskIOReader() {
-    fs_.close();
 }
 
 void
@@ -35,7 +33,15 @@ DiskIOReader::seekg(size_t pos) {
 size_t
 DiskIOReader::length() {
     fs_.seekg(0, fs_.end);
-    return fs_.tellg();
+    size_t len = fs_.tellg();
+    fs_.seekg(0, fs_.beg);
+    return len;
 }
+
+void
+DiskIOReader::close() {
+    fs_.close();
+}
+
 }  // namespace storage
 }  // namespace milvus
