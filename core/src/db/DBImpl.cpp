@@ -739,7 +739,7 @@ DBImpl::Compact(const std::string& table_id) {
         ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
     }
 
-    ENGINE_LOG_ERROR << "Updating meta after compaction...";
+    ENGINE_LOG_DEBUG << "Updating meta after compaction...";
 
     /*
     // Drop index again, in case some files were in the index building process during compacting
