@@ -118,12 +118,12 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
-        //        printf("%llu", res_ids[i]);
+        //        printf("%llu", p_id[i]);
         //        printf("\n");
-        //        printf("%.6f", res_dis[i]);
+        //        printf("%.6f", p_dist[i]);
         //        printf("\n");
-        //        ss_res_id << res_ids[i] << " ";
-        //        ss_res_dist << res_dis[i] << " ";
+        //        ss_res_id << p_id[i] << " ";
+        //        ss_res_dist << p_dist[i] << " ";
         //    }
         //    std::cout << std::endl << "after search: " << std::endl;
         //    std::cout << ss_res_id.str() << std::endl;
