@@ -393,7 +393,7 @@ class TestGetVectorIdIngalid(object):
             status = connect.get_vector_by_id(collection, invalid_id)
 
 
-class TestcollectionNameInvalid(object):
+class TestCollectionNameInvalid(object):
     """
     Test adding vectors with invalid collection names
     """

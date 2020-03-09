@@ -90,118 +90,118 @@ def milvus(request):
 
 
 @pytest.fixture(scope="function")
-def table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.L2}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.drop_collection(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name
 
 
 @pytest.fixture(scope="function")
-def ip_table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def ip_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.IP}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.drop_collection(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name
 
 
 @pytest.fixture(scope="function")
-def jac_table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def jac_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.JACCARD}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.drop_collection(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name
 
 @pytest.fixture(scope="function")
-def ham_table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def ham_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.HAMMING}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.drop_collection(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name
 
 @pytest.fixture(scope="function")
-def tanimoto_table(request, connect):
-    ori_table_name = getattr(request.module, "table_id", "test")
-    table_name = gen_unique_str(ori_table_name)
+def tanimoto_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
     dim = getattr(request.module, "dim", "128")
-    param = {'table_name': table_name,
+    param = {'collection_name': collection_name,
              'dimension': dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.TANIMOTO}
-    status = connect.create_table(param)
+    status = connect.create_collection(param)
     # logging.getLogger().info(status)
     if not status.OK():
-        pytest.exit("Table can not be created, exit pytest ...")
+        pytest.exit("collection can not be created, exit pytest ...")
 
     def teardown():
-        status, table_names = connect.show_tables()
-        for table_name in table_names:
-            connect.drop_collection(table_name)
+        status, collection_names = connect.show_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name)
 
     request.addfinalizer(teardown)
 
-    return table_name
+    return collection_name

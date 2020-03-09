@@ -28,7 +28,7 @@ class TestCacheConfig:
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
-        reset configs so the tests are scollection
+        reset configs so the tests are stable
         '''
         status, reply = connect.set_config("cache_config", "cpu_cache_capacity", 4)
         assert status.OK()
@@ -300,8 +300,10 @@ class TestCacheConfig:
         logging.getLogger().info(mem_available)
         status, cpu_cache_capacity = connect.get_config("cache_config", "cpu_cache_capacity")
         assert status.OK()
+        logging.getLogger().info(cpu_cache_capacity)
         status, insert_buffer_size = connect.get_config("cache_config", "insert_buffer_size")
         assert status.OK()
+        logging.getLogger().info(insert_buffer_size)
         status, reply = connect.set_config("cache_config", "cpu_cache_capacity", mem_available - int(insert_buffer_size) + 1)
         assert not status.OK()
         status, reply = connect.set_config("cache_config", "insert_buffer_size", mem_available - int(cpu_cache_capacity) + 1)
@@ -502,6 +504,9 @@ class TestEngineConfig:
             status, config_value = connect.get_config("engine_config", "use_blas_threshold")
             assert status.OK()
             assert config_value == str(i * 100)
+        # reset
+        status, reply = connect.set_config("engine_config", "use_blas_threshold", 1100)
+        assert status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_search_threshold_invalid_parent_key(self, connect, collection):
@@ -576,7 +581,7 @@ class TestGPUResourceConfig:
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
-        reset configs so the tests are scollection
+        reset configs so the tests are stable
         '''
         status, reply = connect.set_config("gpu_resource_config", "enable", "true")
         assert status.OK()
@@ -1139,7 +1144,7 @@ class TestServerConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_deploy_mode in ["cluster_readonly", "cluster_wricollection", "single"]:
+        for valid_deploy_mode in ["cluster_readonly", "cluster_writable", "single"]:
             status, reply = connect.set_config("server_config", "deploy_mode", valid_deploy_mode)
             assert status.OK()
             status, config_value = connect.get_config("server_config", "deploy_mode")
@@ -1236,25 +1241,25 @@ class TestDBConfig:
         assert status.OK()
 
     @pytest.mark.level(2)
-    def test_get_preload_collection_invalid_child_key(self, connect, collection):
+    def test_get_preload_table_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
-        method: call get_config without child_key: preload_collection
+        method: call get_config without child_key: preload_table
         expected: status not ok
         '''
-        invalid_configs = ["preloadcollection", "preload_collection "]
+        invalid_configs = ["preloadtable", "preload_table "]
         for config in invalid_configs:
             status, config_value = connect.get_config("db_config", config)
             assert not status.OK()
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_preload_collection_valid(self, connect, collection):
+    def test_get_preload_table_valid(self, connect, collection):
         '''
-        target: get preload_collection
+        target: get preload_table
         method: call get_config correctly
         expected: status ok
         '''
-        status, config_value = connect.get_config("db_config", "preload_collection")
+        status, config_value = connect.get_config("db_config", "preload_table")
         assert status.OK()
 
     @pytest.mark.level(2)
@@ -1308,15 +1313,15 @@ class TestDBConfig:
         assert status.OK()
         assert config_value == 'sqlite://:@:/'
 
-    def test_set_preload_collection_valid(self, connect, collection):
+    def test_set_preload_table_valid(self, connect, collection):
         '''
-        target: set preload_collection
+        target: set preload_table
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        status, reply = connect.set_config("db_config", "preload_collection", "")
+        status, reply = connect.set_config("db_config", "preload_table", "")
         assert status.OK()
-        status, config_value = connect.get_config("db_config", "preload_collection")
+        status, config_value = connect.get_config("db_config", "preload_table")
         assert status.OK()
         assert config_value == ""
 

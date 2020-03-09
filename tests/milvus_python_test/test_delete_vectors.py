@@ -538,7 +538,7 @@ class TestDeleteIdsIngalid(object):
             status = connect.delete_by_id(collection, [1, invalid_id])
 
 
-class TestcollectionNameInvalid(object):
+class TestCollectionNameInvalid(object):
     """
     Test adding vectors with invalid collection names
     """
