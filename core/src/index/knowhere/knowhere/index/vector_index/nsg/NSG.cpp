@@ -728,15 +728,6 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
         }
     }
     rc.RecordSection("merge");
-
-    // ProfilerStart("xx.prof");
-    // std::vector<Neighbor> resset;
-    // GetNeighbors(query, resset, nsg, &params);
-    // for (int i = 0; i < k; ++i) {
-    //    ids[i] = resset[i].id;
-    // dist[i] = resset[i].distance;
-    //}
-    // ProfilerStop();
 }
 
 void
