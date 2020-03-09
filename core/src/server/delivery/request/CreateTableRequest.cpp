@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreateTableRequest.h"
+#include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/Log.h"
@@ -78,7 +79,7 @@ CreateTableRequest::OnExecute() {
         table_info.metric_type_ = metric_type_;
 
         // some metric type only support binary vector, adapt the index type
-        if (ValidationUtil::IsBinaryMetricType(metric_type_)) {
+        if (engine::utils::IsBinaryMetricType(metric_type_)) {
             if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
                 table_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
             } else if (table_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {

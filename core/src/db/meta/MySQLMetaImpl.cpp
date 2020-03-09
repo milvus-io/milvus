@@ -1326,8 +1326,12 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
             }
 
             // set table index type to raw
-            dropTableIndexQuery << "UPDATE " << META_TABLES
-                                << " SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE)
+            dropTableIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
+                                << " (CASE"
+                                << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
+                                << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
+                                << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
+                                << (int32_t)EngineType::FAISS_IDMAP << " END)"
                                 << " , index_params = '{}'"
                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 

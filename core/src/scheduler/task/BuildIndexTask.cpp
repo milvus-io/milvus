@@ -18,6 +18,7 @@
 #include <thread>
 #include <utility>
 
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
@@ -36,8 +37,8 @@ XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
         if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
             file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
             file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                         : EngineType::FAISS_IDMAP;
+            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                : EngineType::FAISS_IDMAP;
         } else {
             engine_type = (EngineType)file->engine_type_;
         }
