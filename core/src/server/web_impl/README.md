@@ -635,7 +635,7 @@ Updates the index type and nlist of a collection.
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
 | `index_type`     | The type of indexing method to query the collection. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT".  | No   |
-| `params`     | The extra params of indexing method to query the collection. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT".  | No   |
+| `params`     | The extra params of indexing method to query the collection. Please refer to - [Index params](#index_param) for detailed introduction of supported indexes.  | No   |
 
 ##### Query Parameters
 
@@ -1082,7 +1082,7 @@ $ curl -X GET "http://192.168.1.65:19121/collections/test_collection/segments/15
 | `tags`    |  Tags of partitions that you need to search. You do not have to specify this value if the collection is not partitioned or you wish to search the whole collection.   |  No |
 | `file_ids`    |  IDs of the vector files. You do not have to specify this value if you do not use Milvus in distributed scenarios. Also, if you assign a value to `file_ids`, the value of `tags` is ignored.    |   No  |
 | `vectors`  |  Vectors to query.  |  Yes  |
-| `params`  |  Extra params for search.  |  Yes  |
+| `params`  |  Extra params for search. Please refer to [Search param](#index_param) to get more detail information.  |  Yes  |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
 
@@ -1458,6 +1458,42 @@ $ curl -X PUT "http://192.168.1.65:19121/system/task" -H "accept: application/js
 ```json
 {"code": 0, "message": "success"}
 ```
+
+## Index param
+
+For each index type, it has specific index param and searach param.
+
+<table>
+<tr><th>Index type</th><th>Create index param</th><th>Search param</th></tr>
+<tr>
+ <td> IVFFLAT</td>
+ <td><pre><code>{"nlist": $int}</code></pre></td>
+ <td><pre><code>{"nprobe": $int}</code></pre></td>
+</tr>
+<tr>
+ <td> IVFPQ</td>
+ <td><pre><code>{"m": $int, "nlist": $int}</code></pre></td>
+ <td><pre><code>{"nprobe": $int}</code></pre></td>
+</tr>
+<tr>
+ <td> IVFSQ8</td>
+ <td><pre><code>{"nlist": $int}</code></pre></td>
+ <td><pre><code>{"nprobe": $int}</code></pre></td>
+</tr>
+<tr>
+ <td> IVFSQ8H</td>
+ <td><pre><code>{"nlist": $int}</code></pre></td>
+ <td><pre><code>{"nprobe": $int}</code></pre></td>
+</tr>
+<tr>
+ <td> HNSW</td>
+ <td><pre><code>{"M": $int, "efConstruction": $int}</code></pre></td>
+ <td><pre><code>{"ef": $int}</code></pre></td>
+</tr>
+</table>
+
+You can find more details about parameters above [here](https://github.com/yamasite/docs/blob/v0.7.0/site/zh-CN/guides/index.md)
+
 
 ## Error Codes
 
