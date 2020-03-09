@@ -130,7 +130,7 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
-    if (::write(del_fd, deleted_docs_list.data(), new_num_bytes) == -1) {
+    if (::write(del_fd, deleted_docs_list.data(), sizeof(segment::offset_t) * deleted_docs->GetSize()) == -1) {
         std::string err_msg = "Failed to write to file" + temp_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
