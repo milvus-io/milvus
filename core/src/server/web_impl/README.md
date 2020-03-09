@@ -471,6 +471,7 @@ Gets all information about a table by name.
 | Parameter  | Description  |  Required? |
 |-----------------|---|------|
 | `table_name`     | Name of the table.   | Yes   |
+| `info`     | Type of information to acquire. `info` must either be empty or `stat`. When `info` is empty, Milvus returns table name, dimension, index file size, metric type, offset, index type, and nlist of the table. When `info` is `stat`, Milvus returns the table offset, partition status, and segment status.  | No   |
 
 
 #### Response
@@ -1089,7 +1090,7 @@ $ curl -X GET "http://192.168.1.65:19121/system/version" -H "accept: application
 ##### Response
 
 ```json
-{"reply":"0.6.0"}
+{"reply":"0.7.0"}
 ```
 
 ## Error Codes
