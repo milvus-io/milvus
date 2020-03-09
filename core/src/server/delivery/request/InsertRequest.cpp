@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/InsertRequest.h"
+#include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -115,7 +116,7 @@ InsertRequest::OnExecute() {
 #endif
         // step 4: some metric type doesn't support float vectors
         if (!vectors_data_.float_data_.empty()) {  // insert float vectors
-            if (ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
+            if (engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support float vectors.");
             }
 
@@ -131,7 +132,7 @@ InsertRequest::OnExecute() {
                               "The vector dimension must be equal to the table dimension.");
             }
         } else if (!vectors_data_.binary_data_.empty()) {  // insert binary vectors
-            if (!ValidationUtil::IsBinaryMetricType(table_schema.metric_type_)) {
+            if (!engine::utils::IsBinaryMetricType(table_schema.metric_type_)) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Table metric type doesn't support binary vectors.");
             }
 

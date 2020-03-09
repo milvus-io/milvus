@@ -804,8 +804,18 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
                                        c(&TableFileSchema::file_type_) == (int)TableFileSchema::BACKUP));
 
         // set table index type to raw
+        auto groups = ConnectorPtr->select(columns(&TableSchema::metric_type_),
+                                           where(c(&TableSchema::table_id_) == table_id));
+
+        int32_t raw_engine_type = DEFAULT_ENGINE_TYPE;
+        if (groups.size() == 1) {
+            int32_t metric_type_ = std::get<0>(groups[0]);
+            if (engine::utils::IsBinaryMetricType(metric_type_)) {
+                raw_engine_type = (int32_t)EngineType::FAISS_BIN_IDMAP;
+            }
+        }
         ConnectorPtr->update_all(
-            set(c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE, c(&TableSchema::index_params_) = "{}"),
+            set(c(&TableSchema::engine_type_) = raw_engine_type, c(&TableSchema::index_params_) = "{}"),
             where(c(&TableSchema::table_id_) == table_id));
 
         ENGINE_LOG_DEBUG << "Successfully drop table index, table id = " << table_id;
@@ -1189,29 +1199,21 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                 file_schema.metric_type_ = table_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
-                    case (int)TableFileSchema::RAW:
-                        ++raw_count;
+                    case (int)TableFileSchema::RAW:++raw_count;
                         break;
-                    case (int)TableFileSchema::NEW:
-                        ++new_count;
+                    case (int)TableFileSchema::NEW:++new_count;
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:
-                        ++new_merge_count;
+                    case (int)TableFileSchema::NEW_MERGE:++new_merge_count;
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:
-                        ++new_index_count;
+                    case (int)TableFileSchema::NEW_INDEX:++new_index_count;
                         break;
-                    case (int)TableFileSchema::TO_INDEX:
-                        ++to_index_count;
+                    case (int)TableFileSchema::TO_INDEX:++to_index_count;
                         break;
-                    case (int)TableFileSchema::INDEX:
-                        ++index_count;
+                    case (int)TableFileSchema::INDEX:++index_count;
                         break;
-                    case (int)TableFileSchema::BACKUP:
-                        ++backup_count;
+                    case (int)TableFileSchema::BACKUP:++backup_count;
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
 
                 auto status = utils::GetTableFilePath(options_, file_schema);
@@ -1225,29 +1227,23 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
             std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:
-                        msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)TableFileSchema::NEW:
-                        msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:
-                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
+                    case (int)TableFileSchema::NEW_MERGE:msg = msg + " new_merge files:"
+                                                               + std::to_string(new_merge_count);
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:
-                        msg = msg + " new_index files:" + std::to_string(new_index_count);
+                    case (int)TableFileSchema::NEW_INDEX:msg = msg + " new_index files:"
+                                                               + std::to_string(new_index_count);
                         break;
-                    case (int)TableFileSchema::TO_INDEX:
-                        msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)TableFileSchema::INDEX:
-                        msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)TableFileSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)TableFileSchema::BACKUP:
-                        msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
