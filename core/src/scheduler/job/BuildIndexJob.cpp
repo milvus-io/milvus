@@ -10,9 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/BuildIndexJob.h"
-#include "utils/Log.h"
 
 #include <utility>
+
+#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
@@ -34,7 +35,8 @@ BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr& to_index_
         return false;
     }
 
-    SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_;
+    SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_
+                     << ", location: " << to_index_file->location_;
 
     to_index_files_[to_index_file->id_] = to_index_file;
 }
