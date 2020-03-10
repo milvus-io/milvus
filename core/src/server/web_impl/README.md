@@ -391,7 +391,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections?offset=0&page_size=1" -H "acce
       "metric_type": "L2",
       "count": 0,
       "index": "FLAT",
-      "nlist": 16384
+      "index_params": {"nlist":  4096}
     }
   ],
   "count": 58
