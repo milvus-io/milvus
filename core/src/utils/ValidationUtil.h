@@ -43,17 +43,11 @@ class ValidationUtil {
     ValidateSearchParams(const milvus::json& search_params, const engine::meta::TableSchema& table_schema,
                          int64_t topk);
 
-    static bool
-    IsBinaryIndexType(int32_t index_type);
-
     static Status
     ValidateTableIndexFileSize(int64_t index_file_size);
 
     static Status
     ValidateTableIndexMetricType(int32_t metric_type);
-
-    static bool
-    IsBinaryMetricType(int32_t metric_type);
 
     static Status
     ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);

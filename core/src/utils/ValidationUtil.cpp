@@ -264,12 +264,6 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const en
     return Status::OK();
 }
 
-bool
-ValidationUtil::IsBinaryIndexType(int32_t index_type) {
-    return (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP)) ||
-           (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT));
-}
-
 Status
 ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
@@ -292,13 +286,6 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
     return Status::OK();
-}
-
-bool
-ValidationUtil::IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == static_cast<int32_t>(engine::MetricType::HAMMING)) ||
-           (metric_type == static_cast<int32_t>(engine::MetricType::JACCARD)) ||
-           (metric_type == static_cast<int32_t>(engine::MetricType::TANIMOTO));
 }
 
 Status
