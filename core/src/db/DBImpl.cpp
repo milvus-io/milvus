@@ -687,7 +687,10 @@ DBImpl::Compact(const std::string& table_id) {
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
 
     Status compact_status;
-    for (auto& file : files_to_compact) {
+    for (meta::TableFilesSchema::iterator iter = files_to_compact.begin(); iter != files_to_compact.end();) {
+        meta::TableFileSchema file = *iter;
+        iter = files_to_compact.erase(iter);
+
         // Check if the segment needs compacting
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
@@ -724,6 +727,8 @@ DBImpl::Compact(const std::string& table_id) {
             compact_status = status;
             break;  // meta error, could not go on
         }
+
+        OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
     }
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
