@@ -51,6 +51,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1574 Set all existing bitset in cache when applying deletes
 -   \#1577 Row count incorrect if delete vectors then create index
 -   \#1580 Old segment folder not removed after merge/compact if create_index is called before adding data
+-   \#1590 Server down caused by failure to write file during concurrent mixed operations
 
 ## Feature
 -   \#216 Add CLI to get server info
