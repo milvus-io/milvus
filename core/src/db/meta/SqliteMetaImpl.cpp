@@ -1231,11 +1231,13 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                         break;
                     case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:msg = msg + " new_merge files:"
-                                                               + std::to_string(new_merge_count);
+                    case (int)TableFileSchema::NEW_MERGE:
+                        msg = msg + " new_merge files:"
+                              + std::to_string(new_merge_count);
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:msg = msg + " new_index files:"
-                                                               + std::to_string(new_index_count);
+                    case (int)TableFileSchema::NEW_INDEX:
+                        msg = msg + " new_index files:"
+                              + std::to_string(new_index_count);
                         break;
                     case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
@@ -1360,6 +1362,7 @@ Status
 SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
+    std::map<std::string, TableFileSchema> segment_ids;
 
     // remove to_delete files
     try {
@@ -1409,23 +1412,16 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
-                    // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
-                    // Else, we can only delete the single file
-                    // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
-                    if (utils::IsRawIndexType(table_file.engine_type_)) {
-                        utils::DeleteSegment(options_, table_file);
-                        std::string segment_dir;
-                        utils::GetParentPath(table_file.location_, segment_dir);
-                        ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
-                    } else {
-                        utils::DeleteTableFilePath(options_, table_file);
-                        ENGINE_LOG_DEBUG << "Remove table file: " << table_file.location_;
-                    }
-
                     // delete file from meta
                     ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
+                    // delete file from disk storage
+                    utils::DeleteTableFilePath(options_, table_file);
+
+                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_ << " location:"
+                                     << table_file.location_;
                     table_ids.insert(table_file.table_id_);
+                    segment_ids.insert(std::make_pair(table_file.segment_id_, table_file));
 
                     ++clean_files;
                 }
@@ -1495,6 +1491,32 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
 
         if (remove_tables) {
             ENGINE_LOG_DEBUG << "Remove " << remove_tables << " tables folder";
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when delete table folder", e.what());
+    }
+
+    // remove deleted segment folder
+    // don't remove segment folder until all its tablefiles has been deleted
+    try {
+        fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveSegmentFolder_ThrowException", throw std::exception());
+        server::MetricCollector metric;
+
+        int64_t remove_segments = 0;
+        for (auto& segment_id : segment_ids) {
+            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_),
+                                                 where(c(&TableFileSchema::segment_id_) == segment_id.first));
+            if (selected.size() == 0) {
+                utils::DeleteSegment(options_, segment_id.second);
+                std::string segment_dir;
+                utils::GetParentPath(segment_id.second.location_, segment_dir);
+                ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
+                ++remove_segments;
+            }
+        }
+
+        if (remove_segments > 0) {
+            ENGINE_LOG_DEBUG << "Remove " << remove_segments << " segments folder";
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when delete table folder", e.what());
