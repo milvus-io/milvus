@@ -671,26 +671,6 @@ DBImpl::Compact(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
 
-    /*
-        // Save table index
-        TableIndex table_index;
-        status = DescribeIndex(table_id, table_index);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // Drop all index
-        status = DropIndex(table_id);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // Then update table index to the previous index
-        status = UpdateTableIndexRecursively(table_id, table_index);
-        if (!status.ok()) {
-            return status;
-        }
-    */
     // Get files to compact from meta.
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
@@ -706,9 +686,11 @@ DBImpl::Compact(const std::string& table_id) {
 
     OngoingFileChecker::GetInstance().MarkOngoingFiles(files_to_compact);
 
-    meta::TableFilesSchema files_to_update;
     Status compact_status;
-    for (auto& file : files_to_compact) {
+    for (meta::TableFilesSchema::iterator iter = files_to_compact.begin(); iter != files_to_compact.end();) {
+        meta::TableFileSchema file = *iter;
+        iter = files_to_compact.erase(iter);
+
         // Check if the segment needs compacting
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
@@ -719,52 +701,42 @@ DBImpl::Compact(const std::string& table_id) {
         if (!status.ok()) {
             std::string msg = "Failed to load deleted_docs from " + segment_dir;
             ENGINE_LOG_ERROR << msg;
-            return Status(DB_ERROR, msg);
+            OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+            continue;  // skip this file and try compact next one
         }
 
+        meta::TableFilesSchema files_to_update;
         if (deleted_docs->GetSize() != 0) {
             compact_status = CompactFile(table_id, file, files_to_update);
 
             if (!compact_status.ok()) {
                 ENGINE_LOG_ERROR << "Compact failed for segment " << file.segment_id_ << ": "
                                  << compact_status.message();
-                break;
+                OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+                continue;  // skip this file and try compact next one
             }
         } else {
+            OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
             ENGINE_LOG_DEBUG << "Segment " << file.segment_id_ << " has no deleted data. No need to compact";
+            continue;  // skip this file and try compact next one
+        }
+
+        ENGINE_LOG_DEBUG << "Updating meta after compaction...";
+        status = meta_ptr_->UpdateTableFiles(files_to_update);
+        OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
+        if (!status.ok()) {
+            compact_status = status;
+            break;  // meta error, could not go on
         }
     }
+
+    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
 
     if (compact_status.ok()) {
         ENGINE_LOG_DEBUG << "Finished compacting table: " << table_id;
     }
 
-    ENGINE_LOG_DEBUG << "Updating meta after compaction...";
-
-    /*
-    // Drop index again, in case some files were in the index building process during compacting
-    status = DropIndex(table_id);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // Update index
-    status = UpdateTableIndexRecursively(table_id, table_index);
-    if (!status.ok()) {
-        return status;
-    }
-     */
-
-    status = meta_ptr_->UpdateTableFiles(files_to_update);
-    if (!status.ok()) {
-        return status;
-    }
-
-    OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
-
-    ENGINE_LOG_DEBUG << "Finished updating meta after compaction";
-
-    return status;
+    return compact_status;
 }
 
 Status
