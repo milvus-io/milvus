@@ -55,6 +55,8 @@ class StaticDiscovery(object):
             status, group = self.readonly_topo.create(name=name)
             if status == StatusType.OK:
                 status, pool = group.create(name=name, uri=uri)
+            if status not in (StatusType.OK, StatusType.DUPLICATED):
+                ok = False
         except ConnectionConnectError as exc:
             ok = False
             logger.error('Connection error to: {}'.format(addr))

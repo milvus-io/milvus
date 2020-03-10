@@ -25,6 +25,7 @@ class StatusType(enum.Enum):
     OK = 1
     DUPLICATED = 2
     ADD_ERROR = 3
+    VERSION_ERROR = 4
 
 
 class TopoGroup:
@@ -39,10 +40,16 @@ class TopoGroup:
     def on_added(self, topo_object):
         return True
 
+    def on_pre_add(self, topo_object):
+        return True
+
     def _add_no_lock(self, topo_object):
         if topo_object.name in self.items:
             return StatusType.DUPLICATED
         logger.info('Adding topo_object \"{}\" into group \"{}\"'.format(topo_object, self.name))
+        ok = self.on_pre_add(topo_object)
+        if not ok:
+            return StatusType.VERSION_ERROR
         self.items[topo_object.name] = topo_object
         ok = self.on_added(topo_object)
         if not ok:

@@ -180,13 +180,18 @@ class ConnectionGroup(topology.TopoGroup):
     def __init__(self, name):
         super().__init__(name)
 
-    def on_added(self, topo_object):
+    def on_pre_add(self, topo_object):
         conn = topo_object.fetch()
         conn.on_connect(metadata=None)
-        status, _ = conn.conn.server_version()
+        status, version = conn.conn.server_version()
         if not status.OK():
             logger.error('Cannot connect to newly added address: {}. Remove it now'.format(topo_object.name))
             return False
+        if version not in settings.SERVER_VERSIONS:
+            logger.error('Cannot connect to server of version: {}. Only {} supported'.format(version,
+                settings.SERVER_VERSIONS))
+            return False
+
         return True
 
     def create(self, name, **kwargs):
@@ -195,7 +200,7 @@ class ConnectionGroup(topology.TopoGroup):
             raise RuntimeError('\"uri\" is required to create connection pool')
         pool = ConnectionPool(name=name, **kwargs)
         status = self.add(pool)
-        if status == topology.StatusType.DUPLICATED:
+        if status != topology.StatusType.OK:
             pool = None
         return status, pool
 
