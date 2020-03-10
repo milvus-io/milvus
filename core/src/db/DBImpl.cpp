@@ -664,7 +664,7 @@ DBImpl::Compact(const std::string& table_id) {
 
     ENGINE_LOG_DEBUG << "Before compacting, wait for build index thread to finish...";
 
-    WaitBuildIndexFinish();
+    // WaitBuildIndexFinish();
 
     const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
