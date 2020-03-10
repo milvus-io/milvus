@@ -723,12 +723,11 @@ DBImpl::Compact(const std::string& table_id) {
 
         ENGINE_LOG_DEBUG << "Updating meta after compaction...";
         status = meta_ptr_->UpdateTableFiles(files_to_update);
+        OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
         if (!status.ok()) {
             compact_status = status;
             break;  // meta error, could not go on
         }
-
-        OngoingFileChecker::GetInstance().UnmarkOngoingFile(file);
     }
 
     OngoingFileChecker::GetInstance().UnmarkOngoingFiles(files_to_compact);
