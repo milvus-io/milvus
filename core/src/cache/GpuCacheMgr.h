@@ -16,6 +16,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "config/handler/GpuCacheConfigHandler.h"
+
 namespace milvus {
 namespace cache {
 
@@ -23,7 +25,7 @@ namespace cache {
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 
-class GpuCacheMgr : public CacheMgr<DataObjPtr> {
+class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuCacheConfigHandler {
  public:
     GpuCacheMgr();
 
@@ -37,6 +39,9 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
 
     void
     InsertItem(const std::string& key, const DataObjPtr& data);
+
+ protected:
+    void OnGpuCacheCapacityChanged(int64_t capacity) override;
 
  private:
     bool gpu_enable_ = true;

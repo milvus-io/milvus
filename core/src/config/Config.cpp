@@ -1947,8 +1947,7 @@ Status
 Config::SetCacheConfigCpuCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckCacheConfigCpuCacheCapacity(value));
     CONFIG_CHECK(SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value));
-    cache::CpuCacheMgr::GetInstance()->SetCapacity(std::stol(value) << 30);
-    return Status::OK();
+    return ExecCallBacks(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
 }
 
 Status
@@ -2046,14 +2045,7 @@ Status
 Config::SetGpuResourceConfigCacheCapacity(const std::string& value) {
     CONFIG_CHECK(CheckGpuResourceConfigCacheCapacity(value));
     CONFIG_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value));
-
-    int64_t cap = std::stol(value);
-    std::vector<int64_t> gpus;
-    GetGpuResourceConfigSearchResources(gpus);
-    for (auto& gpu_id : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu_id)->SetCapacity(cap << 30);
-    }
-    return Status::OK();
+    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, value);
 }
 
 Status

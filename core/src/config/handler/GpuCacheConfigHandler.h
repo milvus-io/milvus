@@ -9,33 +9,38 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#ifdef MILVUS_GPU_VERSION
+
 #pragma once
 
-#include "CacheMgr.h"
-#include "DataObj.h"
-#include "config/handler/CacheConfigHandler.h"
-
-#include <memory>
-#include <string>
+#include "config/handler/GpuConfigHandler.h"
 
 namespace milvus {
-namespace cache {
+namespace server {
 
-class CpuCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandler {
- private:
-    CpuCacheMgr();
-
+class GpuCacheConfigHandler : virtual public GpuConfigHandler {
  public:
-    // TODO(myh): use smart pointer instead
-    static CpuCacheMgr*
-    GetInstance();
+    GpuCacheConfigHandler();
 
-    DataObjPtr
-    GetIndex(const std::string& key);
+    ~GpuCacheConfigHandler();
 
  protected:
-    void OnCpuCacheCapacityChanged(int64_t value) override;
+    virtual void
+    OnGpuCacheCapacityChanged(int64_t capacity);
+
+ protected:
+    void
+    AddGpuCacheCapacityListener();
+
+    void
+    RemoveGpuCacheCapacityListener();
+
+
+ protected:
+    int64_t gpu_cache_capacity_ = 1 /* GiB */;
 };
 
-}  // namespace cache
+}  // namespace server
 }  // namespace milvus
+
+#endif

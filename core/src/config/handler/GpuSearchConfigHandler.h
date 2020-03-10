@@ -25,7 +25,7 @@ class GpuSearchConfigHandler : virtual public GpuConfigHandler {
 
     ~GpuSearchConfigHandler();
 
- public:
+ protected:
     virtual void
     OnGpuSearchThresholdChanged(int64_t threshold);
 

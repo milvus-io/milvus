@@ -35,6 +35,9 @@ CpuCacheMgr::CpuCacheMgr() {
     float cpu_cache_threshold;
     config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
     cache_->set_freemem_percent(cpu_cache_threshold);
+
+    SetIdentity("CpuCacheMgr");
+    AddCpuCacheCapacityListener();
 }
 
 CpuCacheMgr*
@@ -47,6 +50,11 @@ DataObjPtr
 CpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     return obj;
+}
+
+void
+CpuCacheMgr::OnCpuCacheCapacityChanged(int64_t value) {
+    SetCapacity(value << 30);
 }
 
 }  // namespace cache
