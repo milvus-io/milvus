@@ -9,7 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "scheduler/task/SearchTask.h"
+
 #include <fiu-local.h>
+
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -21,7 +24,6 @@
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
-#include "scheduler/task/SearchTask.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -264,13 +266,16 @@ XSearchTask::Execute() {
 
             // step 3: pick up topk result
             auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-            if (search_job->GetResultIds().front() == -1 && search_job->GetResultIds().size() > spec_k) {
-                // initialized results set
-                search_job->GetResultIds().resize(spec_k);
-                search_job->GetResultDistances().resize(spec_k);
-            }
+
             {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
+
+                if (search_job->GetResultIds().front() == -1 && search_job->GetResultIds().size() > spec_k) {
+                    // initialized results set
+                    search_job->GetResultIds().resize(spec_k);
+                    search_job->GetResultDistances().resize(spec_k);
+                }
+
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
             }
