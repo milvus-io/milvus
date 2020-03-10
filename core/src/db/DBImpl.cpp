@@ -666,7 +666,7 @@ DBImpl::Compact(const std::string& table_id) {
 
     WaitBuildIndexFinish();
 
-    std::lock_guard<std::mutex> index_lock(index_result_mutex_);
+    const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
 
     ENGINE_LOG_DEBUG << "Compacting table: " << table_id;
