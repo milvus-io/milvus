@@ -105,7 +105,7 @@ class TestConnection:
         assert len(errors) == 1
 
     def test_topology(self):
-        ConnectionGroup.on_added = mock.MagicMock(return_value=(True,))
+        ConnectionGroup.on_pre_add = mock.MagicMock(return_value=(True,))
         w_topo = ConnectionTopology()
         status, wg1 = w_topo.create(name='wg1')
         assert w_topo.has_group(wg1)
@@ -164,7 +164,7 @@ class TestConnection:
         assert len(w_topo.group_names) == 1
 
     def test_connection_pool(self):
-        ConnectionGroup.on_added = mock.MagicMock(return_value=(True,))
+        ConnectionGroup.on_pre_add = mock.MagicMock(return_value=(True,))
 
         def choaz_mp_fetch(capacity, count, tnum):
             threads_num = 5
