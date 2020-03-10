@@ -1543,7 +1543,7 @@ For each index type, the RESTful API has specific index parameters and search pa
 </tr>
 </table>
 
-For detailed information about the parameters above, refer to [Index Types](https://milvus-io.github.io/milvus-sdk-python/pythondoc/v0.2.8/param.html)
+For detailed information about the parameters above, refer to [Index Types](https://milvus.io/docs/v0.7.0/reference/index.md)
 
 ## Error Codes
 
