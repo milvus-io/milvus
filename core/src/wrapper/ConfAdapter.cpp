@@ -225,7 +225,9 @@ NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
 
     // auto tune params
     oricfg[knowhere::IndexParams::nlist] = MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(), 8192, 8192);
-    oricfg[knowhere::IndexParams::nprobe] = int(oricfg[knowhere::IndexParams::nlist].get<int64_t>() * 0.01);
+
+    int64_t nprobe = int(oricfg[knowhere::IndexParams::nlist].get<int64_t>() * 0.1);
+    oricfg[knowhere::IndexParams::nprobe] = nprobe < 1 ? 1 : nprobe;
 
     return true;
 }
