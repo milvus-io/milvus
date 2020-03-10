@@ -681,7 +681,7 @@ Updates the index type and nlist of a collection.
 | Parameter    | Description                                                                                                                                                                                              | Required? |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `index_type` | The type of indexing method to query the collection. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
-| `params`     | The extra params of indexing method to query the collection. Please refer to `Index params`(see below) for detailed introduction of supported indexes.                                              | No        |
+| `params`     | The extra params of indexing method to query the collection. Please refer to [Index and search parameters](#Index-and-search-parameters) for detailed introduction of supported indexes.                                              | No        |
 
 ##### Query Parameters
 
@@ -1122,7 +1122,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 | `tags`     | Tags of partitions that you need to search. You do not have to specify this value if the collection is not partitioned or you wish to search the whole collection.                           | No        |
 | `file_ids` | IDs of the vector files. You do not have to specify this value if you do not use Milvus in distributed scenarios. Also, if you assign a value to `file_ids`, the value of `tags` is ignored. | No        |
 | `vectors`  | Vectors to query.                                                                                                                                                                            | Yes       |
-| `params`   | Extra params for search. Please refer to `Search param`(see below) to get more detail information.                                                                                        | Yes       |
+| `params`   | Extra params for search. Please refer to [Index and search parameters](#Index-and-search-parameters) to get more detail information.                                                                                        | Yes       |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
 
@@ -1510,7 +1510,7 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 { "code": 0, "message": "success" }
 ```
 
-## Index parameters
+## Index and search parameters
 
 For each index type, the RESTful API has specific index parameters and search parameters.
 
