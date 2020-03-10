@@ -84,19 +84,19 @@ using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
  * @brief Index parameters
  * Note: extra_params is extra parameters list, it must be json format
  *       For different index type, parameter list is different accordingly, for example:
- *       FLAT/IVFLAT/SQ8:  "{nlist: '16384'}"
+ *       FLAT/IVFLAT/SQ8:  {nlist: 16384}
  *           ///< nlist range:[1, 999999]
- *       IVFPQ:  "{nlist: '16384', m: "12"}"
+ *       IVFPQ:  {nlist: 16384, m: 12}
  *           ///< nlist range:[1, 999999]
  *           ///< m is decided by dim and have a couple of results.
- *       NSG:  "{search_length: '45', out_degree:'50', candidate_pool_size:'300', "knng":'100'}"
+ *       NSG:  {search_length: 45, out_degree:50, candidate_pool_size:300, knng:100}
  *           ///< search_length range:[10, 300]
  *           ///< out_degree range:[5, 300]
  *           ///< candidate_pool_size range:[50, 1000]
  *           ///< knng range:[5, 300]
- *       HNSW  "{M: '16', efConstruction:'500'}"
+ *       HNSW  {M: 16, efConstruction:300}
  *           ///< M range:[5, 48]
- *           ///< efConstruction range:[topk, 4096]
+ *           ///< efConstruction range:[100, 500]
  */
 struct IndexParam {
     std::string collection_name;        ///< Collection name for create index
@@ -386,12 +386,12 @@ class Connection {
      * @param extra_params, extra search parameters according to different index type, must be json format.
      * Note: extra_params is extra parameters list, it must be json format, for example:
      *       For different index type, parameter list is different accordingly
-     *       FLAT/IVFLAT/SQ8/IVFPQ:  "{nprobe: '32'}"
+     *       FLAT/IVFLAT/SQ8/IVFPQ:  {nprobe: 32}
      *           ///< nprobe range:[1,999999]
-     *       NSG:  "{search_length:'100'}
+     *       NSG:  {search_length:100}
      *           ///< search_length range:[10, 300]
-     *       HNSW  "{ef: '64'}
-     *           ///< ef range:[k, 4096]
+     *       HNSW  {ef: 64}
+     *           ///< ef range:[topk, 4096]
      * @param topk_query_result, result array.
      *
      * @return Indicate if query is successful.
