@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.usefixtures('app')
 class TestConnection:
+    @pytest.mark.skip
     def test_manager(self):
         mgr = ConnectionMgr()
 
