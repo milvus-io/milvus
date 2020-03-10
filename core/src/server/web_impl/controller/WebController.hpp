@@ -617,10 +617,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(VectorsOp)
-    /*************
-     * Search
-     * Delete by ID
-     * */
+
     ENDPOINT("PUT", "/collections/{collection_name}/vectors", VectorsOp,
              PATH(String, collection_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() + "/vectors\'");
@@ -646,6 +643,12 @@ class WebController : public oatpp::web::server::api::ApiController {
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
+    }
+
+    ADD_CORS(SystemOptions)
+
+    ENDPOINT("OPTIONS", "/system/{info}", SystemOptions) {
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ADD_CORS(SystemInfo)
