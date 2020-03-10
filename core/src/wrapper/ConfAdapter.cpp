@@ -31,7 +31,7 @@ namespace engine {
 #define GPU_MAX_NRPOBE 1024
 #endif
 
-#define DEFAULT_MAX_DIM 16384
+#define DEFAULT_MAX_DIM 32768
 #define DEFAULT_MIN_DIM 1
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
@@ -225,7 +225,9 @@ NSGConfAdapter::CheckTrain(milvus::json& oricfg) {
 
     // auto tune params
     oricfg[knowhere::IndexParams::nlist] = MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(), 8192, 8192);
-    oricfg[knowhere::IndexParams::nprobe] = int(oricfg[knowhere::IndexParams::nlist].get<int64_t>() * 0.01);
+
+    int64_t nprobe = int(oricfg[knowhere::IndexParams::nlist].get<int64_t>() * 0.1);
+    oricfg[knowhere::IndexParams::nprobe] = nprobe < 1 ? 1 : nprobe;
 
     return true;
 }

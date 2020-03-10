@@ -100,9 +100,8 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
       index_type_(index_type),
       metric_type_(metric_type),
       index_params_(index_params) {
-    EngineType tmp_index_type = server::ValidationUtil::IsBinaryMetricType((int32_t)metric_type)
-                                    ? EngineType::FAISS_BIN_IDMAP
-                                    : EngineType::FAISS_IDMAP;
+    EngineType tmp_index_type =
+        utils::IsBinaryMetricType((int32_t)metric_type) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
     index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");

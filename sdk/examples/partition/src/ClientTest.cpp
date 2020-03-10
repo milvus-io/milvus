@@ -22,12 +22,12 @@
 
 namespace {
 
-const char* TABLE_NAME = milvus_sdk::Utils::GenTableName().c_str();
+const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t TABLE_DIMENSION = 512;
-constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
-constexpr milvus::MetricType TABLE_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ROW_COUNT = 10000;
+constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
+constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
+constexpr int64_t BATCH_ENTITY_COUNT = 10000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
@@ -36,25 +36,43 @@ constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t PARTITION_COUNT = 5;
 constexpr int32_t TARGET_PARTITION = 3;
 
-milvus::TableSchema
-BuildTableSchema() {
-    milvus::TableSchema tb_schema = {TABLE_NAME, TABLE_DIMENSION, TABLE_INDEX_FILE_SIZE, TABLE_METRIC_TYPE};
-    return tb_schema;
+milvus::CollectionParam
+BuildCollectionParam() {
+    milvus::CollectionParam
+        collection_param = {COLLECTION_NAME, COLLECTION_DIMENSION, COLLECTION_INDEX_FILE_SIZE, COLLECTION_METRIC_TYPE};
+    return collection_param;
 }
 
 milvus::PartitionParam
 BuildPartitionParam(int32_t index) {
     std::string tag = std::to_string(index);
-    std::string partition_name = std::string(TABLE_NAME) + "_" + tag;
-    milvus::PartitionParam partition_param = {TABLE_NAME, tag};
+    std::string partition_name = std::string(COLLECTION_NAME) + "_" + tag;
+    milvus::PartitionParam partition_param = {COLLECTION_NAME, tag};
     return partition_param;
 }
 
 milvus::IndexParam
 BuildIndexParam() {
     JSON json_params = {{"nlist", 16384}};
-    milvus::IndexParam index_param = {TABLE_NAME, INDEX_TYPE, json_params.dump()};
+    milvus::IndexParam index_param = {COLLECTION_NAME, INDEX_TYPE, json_params.dump()};
     return index_param;
+}
+
+void
+CountCollection(std::shared_ptr<milvus::Connection>& conn) {
+    int64_t entity_count = 0;
+    auto stat = conn->CountCollection(COLLECTION_NAME, entity_count);
+    std::cout << COLLECTION_NAME << "(" << entity_count << " entities)" << std::endl;
+}
+
+void
+ShowCollectionInfo(std::shared_ptr<milvus::Connection>& conn) {
+    CountCollection(conn);
+
+    milvus::CollectionInfo collection_info;
+    auto stat = conn->ShowCollectionInfo(COLLECTION_NAME, collection_info);
+    milvus_sdk::Utils::PrintCollectionInfo(collection_info);
+    std::cout << "ShowCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 }  // namespace
@@ -70,11 +88,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
 
-    {  // create table
-        milvus::TableSchema tb_schema = BuildTableSchema();
-        stat = conn->CreateTable(tb_schema);
-        std::cout << "CreateTable function call status: " << stat.message() << std::endl;
-        milvus_sdk::Utils::PrintTableSchema(tb_schema);
+    {  // create collection
+        milvus::CollectionParam tb_schema = BuildCollectionParam();
+        stat = conn->CreateCollection(tb_schema);
+        std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
+        milvus_sdk::Utils::PrintCollectionParam(tb_schema);
     }
 
     {  // create partition
@@ -87,7 +105,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
         // show partitions
         milvus::PartitionTagList partition_array;
-        stat = conn->ShowPartitions(TABLE_NAME, partition_array);
+        stat = conn->ShowPartitions(COLLECTION_NAME, partition_array);
 
         std::cout << partition_array.size() << " partitions created:" << std::endl;
         for (auto& partition_tag : partition_array) {
@@ -96,64 +114,56 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {  // insert vectors
-        milvus_sdk::TimeRecorder rc("All vectors");
+        milvus_sdk::TimeRecorder rc("All entities");
         for (int i = 0; i < PARTITION_COUNT * 5; i++) {
-            std::vector<milvus::RowRecord> record_array;
-            std::vector<int64_t> record_ids;
-            int64_t begin_index = i * BATCH_ROW_COUNT;
+            std::vector<milvus::Entity> entity_array;
+            std::vector<int64_t> entity_ids;
+            int64_t begin_index = i * BATCH_ENTITY_COUNT;
             {  // generate vectors
-                milvus_sdk::TimeRecorder rc("Build vectors No." + std::to_string(i));
-                milvus_sdk::Utils::BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array, record_ids,
-                                                TABLE_DIMENSION);
+                milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
+                milvus_sdk::Utils::BuildEntities(begin_index,
+                                                 begin_index + BATCH_ENTITY_COUNT,
+                                                 entity_array,
+                                                 entity_ids,
+                                                 COLLECTION_DIMENSION);
             }
 
-            std::string title = "Insert " + std::to_string(record_array.size()) + " vectors No." + std::to_string(i);
+            std::string title = "Insert " + std::to_string(entity_array.size()) + " entities No." + std::to_string(i);
             milvus_sdk::TimeRecorder rc(title);
-            stat = conn->Insert(TABLE_NAME, std::to_string(i % PARTITION_COUNT), record_array, record_ids);
+            stat = conn->Insert(COLLECTION_NAME, std::to_string(i % PARTITION_COUNT), entity_array, entity_ids);
         }
     }
 
     {  // flush buffer
-        stat = conn->FlushTable(TABLE_NAME);
-        std::cout << "FlushTable function call status: " << stat.message() << std::endl;
+        stat = conn->FlushCollection(COLLECTION_NAME);
+        std::cout << "FlushCollection function call status: " << stat.message() << std::endl;
     }
 
-    {  // table row count
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-    }
+    ShowCollectionInfo(conn);
 
-    {  // get table information
-        milvus::TableInfo table_info;
-        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
-        milvus_sdk::Utils::PrintTableInfo(table_info);
-        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
-    }
-
-    std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array;
+    std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array;
     {  // build search vectors
-        std::vector<milvus::RowRecord> record_array;
-        std::vector<int64_t> record_ids;
-        int64_t index = TARGET_PARTITION * BATCH_ROW_COUNT + SEARCH_TARGET;
-        milvus_sdk::Utils::BuildVectors(index, index + 1, record_array, record_ids, TABLE_DIMENSION);
-        search_record_array.push_back(std::make_pair(record_ids[0], record_array[0]));
+        std::vector<milvus::Entity> entity_array;
+        std::vector<int64_t> entity_ids;
+        int64_t index = TARGET_PARTITION * BATCH_ENTITY_COUNT + SEARCH_TARGET;
+        milvus_sdk::Utils::BuildEntities(index, index + 1, entity_array, entity_ids, COLLECTION_DIMENSION);
+        search_entity_array.push_back(std::make_pair(entity_ids[0], entity_array[0]));
     }
 
     {  // search vectors
         std::cout << "Search in correct partition" << std::endl;
         std::vector<std::string> partition_tags = {std::to_string(TARGET_PARTITION)};
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
         std::cout << "Search in wrong partition" << std::endl;
         partition_tags = {"0"};
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
 
         std::cout << "Search by regex matched partition tag" << std::endl;
         partition_tags = {"\\d"};
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
     }
 
@@ -166,57 +176,42 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
         milvus::IndexParam index2;
-        stat = conn->DescribeIndex(TABLE_NAME, index2);
+        stat = conn->DescribeIndex(COLLECTION_NAME, index2);
         std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintIndexParam(index2);
     }
 
-    {  // table row count
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-    }
-
-    {  // get table information
-        milvus::TableInfo table_info;
-        stat = conn->ShowTableInfo(TABLE_NAME, table_info);
-        milvus_sdk::Utils::PrintTableInfo(table_info);
-        std::cout << "ShowTableInfo function call status: " << stat.message() << std::endl;
-    }
+    ShowCollectionInfo(conn);
 
     {  // drop partition
-        milvus::PartitionParam param1 = {TABLE_NAME, std::to_string(TARGET_PARTITION)};
+        milvus::PartitionParam param1 = {COLLECTION_NAME, std::to_string(TARGET_PARTITION)};
         milvus_sdk::Utils::PrintPartitionParam(param1);
         stat = conn->DropPartition(param1);
         std::cout << "DropPartition function call status: " << stat.message() << std::endl;
     }
 
-    {  // table row count
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-    }
+    CountCollection(conn);
 
-    {  // search vectors
-        std::cout << "Search in whole table" << std::endl;
+    {  // search vectors, will get search error since we delete a partition
+        std::cout << "Search in whole collection after delete one partition" << std::endl;
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(conn, TABLE_NAME, partition_tags, TOP_K, NPROBE, search_record_array,
+        milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
                                     topk_query_result);
     }
 
     {  // drop index
-        stat = conn->DropIndex(TABLE_NAME);
+        stat = conn->DropIndex(COLLECTION_NAME);
         std::cout << "DropIndex function call status: " << stat.message() << std::endl;
 
-        int64_t row_count = 0;
-        stat = conn->CountTable(TABLE_NAME, row_count);
-        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+        int64_t entity_count = 0;
+        stat = conn->CountCollection(COLLECTION_NAME, entity_count);
+        std::cout << COLLECTION_NAME << "(" << entity_count << " entities)" << std::endl;
     }
 
-    {  // drop table
-        stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DropTable function call status: " << stat.message() << std::endl;
+    {  // drop collection
+        stat = conn->DropCollection(COLLECTION_NAME);
+        std::cout << "DropCollection function call status: " << stat.message() << std::endl;
     }
 
     milvus::Connection::Destroy(conn);

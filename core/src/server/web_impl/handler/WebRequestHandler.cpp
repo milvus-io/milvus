@@ -1046,7 +1046,9 @@ WebRequestHandler::CreateIndex(const OString& table_name, const OString& body) {
         auto status = request_handler_.CreateIndex(context_ptr_, table_name->std_str(), index, request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
+        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
     } catch (nlohmann::detail::type_error& e) {
+        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK())
