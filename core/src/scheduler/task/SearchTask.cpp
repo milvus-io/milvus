@@ -9,7 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "scheduler/task/SearchTask.h"
+
 #include <fiu-local.h>
+
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -21,7 +24,6 @@
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
-#include "scheduler/task/SearchTask.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
