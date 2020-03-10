@@ -588,7 +588,7 @@ def gen_simple_index():
         IndexType.IVF_SQ8H,
         IndexType.IVF_PQ,
         IndexType.HNSW,
-    #    IndexType.RNSG
+        IndexType.RNSG
     ]
     params = [
         {"nlist": 1024},
@@ -597,7 +597,7 @@ def gen_simple_index():
         {"nlist": 1024},
         {"nlist": 1024, "m": 16},
         {"M": 16, "efConstruction": 500},
-    #    {"search_length": 100, "out_degree": 40, "candidate_pool_size": 66, "knng": 100}
+        {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50}
     ]
 
     index_params = []
@@ -611,8 +611,8 @@ def get_search_param(index_type):
         return {"nprobe": 32}
     elif index_type == IndexType.HNSW:
         return {"ef": 64}
-    # elif index_type == IndexType.RNSG:
-    #     return {"search_length": 100}
+     elif index_type == IndexType.RNSG:
+        return {"search_length": 50}
     else:
         logging.getLogger().info("Invalid index_type.")
 
