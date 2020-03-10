@@ -14,6 +14,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#990 Check gpu resources setting when assign repeated value
 -   \#995 Table count set to 0 if no tables found
 -   \#1010 Improve error message when offset or page_size is equal 0
+-   \#1022 Check if partition name is valid
+-   \#1028 check if table exists when show partitions
+-   \#1029 check if table exists when try to delete partition
+-   \#1066 optimize http insert and search speed
 -   \#1022 Check if partition name is legal
 -   \#1028 Check if table exists when show partitions
 -   \#1029 Check if table exists when try to delete partition
@@ -36,6 +40,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
+-   \#1517 result is not correct when search vectors in multi partition, index type is RNSG 
 -   \#1518 Table count did not match after deleting vectors and compact
 -   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
