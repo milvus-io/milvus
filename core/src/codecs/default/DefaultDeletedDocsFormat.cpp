@@ -43,7 +43,7 @@ DefaultDeletedDocsFormat::read(const store::DirectoryPtr& directory_ptr, segment
 
     int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
     if (del_fd == -1) {
-        std::string err_msg = "Failed to open file: " + del_file_path;
+        std::string err_msg = "Failed to open file: " + del_file_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
@@ -91,7 +91,7 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
     // Write to the temp file, in order to avoid possible race condition with search (concurrent read and write)
     int del_fd = open(temp_path.c_str(), O_RDWR | O_CREAT, 00664);
     if (del_fd == -1) {
-        std::string err_msg = "Failed to open file: " + temp_path;
+        std::string err_msg = "Failed to open file: " + temp_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
@@ -130,7 +130,7 @@ DefaultDeletedDocsFormat::write(const store::DirectoryPtr& directory_ptr, const 
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
-    if (::write(del_fd, deleted_docs_list.data(), new_num_bytes) == -1) {
+    if (::write(del_fd, deleted_docs_list.data(), sizeof(segment::offset_t) * deleted_docs->GetSize()) == -1) {
         std::string err_msg = "Failed to write to file" + temp_path + ", error: " + std::strerror(errno);
         ENGINE_LOG_ERROR << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);

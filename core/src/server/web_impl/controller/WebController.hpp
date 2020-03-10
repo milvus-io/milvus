@@ -336,7 +336,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST", "/tables/{collection_name}/indexes", CreateIndex,
+    ENDPOINT("POST", "/collections/{collection_name}/indexes", CreateIndex,
              PATH(String, collection_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");
@@ -617,10 +617,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     }
 
     ADD_CORS(VectorsOp)
-    /*************
-     * Search
-     * Delete by ID
-     * */
+
     ENDPOINT("PUT", "/collections/{collection_name}/vectors", VectorsOp,
              PATH(String, collection_name), BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() + "/vectors\'");
@@ -646,6 +643,12 @@ class WebController : public oatpp::web::server::api::ApiController {
                            + ", reason = " + status_dto->message->std_str() + ". Total cost");
 
         return response;
+    }
+
+    ADD_CORS(SystemOptions)
+
+    ENDPOINT("OPTIONS", "/system/{info}", SystemOptions) {
+        return createResponse(Status::CODE_204, "No Content");
     }
 
     ADD_CORS(SystemInfo)
@@ -674,15 +677,15 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(SystemOp)
 
-    ENDPOINT("PUT", "/system/{Op}", SystemOp, PATH(String, Op), BODY_STRING(String, body_str)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + Op->std_str() + "\'");
+    ENDPOINT("PUT", "/system/{op}", SystemOp, PATH(String, op), BODY_STRING(String, body_str)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + op->std_str() + "\'");
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
         handler.RegisterRequestHandler(::milvus::server::RequestHandler());
 
         String response_str;
-        auto status_dto = handler.SystemOp(Op, body_str, response_str);
+        auto status_dto = handler.SystemOp(op, body_str, response_str);
 
         std::shared_ptr<OutgoingResponse> response;
         switch (status_dto->code->getValue()) {

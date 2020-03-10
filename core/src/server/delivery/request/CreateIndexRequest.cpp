@@ -11,6 +11,7 @@
 
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "config/Config.h"
+#include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -83,7 +84,7 @@ CreateIndexRequest::OnExecute() {
         status = DBWrapper::DB()->DescribeTable(table_info);
 
         int32_t adapter_index_type = index_type_;
-        if (ValidationUtil::IsBinaryMetricType(table_info.metric_type_)) {  // binary vector not allow
+        if (engine::utils::IsBinaryMetricType(table_info.metric_type_)) {  // binary vector not allow
             if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
             } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {

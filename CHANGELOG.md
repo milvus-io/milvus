@@ -12,16 +12,20 @@ Please mark all change in change log and use the issue from GitHub
 -   \#831 Judge branch error in CommonUtil.cpp
 -   \#977 Server crash when create tables concurrently
 -   \#990 Check gpu resources setting when assign repeated value
--   \#995 table count set to 0 if no tables found
--   \#1010 improve error message when offset or page_size is equal 0
--   \#1022 check if partition name is legal
+-   \#995 Table count set to 0 if no tables found
+-   \#1010 Improve error message when offset or page_size is equal 0
+-   \#1022 Check if partition name is valid
 -   \#1028 check if table exists when show partitions
 -   \#1029 check if table exists when try to delete partition
 -   \#1066 optimize http insert and search speed
+-   \#1022 Check if partition name is legal
+-   \#1028 Check if table exists when show partitions
+-   \#1029 Check if table exists when try to delete partition
+-   \#1066 Optimize http insert and search speed
 -   \#1067 Add binary vectors support in http server
 -   \#1075 Improve error message when page size or offset is illegal
 -   \#1082 Check page_size or offset value to avoid float
--   \#1115 http server support load table into memory
+-   \#1115 Http server support load table into memory
 -   \#1152 Error log output continuously after server start
 -   \#1211 Server down caused by searching with index_type: HNSW
 -   \#1240 Update license declaration
@@ -36,6 +40,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1507 set_config for insert_buffer_size is wrong
 -   \#1510 Add set interfaces for WAL configurations
 -   \#1511 Fix big integer cannot pass to server correctly
+-   \#1517 result is not correct when search vectors in multi partition, index type is RNSG 
 -   \#1518 Table count did not match after deleting vectors and compact
 -   \#1521 Make cache_insert_data take effect in-service
 -   \#1525 Add setter API for config preload_table
@@ -43,6 +48,17 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1530 Set table file with correct engine type in meta
 -   \#1532 Search with ivf_flat failed with open-dataset: sift-256-hamming
 -   \#1535 Degradation searching performance with metric_type: binary_idmap
+-   \#1549 Fix server/wal config setting bug
+-   \#1556 Index file not created after table and index created
+-   \#1560 Search crashed with Super-high dimensional binary vector
+-   \#1564 Too low recall for glove-200-angular, ivf_pq index
+-   \#1571 Meta engine type become IDMAP after dropping index for BINARY table
+-   \#1574 Set all existing bitset in cache when applying deletes
+-   \#1577 Row count incorrect if delete vectors then create index
+-   \#1580 Old segment folder not removed after merge/compact if create_index is called before adding data
+-   \#1590 Server down caused by failure to write file during concurrent mixed operations
+-   \#1598 Server down during mixed operations
+-   \#1601 External link bug in HTTP doc
 
 ## Feature
 -   \#216 Add CLI to get server info
@@ -71,7 +87,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#738 Use Openblas / lapack from apt install
 -   \#758 Enhance config description
 -   \#791 Remove Arrow
--   \#834 add cpu mode for built-in Faiss
+-   \#834 Add cpu mode for built-in Faiss
 -   \#848 Add ready-to-use config files to the Milvus repo for enhanced user experince
 -   \#860 Remove redundant checks in CacheMgr's constructor
 -   \#908 Move "primary_path" and "secondary_path" to storage config
@@ -93,6 +109,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1524 Update config "preload_table" description
 -   \#1544 Update resources name in HTTP module
 -   \#1546 Move Config.cpp to config directory
+-   \#1567 Update yaml config description
 
 ## Task
 -   \#1327 Exclude third-party code from codebeat

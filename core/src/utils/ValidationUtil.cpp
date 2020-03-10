@@ -174,14 +174,14 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params, const engi
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 0, 999999, false);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
         case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 0, 999999, false);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
@@ -254,7 +254,7 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const en
             break;
         }
         case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 1000);
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 4096);
             if (!status.ok()) {
                 return status;
             }
@@ -262,12 +262,6 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params, const en
         }
     }
     return Status::OK();
-}
-
-bool
-ValidationUtil::IsBinaryIndexType(int32_t index_type) {
-    return (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP)) ||
-           (index_type == static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT));
 }
 
 Status
@@ -292,13 +286,6 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
     return Status::OK();
-}
-
-bool
-ValidationUtil::IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == static_cast<int32_t>(engine::MetricType::HAMMING)) ||
-           (metric_type == static_cast<int32_t>(engine::MetricType::JACCARD)) ||
-           (metric_type == static_cast<int32_t>(engine::MetricType::TANIMOTO));
 }
 
 Status

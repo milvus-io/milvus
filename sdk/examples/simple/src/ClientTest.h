@@ -29,41 +29,54 @@ class ClientTest {
  private:
     void
     ShowServerVersion();
+
     void
     ShowSdkVersion();
+
     void
-    ShowTables(std::vector<std::string>&);
+    ShowCollections(std::vector<std::string>&);
+
     void
-    CreateTable(const std::string&, int64_t, milvus::MetricType);
+    CreateCollection(const std::string&, int64_t, milvus::MetricType);
+
     void
-    DescribeTable(const std::string&);
+    DescribeCollection(const std::string&);
+
     void
-    InsertVectors(const std::string&, int64_t);
+    InsertEntities(const std::string&, int64_t);
+
     void
-    BuildSearchVectors(int64_t, int64_t);
+    BuildSearchEntities(int64_t, int64_t);
+
     void
     Flush(const std::string&);
+
     void
-    ShowTableInfo(const std::string&);
+    ShowCollectionInfo(const std::string&);
+
     void
-    GetVectorById(const std::string&, int64_t);
+    GetEntityById(const std::string&, int64_t);
+
     void
-    SearchVectors(const std::string&, int64_t, int64_t);
-    void
-    SearchVectorsByIds(const std::string&, int64_t, int64_t);
+    SearchEntities(const std::string&, int64_t, int64_t);
+
     void
     CreateIndex(const std::string&, milvus::IndexType, int64_t);
+
     void
-    PreloadTable(const std::string&);
+    PreloadCollection(const std::string&);
+
     void
-    DeleteByIds(const std::string&, const std::vector<int64_t>&);
+    DeleteByIds(const std::string&, const std::vector<int64_t>& id_array);
+
     void
     DropIndex(const std::string&);
+
     void
-    DropTable(const std::string&);
+    DropCollection(const std::string&);
 
  private:
     std::shared_ptr<milvus::Connection> conn_;
-    std::vector<std::pair<int64_t, milvus::RowRecord>> search_record_array_;
+    std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array_;
     std::vector<int64_t> search_id_array_;
 };

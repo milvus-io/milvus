@@ -698,13 +698,8 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
                  int64_t* ids, SearchParams& params) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
-    if (k >= 45) {
-        params.search_length = k;
-    }
-
     TimeRecorder rc("NsgIndex::search", 1);
-    // TODO(linxj): when to use openmp
-    if (nq <= 4) {
+    if (nq == 1) {
         GetNeighbors(query, resset[0], nsg, &params);
     } else {
 #pragma omp parallel for
@@ -733,15 +728,6 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
         }
     }
     rc.RecordSection("merge");
-
-    // ProfilerStart("xx.prof");
-    // std::vector<Neighbor> resset;
-    // GetNeighbors(query, resset, nsg, &params);
-    // for (int i = 0; i < k; ++i) {
-    //    ids[i] = resset[i].id;
-    // dist[i] = resset[i].distance;
-    //}
-    // ProfilerStop();
 }
 
 void

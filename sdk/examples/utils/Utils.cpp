@@ -64,8 +64,8 @@ Utils::Sleep(int seconds) {
 }
 
 const std::string&
-Utils::GenTableName() {
-    static std::string s_id("tbl_" + CurrentTime());
+Utils::GenCollectionName() {
+    static std::string s_id("C_" + CurrentTime());
     return s_id;
 }
 
@@ -97,19 +97,19 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
 }
 
 void
-Utils::PrintTableSchema(const milvus::TableSchema& tb_schema) {
+Utils::PrintCollectionParam(const milvus::CollectionParam& collection_param) {
     BLOCK_SPLITER
-    std::cout << "Table name: " << tb_schema.table_name << std::endl;
-    std::cout << "Table dimension: " << tb_schema.dimension << std::endl;
-    std::cout << "Table index file size: " << tb_schema.index_file_size << std::endl;
-    std::cout << "Table metric type: " << MetricTypeName(tb_schema.metric_type) << std::endl;
+    std::cout << "Collection name: " << collection_param.collection_name << std::endl;
+    std::cout << "Collection dimension: " << collection_param.dimension << std::endl;
+    std::cout << "Collection index file size: " << collection_param.index_file_size << std::endl;
+    std::cout << "Collection metric type: " << MetricTypeName(collection_param.metric_type) << std::endl;
     BLOCK_SPLITER
 }
 
 void
 Utils::PrintPartitionParam(const milvus::PartitionParam& partition_param) {
     BLOCK_SPLITER
-    std::cout << "Table name: " << partition_param.table_name << std::endl;
+    std::cout << "Collection name: " << partition_param.collection_name << std::endl;
     std::cout << "Partition tag: " << partition_param.partition_tag << std::endl;
     BLOCK_SPLITER
 }
@@ -117,40 +117,40 @@ Utils::PrintPartitionParam(const milvus::PartitionParam& partition_param) {
 void
 Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
     BLOCK_SPLITER
-    std::cout << "Index table name: " << index_param.table_name << std::endl;
+    std::cout << "Index collection name: " << index_param.collection_name << std::endl;
     std::cout << "Index type: " << IndexTypeName(index_param.index_type) << std::endl;
     std::cout << "Index extra_params: " << index_param.extra_params << std::endl;
     BLOCK_SPLITER
 }
 
 void
-Utils::BuildVectors(int64_t from, int64_t to, std::vector<milvus::RowRecord>& vector_record_array,
-                    std::vector<int64_t>& record_ids, int64_t dimension) {
+Utils::BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array,
+                     std::vector<int64_t>& entity_ids, int64_t dimension) {
     if (to <= from) {
         return;
     }
 
-    vector_record_array.clear();
-    record_ids.clear();
+    entity_array.clear();
+    entity_ids.clear();
     for (int64_t k = from; k < to; k++) {
-        milvus::RowRecord record;
-        record.float_data.resize(dimension);
+        milvus::Entity entity;
+        entity.float_data.resize(dimension);
         for (int64_t i = 0; i < dimension; i++) {
-            record.float_data[i] = (float)(k % (i + 1));
+            entity.float_data[i] = (float)(k % (i + 1));
         }
 
-        vector_record_array.emplace_back(record);
-        record_ids.push_back(k);
+        entity_array.emplace_back(entity);
+        entity_ids.push_back(k);
     }
 }
 
 void
-Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
+Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
                          const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
     std::cout << "Returned result count: " << topk_query_result.size() << std::endl;
 
-    if (topk_query_result.size() != search_record_array.size()) {
+    if (topk_query_result.size() != entity_array.size()) {
         std::cout << "ERROR: Returned result count not equal nq" << std::endl;
         return;
     }
@@ -158,8 +158,8 @@ Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
     for (size_t i = 0; i < topk_query_result.size(); i++) {
         const milvus::QueryResult& one_result = topk_query_result[i];
         size_t topk = one_result.ids.size();
-        auto search_id = search_record_array[i].first;
-        std::cout << "No." << i << " vector " << search_id << " top " << topk << " search result:" << std::endl;
+        auto search_id = entity_array[i].first;
+        std::cout << "No." << i << " entity " << search_id << " top " << topk << " search result:" << std::endl;
         for (size_t j = 0; j < topk; j++) {
             std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
         }
@@ -168,13 +168,13 @@ Utils::PrintSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
 }
 
 void
-Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
+Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
                          const milvus::TopKQueryResult& topk_query_result) {
     BLOCK_SPLITER
     size_t nq = topk_query_result.size();
     for (size_t i = 0; i < nq; i++) {
         const milvus::QueryResult& one_result = topk_query_result[i];
-        auto search_id = search_record_array[i].first;
+        auto search_id = entity_array[i].first;
 
         uint64_t match_index = one_result.ids.size();
         for (uint64_t index = 0; index < one_result.ids.size(); index++) {
@@ -195,15 +195,15 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::RowRecord>
 }
 
 void
-Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
+Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-                const std::vector<std::pair<int64_t, milvus::RowRecord>>& search_record_array,
+                const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
                 milvus::TopKQueryResult& topk_query_result) {
     topk_query_result.clear();
 
-    std::vector<milvus::RowRecord> record_array;
-    for (auto& pair : search_record_array) {
-        record_array.push_back(pair.second);
+    std::vector<milvus::Entity> temp_entity_array;
+    for (auto& pair : entity_array) {
+        temp_entity_array.push_back(pair.second);
     }
 
     {
@@ -211,90 +211,33 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& tab
         JSON json_params = {{"nprobe", nprobe}};
         milvus_sdk::TimeRecorder rc("search");
         milvus::Status stat =
-            conn->Search(table_name, partition_tags, record_array, top_k, json_params.dump(), topk_query_result);
-        std::cout << "SearchVector function call status: " << stat.message() << std::endl;
+            conn->Search(collection_name,
+                         partition_tags,
+                         temp_entity_array,
+                         top_k,
+                         json_params.dump(),
+                         topk_query_result);
+        std::cout << "Search function call status: " << stat.message() << std::endl;
         BLOCK_SPLITER
     }
 
-    PrintSearchResult(search_record_array, topk_query_result);
-    CheckSearchResult(search_record_array, topk_query_result);
-}
-
-void
-Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& table_name,
-                const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-                const std::vector<int64_t>& search_id_array, milvus::TopKQueryResult& topk_query_result) {
-    topk_query_result.clear();
-
-    {
-        BLOCK_SPLITER
-        JSON json_params = {{"nprobe", nprobe}};
-        for (auto& search_id : search_id_array) {
-            milvus_sdk::TimeRecorder rc("search by id " + std::to_string(search_id));
-            milvus::TopKQueryResult result;
-            milvus::Status
-                stat = conn->SearchByID(table_name, partition_tags, search_id, top_k, json_params.dump(), result);
-            topk_query_result.insert(topk_query_result.end(), std::make_move_iterator(result.begin()),
-                                     std::make_move_iterator(result.end()));
-            std::cout << "SearchByID function call status: " << stat.message() << std::endl;
-        }
-        BLOCK_SPLITER
-    }
-
-    if (topk_query_result.size() != search_id_array.size()) {
-        std::cout << "ERROR: Returned result count does not equal nq" << std::endl;
-        return;
-    }
-
-    BLOCK_SPLITER
-    for (size_t i = 0; i < topk_query_result.size(); i++) {
-        const milvus::QueryResult& one_result = topk_query_result[i];
-        size_t topk = one_result.ids.size();
-        auto search_id = search_id_array[i];
-        std::cout << "No." << i << " vector " << search_id << " top " << topk << " search result:" << std::endl;
-        for (size_t j = 0; j < topk; j++) {
-            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
-        }
-    }
-    BLOCK_SPLITER
-
-    BLOCK_SPLITER
-    size_t nq = topk_query_result.size();
-    for (size_t i = 0; i < nq; i++) {
-        const milvus::QueryResult& one_result = topk_query_result[i];
-        auto search_id = search_id_array[i];
-
-        uint64_t match_index = one_result.ids.size();
-        for (uint64_t index = 0; index < one_result.ids.size(); index++) {
-            if (search_id == one_result.ids[index]) {
-                match_index = index;
-                break;
-            }
-        }
-
-        if (match_index >= one_result.ids.size()) {
-            std::cout << "The topk result is wrong: not return search target in result set" << std::endl;
-        } else {
-            std::cout << "No." << i << " Check result successfully for target: " << search_id << " at top "
-                      << match_index << std::endl;
-        }
-    }
-    BLOCK_SPLITER
+    PrintSearchResult(entity_array, topk_query_result);
+    CheckSearchResult(entity_array, topk_query_result);
 }
 
 void
 PrintPartitionStat(const milvus::PartitionStat& partition_stat) {
-    std::cout << "\tPartition " << partition_stat.tag << " row count: " << partition_stat.row_count << std::endl;
+    std::cout << "\tPartition " << partition_stat.tag << " entity count: " << partition_stat.row_count << std::endl;
     for (auto& seg_stat : partition_stat.segments_stat) {
-        std::cout << "\t\tsegment " << seg_stat.segment_name << " row count: " << seg_stat.row_count
+        std::cout << "\t\tsegment " << seg_stat.segment_name << " entity count: " << seg_stat.row_count
                   << " index: " << seg_stat.index_name << " data size: " << seg_stat.data_size << std::endl;
     }
 }
 
 void
-Utils::PrintTableInfo(const milvus::TableInfo& info) {
+Utils::PrintCollectionInfo(const milvus::CollectionInfo& info) {
     BLOCK_SPLITER
-    std::cout << "Table " << " total row count: " << info.total_row_count << std::endl;
+    std::cout << "Collection " << " total entity count: " << info.total_row_count << std::endl;
     for (const milvus::PartitionStat& partition_stat : info.partitions_stat) {
         PrintPartitionStat(partition_stat);
     }

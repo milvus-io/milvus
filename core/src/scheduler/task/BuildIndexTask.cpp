@@ -12,11 +12,13 @@
 #include "scheduler/task/BuildIndexTask.h"
 
 #include <fiu-local.h>
+
 #include <memory>
 #include <string>
 #include <thread>
 #include <utility>
 
+#include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
@@ -35,8 +37,8 @@ XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
         if (file->file_type_ == TableFileSchema::FILE_TYPE::RAW ||
             file->file_type_ == TableFileSchema::FILE_TYPE::TO_INDEX ||
             file->file_type_ == TableFileSchema::FILE_TYPE::BACKUP) {
-            engine_type = server::ValidationUtil::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
-                                                                                         : EngineType::FAISS_IDMAP;
+            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+                                                                                : EngineType::FAISS_IDMAP;
         } else {
             engine_type = (EngineType)file->engine_type_;
         }
@@ -206,7 +208,7 @@ XBuildIndexTask::Execute() {
         // step 6: update meta
         table_file.file_type_ = engine::meta::TableFileSchema::INDEX;
         table_file.file_size_ = index->PhysicalSize();
-        table_file.row_count_ = index->Count();
+        table_file.row_count_ = file_->row_count_;  // index->Count();
 
         auto origin_file = *file_;
         origin_file.file_type_ = engine::meta::TableFileSchema::BACKUP;
