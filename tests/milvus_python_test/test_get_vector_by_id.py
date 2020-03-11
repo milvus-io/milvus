@@ -11,7 +11,7 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-table_id = "test_get_vector_by_id"
+collection_id = "test_get_vector_by_id"
 DELETE_TIMEOUT = 60
 nprobe = 1
 tag = "1970-01-01"
@@ -25,54 +25,54 @@ class TestGetBase:
       The following cases are used to test `get_vector_by_id` function
     ******************************************************************
     """
-    def test_get_vector_A(self, connect, table):
+    def test_get_vector_A(self, connect, collection):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(table, vector)
+        status, ids = connect.add_vectors(collection, vector)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[0]) 
+        status, res = connect.get_vector_by_id(collection, ids[0]) 
         assert status.OK()
         assert_equal_vector(res, vector[0])
 
-    def test_get_vector_B(self, connect, table):
+    def test_get_vector_B(self, connect, collection):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[0])
+        status, res = connect.get_vector_by_id(collection, ids[0])
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
-    def test_get_vector_partition(self, connect, table):
+    def test_get_vector_partition(self, connect, collection):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
+        status = connect.create_partition(collection, tag)
         assert status.OK()
-        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[0])
+        status, res = connect.get_vector_by_id(collection, ids[0])
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
-    def test_get_vector_multi_same_ids(self, connect, table):
+    def test_get_vector_multi_same_ids(self, connect, collection):
         '''
         target: test get_vector_by_id
         method: add vectors, with the same id, get vector by the given id
@@ -81,10 +81,10 @@ class TestGetBase:
         vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         ids[1] = 0; ids[-1] = 0
-        status, ids = connect.add_vectors(table, vectors, ids=ids)
-        status = connect.flush([table])
+        status, ids = connect.add_vectors(collection, vectors, ids=ids)
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, 0) 
+        status, res = connect.get_vector_by_id(collection, 0) 
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
@@ -101,75 +101,75 @@ class TestGetBase:
     def get_id(self, request):
         yield request.param
 
-    def test_get_vector_after_delete(self, connect, table, get_id):
+    def test_get_vector_after_delete(self, connect, collection, get_id):
         '''
         target: test get_vector_by_id
         method: add vectors, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(table, [ids[id]])
+        status = connect.delete_by_id(collection, [ids[id]])
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[id])
+        status, res = connect.get_vector_by_id(collection, ids[id])
         assert status.OK()
         assert not res 
 
-    def test_get_vector_after_delete_with_partition(self, connect, table, get_id):
+    def test_get_vector_after_delete_with_partition(self, connect, collection, get_id):
         '''
         target: test get_vector_by_id
         method: add vectors into partition, and delete, get vector by the given id
         expected: status ok, get one vector
         '''
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
-        status, ids = connect.insert(table, vectors, partition_tag=tag)
+        status = connect.create_partition(collection, tag)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(table, [ids[id]])
+        status = connect.delete_by_id(collection, [ids[id]])
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[id])
+        status, res = connect.get_vector_by_id(collection, ids[id])
         assert status.OK()
         assert not res
 
-    def test_get_vector_id_not_exised(self, connect, table):
+    def test_get_vector_id_not_exised(self, connect, collection):
         '''
         target: test get vector, params vector_id not existed
         method: add vector and get 
         expected: status ok, empty result
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(table, vector)
+        status, ids = connect.add_vectors(collection, vector)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, 1) 
+        status, res = connect.get_vector_by_id(collection, 1) 
         assert status.OK()
         assert not res 
 
-    def test_get_vector_table_not_existed(self, connect, table):
+    def test_get_vector_collection_not_existed(self, connect, collection):
         '''
-        target: test get vector, params table_name not existed
+        target: test get vector, params collection_name not existed
         method: add vector and get
         expected: status not ok
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(table, vector)
+        status, ids = connect.add_vectors(collection, vector)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        table_new = gen_unique_str()
-        status, res = connect.get_vector_by_id(table_new, 1) 
+        collection_new = gen_unique_str()
+        status, res = connect.get_vector_by_id(collection_new, 1) 
         assert not status.OK()
 
 
@@ -205,7 +205,7 @@ class TestGetIndexedVectors:
     def get_id(self, request):
         yield request.param
 
-    def test_get_vectors_after_index_created(self, connect, table, get_simple_index, get_id):
+    def test_get_vectors_after_index_created(self, connect, collection, get_simple_index, get_id):
         '''
         target: test get vector after index created
         method: add vector, create index and get vector
@@ -214,20 +214,20 @@ class TestGetIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status = connect.create_index(table, index_type, index_param)
+        status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status, res = connect.get_vector_by_id(table, ids[id])
+        status, res = connect.get_vector_by_id(collection, ids[id])
         assert status.OK()
         logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vectors[id])
 
-    def test_get_vector_after_delete(self, connect, table, get_simple_index, get_id):
+    def test_get_vector_after_delete(self, connect, collection, get_simple_index, get_id):
         '''
         target: test get_vector_by_id
         method: add vectors, and delete, get vector by the given id
@@ -236,22 +236,22 @@ class TestGetIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status = connect.create_index(table, index_type, index_param)
+        status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status = connect.delete_by_id(table, [ids[id]])
+        status = connect.delete_by_id(collection, [ids[id]])
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(table, ids[id])
+        status, res = connect.get_vector_by_id(collection, ids[id])
         assert status.OK()
         assert not res
 
-    def test_get_vector_partition(self, connect, table, get_simple_index, get_id):
+    def test_get_vector_partition(self, connect, collection, get_simple_index, get_id):
         '''
         target: test get_vector_by_id
         method: add vector, and get
@@ -260,16 +260,16 @@ class TestGetIndexedVectors:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
+        status = connect.create_partition(collection, tag)
         ids = [i for i in range(nb)] 
-        status, ids = connect.add_vectors(table, vectors, ids, partition_tag=tag)
+        status, ids = connect.add_vectors(collection, vectors, ids, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status = connect.create_index(table, index_type, index_param)
+        status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
         id = get_id
-        status, res = connect.get_vector_by_id(table, ids[id])
+        status, res = connect.get_vector_by_id(collection, ids[id])
         assert status.OK()
         assert_equal_vector(res, vectors[id])
 
@@ -280,37 +280,37 @@ class TestGetBinary:
       The following cases are used to test `get_vector_by_id` function
     ******************************************************************
     """
-    def test_get_vector_A(self, connect, jac_table):
+    def test_get_vector_A(self, connect, jac_collection):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_table, vector)
+        status, ids = connect.add_vectors(jac_collection, vector)
         assert status.OK()
-        status = connect.flush([jac_table])
+        status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_table, ids[0]) 
+        status, res = connect.get_vector_by_id(jac_collection, ids[0]) 
         assert status.OK()
         assert res == vector[0]
 
-    def test_get_vector_B(self, connect, jac_table):
+    def test_get_vector_B(self, connect, jac_collection):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.add_vectors(jac_table, vectors)
+        status, ids = connect.add_vectors(jac_collection, vectors)
         assert status.OK()
-        status = connect.flush([jac_table])
+        status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_table, ids[0])
+        status, res = connect.get_vector_by_id(jac_collection, ids[0])
         assert status.OK()
         assert res == vectors[0]
 
-    def test_get_vector_multi_same_ids(self, connect, jac_table):
+    def test_get_vector_multi_same_ids(self, connect, jac_collection):
         '''
         target: test get_vector_by_id
         method: add vectors, with the same id, get vector by the given id
@@ -319,56 +319,56 @@ class TestGetBinary:
         tmp, vectors = gen_binary_vectors(nb, dim)
         ids = [i for i in range(nb)]
         ids[0] = 0; ids[-1] = 0
-        status, ids = connect.add_vectors(jac_table, vectors, ids=ids)
-        status = connect.flush([jac_table])
+        status, ids = connect.add_vectors(jac_collection, vectors, ids=ids)
+        status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_table, 0) 
+        status, res = connect.get_vector_by_id(jac_collection, 0) 
         assert status.OK()
         assert res == vectors[0] 
 
-    def test_get_vector_id_not_exised(self, connect, jac_table):
+    def test_get_vector_id_not_exised(self, connect, jac_collection):
         '''
         target: test get vector, params vector_id not existed
         method: add vector and get 
         expected: status ok, empty result
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_table, vector)
+        status, ids = connect.add_vectors(jac_collection, vector)
         assert status.OK()
-        status = connect.flush([jac_table])
+        status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_table, 1) 
+        status, res = connect.get_vector_by_id(jac_collection, 1) 
         assert status.OK()
         assert not res 
 
-    def test_get_vector_table_not_existed(self, connect, jac_table):
+    def test_get_vector_collection_not_existed(self, connect, jac_collection):
         '''
-        target: test get vector, params table_name not existed
+        target: test get vector, params collection_name not existed
         method: add vector and get
         expected: status not ok
         '''
         tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.add_vectors(jac_table, vector)
+        status, ids = connect.add_vectors(jac_collection, vector)
         assert status.OK()
-        status = connect.flush([jac_table])
+        status = connect.flush([jac_collection])
         assert status.OK()
-        table_new = gen_unique_str()
-        status, res = connect.get_vector_by_id(table_new, 1) 
+        collection_new = gen_unique_str()
+        status, res = connect.get_vector_by_id(collection_new, 1) 
         assert not status.OK()
 
-    def test_get_vector_partition(self, connect, jac_table):
+    def test_get_vector_partition(self, connect, jac_collection):
         '''
         target: test get_vector_by_id
         method: add vector, and get
         expected: status ok, vector returned
         '''
         tmp, vectors = gen_binary_vectors(nb, dim)
-        status = connect.create_partition(jac_table, tag)
-        status, ids = connect.add_vectors(jac_table, vectors, partition_tag=tag)
+        status = connect.create_partition(jac_collection, tag)
+        status, ids = connect.add_vectors(jac_collection, vectors, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([jac_table])
+        status = connect.flush([jac_collection])
         assert status.OK()
-        status, res = connect.get_vector_by_id(jac_table, ids[0])
+        status, res = connect.get_vector_by_id(jac_collection, ids[0])
         assert status.OK()
         assert res == vectors[0]
 
@@ -387,26 +387,26 @@ class TestGetVectorIdIngalid(object):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_get_vector_id_invalid(self, connect, table, gen_invalid_id):
+    def test_get_vector_id_invalid(self, connect, collection, gen_invalid_id):
         invalid_id = gen_invalid_id
         with pytest.raises(Exception) as e:
-            status = connect.get_vector_by_id(table, invalid_id)
+            status = connect.get_vector_by_id(collection, invalid_id)
 
 
-class TestTableNameInvalid(object):
+class TestCollectionNameInvalid(object):
     """
-    Test adding vectors with invalid table names
+    Test adding vectors with invalid collection names
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_table_names()
+        params=gen_invalid_collection_names()
     )
-    def get_table_name(self, request):
+    def get_collection_name(self, request):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_get_vectors_with_invalid_table_name(self, connect, get_table_name):
-        table_name = get_table_name
+    def test_get_vectors_with_invalid_collection_name(self, connect, get_collection_name):
+        collection_name = get_collection_name
         vectors = gen_vectors(1, dim)
-        status, result = connect.get_vector_by_id(table_name, 1)
+        status, result = connect.get_vector_by_id(collection_name, 1)
         assert not status.OK()
