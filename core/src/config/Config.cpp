@@ -25,8 +25,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "config/Config.h"
 #include "config/YamlConfigMgr.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/CommonUtil.h"

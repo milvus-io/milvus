@@ -19,7 +19,7 @@
 
 #include <memory>
 
-#include "server/Config.h"
+#include "config/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"

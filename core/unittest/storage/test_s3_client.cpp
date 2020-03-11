@@ -16,8 +16,8 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
+#include "config/Config.h"
 #include "easyloggingpp/easylogging++.h"
-#include "server/Config.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"

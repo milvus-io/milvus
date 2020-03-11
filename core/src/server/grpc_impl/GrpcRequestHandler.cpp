@@ -16,7 +16,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "server/Config.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
