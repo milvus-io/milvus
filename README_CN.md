@@ -31,7 +31,7 @@ Milvus 是一款开源的特征向量相似性搜索引擎。基于异构众核�
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/cn/docs/about_milvus/overview.md)。
 
-通过 [版本发布说明](https://www.milvus.io/cn/docs/v0.6.0/releases/v0.6.0.md) 获取最新版本的功能和更新。
+通过 [版本发布说明](https://www.milvus.io/cn/docs/master/releases/release_notes.md) 获取最新版本的功能和更新。
 
 ## 路线图
 
@@ -100,7 +100,7 @@ Milvus 可以广泛应用于各类场景。下图展示了基于 Milvus 和 VGG 
 
 -   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
--   [Milvus 设计文档](design.md)
+-   [Milvus 设计文档](DESIGN.md)
 
 ## 许可协议
 

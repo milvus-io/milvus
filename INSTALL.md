@@ -153,9 +153,18 @@ $ docker run -it -p 19530:19530 -d milvusdb/milvus-cpu-build-env:latest
 
 Start a GPU container:
 
+- For nvidia docker 2:
+
 ```shell
 $ docker run --runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
 ```
+
+- For nvidia container toolkit:
+
+```shell
+docker run --gpus all -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
+```
+
 To enter the container:
 
 ```shell
