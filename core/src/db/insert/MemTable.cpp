@@ -179,7 +179,7 @@ MemTable::ApplyDeletes() {
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
-//    auto start = std::chrono::high_resolution_clock::now();
+    //    auto start = std::chrono::high_resolution_clock::now();
 
     std::vector<int> file_types{meta::TableFileSchema::FILE_TYPE::RAW, meta::TableFileSchema::FILE_TYPE::TO_INDEX,
                                 meta::TableFileSchema::FILE_TYPE::BACKUP};
@@ -328,7 +328,7 @@ MemTable::ApplyDeletes() {
             indexes[i]->SetBlacklist(blacklists[i]);
         }
 
-//        start = std::chrono::high_resolution_clock::now();
+        //        start = std::chrono::high_resolution_clock::now();
 
         segment::Segment tmp_segment;
         segment::SegmentWriter segment_writer(segment_dir);
@@ -343,7 +343,7 @@ MemTable::ApplyDeletes() {
                          << " offsets to deleted docs in segment: " << table_file.segment_id_ << " in " << diff4.count()
                          << " s";
 
-//        start = std::chrono::high_resolution_clock::now();
+        //        start = std::chrono::high_resolution_clock::now();
 
         status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
@@ -365,12 +365,11 @@ MemTable::ApplyDeletes() {
         auto time7 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff6 = time7 - time6;
         diff6 = time6 - time5;
-        ENGINE_LOG_DEBUG << "Update table file row count in vector of segment: " << table_file.segment_id_ << " in " << diff6.count()
-                         << " s";
+        ENGINE_LOG_DEBUG << "Update table file row count in vector of segment: " << table_file.segment_id_ << " in "
+                         << diff6.count() << " s";
     }
 
     auto time7 = std::chrono::high_resolution_clock::now();
-
 
     status = meta_->UpdateTableFilesRowCount(table_files_to_update);
 
