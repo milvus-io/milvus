@@ -686,6 +686,26 @@ SqliteMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
 }
 
 Status
+SqliteMetaImpl::UpdateTableFilesRowCount(TableFilesSchema& files) {
+    try {
+        server::MetricCollector metric;
+
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+        for (auto& file : files) {
+            ConnectorPtr->update_all(set(c(&TableFileSchema::row_count_) = file.row_count_,
+                                         c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
+                                     where(c(&TableFileSchema::file_id_) == file.file_id_));
+            ENGINE_LOG_DEBUG << "Update file " << file.file_id_ << " row count to " << file.row_count_;
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when update table files row count", e.what());
+    }
+    return Status::OK();
+}
+
+Status
 SqliteMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& index) {
     try {
         server::MetricCollector metric;

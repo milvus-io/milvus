@@ -1058,7 +1058,7 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
 
     // step 4: wait and build index
     status = index_failed_checker_.CleanFailedIndexFileOfTable(table_id);
-    status = BuildTableIndexRecursively(table_id, index);
+    status = WaitTableIndexRecursively(table_id, index);
 
     return status;
 }
@@ -1738,7 +1738,7 @@ DBImpl::UpdateTableIndexRecursively(const std::string& table_id, const TableInde
 }
 
 Status
-DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex& index) {
+DBImpl::WaitTableIndexRecursively(const std::string& table_id, const TableIndex& index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
@@ -1779,8 +1779,8 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     std::vector<meta::TableSchema> partition_array;
     status = meta_ptr_->ShowPartitions(table_id, partition_array);
     for (auto& schema : partition_array) {
-        status = BuildTableIndexRecursively(schema.table_id_, index);
-        fiu_do_on("DBImpl.BuildTableIndexRecursively.fail_build_table_Index_for_partition",
+        status = WaitTableIndexRecursively(schema.table_id_, index);
+        fiu_do_on("DBImpl.WaitTableIndexRecursively.fail_build_table_Index_for_partition",
                   status = Status(DB_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -1790,7 +1790,7 @@ DBImpl::BuildTableIndexRecursively(const std::string& table_id, const TableIndex
     // failed to build index for some files, return error
     std::string err_msg;
     index_failed_checker_.GetErrMsgForTable(table_id, err_msg);
-    fiu_do_on("DBImpl.BuildTableIndexRecursively.not_empty_err_msg", err_msg.append("fiu"));
+    fiu_do_on("DBImpl.WaitTableIndexRecursively.not_empty_err_msg", err_msg.append("fiu"));
     if (!err_msg.empty()) {
         return Status(DB_ERROR, err_msg);
     }
