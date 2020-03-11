@@ -10,13 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <chrono>
-
 #include <oatpp/network/server/Server.hpp>
 
+#include "config/Config.h"
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/controller/WebController.hpp"
-
-#include "server/Config.h"
 
 namespace milvus {
 namespace server {
@@ -45,9 +43,8 @@ WebServer::StartService() {
 
     Config& config = Config::GetInstance();
     std::string port;
-    Status status;
 
-    status = config.GetServerConfigWebPort(port);
+    CONFIG_CHECK(config.GetServerConfigWebPort(port));
 
     {
         AppComponent components = AppComponent(std::stoi(port));

@@ -17,7 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1022 Check if partition name is valid
 -   \#1028 check if table exists when show partitions
 -   \#1029 check if table exists when try to delete partition
--   \#1066 optimize http insert and search speed
+-   \#1066 Optimize http insert and search speed
 -   \#1022 Check if partition name is legal
 -   \#1028 Check if table exists when show partitions
 -   \#1029 Check if table exists when try to delete partition
@@ -108,7 +108,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
+-   \#1537 Optimize raw vector and uids read/write
 -   \#1544 Update resources name in HTTP module
+-   \#1546 Move Config.cpp to config directory
 -   \#1567 Update yaml config description
 
 ## Task

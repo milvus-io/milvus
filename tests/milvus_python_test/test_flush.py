@@ -10,7 +10,7 @@ from utils import *
 
 dim = 128
 index_file_size = 10
-table_id = "test_flush"
+collection_id = "test_flush"
 DELETE_TIMEOUT = 60
 nprobe = 1
 tag = "1970-01-01"
@@ -38,117 +38,117 @@ class TestFlushBase:
             pytest.skip("Only support CPU mode")
         return request.param
 
-    def test_flush_table_not_existed(self, connect, table):
+    def test_flush_collection_not_existed(self, connect, collection):
         '''
-        target: test delete vector, params table_name not existed
+        target: test delete vector, params collection_name not existed
         method: add vector and delete
         expected: status not ok
         '''
-        table_new = gen_unique_str()
-        status = connect.flush([table_new])
+        collection_new = gen_unique_str()
+        status = connect.flush([collection_new])
         assert not status.OK()
 
-    def test_flush_empty_table(self, connect, table):
+    def test_flush_empty_collection(self, connect, collection):
         '''
-        method: flush table with no vectors
+        method: flush collection with no vectors
         expected: status ok
         '''
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
 
-    def test_add_partition_flush(self, connect, table):
+    def test_add_partition_flush(self, connect, collection):
         '''
-        method: add vectors into partition in table, flush serveral times
+        method: add vectors into partition in collection, flush serveral times
         expected: status ok
         '''
         vectors = gen_vector(nb, dim)
-        status = connect.create_partition(table, tag)
+        status = connect.create_partition(collection, tag)
         vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(table, vectors, ids)
-        status = connect.flush([table])
-        result, res = connect.get_table_row_count(table)
+        status, ids = connect.insert(collection, vectors, ids)
+        status = connect.flush([collection])
+        result, res = connect.count_collection(collection)
         assert res == nb
-        status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        result, res = connect.get_table_row_count(table)
+        result, res = connect.count_collection(collection)
         assert res == 2 * nb
 
-    def test_add_partitions_flush(self, connect, table):
+    def test_add_partitions_flush(self, connect, collection):
         '''
-        method: add vectors into partitions in table, flush one
+        method: add vectors into partitions in collection, flush one
         expected: status ok
         '''
         vectors = gen_vectors(nb, dim)
         tag_new = gen_unique_str()
-        status = connect.create_partition(table, tag)
-        status = connect.create_partition(table, tag_new)
+        status = connect.create_partition(collection, tag)
+        status = connect.create_partition(collection, tag_new)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
-        status = connect.flush([table])
+        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
+        status = connect.flush([collection])
         assert status.OK()
-        status, ids = connect.insert(table, vectors, ids, partition_tag=tag_new)
+        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag_new)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        result, res = connect.get_table_row_count(table)
+        result, res = connect.count_collection(collection)
         assert res == 2 * nb
 
-    def test_add_tables_flush(self, connect, table):
+    def test_add_collections_flush(self, connect, collection):
         '''
-        method: add vectors into tables, flush one
+        method: add vectors into collections, flush one
         expected: status ok
         '''
         vectors = gen_vectors(nb, dim)
-        table_new = gen_unique_str()
-        param = {'table_name': table_new,
+        collection_new = gen_unique_str()
+        param = {'collection_name': collection_new,
             'dimension': dim,
             'index_file_size': index_file_size,
             'metric_type': MetricType.L2}
-        status = connect.create_table(param)
-        status = connect.create_partition(table, tag)
-        status = connect.create_partition(table_new, tag)
+        status = connect.create_collection(param)
+        status = connect.create_partition(collection, tag)
+        status = connect.create_partition(collection_new, tag)
         vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(table, vectors, ids, partition_tag=tag)
-        status, ids = connect.insert(table_new, vectors, ids, partition_tag=tag)
+        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
+        status, ids = connect.insert(collection_new, vectors, ids, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
-        status = connect.flush([table_new])
+        status = connect.flush([collection])
+        status = connect.flush([collection_new])
         assert status.OK()
-        result, res = connect.get_table_row_count(table)
+        result, res = connect.count_collection(collection)
         assert res == nb
-        result, res = connect.get_table_row_count(table_new)
+        result, res = connect.count_collection(collection_new)
         assert res == nb
        
-    def test_add_flush_multiable_times(self, connect, table):
+    def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add vectors, flush serveral times
         expected: status ok
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
         for i in range(10):
-            status = connect.flush([table])
+            status = connect.flush([collection])
             assert status.OK()
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status, res = connect.search_vectors(table, top_k, query_records=query_vecs)
+        status, res = connect.search_vectors(collection, top_k, query_records=query_vecs)
         assert status.OK()
 
-    def test_add_flush_auto(self, connect, table):
+    def test_add_flush_auto(self, connect, collection):
         '''
         method: add vectors
         expected: status ok
         '''
         vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        status, ids = connect.add_vectors(table, vectors, ids)
+        status, ids = connect.add_vectors(collection, vectors, ids)
         assert status.OK()
         time.sleep(2)
-        status, res = connect.get_table_row_count(table)
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == nb 
 
@@ -163,7 +163,7 @@ class TestFlushBase:
         yield request.param
 
     # both autoflush / flush
-    def test_add_flush_same_ids(self, connect, table, same_ids):
+    def test_add_flush_same_ids(self, connect, collection, same_ids):
         '''
         method: add vectors, with same ids, count(same ids) < 15, > 15
         expected: status ok
@@ -173,79 +173,79 @@ class TestFlushBase:
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
-        status, ids = connect.add_vectors(table, vectors, ids)
+        status, ids = connect.add_vectors(collection, vectors, ids)
         time.sleep(2)
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == nb 
 
-    def test_delete_flush_multiable_times(self, connect, table):
+    def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete vectors, flush serveral times
         expected: status ok
         '''
         vectors = gen_vectors(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.delete_by_id(table, [ids[-1]])
+        status = connect.delete_by_id(collection, [ids[-1]])
         assert status.OK()
         for i in range(10):
-            status = connect.flush([table])
+            status = connect.flush([collection])
             assert status.OK()
         query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status, res = connect.search_vectors(table, top_k, query_records=query_vecs)
+        status, res = connect.search_vectors(collection, top_k, query_records=query_vecs)
         assert status.OK()
 
     # TODO: CI fail, LOCAL pass
-    def _test_table_count_during_flush(self, connect, args):
+    def _test_collection_count_during_flush(self, connect, args):
         '''
-        method: flush table at background, call `get_table_row_count`
+        method: flush collection at background, call `count_collection`
         expected: status ok
         '''
-        table = gen_unique_str() 
+        collection = gen_unique_str() 
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
-        param = {'table_name': table,
+        param = {'collection_name': collection,
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         milvus = get_milvus()
         milvus.connect(uri=uri)
-        milvus.create_table(param)
+        milvus.create_collection(param)
         vectors = gen_vector(nb, dim)
-        status, ids = milvus.add_vectors(table, vectors, ids=[i for i in range(nb)])
-        def flush(table_name):
+        status, ids = milvus.add_vectors(collection, vectors, ids=[i for i in range(nb)])
+        def flush(collection_name):
             milvus = get_milvus()
             milvus.connect(uri=uri)
-            status = milvus.delete_by_id(table_name, [i for i in range(nb)])
+            status = milvus.delete_by_id(collection_name, [i for i in range(nb)])
             assert status.OK()
-            status = milvus.flush([table_name])
+            status = milvus.flush([collection_name])
             assert status.OK()
-        p = Process(target=flush, args=(table, ))
+        p = Process(target=flush, args=(collection, ))
         p.start()
-        status, res = milvus.get_table_row_count(table)
+        status, res = milvus.count_collection(collection)
         assert status.OK()
         p.join()
-        status, res = milvus.get_table_row_count(table)
+        status, res = milvus.count_collection(collection)
         assert status.OK()
         logging.getLogger().info(res)
         assert res == 0
 
 
-class TestTableNameInvalid(object):
+class TestCollectionNameInvalid(object):
     """
-    Test adding vectors with invalid table names
+    Test adding vectors with invalid collection names
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_table_names()
+        params=gen_invalid_collection_names()
     )
-    def get_table_name(self, request):
+    def get_collection_name(self, request):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_flush_with_invalid_table_name(self, connect, get_table_name):
-        table_name = get_table_name
+    def test_flush_with_invalid_collection_name(self, connect, get_collection_name):
+        collection_name = get_collection_name
         with pytest.raises(Exception) as e:
-            status, result = connect.flush(table_name)
+            status, result = connect.flush(collection_name)

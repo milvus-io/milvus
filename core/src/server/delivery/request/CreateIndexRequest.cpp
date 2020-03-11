@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreateIndexRequest.h"
+#include "config/Config.h"
 #include "db/Utils.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
