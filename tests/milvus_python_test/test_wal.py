@@ -8,7 +8,7 @@ from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
-table_id = "test_wal"
+collection_id = "test_wal"
 WAL_TIMEOUT = 30
 nb = 6000
 add_interval = 1.5
@@ -21,109 +21,109 @@ class TestWalBase:
     ******************************************************************
     """
     @pytest.mark.timeout(WAL_TIMEOUT)
-    def test_wal_add_vectors(self, connect, table):
+    def test_wal_add_vectors(self, connect, collection):
         '''
         target: add vectors in WAL
         method: add vectors and flush when WAL is enabled
         expected: status ok, vectors added
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == nb
-        status, res = connect.get_vector_by_id(table, ids[0]) 
+        status, res = connect.get_vector_by_id(collection, ids[0]) 
         logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vectors[0])
 
     @pytest.mark.timeout(WAL_TIMEOUT)
-    def test_wal_delete_vectors(self, connect, table):
+    def test_wal_delete_vectors(self, connect, collection):
         '''
         target: delete vectors in WAL
         method: delete vectors and flush when WAL is enabled
         expected: status ok, vectors deleted
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        connect.flush([table])
-        status, res = connect.get_table_row_count(table)
+        connect.flush([collection])
+        status, res = connect.count_collection(collection)
         assert status.OK()
-        status = connect.delete_by_id(table, ids)
+        status = connect.delete_by_id(collection, ids)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == 0
 
     @pytest.mark.timeout(WAL_TIMEOUT)
-    def test_wal_invalid_operation(self, connect, table):
+    def test_wal_invalid_operation(self, connect, collection):
         '''
         target: invalid operation in WAL
         method: add vectors, delete with non-existent ids and flush when WAL is enabled
         expected: status ok, search with vector have result
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(table, vector)
+        status, ids = connect.add_vectors(collection, vector)
         assert status.OK()
-        connect.flush([table])
-        status = connect.delete_by_id(table, [0])
+        connect.flush([collection])
+        status = connect.delete_by_id(collection, [0])
         assert status.OK()
-        status = connect.flush([table])
-        status, res = connect.get_table_row_count(table)
+        status = connect.flush([collection])
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == 1
 
     @pytest.mark.timeout(WAL_TIMEOUT)
-    def test_wal_invalid_operation_B(self, connect, table):
+    def test_wal_invalid_operation_B(self, connect, collection):
         '''
         target: invalid operation in WAL
-        method: add vectors, delete with not existed table name when WAL is enabled
+        method: add vectors, delete with not existed collection name when WAL is enabled
         expected: status not ok
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
-        status = connect.delete_by_id(table, [0])
-        connect.flush([table])
-        table_new = gen_unique_str()
-        status = connect.delete_by_id(table_new, ids)
+        status = connect.flush([collection])
+        status = connect.delete_by_id(collection, [0])
+        connect.flush([collection])
+        collection_new = gen_unique_str()
+        status = connect.delete_by_id(collection_new, ids)
         assert not status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == nb
 
     @pytest.mark.timeout(WAL_TIMEOUT)
-    def test_wal_server_crashed_recovery(self, connect, table):
+    def test_wal_server_crashed_recovery(self, connect, collection):
         '''
         target: test wal when server crashed unexpectedly and restarted
         method: add vectors, server killed before flush, restarted server and flush
         expected: status ok, add request is recovered and vectors added
         '''
         vector = gen_single_vector(dim)
-        status, ids = connect.add_vectors(table, vector)
+        status, ids = connect.add_vectors(collection, vector)
         assert status.OK()
-        status = connect.flush([table])
-        status, res = connect.get_table_row_count(table)
+        status = connect.flush([collection])
+        status, res = connect.count_collection(collection)
         assert status.OK()
         logging.getLogger().info(res) # should be 0 because no auto flush
         logging.getLogger().info("Stop server and restart")
         # kill server and restart. auto flush should be set to 15 seconds.
         # time.sleep(15)
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, res = connect.get_table_row_count(table)
+        status, res = connect.count_collection(collection)
         assert status.OK()
         assert res == 1
-        status, res = connect.get_vector_by_id(table, ids[0]) 
+        status, res = connect.get_vector_by_id(collection, ids[0]) 
         logging.getLogger().info(res)
         assert status.OK()
         assert_equal_vector(res, vector[0])
