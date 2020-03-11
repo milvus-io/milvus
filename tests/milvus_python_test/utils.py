@@ -611,7 +611,7 @@ def get_search_param(index_type):
         return {"nprobe": 32}
     elif index_type == IndexType.HNSW:
         return {"ef": 64}
-     elif index_type == IndexType.RNSG:
+    elif index_type == IndexType.RNSG:
         return {"search_length": 50}
     else:
         logging.getLogger().info("Invalid index_type.")
