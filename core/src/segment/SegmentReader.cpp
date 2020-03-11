@@ -114,5 +114,18 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     return Status::OK();
 }
 
+Status
+SegmentReader::ReadDeletedDocsSize(size_t& size) {
+    codec::DefaultCodec default_codec;
+    try {
+        directory_ptr_->Create();
+        default_codec.GetDeletedDocsFormat()->readSize(directory_ptr_, size);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to read deleted docs size: " + std::string(e.what());
+        ENGINE_LOG_ERROR << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+    return Status::OK();
+}
 }  // namespace segment
 }  // namespace milvus

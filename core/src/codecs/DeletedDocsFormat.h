@@ -32,6 +32,9 @@ class DeletedDocsFormat {
 
     virtual void
     write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) = 0;
+
+    virtual void
+    readSize(const store::DirectoryPtr& directory_ptr, size_t& size) = 0;
 };
 
 using DeletedDocsFormatPtr = std::shared_ptr<DeletedDocsFormat>;

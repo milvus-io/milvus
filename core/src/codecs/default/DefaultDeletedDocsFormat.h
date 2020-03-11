@@ -35,6 +35,9 @@ class DefaultDeletedDocsFormat : public DeletedDocsFormat {
     void
     write(const store::DirectoryPtr& directory_ptr, const segment::DeletedDocsPtr& deleted_docs) override;
 
+    void
+    readSize(const store::DirectoryPtr& directory_ptr, size_t& size) override;
+
     // No copy and move
     DefaultDeletedDocsFormat(const DefaultDeletedDocsFormat&) = delete;
     DefaultDeletedDocsFormat(DefaultDeletedDocsFormat&&) = delete;

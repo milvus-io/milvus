@@ -60,6 +60,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1598 Server down during mixed operations
 -   \#1601 External link bug in HTTP doc
 -   \#1609 Refine Compact function
+-   \#1619 Improve compact performance
 
 ## Feature
 -   \#216 Add CLI to get server info
