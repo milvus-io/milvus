@@ -220,6 +220,19 @@ IsRawIndexType(int32_t type) {
     return (type == (int32_t)EngineType::FAISS_IDMAP) || (type == (int32_t)EngineType::FAISS_BIN_IDMAP);
 }
 
+bool
+IsBinaryIndexType(int32_t index_type) {
+    return (index_type == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) ||
+           (index_type == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT);
+}
+
+bool
+IsBinaryMetricType(int32_t metric_type) {
+    return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
+           (metric_type == (int32_t)engine::MetricType::JACCARD) ||
+           (metric_type == (int32_t)engine::MetricType::TANIMOTO);
+}
+
 meta::DateT
 GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;

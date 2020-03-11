@@ -236,11 +236,27 @@ MemTable::ApplyDeletes() {
         utils::GetParentPath(table_file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
 
-        auto index =
-            std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(table_file.location_));
-        faiss::ConcurrentBitsetPtr blacklist = nullptr;
-        if (index != nullptr) {
-            status = index->GetBlacklist(blacklist);
+        auto& segment_id = table_file.segment_id_;
+        meta::TableFilesSchema segment_files;
+        status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
+        if (!status.ok()) {
+            break;
+        }
+
+        // Get all index that contains blacklist in cache
+        std::vector<VecIndexPtr> indexes;
+        std::vector<faiss::ConcurrentBitsetPtr> blacklists;
+        for (auto& file : segment_files) {
+            auto index =
+                std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_));
+            faiss::ConcurrentBitsetPtr blacklist = nullptr;
+            if (index != nullptr) {
+                index->GetBlacklist(blacklist);
+                if (blacklist != nullptr) {
+                    indexes.emplace_back(index);
+                    blacklists.emplace_back(blacklist);
+                }
+            }
         }
 
         std::vector<segment::doc_id_t> uids;
@@ -293,7 +309,7 @@ MemTable::ApplyDeletes() {
                     id_bloom_filter_ptr->Remove(uids[i]);
                 }
 
-                if (blacklist != nullptr) {
+                for (auto& blacklist : blacklists) {
                     if (!blacklist->test(i)) {
                         blacklist->set(i);
                     }
@@ -308,8 +324,8 @@ MemTable::ApplyDeletes() {
                          << find_diff.count() << " s in total";
         ENGINE_LOG_DEBUG << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 
-        if (index != nullptr) {
-            index->SetBlacklist(blacklist);
+        for (auto i = 0; i < indexes.size(); ++i) {
+            indexes[i]->SetBlacklist(blacklists[i]);
         }
 
         start = std::chrono::high_resolution_clock::now();
@@ -339,12 +355,6 @@ MemTable::ApplyDeletes() {
                          << " s";
 
         // Update table file row count
-        auto& segment_id = table_file.segment_id_;
-        meta::TableFilesSchema segment_files;
-        status = meta_->GetTableFilesBySegmentId(segment_id, segment_files);
-        if (!status.ok()) {
-            break;
-        }
         for (auto& file : segment_files) {
             if (file.file_type_ == meta::TableFileSchema::RAW || file.file_type_ == meta::TableFileSchema::TO_INDEX ||
                 file.file_type_ == meta::TableFileSchema::INDEX || file.file_type_ == meta::TableFileSchema::BACKUP) {
@@ -354,7 +364,7 @@ MemTable::ApplyDeletes() {
         }
     }
 
-    status = meta_->UpdateTableFiles(table_files_to_update);
+    status = meta_->UpdateTableFilesRowCount(table_files_to_update);
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();

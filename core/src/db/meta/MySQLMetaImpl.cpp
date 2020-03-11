@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
@@ -1240,6 +1241,46 @@ MySQLMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
 }
 
 Status
+MySQLMetaImpl::UpdateTableFilesRowCount(TableFilesSchema& files) {
+    try {
+        server::MetricCollector metric;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query updateTableFilesQuery = connectionPtr->query();
+
+            for (auto& file : files) {
+                std::string row_count = std::to_string(file.row_count_);
+                std::string updated_time = std::to_string(utils::GetMicroSecTimeStamp());
+
+                updateTableFilesQuery << "UPDATE " << META_TABLEFILES << " SET row_count = " << row_count
+                                      << " , updated_time = " << updated_time << " WHERE file_id = " << file.file_id_
+                                      << ";";
+
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesRowCount: " << updateTableFilesQuery.str();
+
+                if (!updateTableFilesQuery.exec()) {
+                    return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
+                }
+
+                ENGINE_LOG_DEBUG << "Update file " << file.file_id_ << " row count to " << file.row_count_;
+            }
+        }  // Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Update " << files.size() << " table files";
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES ROW COUNT", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
 MySQLMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index) {
     try {
         server::MetricCollector metric;
@@ -1326,8 +1367,12 @@ MySQLMetaImpl::DropTableIndex(const std::string& table_id) {
             }
 
             // set table index type to raw
-            dropTableIndexQuery << "UPDATE " << META_TABLES
-                                << " SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE)
+            dropTableIndexQuery << "UPDATE " << META_TABLES << " SET engine_type = "
+                                << " (CASE"
+                                << " WHEN metric_type in (" << (int32_t)MetricType::HAMMING << " ,"
+                                << (int32_t)MetricType::JACCARD << " ," << (int32_t)MetricType::TANIMOTO << ")"
+                                << " THEN " << (int32_t)EngineType::FAISS_BIN_IDMAP << " ELSE "
+                                << (int32_t)EngineType::FAISS_IDMAP << " END)"
                                 << " , index_params = '{}'"
                                 << " WHERE table_id = " << mysqlpp::quote << table_id << ";";
 
@@ -2022,6 +2067,7 @@ Status
 MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
+    std::map<std::string, TableFileSchema> segment_ids;
 
     // remove to_delete files
     try {
@@ -2049,7 +2095,7 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
             mysqlpp::StoreQueryResult res = query.store();
 
             TableFileSchema table_file;
-            std::vector<std::string> idsToDelete;
+            std::vector<std::string> delete_ids;
 
             int64_t clean_files = 0;
             for (auto& resRow : res) {
@@ -2074,30 +2120,22 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
-                    // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
-                    // Else, we can only delete the single file
-                    // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
-                    if (utils::IsRawIndexType(table_file.engine_type_)) {
-                        utils::DeleteSegment(options_, table_file);
-                        std::string segment_dir;
-                        utils::GetParentPath(table_file.location_, segment_dir);
-                        ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
-                    } else {
-                        utils::DeleteTableFilePath(options_, table_file);
-                        ENGINE_LOG_DEBUG << "Remove table file: " << table_file.location_;
-                    }
+                    // delete file from disk storage
+                    utils::DeleteTableFilePath(options_, table_file);
+                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.id_ << " location:" << table_file.location_;
 
-                    idsToDelete.emplace_back(std::to_string(table_file.id_));
+                    delete_ids.emplace_back(std::to_string(table_file.id_));
                     table_ids.insert(table_file.table_id_);
+                    segment_ids.insert(std::make_pair(table_file.segment_id_, table_file));
 
-                    ++clean_files;
+                    clean_files++;
                 }
             }
 
             // delete file from meta
-            if (!idsToDelete.empty()) {
+            if (!delete_ids.empty()) {
                 std::stringstream idsToDeleteSS;
-                for (auto& id : idsToDelete) {
+                for (auto& id : delete_ids) {
                     idsToDeleteSS << "id = " << id << " OR ";
                 }
 
@@ -2207,6 +2245,51 @@ MySQLMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/)
 
             if (table_ids.size() > 0) {
                 ENGINE_LOG_DEBUG << "Remove " << table_ids.size() << " tables folder";
+            }
+        }
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+    }
+
+    // remove deleted segment folder
+    // don't remove segment folder until all its tablefiles has been deleted
+    try {
+        server::MetricCollector metric;
+
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedSegmentFolder_NUllConnection",
+                      is_null_connection = true);
+            fiu_do_on("MySQLMetaImpl.CleanUpFilesWithTTL.RemoveDeletedSegmentFolder_ThrowException",
+                      throw std::exception(););
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            int64_t remove_segments = 0;
+            for (auto& segment_id : segment_ids) {
+                mysqlpp::Query query = connectionPtr->query();
+                query << "SELECT id"
+                      << " FROM " << META_TABLEFILES << " WHERE segment_id = " << mysqlpp::quote << segment_id.first
+                      << ";";
+
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << query.str();
+
+                mysqlpp::StoreQueryResult res = query.store();
+
+                if (res.empty()) {
+                    utils::DeleteSegment(options_, segment_id.second);
+                    std::string segment_dir;
+                    utils::GetParentPath(segment_id.second.location_, segment_dir);
+                    ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
+                    ++remove_segments;
+                }
+            }
+
+            if (remove_segments > 0) {
+                ENGINE_LOG_DEBUG << "Remove " << remove_segments << " segments folder";
             }
         }
     } catch (std::exception& e) {

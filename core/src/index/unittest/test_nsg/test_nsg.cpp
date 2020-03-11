@@ -233,7 +233,7 @@ TEST_F(NSGInterfaceTest, comparetest) {
 //            }
 //        }
 //    }
-//    printf("R@1 = %.4f\n", n_1 / float(nq));
+//    printf("R@1 = %.4f\n", n_1 / float(nq));;
 //    printf("R@10 = %.4f\n", n_10 / float(nq));
 //    printf("R@100 = %.4f\n", n_100 / float(nq));
 //}

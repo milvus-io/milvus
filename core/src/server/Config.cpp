@@ -667,7 +667,7 @@ Config::CheckConfigVersion(const std::string& value) {
             std::string msg = "Invalid config version: " + value +
                               ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
             SERVER_LOG_ERROR << msg;
-            // return Status(SERVER_INVALID_ARGUMENT, msg);
+            return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     }
     return Status::OK();
