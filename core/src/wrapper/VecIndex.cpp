@@ -11,7 +11,7 @@
 
 #include "wrapper/VecIndex.h"
 
-#include "VecImpl.h"
+#include "config/Config.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
@@ -22,7 +22,6 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "server/Config.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/s3/S3IOReader.h"
@@ -31,6 +30,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "wrapper/BinVecImpl.h"
+#include "wrapper/VecImpl.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>

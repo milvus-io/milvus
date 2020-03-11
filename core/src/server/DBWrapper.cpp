@@ -15,8 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "config/Config.h"
 #include "db/DBFactory.h"
-#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
