@@ -18,7 +18,7 @@ nb = 6000
 nlist = 1024
 
 
-class TestTableInfoBase:
+class TestCollectionInfoBase:
     def index_string_convert(self, index_string, index_type):
         if index_string == "IDMAP" and index_type == IndexType.FLAT:
             return True
@@ -30,87 +30,87 @@ class TestTableInfoBase:
 
     """
     ******************************************************************
-      The following cases are used to test `table_info` function
+      The following cases are used to test `collection_info` function
     ******************************************************************
     """
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_name_None(self, connect, table):
+    def test_get_collection_info_name_None(self, connect, collection):
         '''
-        target: get table info where table name is None
-        method: call table_info with the table_name: None
+        target: get collection info where collection name is None
+        method: call collection_info with the collection_name: None
         expected: status not ok
         '''
-        table_name = None
-        status, info = connect.table_info(table_name)
+        collection_name = None
+        status, info = connect.collection_info(collection_name)
         assert not status.OK()
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_name_not_existed(self, connect, table):
+    def test_get_collection_info_name_not_existed(self, connect, collection):
         '''
-        target: get table info where table name does not exist
-        method: call table_info with a random table_name, which is not in db
+        target: get collection info where collection name does not exist
+        method: call collection_info with a random collection_name, which is not in db
         expected: status not ok
         '''
-        table_name = gen_unique_str("not_existed_table")
-        status, info = connect.table_info(table_name)
+        collection_name = gen_unique_str("not_existed_collection")
+        status, info = connect.collection_info(collection_name)
         assert not status.OK()
     
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_table_names()
+        params=gen_invalid_collection_names()
     )
-    def get_table_name(self, request):
+    def get_collection_name(self, request):
         yield request.param
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_name_invalid(self, connect, get_table_name):
+    def test_get_collection_info_name_invalid(self, connect, get_collection_name):
         '''
-        target: get table info where table name is invalid
-        method: call table_info with invalid table_name
+        target: get collection info where collection name is invalid
+        method: call collection_info with invalid collection_name
         expected: status not ok
         '''
-        table_name = get_table_name
-        status, info = connect.table_info(table_name)
+        collection_name = get_collection_name
+        status, info = connect.collection_info(collection_name)
         assert not status.OK()
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_table_row_count(self, connect, table):
+    def test_get_collection_info_collection_row_count(self, connect, collection):
         '''
-        target: get row count with table_info
-        method: add and delete vectors, check count in table info
+        target: get row count with collection_info
+        method: add and delete vectors, check count in collection info
         expected: status ok, count as expected
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         assert info.count == nb
         # delete a few vectors
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_by_id(table, delete_ids)
+        status = connect.delete_by_id(collection, delete_ids)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         assert info.count == nb - 2
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_partition_stats_A(self, connect, table):
+    def test_get_collection_info_partition_stats_A(self, connect, collection):
         '''
-        target: get partition info in a table
-        method: no partition, call table_info and check partition_stats
+        target: get partition info in a collection
+        method: no partition, call collection_info and check partition_stats
         expected: status ok, "_default" partition is listed
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
         assert len(info.partitions_stat) == 1
@@ -119,19 +119,19 @@ class TestTableInfoBase:
 
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_partition_stats_B(self, connect, table):
+    def test_get_collection_info_partition_stats_B(self, connect, collection):
         '''
-        target: get partition info in a table
-        method: call table_info after partition created and check partition_stats
+        target: get partition info in a collection
+        method: call collection_info after partition created and check partition_stats
         expected: status ok, vectors added to partition
         '''
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
-        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        status = connect.create_partition(collection, tag)
+        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
         assert len(info.partitions_stat) == 2
@@ -139,23 +139,23 @@ class TestTableInfoBase:
         assert info.partitions_stat[1].count == nb
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_partition_stats_C(self, connect, table):
+    def test_get_collection_info_partition_stats_C(self, connect, collection):
         '''
-        target: get partition info in a table
-        method: create two partitions, add vectors in one of the partitions, call table_info and check 
+        target: get partition info in a collection
+        method: create two partitions, add vectors in one of the partitions, call collection_info and check 
         expected: status ok, vectors added to one partition but not the other
         '''
         new_tag = "new_tag"
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
+        status = connect.create_partition(collection, tag)
         assert status.OK()
-        status = connect.create_partition(table, new_tag)
+        status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
         for partition in info.partitions_stat:
@@ -165,25 +165,25 @@ class TestTableInfoBase:
                 assert partition.count == 0
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_partition_stats_D(self, connect, table):
+    def test_get_collection_info_partition_stats_D(self, connect, collection):
         '''
-        target: get partition info in a table
-        method: create two partitions, add vectors in both partitions, call table_info and check 
+        target: get partition info in a collection
+        method: create two partitions, add vectors in both partitions, call collection_info and check 
         expected: status ok, vectors added to both partitions
         '''
         new_tag = "new_tag"
         vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(table, tag)
+        status = connect.create_partition(collection, tag)
         assert status.OK()
-        status = connect.create_partition(table, new_tag)
+        status = connect.create_partition(collection, new_tag)
         assert status.OK()
-        status, ids = connect.add_vectors(table, vectors, partition_tag=tag)
+        status, ids = connect.add_vectors(collection, vectors, partition_tag=tag)
         assert status.OK()
-        status, ids = connect.add_vectors(table, vectors, partition_tag=new_tag)
+        status, ids = connect.add_vectors(collection, vectors, partition_tag=new_tag)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         assert info.count == nb * 2
         for partition in info.partitions_stat:
@@ -205,24 +205,24 @@ class TestTableInfoBase:
         return request.param
     
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_index_created(self, connect, table, get_simple_index):
+    def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
         '''
-        target: test table info after index created
-        method: create table, add vectors, create index and call table_info 
+        target: test collection info after index created
+        method: create collection, add vectors, create index and call collection_info 
         expected: status ok, index created and shown in segments_stat
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status = connect.create_index(table, index_type, index_param) 
+        status = connect.create_index(collection, index_type, index_param) 
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
         index_string = info.partitions_stat[0].segments_stat[0].index_name
@@ -231,24 +231,24 @@ class TestTableInfoBase:
         assert nb == info.partitions_stat[0].segments_stat[0].count
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_create_same_index_repeatedly(self, connect, table, get_simple_index):
+    def test_get_collection_info_after_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         '''
-        target: test table info after index created repeatedly
-        method: create table, add vectors, create index and call table_info multiple times 
+        target: test collection info after index created repeatedly
+        method: create collection, add vectors, create index and call collection_info multiple times 
         expected: status ok, index info shown in segments_stat
         '''
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
-        status = connect.create_index(table, index_type, index_param)
-        status = connect.create_index(table, index_type, index_param)
-        status = connect.create_index(table, index_type, index_param)
+        status = connect.create_index(collection, index_type, index_param)
+        status = connect.create_index(collection, index_type, index_param)
+        status = connect.create_index(collection, index_type, index_param)
         assert status.OK()
-        status, info = connect.table_info(table)
+        status, info = connect.collection_info(collection)
         assert status.OK()
         logging.getLogger().info(info)
         index_string = info.partitions_stat[0].segments_stat[0].index_name
@@ -257,22 +257,22 @@ class TestTableInfoBase:
         assert nb == info.partitions_stat[0].segments_stat[0].count
 
     @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_table_info_after_create_different_index_repeatedly(self, connect, table, get_simple_index):
+    def test_get_collection_info_after_create_different_index_repeatedly(self, connect, collection, get_simple_index):
         '''
-        target: test table info after index created repeatedly
-        method: create table, add vectors, create index and call table_info multiple times 
+        target: test collection info after index created repeatedly
+        method: create collection, add vectors, create index and call collection_info multiple times 
         expected: status ok, index info shown in segments_stat
         '''
         vectors = gen_vector(nb, dim)
-        status, ids = connect.add_vectors(table, vectors)
+        status, ids = connect.add_vectors(collection, vectors)
         assert status.OK()
-        status = connect.flush([table])
+        status = connect.flush([collection])
         assert status.OK()
         index_param = {"nlist": nlist} 
         for index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8]:
-            status = connect.create_index(table, index_type, index_param)
+            status = connect.create_index(collection, index_type, index_param)
             assert status.OK()
-            status, info = connect.table_info(table)
+            status, info = connect.collection_info(collection)
             assert status.OK()
             logging.getLogger().info(info)
             index_string = info.partitions_stat[0].segments_stat[0].index_name
