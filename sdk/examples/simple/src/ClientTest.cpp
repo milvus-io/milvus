@@ -31,7 +31,7 @@ constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
-constexpr int64_t ADD_ENTITY_LOOP = 5;
+constexpr int64_t ADD_ENTITY_LOOP = 50;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
 constexpr int32_t NLIST = 16384;
 
@@ -245,15 +245,19 @@ ClientTest::Test() {
     Flush(collection_name);
     ShowCollectionInfo(collection_name);
 
-    GetEntityById(collection_name, search_id_array_[0]);
-    SearchEntities(collection_name, TOP_K, NPROBE);
+//    GetEntityById(collection_name, search_id_array_[0]);
+//    SearchEntities(collection_name, TOP_K, NPROBE);
+//
+//    CreateIndex(collection_name, INDEX_TYPE, NLIST);
+//    ShowCollectionInfo(collection_name);
+//
+//    PreloadCollection(collection_name);
 
-    CreateIndex(collection_name, INDEX_TYPE, NLIST);
-    ShowCollectionInfo(collection_name);
-
-    PreloadCollection(collection_name);
-
-    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    constexpr long vector_size = 2000000;
+    std::vector<int64_t> delete_ids(vector_size); //  = {search_id_array_[0], search_id_array_[1]};
+    for(long i= 0; i < vector_size;  ++ i) {
+        delete_ids[i] = i;
+    }
     DeleteByIds(collection_name, delete_ids);
     SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
 
