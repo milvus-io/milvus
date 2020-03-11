@@ -19,11 +19,11 @@
 #include <string>
 #include <vector>
 
+#include "config/Config.h"
 #include "config/handler/CacheConfigHandler.h"
 #include "db/insert/MemManager.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/Meta.h"
-#include "server/Config.h"
 #include "utils/Status.h"
 
 namespace milvus {

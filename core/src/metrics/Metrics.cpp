@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "metrics/Metrics.h"
-#include "server/Config.h"
+#include "config/Config.h"
 #ifdef MILVUS_WITH_PROMETHEUS
 #include "metrics/prometheus/PrometheusMetrics.h"
 #endif

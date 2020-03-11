@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "cache/GpuCacheMgr.h"
-#include "server/Config.h"
+#include "config/Config.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>
