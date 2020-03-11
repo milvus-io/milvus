@@ -1241,6 +1241,46 @@ MySQLMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
 }
 
 Status
+MySQLMetaImpl::UpdateTableFilesRowCount(TableFilesSchema& files) {
+    try {
+        server::MetricCollector metric;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query updateTableFilesQuery = connectionPtr->query();
+
+            for (auto& file : files) {
+                std::string row_count = std::to_string(file.row_count_);
+                std::string updated_time = std::to_string(utils::GetMicroSecTimeStamp());
+
+                updateTableFilesQuery << "UPDATE " << META_TABLEFILES << " SET row_count = " << row_count
+                                      << " , updated_time = " << updated_time << " WHERE file_id = " << file.file_id_
+                                      << ";";
+
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesRowCount: " << updateTableFilesQuery.str();
+
+                if (!updateTableFilesQuery.exec()) {
+                    return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
+                }
+
+                ENGINE_LOG_DEBUG << "Update file " << file.file_id_ << " row count to " << file.row_count_;
+            }
+        }  // Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Update " << files.size() << " table files";
+    } catch (std::exception& e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES ROW COUNT", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
 MySQLMetaImpl::DescribeTableIndex(const std::string& table_id, TableIndex& index) {
     try {
         server::MetricCollector metric;
