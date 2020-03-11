@@ -88,6 +88,9 @@ class Meta {
     UpdateTableFiles(TableFilesSchema& files) = 0;
 
     virtual Status
+    UpdateTableFilesRowCount(TableFilesSchema& files) = 0;
+
+    virtual Status
     UpdateTableIndex(const std::string& table_id, const TableIndex& index) = 0;
 
     virtual Status

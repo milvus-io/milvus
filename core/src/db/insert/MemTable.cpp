@@ -364,7 +364,7 @@ MemTable::ApplyDeletes() {
         }
     }
 
-    status = meta_->UpdateTableFiles(table_files_to_update);
+    status = meta_->UpdateTableFilesRowCount(table_files_to_update);
 
     if (!status.ok()) {
         std::string err_msg = "Failed to apply deletes: " + status.ToString();
