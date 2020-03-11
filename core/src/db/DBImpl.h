@@ -216,7 +216,7 @@ class DBImpl : public DB, public server::CacheConfigHandler {
     UpdateTableIndexRecursively(const std::string& table_id, const TableIndex& index);
 
     Status
-    BuildTableIndexRecursively(const std::string& table_id, const TableIndex& index);
+    WaitTableIndexRecursively(const std::string& table_id, const TableIndex& index);
 
     Status
     DropTableIndexRecursively(const std::string& table_id);

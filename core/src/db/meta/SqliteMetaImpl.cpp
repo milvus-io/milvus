@@ -686,6 +686,26 @@ SqliteMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
 }
 
 Status
+SqliteMetaImpl::UpdateTableFilesRowCount(TableFilesSchema& files) {
+    try {
+        server::MetricCollector metric;
+
+        // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
+        for (auto& file : files) {
+            ConnectorPtr->update_all(set(c(&TableFileSchema::row_count_) = file.row_count_,
+                                         c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
+                                     where(c(&TableFileSchema::file_id_) == file.file_id_));
+            ENGINE_LOG_DEBUG << "Update file " << file.file_id_ << " row count to " << file.row_count_;
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when update table files row count", e.what());
+    }
+    return Status::OK();
+}
+
+Status
 SqliteMetaImpl::UpdateTableIndex(const std::string& table_id, const TableIndex& index) {
     try {
         server::MetricCollector metric;
@@ -804,8 +824,18 @@ SqliteMetaImpl::DropTableIndex(const std::string& table_id) {
                                        c(&TableFileSchema::file_type_) == (int)TableFileSchema::BACKUP));
 
         // set table index type to raw
+        auto groups = ConnectorPtr->select(columns(&TableSchema::metric_type_),
+                                           where(c(&TableSchema::table_id_) == table_id));
+
+        int32_t raw_engine_type = DEFAULT_ENGINE_TYPE;
+        if (groups.size() == 1) {
+            int32_t metric_type_ = std::get<0>(groups[0]);
+            if (engine::utils::IsBinaryMetricType(metric_type_)) {
+                raw_engine_type = (int32_t)EngineType::FAISS_BIN_IDMAP;
+            }
+        }
         ConnectorPtr->update_all(
-            set(c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE, c(&TableSchema::index_params_) = "{}"),
+            set(c(&TableSchema::engine_type_) = raw_engine_type, c(&TableSchema::index_params_) = "{}"),
             where(c(&TableSchema::table_id_) == table_id));
 
         ENGINE_LOG_DEBUG << "Successfully drop table index, table id = " << table_id;
@@ -1189,29 +1219,21 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
                 file_schema.metric_type_ = table_schema.metric_type_;
 
                 switch (file_schema.file_type_) {
-                    case (int)TableFileSchema::RAW:
-                        ++raw_count;
+                    case (int)TableFileSchema::RAW:++raw_count;
                         break;
-                    case (int)TableFileSchema::NEW:
-                        ++new_count;
+                    case (int)TableFileSchema::NEW:++new_count;
                         break;
-                    case (int)TableFileSchema::NEW_MERGE:
-                        ++new_merge_count;
+                    case (int)TableFileSchema::NEW_MERGE:++new_merge_count;
                         break;
-                    case (int)TableFileSchema::NEW_INDEX:
-                        ++new_index_count;
+                    case (int)TableFileSchema::NEW_INDEX:++new_index_count;
                         break;
-                    case (int)TableFileSchema::TO_INDEX:
-                        ++to_index_count;
+                    case (int)TableFileSchema::TO_INDEX:++to_index_count;
                         break;
-                    case (int)TableFileSchema::INDEX:
-                        ++index_count;
+                    case (int)TableFileSchema::INDEX:++index_count;
                         break;
-                    case (int)TableFileSchema::BACKUP:
-                        ++backup_count;
+                    case (int)TableFileSchema::BACKUP:++backup_count;
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
 
                 auto status = utils::GetTableFilePath(options_, file_schema);
@@ -1225,29 +1247,25 @@ SqliteMetaImpl::FilesByType(const std::string& table_id, const std::vector<int>&
             std::string msg = "Get table files by type.";
             for (int file_type : file_types) {
                 switch (file_type) {
-                    case (int)TableFileSchema::RAW:
-                        msg = msg + " raw files:" + std::to_string(raw_count);
+                    case (int)TableFileSchema::RAW:msg = msg + " raw files:" + std::to_string(raw_count);
                         break;
-                    case (int)TableFileSchema::NEW:
-                        msg = msg + " new files:" + std::to_string(new_count);
+                    case (int)TableFileSchema::NEW:msg = msg + " new files:" + std::to_string(new_count);
                         break;
                     case (int)TableFileSchema::NEW_MERGE:
-                        msg = msg + " new_merge files:" + std::to_string(new_merge_count);
+                        msg = msg + " new_merge files:"
+                              + std::to_string(new_merge_count);
                         break;
                     case (int)TableFileSchema::NEW_INDEX:
-                        msg = msg + " new_index files:" + std::to_string(new_index_count);
+                        msg = msg + " new_index files:"
+                              + std::to_string(new_index_count);
                         break;
-                    case (int)TableFileSchema::TO_INDEX:
-                        msg = msg + " to_index files:" + std::to_string(to_index_count);
+                    case (int)TableFileSchema::TO_INDEX:msg = msg + " to_index files:" + std::to_string(to_index_count);
                         break;
-                    case (int)TableFileSchema::INDEX:
-                        msg = msg + " index files:" + std::to_string(index_count);
+                    case (int)TableFileSchema::INDEX:msg = msg + " index files:" + std::to_string(index_count);
                         break;
-                    case (int)TableFileSchema::BACKUP:
-                        msg = msg + " backup files:" + std::to_string(backup_count);
+                    case (int)TableFileSchema::BACKUP:msg = msg + " backup files:" + std::to_string(backup_count);
                         break;
-                    default:
-                        break;
+                    default:break;
                 }
             }
             ENGINE_LOG_DEBUG << msg;
@@ -1364,6 +1382,7 @@ Status
 SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/) {
     auto now = utils::GetMicroSecTimeStamp();
     std::set<std::string> table_ids;
+    std::map<std::string, TableFileSchema> segment_ids;
 
     // remove to_delete files
     try {
@@ -1413,23 +1432,16 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
                 server::CommonUtil::EraseFromCache(table_file.location_);
 
                 if (table_file.file_type_ == (int)TableFileSchema::TO_DELETE) {
-                    // If we are deleting a raw table file, it means it's okay to delete the entire segment directory.
-                    // Else, we can only delete the single file
-                    // TODO(zhiru): We determine whether a table file is raw by its engine type. This is a bit hacky
-                    if (utils::IsRawIndexType(table_file.engine_type_)) {
-                        utils::DeleteSegment(options_, table_file);
-                        std::string segment_dir;
-                        utils::GetParentPath(table_file.location_, segment_dir);
-                        ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
-                    } else {
-                        utils::DeleteTableFilePath(options_, table_file);
-                        ENGINE_LOG_DEBUG << "Remove table file: " << table_file.location_;
-                    }
-
                     // delete file from meta
                     ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
+                    // delete file from disk storage
+                    utils::DeleteTableFilePath(options_, table_file);
+
+                    ENGINE_LOG_DEBUG << "Remove file id:" << table_file.file_id_ << " location:"
+                                     << table_file.location_;
                     table_ids.insert(table_file.table_id_);
+                    segment_ids.insert(std::make_pair(table_file.segment_id_, table_file));
 
                     ++clean_files;
                 }
@@ -1499,6 +1511,32 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
 
         if (remove_tables) {
             ENGINE_LOG_DEBUG << "Remove " << remove_tables << " tables folder";
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when delete table folder", e.what());
+    }
+
+    // remove deleted segment folder
+    // don't remove segment folder until all its tablefiles has been deleted
+    try {
+        fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveSegmentFolder_ThrowException", throw std::exception());
+        server::MetricCollector metric;
+
+        int64_t remove_segments = 0;
+        for (auto& segment_id : segment_ids) {
+            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_),
+                                                 where(c(&TableFileSchema::segment_id_) == segment_id.first));
+            if (selected.size() == 0) {
+                utils::DeleteSegment(options_, segment_id.second);
+                std::string segment_dir;
+                utils::GetParentPath(segment_id.second.location_, segment_dir);
+                ENGINE_LOG_DEBUG << "Remove segment directory: " << segment_dir;
+                ++remove_segments;
+            }
+        }
+
+        if (remove_segments > 0) {
+            ENGINE_LOG_DEBUG << "Remove " << remove_segments << " segments folder";
         }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when delete table folder", e.what());

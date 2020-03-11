@@ -48,6 +48,12 @@ IsSameIndex(const TableIndex& index1, const TableIndex& index2);
 bool
 IsRawIndexType(int32_t type);
 
+static bool
+IsBinaryIndexType(int32_t index_type);
+
+bool
+IsBinaryMetricType(int32_t metric_type);
+
 meta::DateT
 GetDate(const std::time_t& t, int day_delta = 0);
 meta::DateT
