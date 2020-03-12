@@ -738,15 +738,22 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
     auto status = Status::OK();
     std::vector<segment::doc_id_t> uids;
+    faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
         status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
         uids = from_index->GetUids();
+        from_index->GetBlacklist(blacklist);
     } else if (bin_from_index) {
         status = to_index->BuildAll(Count(), bin_from_index->GetRawVectors(), bin_from_index->GetRawIds(), conf);
         uids = bin_from_index->GetUids();
+        bin_from_index->GetBlacklist(blacklist);
     }
     to_index->SetUids(uids);
-    ENGINE_LOG_DEBUG << "set uids " << to_index->GetUids().size() << " for " << location;
+    ENGINE_LOG_DEBUG << "Set " << to_index->GetUids().size() << "uids for " << location;
+    if (blacklist != nullptr) {
+        to_index->SetBlacklist(blacklist);
+        ENGINE_LOG_DEBUG << "Set blacklist for index " << location;
+    }
 
     if (!status.ok()) {
         throw Exception(DB_ERROR, status.message());
