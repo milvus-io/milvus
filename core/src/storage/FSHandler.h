@@ -19,22 +19,24 @@
 
 #include <memory>
 
-#include "segment/DeletedDocs.h"
-#include "storage/FSHandler.h"
+#include "storage/IOReader.h"
+#include "storage/IOWriter.h"
+#include "storage/Operation.h"
 
 namespace milvus {
-namespace codec {
+namespace storage {
 
-class DeletedDocsFormat {
- public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::DeletedDocsPtr& deleted_docs) = 0;
+struct FSHandler {
+    IOReaderPtr reader_ptr_ = nullptr;
+    IOWriterPtr writer_ptr_ = nullptr;
+    OperationPtr operation_ptr_ = nullptr;
 
-    virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs) = 0;
+    FSHandler(IOReaderPtr& reader_ptr, IOWriterPtr& writer_ptr, OperationPtr& operation_ptr)
+        : reader_ptr_(reader_ptr), writer_ptr_(writer_ptr), operation_ptr_(operation_ptr) {
+    }
 };
 
-using DeletedDocsFormatPtr = std::shared_ptr<DeletedDocsFormat>;
+using FSHandlerPtr = std::shared_ptr<FSHandler>;
 
-}  // namespace codec
+}  // namespace storage
 }  // namespace milvus

@@ -13,23 +13,42 @@
 
 #include <fstream>
 #include <string>
-#include "storage/IOWriter.h"
+#include "storage/IOReader.h"
 
 namespace milvus {
 namespace storage {
 
-class FileIOWriter : public IOWriter {
+class DiskIOReader : public IOReader {
  public:
-    explicit FileIOWriter(const std::string& name);
-    ~FileIOWriter();
+    DiskIOReader() = default;
+    ~DiskIOReader() = default;
+
+    // No copy and move
+    DiskIOReader(const DiskIOReader&) = delete;
+    DiskIOReader(DiskIOReader&&) = delete;
+
+    DiskIOReader&
+    operator=(const DiskIOReader&) = delete;
+    DiskIOReader&
+    operator=(DiskIOReader&&) = delete;
 
     void
-    write(void* ptr, size_t size) override;
+    open(const std::string& name) override;
+
+    void
+    read(void* ptr, size_t size) override;
+
+    void
+    seekg(size_t pos) override;
 
     size_t
     length() override;
 
+    void
+    close() override;
+
  public:
+    std::string name_;
     std::fstream fs_;
 };
 

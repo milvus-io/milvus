@@ -27,8 +27,8 @@ set(wrapper_files
         )
 
 set(storage_files
-        ${MILVUS_ENGINE_SRC}/storage/file/FileIOReader.cpp
-        ${MILVUS_ENGINE_SRC}/storage/file/FileIOWriter.cpp
+        ${MILVUS_ENGINE_SRC}/storage/disk/DiskIOReader.cpp
+        ${MILVUS_ENGINE_SRC}/storage/disk/DiskIOWriter.cpp
         )
 
 set(util_files
