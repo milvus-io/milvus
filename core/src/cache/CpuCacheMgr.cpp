@@ -54,7 +54,7 @@ CpuCacheMgr::GetIndex(const std::string& key) {
 
 void
 CpuCacheMgr::OnCpuCacheCapacityChanged(int64_t value) {
-    SetCapacity(value << 30);
+    SetCapacity(value * unit);
 }
 
 }  // namespace cache

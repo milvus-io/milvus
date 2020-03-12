@@ -15,7 +15,7 @@
 
 #include <string>
 
-#include "server/Config.h"
+#include "config/Config.h"
 
 namespace milvus {
 namespace server {

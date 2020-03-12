@@ -80,8 +80,8 @@ GpuCacheMgr::InsertItem(const std::string& key, const milvus::cache::DataObjPtr&
 
 void
 GpuCacheMgr::OnGpuCacheCapacityChanged(int64_t capacity) {
-    for (auto & iter : instance_) {
-        iter.second->SetCapacity(capacity << 30);
+    for (auto& iter : instance_) {
+        iter.second->SetCapacity(capacity * G_BYTE);
     }
 }
 

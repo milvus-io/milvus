@@ -35,7 +35,6 @@ class GpuCacheConfigHandler : virtual public GpuConfigHandler {
     void
     RemoveGpuCacheCapacityListener();
 
-
  protected:
     int64_t gpu_cache_capacity_ = 1 /* GiB */;
 };

@@ -41,7 +41,8 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuCacheConfigHa
     InsertItem(const std::string& key, const DataObjPtr& data);
 
  protected:
-    void OnGpuCacheCapacityChanged(int64_t capacity) override;
+    void
+    OnGpuCacheCapacityChanged(int64_t capacity) override;
 
  private:
     bool gpu_enable_ = true;
