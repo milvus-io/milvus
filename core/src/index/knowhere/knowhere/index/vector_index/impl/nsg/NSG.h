@@ -22,7 +22,7 @@
 #include "knowhere/common/Config.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 using node_t = int64_t;
 
@@ -135,5 +135,5 @@ class NsgIndex {
     FindUnconnectedNode(boost::dynamic_bitset<>& flags, int64_t& root);
 };
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

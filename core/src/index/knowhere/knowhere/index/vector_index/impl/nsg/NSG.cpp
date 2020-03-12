@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <algorithm>
+#include <implrithm>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -23,7 +23,7 @@
 #include "knowhere/common/Timer.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 unsigned int seed = 100;
 
@@ -835,5 +835,5 @@ NsgIndex::SetKnnGraph(Graph& g) {
     knng = std::move(g);
 }
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

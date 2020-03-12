@@ -14,7 +14,7 @@
 #include <mutex>
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 using node_t = int64_t;
 
@@ -40,5 +40,5 @@ struct Neighbor {
 
 typedef std::lock_guard<std::mutex> LockGuard;
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

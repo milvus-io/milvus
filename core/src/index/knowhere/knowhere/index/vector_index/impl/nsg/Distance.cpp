@@ -16,7 +16,7 @@
 #include "Distance.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 float
 DistanceL2::Compare(const float* a, const float* b, unsigned size) const {
@@ -237,5 +237,5 @@ DistanceIP::Compare(const float* a, const float* b, unsigned size) const {
 //    return faiss::fvec_inner_product(a,b,size);
 //}
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

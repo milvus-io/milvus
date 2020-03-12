@@ -20,7 +20,7 @@
 
 namespace knowhere {
 
-namespace algo {
+namespace impl {
 class NsgIndex;
 }
 
@@ -67,7 +67,7 @@ class NSG : public VecIndex {
     Dim() override;
 
  private:
-    std::shared_ptr<algo::NsgIndex> index_;
+    std::shared_ptr<impl::NsgIndex> index_;
     std::mutex mutex_;
     int64_t gpu_;
 };

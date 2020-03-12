@@ -14,10 +14,10 @@
 #include "Neighbor.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 extern int
 InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn);
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

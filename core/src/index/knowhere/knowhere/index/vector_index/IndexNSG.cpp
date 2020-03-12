@@ -39,10 +39,10 @@ NSG::Serialize(const Config& config) {
     try {
         // fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
-        algo::NsgIndex* index = index_.get();
+        impl::NsgIndex* index = index_.get();
 
         MemoryIOWriter writer;
-        algo::write_index(index, writer);
+        impl::write_index(index, writer);
         auto data = std::make_shared<uint8_t>();
         data.reset(writer.data_);
 
@@ -65,7 +65,7 @@ NSG::Load(const BinarySet& index_binary) {
         reader.total = binary->size;
         reader.data_ = binary->data.get();
 
-        auto index = algo::read_index(reader);
+        auto index = impl::read_index(reader);
         index_.reset(index);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -87,7 +87,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        algo::SearchParams s_params;
+        impl::SearchParams s_params;
         s_params.search_length = config[IndexParams::search_length];
         s_params.k = config[meta::TOPK];
         {
@@ -130,7 +130,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
 #endif
 
-    algo::BuildParams b_params;
+    impl::BuildParams b_params;
     b_params.candidate_pool_size = config[IndexParams::candidate];
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
@@ -138,7 +138,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     GETTENSOR(dataset_ptr)
-    index_ = std::make_shared<algo::NsgIndex>(dim, rows);
+    index_ = std::make_shared<impl::NsgIndex>(dim, rows);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
 }

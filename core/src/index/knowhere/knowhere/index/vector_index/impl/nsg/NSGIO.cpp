@@ -14,7 +14,7 @@
 #include "NSGIO.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 void
 write_index(NsgIndex* index, MemoryIOWriter& writer) {
@@ -59,5 +59,5 @@ read_index(MemoryIOReader& reader) {
     return index;
 }
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

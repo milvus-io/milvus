@@ -14,7 +14,7 @@
 #include "NSGHelper.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 // TODO: impl search && insert && return insert pos. why not just find and swap?
 int
@@ -61,5 +61,5 @@ InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn) {
     return right;
 }
 
-};  // namespace algo
+};  // namespace impl
 }  // namespace knowhere

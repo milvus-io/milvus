@@ -12,7 +12,7 @@
 #pragma once
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 struct Distance {
     virtual float
@@ -29,5 +29,5 @@ struct DistanceIP : public Distance {
     Compare(const float* a, const float* b, unsigned size) const override;
 };
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere

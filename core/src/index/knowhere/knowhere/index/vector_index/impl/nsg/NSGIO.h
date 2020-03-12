@@ -15,7 +15,7 @@
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
-namespace algo {
+namespace impl {
 
 extern void
 write_index(NsgIndex* index, MemoryIOWriter& writer);
@@ -23,5 +23,5 @@ write_index(NsgIndex* index, MemoryIOWriter& writer);
 extern NsgIndex*
 read_index(MemoryIOReader& reader);
 
-}  // namespace algo
+}  // namespace impl
 }  // namespace knowhere
