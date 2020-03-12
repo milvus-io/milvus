@@ -17,10 +17,10 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
@@ -39,9 +39,9 @@ GPUIDMAP::CopyGpuToCpu(const Config& config) {
 }
 
 BinarySet
-GPUIDMAP::SerializeImpl(const IndexType type) {
+GPUIDMAP::SerializeImpl(const IndexType& type) {
     try {
-	fiu_do_on("GPUIDMP.SerializeImpl.throw_exception", throw std::exception());
+        // fiu_do_on("GPUIDMP.SerializeImpl.throw_exception", throw std::exception());
         MemoryIOWriter writer;
         {
             faiss::Index* index = index_.get();
@@ -63,7 +63,7 @@ GPUIDMAP::SerializeImpl(const IndexType type) {
 }
 
 void
-GPUIDMAP::LoadImpl(const BinarySet& index_binary, const IndexType type) {
+GPUIDMAP::LoadImpl(const BinarySet& index_binary, const IndexType& type) {
     auto binary = index_binary.GetByName(IndexTypeToStr(type));
     MemoryIOReader reader;
     {
@@ -91,12 +91,12 @@ GPUIDMAP::CopyGpuToGpu(const int64_t device_id, const Config& config) {
     return std::static_pointer_cast<IDMAP>(cpu_index)->CopyCpuToGpu(device_id, config);
 }
 
-float*
+const float*
 GPUIDMAP::GetRawVectors() {
     KNOWHERE_THROW_MSG("Not support");
 }
 
-int64_t*
+const int64_t*
 GPUIDMAP::GetRawIds() {
     KNOWHERE_THROW_MSG("Not support");
 }

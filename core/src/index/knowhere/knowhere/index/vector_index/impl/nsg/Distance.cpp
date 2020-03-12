@@ -13,7 +13,7 @@
 
 #include <immintrin.h>
 
-#include "knowhere/index/vector_index/nsg/Distance.h"
+#include "Distance.h"
 
 namespace knowhere {
 namespace algo {

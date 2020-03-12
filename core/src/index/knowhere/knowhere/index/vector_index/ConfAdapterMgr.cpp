@@ -11,8 +11,8 @@
 
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 
-#include "knowhere/common/Log.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
 
 namespace knowhere {
 

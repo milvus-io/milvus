@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "server/Config.h"
+// #include "server/Config.h"
 
 namespace knowhere {
 
@@ -152,15 +152,16 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg) {
     oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
 #ifdef MILVUS_GPU_VERSION
-    Status s;
-    bool enable_gpu = false;
-    server::Config& config = server::Config::GetInstance();
-    s = config.GetGpuResourceConfigEnable(enable_gpu);
-    if (s.ok()) {
-        CheckStrByValues(knowhere::Metric::TYPE, GPU_METRICS);
-    } else {
-        CheckStrByValues(knowhere::Metric::TYPE, CPU_METRICS);
-    }
+    // Status s;
+    // bool enable_gpu = false;
+    // server::Config& config = server::Config::GetInstance();
+    // s = config.GetGpuResourceConfigEnable(enable_gpu);
+    // if (s.ok()) {
+    //     CheckStrByValues(knowhere::Metric::TYPE, GPU_METRICS);
+    // } else {
+    //     CheckStrByValues(knowhere::Metric::TYPE, CPU_METRICS);
+    // }
+    CheckStrByValues(knowhere::Metric::TYPE, CPU_METRICS);
 #endif
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);

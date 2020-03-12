@@ -16,27 +16,27 @@
 #include <stack>
 #include <utility>
 
+#include "NSG.h"
+#include "NSGHelper.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/nsg/NSG.h"
-#include "knowhere/index/vector_index/nsg/NSGHelper.h"
 
 namespace knowhere {
 namespace algo {
 
 unsigned int seed = 100;
 
-NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, METRICTYPE metric)
+NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, std::string metric)
     : dimension(dimension), ntotal(n), metric_type(metric) {
-    switch (metric) {
-        case METRICTYPE::L2:
-            distance_ = new DistanceL2;
-            break;
-        case METRICTYPE::IP:
-            distance_ = new DistanceIP;
-            break;
-    }
+    // switch (metric) {
+    //     case METRICTYPE::L2:
+    //         break;
+    //     case METRICTYPE::IP:
+    //         distance_ = new DistanceIP;
+    //         break;
+    // }
+    distance_ = new DistanceL2;
 }
 
 NsgIndex::~NsgIndex() {

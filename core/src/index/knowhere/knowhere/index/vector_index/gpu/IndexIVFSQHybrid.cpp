@@ -11,8 +11,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
@@ -215,12 +215,12 @@ IVFSQHybrid::UnsetQuantizer() {
 }
 
 BinarySet
-IVFSQHybrid::SerializeImpl(const IndexType type) {
+IVFSQHybrid::SerializeImpl(const IndexType& type) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    fiu_do_on("IVFSQHybrid.SerializeImpl.zero_gpu_mode", gpu_mode = 0);
+    // fiu_do_on("IVFSQHybrid.SerializeImpl.zero_gpu_mode", gpu_mode = 0);
     if (gpu_mode_ == 0) {
         MemoryIOWriter writer;
         faiss::write_index(index_.get(), &writer);
@@ -240,7 +240,7 @@ IVFSQHybrid::SerializeImpl(const IndexType type) {
 }
 
 void
-IVFSQHybrid::LoadImpl(const BinarySet& binary_set, const IndexType type) {
+IVFSQHybrid::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
     FaissBaseIndex::LoadImpl(binary_set, index_type_);  // load on cpu
     auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->backup_quantizer();

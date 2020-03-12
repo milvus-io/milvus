@@ -19,11 +19,10 @@
 
 #undef mkdir
 
-#include "knowhere/adapter/SptagAdapter.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "knowhere/index/vector_index/helpers/Definitions.h"
+#include "knowhere/index/vector_index/adapter/SptagAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/SPTAGParameterMgr.h"
 
 namespace knowhere {
@@ -72,15 +71,15 @@ CPUSPTAGRNG::Serialize(const Config& config) {
     metadata1.reset(static_cast<uint8_t*>(index_blobs[4].Data()));
     auto metadata2 = std::make_shared<uint8_t>();
     metadata2.reset(static_cast<uint8_t*>(index_blobs[5].Data()));
-    auto config = std::make_shared<uint8_t>();
-    config.reset(static_cast<uint8_t*>((void*)cstr));
+    auto x_cfg = std::make_shared<uint8_t>();
+    x_cfg.reset(static_cast<uint8_t*>((void*)cstr));
 
     binary_set.Append("samples", sample, index_blobs[0].Length());
     binary_set.Append("tree", tree, index_blobs[1].Length());
     binary_set.Append("deleteid", deleteid, index_blobs[3].Length());
     binary_set.Append("metadata1", metadata1, index_blobs[4].Length());
     binary_set.Append("metadata2", metadata2, index_blobs[5].Length());
-    binary_set.Append("config", config, length);
+    binary_set.Append("config", x_cfg, length);
     binary_set.Append("graph", graph, index_blobs[2].Length());
 
     return binary_set;

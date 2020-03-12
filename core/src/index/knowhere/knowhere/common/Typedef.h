@@ -16,7 +16,7 @@
 #include <vector>
 
 namespace knowhere {
-    
+
 using MetricType = std::string;
 // using IndexType = std::string;
 using IDType = int64_t;

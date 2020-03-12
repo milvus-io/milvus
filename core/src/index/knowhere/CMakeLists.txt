@@ -21,12 +21,12 @@ if (NOT TARGET SPTAGLibStatic)
 endif ()
 
 set(external_srcs
-        knowhere/adapter/SptagAdapter.cpp
         knowhere/common/Exception.cpp
         knowhere/common/Timer.cpp
         )
 
 set(index_srcs
+        knowhere/index/vector_index/adapter/SptagAdapter.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
         knowhere/index/vector_index/FaissBaseIndex.cpp

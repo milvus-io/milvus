@@ -11,12 +11,12 @@
 
 #include "knowhere/index/vector_index/IndexNSG.h"
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/impl/nsg/NSG.h"
 #include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
 
@@ -87,7 +87,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        impl::SearchParams s_params;
+        algo::SearchParams s_params;
         s_params.search_length = config[IndexParams::search_length];
         s_params.k = config[meta::TOPK];
         {
@@ -107,15 +107,15 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 void
 NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
-    idmap->Train(config);
-    idmap->AddWithoutId(dataset_ptr, config);
+    idmap->Train(dataset_ptr, config);
+    idmap->AddWithoutIds(dataset_ptr, config);
     Graph knng;
     const float* raw_data = idmap->GetRawVectors();
 #ifdef MILVUS_GPU_VERSION
     if (config[knowhere::meta::DEVICEID].get<int64_t>() == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);
-	    preprocess_index->AddWithoutIds(dataset_ptr, config);
+        preprocess_index->AddWithoutIds(dataset_ptr, config);
         preprocess_index->GenGraph(raw_data, config[IndexParams::knng].get<int64_t>(), knng, config);
     } else {
         auto gpu_idx = cloner::CopyCpuToGpu(idmap, config[knowhere::meta::DEVICEID].get<int64_t>(), config);

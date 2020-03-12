@@ -18,9 +18,9 @@
 
 #include <faiss/IndexIVF.h>
 
+#include "knowhere/common/Typedef.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/common/Typedef"
 
 namespace knowhere {
 

@@ -17,9 +17,9 @@
 #include <chrono>
 #include <string>
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace knowhere {
 
@@ -32,13 +32,13 @@ BinaryIVF::Serialize(const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    return SerializeImpl();
+    return SerializeImpl(index_type_);
 }
 
 void
 BinaryIVF::Load(const BinarySet& index_binary) {
     std::lock_guard<std::mutex> lk(mutex_);
-    LoadImpl(index_binary);
+    LoadImpl(index_binary, index_type_);
 }
 
 DatasetPtr

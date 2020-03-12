@@ -20,9 +20,9 @@
 #include "hnswlib/hnswalg.h"
 #include "hnswlib/space_ip.h"
 #include "hnswlib/space_l2.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
@@ -130,7 +130,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
-IndexModelPtr
+void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
 
@@ -143,8 +143,6 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                config[IndexParams::efConstruction].get<int64_t>());
-
-    return nullptr;
 }
 
 void

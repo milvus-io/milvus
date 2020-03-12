@@ -21,7 +21,7 @@
 
 namespace knowhere {
 
-class CPUSPTAGRNG : public VectorIndex {
+class CPUSPTAGRNG : public VecIndex {
  public:
     explicit CPUSPTAGRNG(const std::string& IndexType);
 
@@ -59,7 +59,6 @@ class CPUSPTAGRNG : public VectorIndex {
     SetParameters(const Config& config);
 
  private:
-    PreprocessorPtr preprocessor_;
     std::shared_ptr<SPTAG::VectorIndex> index_ptr_;
     SPTAG::IndexAlgoType index_type_;
 };

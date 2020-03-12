@@ -23,7 +23,7 @@ FaissBaseBinaryIndex::FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> i
 }
 
 BinarySet
-FaissBaseBinaryIndex::SerializeImpl() {
+FaissBaseBinaryIndex::SerializeImpl(const IndexType& type) {
     try {
         faiss::IndexBinary* index = index_.get();
 
@@ -41,7 +41,7 @@ FaissBaseBinaryIndex::SerializeImpl() {
 }
 
 void
-FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary) {
+FaissBaseBinaryIndex::LoadImpl(const BinarySet& index_binary, const IndexType& type) {
     auto binary = index_binary.GetByName("BinaryIVF");
 
     MemoryIOReader reader;

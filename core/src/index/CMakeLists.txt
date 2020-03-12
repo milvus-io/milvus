@@ -106,7 +106,7 @@ endif ()
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
 if (KNOWHERE_BUILD_TESTS)
-    add_subdirectory(unittest)
+    # add_subdirectory(unittest)
 endif ()
 
 config_summary()

@@ -19,7 +19,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "server/Config.h"
+// #include "server/Config.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -38,11 +38,13 @@ VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
     std::shared_ptr<knowhere::VecIndex> index;
 
 #ifdef MILVUS_GPU_VERSION
-    auto gpu_device = -1;  // TODO(linxj): remove hardcode here
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    bool gpu_resource_enable = true;
-    config.GetGpuResourceConfigEnable(gpu_resource_enable);
+    // auto gpu_device = -1;  // TODO(linxj): remove hardcode here
+    // milvus::server::Config& config = milvus::server::Config::GetInstance();
+    // bool gpu_resource_enable = true;
+    // config.GetGpuResourceConfigEnable(gpu_resource_enable);
 
+    auto gpu_device = -1;  // TODO(linxj): remove hardcode here
+    bool gpu_resource_enable = true;
     if (mode == IndexMode::MODE_GPU && gpu_resource_enable) {
         switch (type) {
             // case IndexType::INDEX_FAISS_IDMAP {

@@ -28,15 +28,17 @@
 #include <utility>
 #include <vector>
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #endif
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+
+#include <fiu-local.h>
 
 namespace knowhere {
 
@@ -177,7 +179,7 @@ IVF::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 }
 
 void
-IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config& config) {
+IVF::GenGraph(const float* data, const int64_t& k, GraphType& graph, const Config& config) {
     int64_t K = k + 1;
     auto ntotal = Count();
 
@@ -189,7 +191,7 @@ IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config
 
     std::vector<float> res_dis(K * batch_size);
     graph.resize(ntotal);
-    Graph res_vec(total_search_count);
+    GraphType res_vec(total_search_count);
     for (int i = 0; i < total_search_count; ++i) {
         auto b_size = (i == (total_search_count - 1)) && tail_batch_size != 0 ? tail_batch_size : batch_size;
 

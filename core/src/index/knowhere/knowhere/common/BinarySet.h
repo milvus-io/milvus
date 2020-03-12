@@ -17,8 +17,6 @@
 #include <utility>
 #include <vector>
 
-#include "Id.h"
-
 namespace knowhere {
 
 struct Binary {

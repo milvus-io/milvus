@@ -16,20 +16,23 @@
 #include <utility>
 #include <vector>
 
-#include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/IndexIVF.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
+#include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace knowhere {
 
-class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
+class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
  public:
     BinaryIVF() : FaissBaseBinaryIndex(nullptr) {
+        index_type_ = IndexType::INDEX_FAISS_BIN_IVFFLAT;
     }
 
     explicit BinaryIVF(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
+        index_type_ = IndexType::INDEX_FAISS_BIN_IVFFLAT;
     }
 
     BinarySet

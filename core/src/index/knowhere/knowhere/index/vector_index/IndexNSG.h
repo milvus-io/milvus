@@ -14,19 +14,20 @@
 #include <memory>
 #include <vector>
 
+#include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace knowhere {
 
-namespace impl {
+namespace algo {
 class NsgIndex;
 }
 
-class NSG : public VectorIndex {
+class NSG : public VecIndex {
  public:
     explicit NSG(const int64_t& gpu_num = -1) : gpu_(gpu_num) {
-        if(gpu >= 0) {
+        if (gpu_ >= 0) {
             index_mode_ = IndexMode::MODE_GPU;
         }
     }
@@ -64,9 +65,8 @@ class NSG : public VectorIndex {
     int64_t
     Dim() override;
 
-
  private:
-    std::shared_ptr<impl::NsgIndex> index_;
+    std::shared_ptr<algo::NsgIndex> index_;
     std::mutex mutex_;
     int64_t gpu_;
 };

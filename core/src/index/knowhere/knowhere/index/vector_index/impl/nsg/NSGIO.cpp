@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-#include "knowhere/index/vector_index/nsg/NSGIO.h"
+#include "NSGIO.h"
 
 namespace knowhere {
 namespace algo {

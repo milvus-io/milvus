@@ -22,12 +22,14 @@
 
 namespace knowhere {
 
-class BinaryIDMAP : public VectorIndex, public FaissBaseBinaryIndex {
+class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
  public:
     BinaryIDMAP() : FaissBaseBinaryIndex(nullptr) {
+        index_type_ = IndexType::INDEX_FAISS_BIN_IDMAP;
     }
 
     explicit BinaryIDMAP(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
+        index_type_ = IndexType::INDEX_FAISS_BIN_IDMAP;
     }
 
     BinarySet

@@ -23,8 +23,8 @@
 
 #include <vector>
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
@@ -103,7 +103,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    search_impl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, Config());
+    QueryImpl(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, Config());
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

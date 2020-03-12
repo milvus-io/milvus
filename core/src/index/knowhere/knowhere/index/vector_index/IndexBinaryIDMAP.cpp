@@ -17,8 +17,8 @@
 
 #include <string>
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace knowhere {
 
@@ -29,13 +29,13 @@ BinaryIDMAP::Serialize(const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    return SerializeImpl();
+    return SerializeImpl(index_type_);
 }
 
 void
 BinaryIDMAP::Load(const BinarySet& index_binary) {
     std::lock_guard<std::mutex> lk(mutex_);
-    LoadImpl(index_binary);
+    LoadImpl(index_binary, index_type_);
 }
 
 DatasetPtr
@@ -130,7 +130,7 @@ BinaryIDMAP::GetRawIds() {
 }
 
 void
-BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset_ptr, const Config& config) {
+BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }

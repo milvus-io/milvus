@@ -15,8 +15,8 @@
 #include <faiss/index_factory.h>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
@@ -30,13 +30,13 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
-        auto device_index = new faiss::gpu::GpuIndexIVFPQ(
-            temp_resource->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m],
-            config[IndexParams::nbits],
-            GetMetricType(config[Metric::TYPE].get<std::string>()));  // IP not support
+        auto device_index =
+            new faiss::gpu::GpuIndexIVFPQ(gpu_res->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(),
+                                          config[IndexParams::m], config[IndexParams::nbits],
+                                          GetMetricType(config[Metric::TYPE].get<std::string>()));  // IP not support
         device_index->train(rows, (float*)p_data);
         std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index.get()));
+        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
 
         auto device_index1 = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, host_index.get());
         index_.reset(device_index1);

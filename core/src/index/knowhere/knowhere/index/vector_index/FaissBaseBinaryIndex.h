@@ -17,6 +17,7 @@
 
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Dataset.h"
+#include "knowhere/index/vector_index/IndexType.h"
 
 namespace knowhere {
 

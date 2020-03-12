@@ -16,12 +16,12 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/index_io.h>
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace knowhere {
 
@@ -35,7 +35,7 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = gpu_id_;
-        faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim, config[IndexParams::nlist],
+        faiss::gpu::GpuIndexIVFFlat device_index(gpu_res->faiss_res.get(), dim, config[IndexParams::nlist],
                                                  GetMetricType(config[Metric::TYPE].get<std::string>()), idx_config);
         device_index.train(rows, (float*)p_data);
 
@@ -61,7 +61,7 @@ GPUIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 BinarySet
-GPUIVF::SerializeImpl(const IndexType type) {
+GPUIVF::SerializeImpl(const IndexType& type) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -88,7 +88,7 @@ GPUIVF::SerializeImpl(const IndexType type) {
 }
 
 void
-GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType type) {
+GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
     auto binary = binary_set.GetByName(IndexTypeToStr(type));
     MemoryIOReader reader;
     {
@@ -115,7 +115,7 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
-    fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
+    // fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
         device_index->nprobe = config[IndexParams::nprobe];
         ResScope rs(res_, gpu_id_);

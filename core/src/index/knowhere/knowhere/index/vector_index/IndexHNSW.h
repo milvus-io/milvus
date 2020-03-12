@@ -16,11 +16,12 @@
 
 #include "hnswlib/hnswlib.h"
 
-#include "knowhere/index/vector_index/VectorIndex.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace knowhere {
 
-class IndexHNSW : public VectorIndex {
+class IndexHNSW : public VecIndex {
  public:
     BinarySet
     Serialize(const Config& config = Config()) override;
@@ -28,7 +29,7 @@ class IndexHNSW : public VectorIndex {
     void
     Load(const BinarySet& index_binary) override;
 
-    IndexModelPtr
+    void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void

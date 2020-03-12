@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-#include "knowhere/index/vector_index/nsg/NSGHelper.h"
+#include "NSGHelper.h"
 
 namespace knowhere {
 namespace algo {

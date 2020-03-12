@@ -35,10 +35,10 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     VecIndexPtr
     CopyGpuToGpu(const int64_t, const Config&) override;
 
-    float*
+    const float*
     GetRawVectors() override;
 
-    int64_t*
+    const int64_t*
     GetRawIds() override;
 
     void
@@ -46,10 +46,10 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
 
  protected:
     BinarySet
-    SerializeImpl(const IndexType) override;
+    SerializeImpl(const IndexType&) override;
 
     void
-    LoadImpl(const BinarySet&, const IndexType) override;
+    LoadImpl(const BinarySet&, const IndexType&) override;
 
     void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&) override;

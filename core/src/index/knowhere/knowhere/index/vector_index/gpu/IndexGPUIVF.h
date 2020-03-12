@@ -44,10 +44,10 @@ class GPUIVF : public IVF, public GPUIndex {
 
  protected:
     BinarySet
-    SerializeImpl(const IndexType) override;
+    SerializeImpl(const IndexType&) override;
 
     void
-    LoadImpl(const BinarySet&, const IndexType) override;
+    LoadImpl(const BinarySet&, const IndexType&) override;
 
     void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&) override;

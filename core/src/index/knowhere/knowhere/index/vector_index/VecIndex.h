@@ -14,9 +14,9 @@
 #include <memory>
 
 #include "knowhere/common/Dataset.h"
+#include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/vector_index/IndexType.h"
-#include "knowhere/common/Typedef.h"
 
 namespace knowhere {
 
@@ -45,7 +45,7 @@ class VecIndex : public Index {
     //
     // virtual DatasetPtr
     // QueryByRange(const DatasetPtr&, const Config&) = 0;
-    // 
+    //
     // virtual MetricType
     // metric_type() = 0;
 

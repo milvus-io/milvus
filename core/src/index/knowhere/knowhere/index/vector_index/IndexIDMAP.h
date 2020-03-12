@@ -56,10 +56,10 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&);
 
-    const float*
+    virtual const float*
     GetRawVectors();
 
-    const int64_t*
+    virtual const int64_t*
     GetRawIds();
 
  protected:

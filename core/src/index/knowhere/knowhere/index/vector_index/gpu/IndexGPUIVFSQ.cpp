@@ -14,9 +14,9 @@
 
 #include <memory>
 
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
