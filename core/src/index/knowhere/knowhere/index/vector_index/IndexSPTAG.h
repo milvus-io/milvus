@@ -60,7 +60,6 @@ class CPUSPTAGRNG : public VecIndex {
 
  private:
     std::shared_ptr<SPTAG::VectorIndex> index_ptr_;
-    SPTAG::IndexAlgoType index_type_;
 };
 
 using CPUSPTAGRNGPtr = std::shared_ptr<CPUSPTAGRNG>;

@@ -19,7 +19,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-// #include "server/Config.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -38,14 +38,8 @@ VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
     std::shared_ptr<knowhere::VecIndex> index;
 
 #ifdef MILVUS_GPU_VERSION
-    // auto gpu_device = -1;  // TODO(linxj): remove hardcode here
-    // milvus::server::Config& config = milvus::server::Config::GetInstance();
-    // bool gpu_resource_enable = true;
-    // config.GetGpuResourceConfigEnable(gpu_resource_enable);
-
-    auto gpu_device = -1;  // TODO(linxj): remove hardcode here
-    bool gpu_resource_enable = true;
-    if (mode == IndexMode::MODE_GPU && gpu_resource_enable) {
+    auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
+    if (mode == IndexMode::MODE_GPU) {
         switch (type) {
             // case IndexType::INDEX_FAISS_IDMAP {
             //     return std::make_shared<knowhere::GPUIDMAP>(gpu_device);
@@ -79,15 +73,18 @@ VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
         case IndexType::INDEX_FAISS_IVFPQ: {
             return std::make_shared<knowhere::IVFPQ>();
         }
-            // case IndexType::INDEX_SPTAG_KDT_RNT: {
-            //     return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
-            // }
-            // case IndexType::INDEX_SPTAG_BKT_RNT: {
-            //     return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
-            // }
-            // case IndexType::INDEX_NSG: {
-            //     return std::make_shared<knowhere::NSG>(gpu_device);
-            // }
+        case IndexType::INDEX_SPTAG_KDT_RNT: {
+            return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
+        }
+        case IndexType::INDEX_SPTAG_BKT_RNT: {
+            return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
+        }
+        case IndexType::INDEX_NSG: {
+            return std::make_shared<knowhere::NSG>(-1);
+        }
+        case IndexType::INDEX_HNSW: {
+            return std::make_shared<knowhere::HNSW>();
+        }
     }
     return nullptr;
 }

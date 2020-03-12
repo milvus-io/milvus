@@ -23,6 +23,10 @@ namespace knowhere {
 
 class IndexHNSW : public VecIndex {
  public:
+    IndexHNSW() {
+        index_type_ = IndexType::INDEX_HNSW;
+    }
+
     BinarySet
     Serialize(const Config& config = Config()) override;
 

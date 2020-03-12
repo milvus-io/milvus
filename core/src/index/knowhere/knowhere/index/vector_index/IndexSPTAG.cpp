@@ -31,11 +31,11 @@ CPUSPTAGRNG::CPUSPTAGRNG(const std::string& IndexType) {
     if (IndexType == "KDT") {
         index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::KDT, SPTAG::VectorValueType::Float);
         index_ptr_->SetParameter("DistCalcMethod", "L2");
-        index_type_ = SPTAG::IndexAlgoType::KDT;
+        index_type_ = IndexType::INDEX_SPTAG_KDT_RNT;
     } else {
         index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::BKT, SPTAG::VectorValueType::Float);
         index_ptr_->SetParameter("DistCalcMethod", "L2");
-        index_type_ = SPTAG::IndexAlgoType::BKT;
+        index_type_ = IndexType::INDEX_SPTAG_BKT_RNT;
     }
 }
 
@@ -135,7 +135,7 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 #define Assign(param_name, str_name) \
     index_ptr_->SetParameter(str_name, std::to_string(build_cfg[param_name].get<int64_t>()))
 
-    if (index_type_ == SPTAG::IndexAlgoType::KDT) {
+    if (index_type_ == IndexType::INDEX_SPTAG_KDT_RNT) {
         auto build_cfg = SPTAGParameterMgr::GetInstance().GetKDTParameters();
 
         Assign("kdtnumber", "KDTNumber");
