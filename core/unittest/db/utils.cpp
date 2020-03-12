@@ -65,7 +65,7 @@ static const char *CONFIG_STR =
     "  cpu_cache_capacity: 4             # GB, CPU memory used for cache\n"
     "  cpu_cache_threshold: 0.85         # percentage of data kept when cache cleanup triggered\n"
     "  insert_buffer_size: 4             # GB, maximum insert buffer size allowed\n"
-    "  cache_insert_data: false          # whether load inserted data into cache\n"
+    "  cache_insert_data: true          # whether load inserted data into cache\n"
     "\n"
     "engine_config:\n"
     "  use_blas_threshold: 20\n"
@@ -179,6 +179,7 @@ DBTest::SetUp() {
     milvus::scheduler::JobMgrInst::GetInstance()->Start();
 
     auto options = GetOptions();
+    options.insert_cache_immediately_ = true;
     db_ = milvus::engine::DBFactory::Build(options);
 
     std::string config_path(options.meta_.path_ + CONFIG_FILE);
