@@ -31,7 +31,7 @@ Milvus is an open source vector similarity search engine. Built with heterogeneo
 
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/about_milvus/overview.md).
 
-Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/master/releases/release_notes.md).
+Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/releases/release_notes.md).
 
 ## Roadmap
 
