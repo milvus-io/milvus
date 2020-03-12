@@ -9,14 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <cache/CpuCacheMgr.h>
-#include <cache/GpuCacheMgr.h>
-#include <fiu-local.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
@@ -25,11 +23,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include <fiu-local.h>
+
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
 #include "server/DBWrapper.h"
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/CommonUtil.h"
+#include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/ValidationUtil.h"
 
