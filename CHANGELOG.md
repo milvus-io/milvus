@@ -4,6 +4,17 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 0.8.0 (TBD)
 
+## Bug
+
+## Feature
+
+## Improvement
+-   \#1537 Optimize raw vector and uids read/write
+-   \#1546 Move Config.cpp to config directory
+-   \#1547 Rename storage/file to storage/disk and rename classes
+
+## Task
+
 
 # Milvus 0.7.0 (2020-03-11)
 
@@ -111,10 +122,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1448 General proto api for NNS libraries 
 -   \#1480 Add return code for AVX512 selection
 -   \#1524 Update config "preload_table" description
--   \#1537 Optimize raw vector and uids read/write
 -   \#1544 Update resources name in HTTP module
--   \#1546 Move Config.cpp to config directory
--   \#1547 Rename storage/file to storage/disk and rename classes
 -   \#1567 Update yaml config description
 
 ## Task
