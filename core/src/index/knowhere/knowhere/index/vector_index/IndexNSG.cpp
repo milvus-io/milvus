@@ -26,7 +26,7 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
-#include <fiu-local.h>
+// #include <fiu-local.h>
 
 namespace knowhere {
 
@@ -37,7 +37,7 @@ NSG::Serialize(const Config& config) {
     }
 
     try {
-        fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
+        // fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         algo::NsgIndex* index = index_.get();
 
@@ -57,7 +57,7 @@ NSG::Serialize(const Config& config) {
 void
 NSG::Load(const BinarySet& index_binary) {
     try {
-        fiu_do_on("NSG.Load.throw_exception", throw std::exception());
+        // fiu_do_on("NSG.Load.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName(IndexTypeToStr(index_type_));
 

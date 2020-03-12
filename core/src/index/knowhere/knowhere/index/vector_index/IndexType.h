@@ -15,6 +15,7 @@
 
 namespace knowhere {
 
+// todo: enum => string
 enum class IndexType {
     INVALID = 0,
     INDEX_FAISS_IDMAP = 1,

@@ -70,7 +70,7 @@ class VecIndex : public Index {
         if (size_ != -1) {
             return size_;
         }
-        return Count() * Dim() * sizeof(float);
+        return Count() * Dim() * sizeof(FloatType);
     }
 
  protected:
