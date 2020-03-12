@@ -680,7 +680,7 @@ Updates the index type and nlist of a collection.
 
 | Parameter    | Description                                                                                                                                                                                              | Required? |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `index_type` | The type of indexing method to query the collection. Please refer to [Index Types](https://www.milvus.io/docs/reference/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
+| `index_type` | The type of indexing method to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
 | `params`     | The extra params of indexing method to query the collection. Please refer to [Index and search parameters](#Index-and-search-parameters) for detailed introduction of supported indexes.                                              | No        |
 
 ##### Query Parameters
@@ -1543,7 +1543,7 @@ For each index type, the RESTful API has specific index parameters and search pa
 </tr>
 </table>
 
-For detailed information about the parameters above, refer to [Index Types](https://milvus.io/docs/v0.7.0/reference/index.md)
+For detailed information about the parameters above, refer to [Milvus Indexes](https://milvus.io/docs/guides/index.md)
 
 ## Error Codes
 
