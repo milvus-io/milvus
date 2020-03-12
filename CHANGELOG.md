@@ -2,7 +2,12 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.7.0 (TBD)
+# Milvus 0.7.1 (TBD)
+
+## Bug
+-   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
+
+# Milvus 0.7.0 (2020-03-11)
 
 ## Bug
 -   \#715 Milvus crash when searching and building index simultaneously using SQ8H
@@ -60,7 +65,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1598 Server down during mixed operations
 -   \#1601 External link bug in HTTP doc
 -   \#1609 Refine Compact function
--   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
 
 ## Feature
 -   \#216 Add CLI to get server info
