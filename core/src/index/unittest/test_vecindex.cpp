@@ -11,8 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
@@ -56,24 +56,26 @@ class VecIndexTest : public DataGen,
     knowhere::VecIndexPtr index_ = nullptr;
 };
 
-INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
-                        Values(
+INSTANTIATE_TEST_CASE_P(
+    IVFParameters, IVFTest,
+    Values(
 #ifdef MILVUS_GPU_VERSION
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFFLAT, knowhere::IndexMode::MODE_GPU, ParameterType::ivf), 
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFPQ, knowhere::IndexMode::MODE_GPU, ParameterType::ivfpq), 
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8, knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFFLAT, knowhere::IndexMode::MODE_GPU, ParameterType::ivf),
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFPQ, knowhere::IndexMode::MODE_GPU, ParameterType::ivfpq),
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8, knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8H, knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8H, knowhere::IndexMode::MODE_GPU, ParameterType::ivfsq),
 #endif
 #endif
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFFLAT, knowhere::IndexMode::MODE_CPU, ParameterType::ivf), 
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFPQ, knowhere::IndexMode::MODE_CPU, ParameterType::ivfpq), 
-                            std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq)
-                            // std::make_tuple(knowhere::IndexType::INDEX_NSG, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-                            // std::make_tuple(knowhere::IndexType::INDEX_HNSW, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-                            // std::make_tuple(knowhere::IndexType::INDEX_SPTAG_KDT_RNT, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-                            // std::make_tuple(knowhere::IndexType::INDEX_SPTAG_BKT_RNT, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
-                            ));
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFFLAT, knowhere::IndexMode::MODE_CPU, ParameterType::ivf),
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFPQ, knowhere::IndexMode::MODE_CPU, ParameterType::ivfpq),
+        std::make_tuple(knowhere::IndexType::INDEX_FAISS_IVFSQ8, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq)
+        // std::make_tuple(knowhere::IndexType::INDEX_NSG, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
+        // std::make_tuple(knowhere::IndexType::INDEX_HNSW, knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
+        // std::make_tuple(knowhere::IndexType::INDEX_SPTAG_KDT_RNT, knowhere::IndexMode::MODE_CPU,
+        // ParameterType::ivfsq), std::make_tuple(knowhere::IndexType::INDEX_SPTAG_BKT_RNT,
+        // knowhere::IndexMode::MODE_CPU, ParameterType::ivfsq),
+        ));
 
 TEST_P(VecIndexTest, basic) {
     assert(!xb.empty());

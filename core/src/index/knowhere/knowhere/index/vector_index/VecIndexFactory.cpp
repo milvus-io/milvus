@@ -13,13 +13,13 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "knowhere/index/vector_index/IndexHNSW.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
@@ -83,7 +83,7 @@ VecIndexFactory::CreateVecIndex(const IndexType type, const IndexMode mode) {
             return std::make_shared<knowhere::NSG>(-1);
         }
         case IndexType::INDEX_HNSW: {
-            return std::make_shared<knowhere::HNSW>();
+            return std::make_shared<knowhere::IndexHNSW>();
         }
     }
     return nullptr;
