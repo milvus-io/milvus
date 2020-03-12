@@ -37,6 +37,8 @@ class TestCacheConfig:
         '''
         status, reply = connect.set_config("cache_config", "cpu_cache_capacity", 4)
         assert status.OK()
+        status, reply = connect.set_config("cache_config", "cache_insert_data", "false")
+        assert status.OK()
         status, config_value = connect.get_config("cache_config", "cpu_cache_capacity")
         assert config_value == '4'
         status, reply = connect.set_config("cache_config", "insert_buffer_size", 1)
@@ -356,6 +358,7 @@ class TestCacheConfig:
         for config in invalid_configs:
             status, reply = connect.set_config(config, "cache_insert_data", "1")
             assert not status.OK()
+        self.reset_configs(connect)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_insert_data_valid(self, connect, collection):
@@ -373,6 +376,7 @@ class TestCacheConfig:
             status, config_value = connect.get_config("cache_config", "cache_insert_data")
             assert status.OK()
             assert config_value == str(config)
+        self.reset_configs(connect)
 
 
 class TestEngineConfig:
