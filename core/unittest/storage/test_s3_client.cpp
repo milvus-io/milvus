@@ -21,7 +21,6 @@
 #include "storage/s3/S3ClientWrapper.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
-#include "storage/IStorage.h"
 #include "storage/utils.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -91,15 +90,18 @@ TEST_F(StorageTest, S3_RW_TEST) {
     ASSERT_TRUE(storage_inst.StartService().ok());
 
     {
-        milvus::storage::S3IOWriter writer(index_name);
+        milvus::storage::S3IOWriter writer;
+        writer.open(index_name);
         size_t len = content.length();
         writer.write(&len, sizeof(len));
         writer.write((void*)(content.data()), len);
         ASSERT_TRUE(len + sizeof(len) == writer.length());
+        writer.close();
     }
 
     {
-        milvus::storage::S3IOReader reader(index_name);
+        milvus::storage::S3IOReader reader;
+        reader.open(index_name);
         size_t length = reader.length();
         size_t rp = 0;
         reader.seekg(rp);
@@ -121,6 +123,7 @@ TEST_F(StorageTest, S3_RW_TEST) {
         }
 
         ASSERT_TRUE(content == content_out);
+        reader.close();
     }
 
     storage_inst.StopService();

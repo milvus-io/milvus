@@ -18,23 +18,34 @@
 #pragma once
 
 #include <memory>
-
-#include "segment/DeletedDocs.h"
-#include "storage/FSHandler.h"
+#include <string>
+#include <vector>
 
 namespace milvus {
-namespace codec {
+namespace storage {
 
-class DeletedDocsFormat {
+class Operation {
  public:
     virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::DeletedDocsPtr& deleted_docs) = 0;
+    CreateDirectory() = 0;
+
+    virtual const std::string&
+    GetDirectory() const = 0;
 
     virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs) = 0;
+    ListDirectory(std::vector<std::string>& file_paths) = 0;
+
+    virtual bool
+    DeleteFile(const std::string& file_path) = 0;
+
+    // TODO(zhiru):
+    //  open(), sync(), close()
+    //  function that opens a stream for reading file
+    //  function that creates a new, empty file and returns an stream for appending data to this file
+    //  function that creates a new, empty, temporary file and returns an stream for appending data to this file
 };
 
-using DeletedDocsFormatPtr = std::shared_ptr<DeletedDocsFormat>;
+using OperationPtr = std::shared_ptr<Operation>;
 
-}  // namespace codec
+}  // namespace storage
 }  // namespace milvus

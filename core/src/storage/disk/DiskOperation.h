@@ -21,24 +21,26 @@
 #include <string>
 #include <vector>
 
+#include "storage/Operation.h"
+
 namespace milvus {
-namespace store {
+namespace storage {
 
-class Directory {
+class DiskOperation : public Operation {
  public:
-    explicit Directory(const std::string& dir_path);
+    explicit DiskOperation(const std::string& dir_path);
 
     void
-    Create();
+    CreateDirectory();
+
+    const std::string&
+    GetDirectory() const;
 
     void
-    ListAll(std::vector<std::string>& file_paths);
+    ListDirectory(std::vector<std::string>& file_paths);
 
     bool
     DeleteFile(const std::string& file_path);
-
-    const std::string&
-    GetDirPath() const;
 
     // TODO(zhiru):
     //  open(), sync(), close()
@@ -50,7 +52,7 @@ class Directory {
     const std::string dir_path_;
 };
 
-using DirectoryPtr = std::shared_ptr<Directory>;
+using DiskOperationPtr = std::shared_ptr<DiskOperation>;
 
-}  // namespace store
+}  // namespace storage
 }  // namespace milvus
