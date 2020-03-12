@@ -7,11 +7,10 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
-#include <fiu-local.h>
 #include <utility>
 
 namespace knowhere {
@@ -78,7 +77,6 @@ FaissGpuResourceMgr::InitResource() {
 
 ResPtr
 FaissGpuResourceMgr::GetRes(const int64_t& device_id, const int64_t& alloc_size) {
-    fiu_return_on("FaissGpuResourceMgr.GetRes.ret_null", nullptr);
     InitResource();
 
     auto finder = idle_map_.find(device_id);

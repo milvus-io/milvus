@@ -7,7 +7,9 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
 
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
@@ -15,23 +17,20 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
-#include <memory>
-#include <string>
-#include <utility>
-
-#include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #endif
-#include "knowhere/index/vector_index/IndexIVFPQ.h"
 
 namespace knowhere {
 
-IndexModelPtr
-IVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
-    GETTENSOR(dataset)
+void
+IVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    GETTENSOR(dataset_ptr)
 
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(config[Metric::TYPE].get<std::string>()));
     auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
@@ -39,27 +38,11 @@ IVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
                                                      config[IndexParams::nbits].get<int64_t>());
     index->train(rows, (float*)p_data);
 
-    return std::make_shared<IVFIndexModel>(index);
+    index_.reset(faiss::clone_index(index.get()));
 }
 
-std::shared_ptr<faiss::IVFSearchParameters>
-IVFPQ::GenParams(const Config& config) {
-    auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    params->nprobe = config[IndexParams::nprobe];
-    // params->scan_table_threshold = config["scan_table_threhold"]
-    // params->polysemous_ht = config["polysemous_ht"]
-    // params->max_codes = config["max_codes"]
-
-    return params;
-}
-
-// VectorIndexPtr
-// IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
-//    return std::make_shared<IVFPQ>(index);
-//}
-
-VectorIndexPtr
-IVFPQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+VecIndexPtr
+IVFPQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #ifdef MILVUS_GPU_VERSION
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
@@ -74,6 +57,17 @@ IVFPQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 #else
     KNOWHERE_THROW_MSG("Calling IVFPQ::CopyCpuToGpu when we are using CPU version");
 #endif
+}
+
+std::shared_ptr<faiss::IVFSearchParameters>
+IVFPQ::GenParams(const Config& config) {
+    auto params = std::make_shared<faiss::IVFPQSearchParameters>();
+    params->nprobe = config[IndexParams::nprobe];
+    // params->scan_table_threshold = config["scan_table_threhold"]
+    // params->polysemous_ht = config["polysemous_ht"]
+    // params->max_codes = config["max_codes"]
+
+    return params;
 }
 
 }  // namespace knowhere

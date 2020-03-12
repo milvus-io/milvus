@@ -7,86 +7,67 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
-#include "IndexIVF.h"
-
-#include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <utility>
 
+#include "knowhere/index/vector_index/FaissBaseIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+
 namespace knowhere {
 
-class IDMAP : public VectorIndex, public FaissBaseIndex {
+class IDMAP : public VecIndex, public FaissBaseIndex {
  public:
     IDMAP() : FaissBaseIndex(nullptr) {
+        index_type_ = IndexType::INDEX_FAISS_IDMAP;
     }
 
     explicit IDMAP(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
+        index_type_ = IndexType::INDEX_FAISS_IDMAP;
     }
 
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
 
     void
-    Load(const BinarySet& index_binary) override;
+    Load(const BinarySet&) override;
 
     void
-    Train(const Config& config);
+    Train(const DatasetPtr&, const Config&) override;
+
+    void
+    Add(const DatasetPtr&, const Config&) override;
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
+    Query(const DatasetPtr&, const Config&) override;
 
     int64_t
     Count() override;
 
-    //    VectorIndexPtr
-    //    Clone() override;
-
     int64_t
-    Dimension() override;
+    Dim() override;
 
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
+    VecIndexPtr
+    CopyCpuToGpu(const int64_t, const Config&);
 
-    void
-    AddWithoutId(const DatasetPtr& dataset, const Config& config);
-
-    VectorIndexPtr
-    CopyCpuToGpu(const int64_t& device_id, const Config& config);
-
-    void
-    Seal() override;
-
-    virtual const float*
+    const float*
     GetRawVectors();
 
-    virtual const int64_t*
+    const int64_t*
     GetRawIds();
-
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config);
-
-    DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config);
-
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr list);
-
-    void
-    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
 
  protected:
     virtual void
-    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&);
 
  protected:
     std::mutex mutex_;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using IDMAPPtr = std::shared_ptr<IDMAP>;

@@ -20,7 +20,7 @@
 #undef mkdir
 
 #include "knowhere/adapter/SptagAdapter.h"
-#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
@@ -41,7 +41,7 @@ CPUSPTAGRNG::CPUSPTAGRNG(const std::string& IndexType) {
 }
 
 BinarySet
-CPUSPTAGRNG::Serialize() {
+CPUSPTAGRNG::Serialize(const Config& config) {
     std::string index_config;
     std::vector<SPTAG::ByteArray> index_blobs;
 
@@ -115,16 +115,11 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
     index_ptr_->LoadIndex(index_config, index_blobs);
 }
 
-// PreprocessorPtr
-// CPUKDTRNG::BuildPreprocessor(const DatasetPtr &dataset, const Config &config) {
-//    return std::make_shared<NormalizePreprocessor>();
-//}
-
-IndexModelPtr
+void
 CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
 
-    DatasetPtr dataset = origin;  // TODO(linxj): copy or reference?
+    DatasetPtr dataset = origin;
 
     // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
     //    && preprocessor_) {
@@ -134,24 +129,6 @@ CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);
     index_ptr_->BuildIndex(vectorset, metaset);
-
-    // TODO: return IndexModelPtr
-    return nullptr;
-}
-
-void
-CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
-    //    SetParameters(add_config);
-    //    DatasetPtr dataset = origin->Clone();
-    //
-    //    // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-    //    //    && preprocessor_) {
-    //    //    preprocessor_->Preprocess(dataset);
-    //    //}
-    //
-    //    auto vectorset = ConvertToVectorSet(dataset);
-    //    auto metaset = ConvertToMetadataSet(dataset);
-    //    index_ptr_->AddIndex(vectorset, metaset);
 }
 
 void
@@ -204,17 +181,17 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 }
 
 DatasetPtr
-CPUSPTAGRNG::Search(const DatasetPtr& dataset, const Config& config) {
+CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     SetParameters(config);
 
-    auto p_data = dataset->Get<const float*>(meta::TENSOR);
+    auto p_data = dataset_ptr->Get<const float*>(meta::TENSOR);
     for (auto i = 0; i < 10; ++i) {
         for (auto j = 0; j < 10; ++j) {
             std::cout << p_data[i * 10 + j] << " ";
         }
         std::cout << std::endl;
     }
-    std::vector<SPTAG::QueryResult> query_results = ConvertToQueryResult(dataset, config);
+    std::vector<SPTAG::QueryResult> query_results = ConvertToQueryResult(dataset_ptr, config);
 
 #pragma omp parallel for
     for (auto i = 0; i < query_results.size(); ++i) {
@@ -232,28 +209,23 @@ CPUSPTAGRNG::Count() {
 }
 
 int64_t
-CPUSPTAGRNG::Dimension() {
+CPUSPTAGRNG::Dim() {
     return index_ptr_->GetFeatureDim();
 }
 
-// VectorIndexPtr
-// CPUSPTAGRNG::Clone() {
-//    KNOWHERE_THROW_MSG("not support");
-//}
+// void
+// CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
+//     SetParameters(add_config);
+//     DatasetPtr dataset = origin->Clone();
 
-void
-CPUSPTAGRNG::Seal() {
-    return;  // do nothing
-}
+//     // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+//     //    && preprocessor_) {
+//     //    preprocessor_->Preprocess(dataset);
+//     //}
 
-BinarySet
-CPUSPTAGRNGIndexModel::Serialize() {
-    //    KNOWHERE_THROW_MSG("not support"); // not support
-}
-
-void
-CPUSPTAGRNGIndexModel::Load(const BinarySet& binary) {
-    //    KNOWHERE_THROW_MSG("not support"); // not support
-}
+//     auto vectorset = ConvertToVectorSet(dataset);
+//     auto metaset = ConvertToMetadataSet(dataset);
+//     index_ptr_->AddIndex(vectorset, metaset);
+// }
 
 }  // namespace knowhere

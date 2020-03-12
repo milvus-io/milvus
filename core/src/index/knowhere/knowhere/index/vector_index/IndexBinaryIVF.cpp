@@ -17,7 +17,7 @@
 #include <chrono>
 #include <string>
 
-#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 
@@ -26,7 +26,7 @@ namespace knowhere {
 using stdclock = std::chrono::high_resolution_clock;
 
 BinarySet
-BinaryIVF::Serialize() {
+BinaryIVF::Serialize(const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -42,12 +42,12 @@ BinaryIVF::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-BinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
+BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETBINARYTENSOR(dataset)
+    GETBINARYTENSOR(dataset_ptr)
 
     try {
         auto elems = rows * config[meta::TOPK].get<int64_t>();
@@ -83,8 +83,8 @@ BinaryIVF::Search(const DatasetPtr& dataset, const Config& config) {
 
 void
 BinaryIVF::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                       const Config& cfg) {
-    auto params = GenParams(cfg);
+                       const Config& config) {
+    auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
     int32_t* pdistances = (int32_t*)distances;
@@ -110,10 +110,10 @@ BinaryIVF::GenParams(const Config& config) {
     return params;
 }
 
-IndexModelPtr
-BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
-    GETBINARYTENSOR(dataset)
-    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
+void
+BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    GETBINARYTENSOR(dataset_ptr)
+    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     faiss::IndexBinary* coarse_quantizer =
         new faiss::IndexBinaryFlat(dim, GetMetricType(config[Metric::TYPE].get<std::string>()));
@@ -122,7 +122,6 @@ BinaryIVF::Train(const DatasetPtr& dataset, const Config& config) {
     index->train(rows, (uint8_t*)p_data);
     index->add_with_ids(rows, (uint8_t*)p_data, p_ids);
     index_ = index;
-    return nullptr;
 }
 
 int64_t
@@ -131,30 +130,25 @@ BinaryIVF::Count() {
 }
 
 int64_t
-BinaryIVF::Dimension() {
+BinaryIVF::Dim() {
     return index_->d;
 }
 
 void
-BinaryIVF::Add(const DatasetPtr& dataset, const Config& config) {
+BinaryIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     KNOWHERE_THROW_MSG("not support yet");
 }
 
-void
-BinaryIVF::Seal() {
-    // do nothing
-}
-
 DatasetPtr
-BinaryIVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    //    GETBINARYTENSOR(dataset)
-    // auto rows = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
-    auto elems = dataset->Get<int64_t>(meta::DIM);
+    //    GETBINARYTENSOR(dataset_ptr)
+    // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
 
     try {
         size_t p_x_size = sizeof(uint8_t) * elems;
@@ -173,13 +167,13 @@ BinaryIVF::GetVectorById(const DatasetPtr& dataset, const Config& config) {
 }
 
 DatasetPtr
-BinaryIVF::SearchById(const DatasetPtr& dataset, const Config& config) {
+BinaryIVF::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto rows = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     try {
         auto elems = rows * config[meta::TOPK].get<int64_t>();

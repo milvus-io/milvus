@@ -25,10 +25,10 @@ class FaissBaseBinaryIndex {
     explicit FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index);
 
     virtual BinarySet
-    SerializeImpl();
+    SerializeImpl(const IndexType& type);
 
     virtual void
-    LoadImpl(const BinarySet& index_binary);
+    LoadImpl(const BinarySet& index_binary, const IndexType& type);
 
  public:
     std::shared_ptr<faiss::IndexBinary> index_ = nullptr;

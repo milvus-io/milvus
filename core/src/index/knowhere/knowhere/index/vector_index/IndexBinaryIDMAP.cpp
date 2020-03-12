@@ -17,13 +17,13 @@
 
 #include <string>
 
-#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 
 namespace knowhere {
 
 BinarySet
-BinaryIDMAP::Serialize() {
+BinaryIDMAP::Serialize(const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -39,11 +39,11 @@ BinaryIDMAP::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-BinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
+BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETBINARYTENSOR(dataset)
+    GETBINARYTENSOR(dataset_ptr)
 
     auto elems = rows * config[meta::TOPK].get<int64_t>();
     size_t p_id_size = sizeof(int64_t) * elems;
@@ -72,26 +72,26 @@ BinaryIDMAP::Search(const DatasetPtr& dataset, const Config& config) {
 
 void
 BinaryIDMAP::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                         const Config& cfg) {
+                         const Config& config) {
     int32_t* pdistances = (int32_t*)distances;
     index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
 }
 
 void
-BinaryIDMAP::Add(const DatasetPtr& dataset, const Config& config) {
+BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETBINARYTENSOR(dataset)
+    GETBINARYTENSOR(dataset_ptr)
 
-    auto p_ids = dataset->Get<const int64_t*>(meta::IDS);
+    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
     index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
 }
 
 void
-BinaryIDMAP::Train(const Config& config) {
+BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     const char* type = "BFlat";
     auto index = faiss::index_binary_factory(config[meta::DIM].get<int64_t>(), type,
                                              GetMetricType(config[Metric::TYPE].get<std::string>()));
@@ -104,7 +104,7 @@ BinaryIDMAP::Count() {
 }
 
 int64_t
-BinaryIDMAP::Dimension() {
+BinaryIDMAP::Dim() {
     return index_->d;
 }
 
@@ -130,18 +130,13 @@ BinaryIDMAP::GetRawIds() {
 }
 
 void
-BinaryIDMAP::Seal() {
-    // do nothing
-}
-
-void
-BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
+BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETBINARYTENSOR(dataset)
+    GETBINARYTENSOR(dataset_ptr)
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {
@@ -152,15 +147,15 @@ BinaryIDMAP::AddWithoutId(const DatasetPtr& dataset, const Config& config) {
 }
 
 DatasetPtr
-BinaryIDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
+BinaryIDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    //    GETBINARYTENSOR(dataset)
-    // auto rows = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
-    auto elems = dataset->Get<int64_t>(meta::DIM);
+    //    GETBINARYTENSOR(dataset_ptr)
+    // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
 
     size_t p_x_size = sizeof(uint8_t) * elems;
     auto p_x = (uint8_t*)malloc(p_x_size);
@@ -173,14 +168,14 @@ BinaryIDMAP::GetVectorById(const DatasetPtr& dataset, const Config& config) {
 }
 
 DatasetPtr
-BinaryIDMAP::SearchById(const DatasetPtr& dataset, const Config& config) {
+BinaryIDMAP::SearchById(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    auto dim = dataset->Get<int64_t>(meta::DIM);
-    auto rows = dataset->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset->Get<const int64_t*>(meta::IDS);
+    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
+    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     auto elems = rows * config[meta::TOPK].get<int64_t>();
     size_t p_id_size = sizeof(int64_t) * elems;

@@ -17,9 +17,10 @@
 #include <vector>
 
 #include <faiss/utils/ConcurrentBitset.h>
-#include "FaissBaseBinaryIndex.h"
-#include "VectorIndex.h"
-#include "faiss/IndexIVF.h"
+#include <faiss/IndexIVF.h>
+
+#include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace knowhere {
 
@@ -32,34 +33,44 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
     }
 
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
 
     void
     Load(const BinarySet& index_binary) override;
 
+    void
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Addwithout ids is not supported");
+    }
+
     DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    Seal() override;
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
     Count() override;
 
     int64_t
-    Dimension() override;
+    Dim() override;
+
+    int64_t
+    Size() override {
+        if (size_ != -1) {
+            return size_;
+        }
+        return Count() * Dim() * sizeof(uint8_t);
+    }
 
     DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config);
+    GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
 
     DatasetPtr
-    SearchById(const DatasetPtr& dataset, const Config& config);
+    SearchById(const DatasetPtr& dataset_ptr, const Config& config);
 
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr list);
@@ -72,7 +83,7 @@ class BinaryIVF : public VectorIndex, public FaissBaseBinaryIndex {
     GenParams(const Config& config);
 
     virtual void
-    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
+    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
 
  protected:
     std::mutex mutex_;

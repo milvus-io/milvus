@@ -23,37 +23,30 @@ namespace knowhere {
 class IndexHNSW : public VectorIndex {
  public:
     BinarySet
-    Serialize() override;
+    Serialize(const Config& config = Config()) override;
 
     void
     Load(const BinarySet& index_binary) override;
 
-    DatasetPtr
-    Search(const DatasetPtr& dataset, const Config& config) override;
-
-    //    void
-    //    set_preprocessor(PreprocessorPtr preprocessor) override;
-    //
-    //    void
-    //    set_index_model(IndexModelPtr model) override;
-    //
-    //    PreprocessorPtr
-    //    BuildPreprocessor(const DatasetPtr& dataset, const Config& config) override;
-
     IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset, const Config& config) override;
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Seal() override;
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    }
+
+    DatasetPtr
+    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     int64_t
     Count() override;
 
     int64_t
-    Dimension() override;
+    Dim() override;
 
  private:
     bool normalize = false;

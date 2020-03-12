@@ -27,15 +27,12 @@ FaissBaseBinaryIndex::SerializeImpl() {
     try {
         faiss::IndexBinary* index = index_.get();
 
-        // SealImpl();
-
         MemoryIOWriter writer;
         faiss::write_index_binary(index, &writer);
         auto data = std::make_shared<uint8_t>();
         data.reset(writer.data_);
 
         BinarySet res_set;
-        // TODO(linxj): use virtual func Name() instead of raw string.
         res_set.Append("BinaryIVF", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {

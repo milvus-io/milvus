@@ -7,7 +7,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
@@ -16,21 +16,22 @@
 #include <faiss/Index.h>
 
 #include "knowhere/common/BinarySet.h"
+#include "knowhere/index/vector_index/IndexType.h"
 
 namespace knowhere {
 
 class FaissBaseIndex {
  protected:
-    explicit FaissBaseIndex(std::shared_ptr<faiss::Index> index);
+    explicit FaissBaseIndex(std::shared_ptr<faiss::Index>);
 
     virtual BinarySet
-    SerializeImpl();
+    SerializeImpl(const IndexType& type);
 
     virtual void
-    LoadImpl(const BinarySet& index_binary);
+    LoadImpl(const BinarySet&, const IndexType& type);
 
     virtual void
-    SealImpl();
+    SealImpl() { /* do nothing */ };
 
  public:
     std::shared_ptr<faiss::Index> index_ = nullptr;

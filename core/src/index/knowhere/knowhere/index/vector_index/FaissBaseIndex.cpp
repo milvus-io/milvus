@@ -7,16 +7,14 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <faiss/index_io.h>
-#include <fiu-local.h>
 #include <utility>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
@@ -25,12 +23,9 @@ FaissBaseIndex::FaissBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std
 }
 
 BinarySet
-FaissBaseIndex::SerializeImpl() {
+FaissBaseIndex::SerializeImpl(const IndexType type) {
     try {
-        fiu_do_on("FaissBaseIndex.SerializeImpl.throw_exception", throw std::exception());
         faiss::Index* index = index_.get();
-
-        // SealImpl();
 
         MemoryIOWriter writer;
         faiss::write_index(index, &writer);
@@ -39,7 +34,7 @@ FaissBaseIndex::SerializeImpl() {
 
         BinarySet res_set;
         // TODO(linxj): use virtual func Name() instead of raw string.
-        res_set.Append("IVF", data, writer.rp);
+        res_set.Append(IndexTypeToStr(type), data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -47,8 +42,8 @@ FaissBaseIndex::SerializeImpl() {
 }
 
 void
-FaissBaseIndex::LoadImpl(const BinarySet& index_binary) {
-    auto binary = index_binary.GetByName("IVF");
+FaissBaseIndex::LoadImpl(const BinarySet& binary_set, const IndexType type) {
+    auto binary = binary_set.GetByName(IndexTypeToStr(type));
 
     MemoryIOReader reader;
     reader.total = binary->size;
@@ -59,20 +54,6 @@ FaissBaseIndex::LoadImpl(const BinarySet& index_binary) {
     index_.reset(index);
 
     SealImpl();
-}
-
-void
-FaissBaseIndex::SealImpl() {
-#ifdef CUSTOMIZATION
-    faiss::Index* index = index_.get();
-    auto idx = dynamic_cast<faiss::IndexIVF*>(index);
-    if (idx != nullptr) {
-        // To be deleted
-        KNOWHERE_LOG_DEBUG << "Test before to_readonly:"
-                           << " IVF READONLY " << std::boolalpha << idx->is_readonly();
-        idx->to_readonly();
-    }
-#endif
 }
 
 }  // namespace knowhere

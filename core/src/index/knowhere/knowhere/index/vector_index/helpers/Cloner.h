@@ -7,21 +7,20 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
-#include "knowhere/index/vector_index/VectorIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace knowhere {
 namespace cloner {
 
-// TODO(linxj): rename CopyToGpu
-extern VectorIndexPtr
-CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config& config);
+extern VecIndexPtr
+CopyCpuToGpu(const VecIndexPtr&, const int64_t, const Config&);
 
-extern VectorIndexPtr
-CopyGpuToCpu(const VectorIndexPtr& index, const Config& config);
+extern VecIndexPtr
+CopyGpuToCpu(const VecIndexPtr&, const Config&);
 
 }  // namespace cloner
 }  // namespace knowhere

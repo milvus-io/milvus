@@ -27,25 +27,28 @@ set(external_srcs
         )
 
 set(index_srcs
-        knowhere/index/preprocessor/Normalize.cpp
-        knowhere/index/vector_index/IndexSPTAG.cpp
-        knowhere/index/vector_index/IndexIDMAP.cpp
-        knowhere/index/vector_index/IndexIVF.cpp
-        knowhere/index/vector_index/IndexBinaryIVF.cpp
+        knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
+        knowhere/index/vector_index/FaissBaseIndex.cpp
+        knowhere/index/vector_index/IndexIVF.cpp
+        knowhere/index/vector_index/IndexIDMAP.cpp
+        knowhere/index/vector_index/IndexIVFSQ.cpp
+        knowhere/index/vector_index/IndexIVFPQ.cpp
+        knowhere/index/vector_index/IndexBinaryIVF.cpp
         knowhere/index/vector_index/IndexBinaryIDMAP.cpp
+        knowhere/index/vector_index/IndexSPTAG.cpp
         knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
         knowhere/index/vector_index/IndexNSG.cpp
         knowhere/index/vector_index/IndexHNSW.cpp
-        knowhere/index/vector_index/nsg/NSG.cpp
-        knowhere/index/vector_index/nsg/NSGIO.cpp
-        knowhere/index/vector_index/nsg/NSGHelper.cpp
-        knowhere/index/vector_index/nsg/Distance.cpp
-        knowhere/index/vector_index/IndexIVFSQ.cpp
-        knowhere/index/vector_index/IndexIVFPQ.cpp
-        knowhere/index/vector_index/FaissBaseIndex.cpp
-        knowhere/index/vector_index/helpers/FaissIO.cpp
+        knowhere/index/vector_index/impl/nsg/NSG.cpp
+        knowhere/index/vector_index/impl/nsg/NSGIO.cpp
+        knowhere/index/vector_index/impl/nsg/NSGHelper.cpp
+        knowhere/index/vector_index/impl/nsg/Distance.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
+        knowhere/index/vector_index/ConfAdapter.cpp
+        knowhere/index/vector_index/ConfAdapterMgr.cpp
+        knowhere/index/vector_index/IndexType.cpp
+        knowhere/index/vector_index/VecIndexFactory.cpp
         )
 
 set(depend_libs
@@ -82,13 +85,13 @@ if (KNOWHERE_GPU_VERSION)
             )
 
     set(index_srcs ${index_srcs}
-            knowhere/index/vector_index/IndexGPUIVF.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVF.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
+            knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
-            knowhere/index/vector_index/IndexGPUIVFSQ.cpp
-            knowhere/index/vector_index/IndexIVFSQHybrid.cpp
-            knowhere/index/vector_index/IndexGPUIVFPQ.cpp
-            knowhere/index/vector_index/IndexGPUIDMAP.cpp
             )
 
 endif ()
