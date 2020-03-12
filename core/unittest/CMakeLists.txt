@@ -117,7 +117,7 @@ set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
 set(helper_files
-        ${MILVUS_ENGINE_SRC}/server/Config.cpp
+        ${MILVUS_ENGINE_SRC}/config/Config.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp

@@ -17,8 +17,8 @@
 #include <gtest/gtest.h>
 #include <cmath>
 
+#include "config/Config.h"
 #include "config/YamlConfigMgr.h"
-#include "server/Config.h"
 #include "server/utils.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"

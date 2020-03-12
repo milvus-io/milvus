@@ -18,7 +18,7 @@
 #include <regex>
 #include <vector>
 
-#include "server/Config.h"
+#include "config/Config.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
