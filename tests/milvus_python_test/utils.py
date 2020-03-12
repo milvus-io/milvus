@@ -90,8 +90,6 @@ def gen_invalid_ips():
             "BB。A",
             " siede ",
             "(mn)",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for _ in range(256))
     ]
@@ -110,8 +108,6 @@ def gen_invalid_ports():
             "BB。A",
             " siede ",
             "(mn)",
-            "\n",
-            "\t",
             "中文"
     ]
     return ports
@@ -149,7 +145,6 @@ def gen_invalid_uris():
 def gen_invalid_collection_names():
     collection_names = [
             "12-s",
-            "12/s",
             " ",
             # "",
             # None,
@@ -158,11 +153,8 @@ def gen_invalid_collection_names():
             "c|c",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -184,11 +176,8 @@ def gen_invalid_top_ks():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -213,11 +202,8 @@ def gen_invalid_dims():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -241,11 +227,8 @@ def gen_invalid_file_sizes():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -270,11 +253,8 @@ def gen_invalid_index_types():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -296,11 +276,8 @@ def gen_invalid_params():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文"
     ]
     return params
@@ -322,11 +299,8 @@ def gen_invalid_nprobes():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文"
     ]
     return nprobes
@@ -348,11 +322,8 @@ def gen_invalid_metric_types():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文"    
     ]
     return metric_types
@@ -377,11 +348,8 @@ def gen_invalid_vectors():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "a".join("a" for i in range(256))
     ]
@@ -401,9 +369,7 @@ def gen_invalid_vector_ids():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "=c",
-            "\n",
             "中文",
     ]
     return invalid_vector_ids
@@ -424,11 +390,8 @@ def gen_invalid_cache_config():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "'123'",
             "さようなら"
@@ -449,11 +412,8 @@ def gen_invalid_engine_config():
             "BB。A",
             " siede ",
             "(mn)",
-            "#12s",
             "pip+",
             "=c",
-            "\n",
-            "\t",
             "中文",
             "'123'",
     ]

@@ -1034,12 +1034,14 @@ class TestSearchParamsInvalid(object):
                 pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
-    def test_search_with_empty_params(self, connect, collection, get_simple_index):
+    def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
         target: test search fuction, with empty search params
         method: search with params
         expected: search status not ok, and the connection is normal
         '''
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
         index_type = get_simple_index["index_type"]
         index_param = get_simple_index["index_param"]
         connect.create_index(collection, index_type, index_param)

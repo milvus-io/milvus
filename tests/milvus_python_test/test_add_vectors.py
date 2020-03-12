@@ -629,6 +629,8 @@ class TestAddBase:
             assert the value returned by count_collection method is equal to length of vectors
         expected: the count is equal to the length of vectors
         '''
+        if args["handler"] == "HTTP":
+            pytest.skip("Skip test in http mode")
         thread_num = 8
         threads = []
         collection = gen_unique_str()
