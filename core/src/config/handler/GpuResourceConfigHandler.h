@@ -21,25 +21,66 @@
 namespace milvus {
 namespace server {
 
-class GpuConfigHandler : virtual public ConfigHandler {
+class GpuResourceConfigHandler : virtual public ConfigHandler {
  public:
-    GpuConfigHandler();
+    GpuResourceConfigHandler();
 
-    ~GpuConfigHandler();
+    ~GpuResourceConfigHandler();
 
  protected:
     virtual void
     OnGpuEnableChanged(bool enable);
+
+    virtual void
+    OnGpuCacheCapacityChanged(int64_t capacity);
+
+    virtual void
+    OnGpuBuildResChanged(const std::vector<int64_t>& gpus);
+
+    virtual void
+    OnGpuSearchThresholdChanged(int64_t threshold);
+
+    virtual void
+    OnGpuSearchResChanged(const std::vector<int64_t>& gpus);
 
  protected:
     void
     AddGpuEnableListener();
 
     void
+    AddGpuCacheCapacityListener();
+
+    void
+    AddGpuBuildResourcesListener();
+
+    void
+    AddGpuSearchThresholdListener();
+
+    void
+    AddGpuSearchResourcesListener();
+
+ protected:
+    void
     RemoveGpuEnableListener();
+
+    void
+    RemoveGpuCacheCapacityListener();
+
+    void
+    RemoveGpuBuildResourcesListener();
+
+    void
+    RemoveGpuSearchThresholdListener();
+
+    void
+    RemoveGpuSearchResourcesListener();
 
  protected:
     bool gpu_enable_ = true;
+    int64_t gpu_cache_capacity_ = 1 /* GiB */;
+    int64_t threshold_ = std::numeric_limits<int64_t>::max();
+    std::vector<int64_t> build_gpus_;
+    std::vector<int64_t> search_gpus_;
 };
 
 }  // namespace server

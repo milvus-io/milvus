@@ -37,7 +37,7 @@ FaissIVFSQ8Pass::Init() {
     SetIdentity("FaissIVFSQ8Pass");
     AddGpuEnableListener();
     AddGpuSearchThresholdListener();
-    AddGpuSearchResListener();
+    AddGpuSearchResourcesListener();
 #endif
 }
 

@@ -16,7 +16,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "config/handler/GpuCacheConfigHandler.h"
+#include "config/handler/GpuResourceConfigHandler.h"
 
 namespace milvus {
 namespace cache {
@@ -25,7 +25,7 @@ namespace cache {
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 
-class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuCacheConfigHandler {
+class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfigHandler {
  public:
     GpuCacheMgr();
 
