@@ -210,13 +210,13 @@ class TestFlushBase:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        milvus = get_milvus()
+        milvus = get_milvus(args["handler"])
         milvus.connect(uri=uri)
         milvus.create_collection(param)
         vectors = gen_vector(nb, dim)
         status, ids = milvus.add_vectors(collection, vectors, ids=[i for i in range(nb)])
         def flush(collection_name):
-            milvus = get_milvus()
+            milvus = get_milvus(args["handler"])
             milvus.connect(uri=uri)
             status = milvus.delete_by_id(collection_name, [i for i in range(nb)])
             assert status.OK()
