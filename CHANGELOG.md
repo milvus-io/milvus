@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.7.1 (TBD)
 
 ## Bug
+-   \#1301 Data in WAL may be accidentally inserted into a new table with the same name.
 -   \#1634 Fix search demo bug in HTTP doc
 -   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
 
