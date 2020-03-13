@@ -209,10 +209,12 @@ class TestDeleteBase:
         status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
         assert status.OK()
         logging.getLogger().info(res)
-        assert res[0][0].distance > epsilon
-        assert res[1][0].distance < epsilon
+        logging.getLogger().info(ids[0])
+        logging.getLogger().info(ids[1])
+        logging.getLogger().info(ids[-1])
+        assert res[0][0].id != ids[0]
         assert res[1][0].id == ids[1]
-        assert res[2][0].distance > epsilon
+        assert res[2][0].id != ids[-1]
 
     def test_add_vector_after_delete(self, connect, collection, get_simple_index):
         '''
@@ -351,11 +353,13 @@ class TestDeleteIndexedVectors:
         search_param = get_search_param(index_type)
         status, res = connect.search_vectors(collection, top_k, query_vecs, params=search_param)
         assert status.OK()
+        logging.getLogger().info(ids[0])
+        logging.getLogger().info(ids[1])
+        logging.getLogger().info(ids[-1])
         logging.getLogger().info(res)
-        assert res[0][0].distance > epsilon
-        assert res[1][0].distance < epsilon
+        assert res[0][0].id != ids[0]
         assert res[1][0].id == ids[1]
-        assert res[2][0].distance > epsilon
+        assert res[2][0].id != ids[-1]
 
 
 class TestDeleteBinary:

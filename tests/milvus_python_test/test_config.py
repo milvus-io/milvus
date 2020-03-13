@@ -25,12 +25,19 @@ class TestCacheConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
         reset configs so the tests are stable
         '''
         status, reply = connect.set_config("cache_config", "cpu_cache_capacity", 4)
+        assert status.OK()
+        status, reply = connect.set_config("cache_config", "cache_insert_data", "false")
         assert status.OK()
         status, config_value = connect.get_config("cache_config", "cpu_cache_capacity")
         assert config_value == '4'
@@ -47,7 +54,7 @@ class TestCacheConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig", "cache_config\n", "cache_config\t"])
+        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig"])
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "cpu_cache_capacity")
             assert not status.OK()
@@ -60,7 +67,7 @@ class TestCacheConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cpu_cache_capacity", "cpu cache_capacity", "cpucachecapacity", "cpu_cache_capacity\n", "cpu_cache_capacity\t"])
+        invalid_configs.extend(["Cpu_cache_capacity", "cpu cache_capacity", "cpucachecapacity"])
         for config in invalid_configs:
             status, config_value = connect.get_config("cache_config", config)
             assert not status.OK()
@@ -83,7 +90,7 @@ class TestCacheConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig", "cache_config\n", "cache_config\t"])
+        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig"])
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "insert_buffer_size")
             assert not status.OK()
@@ -96,7 +103,7 @@ class TestCacheConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Insert_buffer_size", "insert buffer_size", "insertbuffersize", "insert_buffer_size\n", "insert_buffer_size\t"])
+        invalid_configs.extend(["Insert_buffer_size", "insert buffer_size", "insertbuffersize"])
         for config in invalid_configs:
             status, config_value = connect.get_config("cache_config", config)
             assert not status.OK()
@@ -119,7 +126,7 @@ class TestCacheConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig", "cache_config\n", "cache_config\t"])
+        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig"])
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "cache_insert_data")
             assert not status.OK()
@@ -178,7 +185,7 @@ class TestCacheConfig:
         '''
         self.reset_configs(connect)
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig", "cache_config\n", "cache_config\t"])
+        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig"])
         for config in invalid_configs:
             status, reply = connect.set_config(config, "cpu_cache_capacity", 4)
             assert not status.OK()
@@ -239,7 +246,7 @@ class TestCacheConfig:
         '''
         self.reset_configs(connect)
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig", "cache_config\n", "cache_config\t"])
+        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig"])
         for config in invalid_configs:
             status, reply = connect.set_config(config, "insert_buffer_size", 1)
             assert not status.OK()
@@ -347,10 +354,11 @@ class TestCacheConfig:
         '''
         self.reset_configs(connect)
         invalid_configs = gen_invalid_cache_config()
-        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig", "cache_config\n", "cache_config\t"])
+        invalid_configs.extend(["Cache_config", "cache config", "cache_Config", "cacheconfig"])
         for config in invalid_configs:
             status, reply = connect.set_config(config, "cache_insert_data", "1")
             assert not status.OK()
+        self.reset_configs(connect)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_insert_data_valid(self, connect, collection):
@@ -368,6 +376,7 @@ class TestCacheConfig:
             status, config_value = connect.get_config("cache_config", "cache_insert_data")
             assert status.OK()
             assert config_value == str(config)
+        self.reset_configs(connect)
 
 
 class TestEngineConfig:
@@ -376,6 +385,11 @@ class TestEngineConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_use_blas_threshold_invalid_parent_key(self, connect, collection):
         '''
@@ -384,7 +398,7 @@ class TestEngineConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_engine_config()
-        invalid_configs.extend(["Engine_config", "engine config", "engine_config\n", "engine_config\t"])
+        invalid_configs.extend(["Engine_config", "engine config"])
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "use_blas_threshold")
             assert not status.OK()
@@ -397,7 +411,7 @@ class TestEngineConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_engine_config()
-        invalid_configs.extend(["Use_blas_threshold", "use blas threshold", "use_blas_threshold\n", "use_blas_threshold\t"])
+        invalid_configs.extend(["Use_blas_threshold", "use blas threshold"])
         for config in invalid_configs:
             status, config_value = connect.get_config("engine_config", config)
             assert not status.OK()
@@ -422,7 +436,7 @@ class TestEngineConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = gen_invalid_engine_config()
-        invalid_configs.extend(["Engine_config", "engine config", "engine_config\n", "engine_config\t"])
+        invalid_configs.extend(["Engine_config", "engine config"])
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "gpu_search_threshold")
             assert not status.OK()
@@ -437,7 +451,7 @@ class TestEngineConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = gen_invalid_engine_config()
-        invalid_configs.extend(["Gpu_search_threshold", "gpusearchthreshold", "gpu_search_threshold\n", "gpu_search_threshold\t"])
+        invalid_configs.extend(["Gpu_search_threshold", "gpusearchthreshold"])
         for config in invalid_configs:
             status, config_value = connect.get_config("engine_config", config)
             assert not status.OK()
@@ -468,7 +482,7 @@ class TestEngineConfig:
         expected: status not ok
         '''
         invalid_configs = gen_invalid_engine_config()
-        invalid_configs.extend(["Engine_config", "engine config", "engine_config\n", "engine_config\t"])
+        invalid_configs.extend(["Engine_config", "engine config"])
         for config in invalid_configs:
             status, reply = connect.set_config(config, "use_blas_threshold", 1000)
             assert not status.OK()
@@ -525,7 +539,7 @@ class TestEngineConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = gen_invalid_engine_config()
-        invalid_configs.extend(["Engine_config", "engine config", "engine_config\n", "engine_config\t"])
+        invalid_configs.extend(["Engine_config", "engine config"])
         for config in invalid_configs:
             status, reply = connect.set_config(config, "gpu_search_threshold", 1000)
             assert not status.OK()
@@ -585,6 +599,11 @@ class TestGPUResourceConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
@@ -617,7 +636,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "enable")
             assert not status.OK()
@@ -631,7 +650,7 @@ class TestGPUResourceConfig:
         '''
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
-        invalid_configs = ["Enable", "enable ", "disable", "true", "enable\t"]
+        invalid_configs = ["Enable", "enable ", "disable", "true"]
         for config in invalid_configs:
             status, config_value = connect.get_config("gpu_resource_config", config)
             assert not status.OK()
@@ -659,7 +678,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "cache_capacity")
             assert not status.OK()
@@ -673,7 +692,7 @@ class TestGPUResourceConfig:
         '''
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
-        invalid_configs = ["Cache_capacity", "cachecapacity", "cache_capacity\n", "cache_capacity\t"]
+        invalid_configs = ["Cache_capacity", "cachecapacity"]
         for config in invalid_configs:
             status, config_value = connect.get_config("gpu_resource_config", config)
             assert not status.OK()
@@ -700,7 +719,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "search_resources")
             assert not status.OK()
@@ -714,7 +733,7 @@ class TestGPUResourceConfig:
         '''
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
-        invalid_configs = ["Search_resources", "search_resources\n", "search_resources\t"]
+        invalid_configs = ["Search_resources"]
         for config in invalid_configs:
             status, config_value = connect.get_config("gpu_resource_config", config)
             assert not status.OK()
@@ -742,7 +761,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, config_value = connect.get_config(config, "build_index_resources")
             assert not status.OK()
@@ -756,7 +775,7 @@ class TestGPUResourceConfig:
         '''
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
-        invalid_configs = ["Build_index_resources", "build_index_resources\n", "build_index_resources\t"]
+        invalid_configs = ["Build_index_resources"]
         for config in invalid_configs:
             status, config_value = connect.get_config("gpu_resource_config", config)
             assert not status.OK()
@@ -790,7 +809,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, reply = connect.set_config(config, "enable", "true")
             assert not status.OK()
@@ -805,7 +824,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, reply = connect.set_config("gpu_resource_config", config, "true")
             assert not status.OK()
@@ -850,7 +869,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, reply = connect.set_config(config, "cache_capacity", 2)
             assert not status.OK()
@@ -891,7 +910,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, reply = connect.set_config(config, "search_resources", "gpu0")
             assert not status.OK()
@@ -933,7 +952,7 @@ class TestGPUResourceConfig:
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource", "gpu_resource_config\n", "gpu_resource_config\t"]
+            "gpu_resource"]
         for config in invalid_configs:
             status, reply = connect.set_config(config, "build_index_resources", "gpu0")
             assert not status.OK()
@@ -973,6 +992,11 @@ class TestServerConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_address_invalid_child_key(self, connect, collection):
         '''
@@ -1225,6 +1249,11 @@ class TestDBConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_backend_url_invalid_child_key(self, connect, collection):
         '''
@@ -1362,6 +1391,11 @@ class TestStorageConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_primary_path_invalid_child_key(self, connect, collection):
         '''
@@ -1455,6 +1489,11 @@ class TestMetricConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_enable_monitor_invalid_child_key(self, connect, collection):
         '''
@@ -1593,6 +1632,11 @@ class TestTracingConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_json_config_path_invalid_child_key(self, connect, collection):
         '''
@@ -1651,6 +1695,11 @@ class TestWALConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_enable_invalid_child_key(self, connect, collection):
         '''
@@ -1795,7 +1844,7 @@ class TestWALConfig:
             assert config_value == str(valid_buffer_size)
         
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_wal_path_valid(self, connect, collection):
+    def test_set_wal_path_valid(self, connect, collection, args):
         '''
         target: set wal_path
         method: call set_config correctly
