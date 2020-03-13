@@ -21,7 +21,7 @@ class EngineConfigHandler : virtual public ConfigHandler {
  public:
     EngineConfigHandler();
 
-    ~EngineConfigHandler();
+    virtual ~EngineConfigHandler();
 
  protected:
     virtual void

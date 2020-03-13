@@ -20,7 +20,7 @@ namespace server {
 class CacheConfigHandler : virtual public ConfigHandler {
  public:
     CacheConfigHandler();
-    ~CacheConfigHandler();
+    virtual ~CacheConfigHandler();
 
  protected:
     virtual void

@@ -27,11 +27,6 @@
 namespace milvus {
 namespace server {
 
-DBWrapper::DBWrapper() {
-    SetIdentity("DBWrapper");
-    AddUseBlasThresholdListener();
-}
-
 Status
 DBWrapper::StartService() {
     Config& config = Config::GetInstance();
@@ -262,11 +257,6 @@ DBWrapper::PreloadTables(const std::string& preload_tables) {
     }
 
     return Status::OK();
-}
-
-void
-DBWrapper::OnUseBlasThresholdChanged(int64_t threshold) {
-    faiss::distance_compute_blas_threshold = threshold;
 }
 
 }  // namespace server

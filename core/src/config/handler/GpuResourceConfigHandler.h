@@ -26,7 +26,7 @@ class GpuResourceConfigHandler : virtual public ConfigHandler {
  public:
     GpuResourceConfigHandler();
 
-    ~GpuResourceConfigHandler();
+    virtual ~GpuResourceConfigHandler();
 
  protected:
     virtual void

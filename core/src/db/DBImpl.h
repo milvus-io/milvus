@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "config/handler/CacheConfigHandler.h"
+#include "config/handler/EngineConfigHandler.h"
 #include "db/DB.h"
 #include "db/IndexFailedChecker.h"
 #include "db/OngoingFileChecker.h"
@@ -38,7 +39,7 @@ namespace meta {
 class Meta;
 }
 
-class DBImpl : public DB, public server::CacheConfigHandler {
+class DBImpl : public DB, public server::CacheConfigHandler, public server::EngineConfigHandler {
  public:
     explicit DBImpl(const DBOptions& options);
     ~DBImpl();
@@ -150,6 +151,9 @@ class DBImpl : public DB, public server::CacheConfigHandler {
  protected:
     void
     OnCacheInsertDataChanged(bool value) override;
+
+    void
+    OnUseBlasThresholdChanged(int64_t threshold) override;
 
  private:
     Status

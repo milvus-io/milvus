@@ -20,6 +20,10 @@ namespace milvus {
 namespace server {
 
 class ConfigHandler {
+ public:
+    ConfigHandler() = default;
+    virtual ~ConfigHandler() = default;
+
  protected:
     void
     SetIdentity(const std::string& identity) {

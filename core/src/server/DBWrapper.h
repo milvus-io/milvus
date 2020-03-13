@@ -13,16 +13,15 @@
 
 #include <string>
 
-#include "config/handler/EngineConfigHandler.h"
 #include "db/DB.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace server {
 
-class DBWrapper : public EngineConfigHandler {
+class DBWrapper {
  private:
-    DBWrapper();
+    DBWrapper() = default;
     ~DBWrapper() = default;
 
  public:
@@ -46,10 +45,6 @@ class DBWrapper : public EngineConfigHandler {
     EngineDB() {
         return db_;
     }
-
- protected:
-    void
-    OnUseBlasThresholdChanged(int64_t threshold) override;
 
  private:
     Status
