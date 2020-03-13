@@ -52,8 +52,8 @@ class CacheConfigHandler : virtual public ConfigHandler {
     RemoveCacheInsertDataListener();
 
  private:
-    int64_t cpu_cache_capacity_ = 4 /*GiB*/;
-    int64_t insert_buffer_size_ = 1 /*GiB*/;
+    int64_t cpu_cache_capacity_ = std::stol(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT) /*GiB*/;
+    int64_t insert_buffer_size_ = std::stol(CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT) /*GiB*/;
     bool cache_insert_data_ = false;
 };
 

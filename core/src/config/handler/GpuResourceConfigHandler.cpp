@@ -1,4 +1,3 @@
-
 // Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -16,7 +15,7 @@ namespace milvus {
 namespace server {
 
 GpuResourceConfigHandler::GpuResourceConfigHandler() {
-    server::Config& config = server::Config::GetInstance();
+    auto& config = Config::GetInstance();
     config.GetGpuResourceConfigEnable(gpu_enable_);
 }
 
@@ -57,10 +56,10 @@ GpuResourceConfigHandler::OnGpuSearchResChanged(const std::vector<int64_t>& gpus
 //////////////////////////// Listener methods //////////////////////////////////
 void
 GpuResourceConfigHandler::AddGpuEnableListener() {
-    auto& config = server::Config::GetInstance();
+    auto& config = Config::GetInstance();
 
-    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        auto& config = server::Config::GetInstance();
+    ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
         bool enable;
         auto status = config.GetGpuResourceConfigEnable(enable);
         if (status.ok()) {
@@ -69,13 +68,13 @@ GpuResourceConfigHandler::AddGpuEnableListener() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda);
+    config.RegisterCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, identity_, lambda);
 }
 
 void
 GpuResourceConfigHandler::AddGpuCacheCapacityListener() {
-    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        auto& config = server::Config::GetInstance();
+    ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
         int64_t capacity = 1;
         auto status = config.GetGpuResourceConfigCacheCapacity(capacity);
         if (status.ok()) {
@@ -85,15 +84,15 @@ GpuResourceConfigHandler::AddGpuCacheCapacityListener() {
         return status;
     };
 
-    auto& config = server::Config::GetInstance();
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_CACHE_CAPACITY, identity_, lambda);
+    auto& config = Config::GetInstance();
+    config.RegisterCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, identity_, lambda);
 }
 
 void
 GpuResourceConfigHandler::AddGpuBuildResourcesListener() {
-    server::Config& config = server::Config::GetInstance();
-    server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
+    auto& config = Config::GetInstance();
+    ConfigCallBackF lambda = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
         std::vector<int64_t> gpu_ids;
         auto status = config.GetGpuResourceConfigSearchResources(gpu_ids);
         if (status.ok()) {
@@ -102,16 +101,15 @@ GpuResourceConfigHandler::AddGpuBuildResourcesListener() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_,
-                            lambda);
+    config.RegisterCallBack(CONFIG_GPU_RESOURCE,CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_,lambda);
 }
 
 void
 GpuResourceConfigHandler::AddGpuSearchThresholdListener() {
-    server::Config& config = server::Config::GetInstance();
+    auto& config = Config::GetInstance();
 
-    server::ConfigCallBackF lambda_gpu_threshold = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
+    ConfigCallBackF lambda_gpu_threshold = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
         int64_t threshold;
         auto status = config.GetEngineConfigGpuSearchThreshold(threshold);
         if (status.ok()) {
@@ -120,16 +118,16 @@ GpuResourceConfigHandler::AddGpuSearchThresholdListener() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_,
+    config.RegisterCallBack(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_,
                             lambda_gpu_threshold);
 }
 
 void
 GpuResourceConfigHandler::AddGpuSearchResourcesListener() {
-    server::Config& config = server::Config::GetInstance();
+    auto& config = Config::GetInstance();
 
-    server::ConfigCallBackF lambda_gpu_search_res = [this](const std::string& value) -> Status {
-        server::Config& config = server::Config::GetInstance();
+    ConfigCallBackF lambda_gpu_search_res = [this](const std::string& value) -> Status {
+        auto& config = Config::GetInstance();
         std::vector<int64_t> gpu_ids;
         auto status = config.GetGpuResourceConfigSearchResources(gpu_ids);
         if (status.ok()) {
@@ -138,38 +136,38 @@ GpuResourceConfigHandler::AddGpuSearchResourcesListener() {
 
         return status;
     };
-    config.RegisterCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_,
+    config.RegisterCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_,
                             lambda_gpu_search_res);
 }
 
 void
 GpuResourceConfigHandler::RemoveGpuEnableListener() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, identity_);
 }
 
 void
 GpuResourceConfigHandler::RemoveGpuCacheCapacityListener() {
-    auto& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_CACHE_CAPACITY, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_CAPACITY, identity_);
 }
 
 void
 GpuResourceConfigHandler::RemoveGpuBuildResourcesListener() {
-    auto& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_);
 }
 
 void
 GpuResourceConfigHandler::RemoveGpuSearchThresholdListener() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_ENGINE, server::CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_);
 }
 
 void
 GpuResourceConfigHandler::RemoveGpuSearchResourcesListener() {
-    auto& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
+    auto& config = Config::GetInstance();
+    config.CancelCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_);
 }
 
 }  // namespace server
