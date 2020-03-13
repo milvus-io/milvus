@@ -9,23 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu-control.h>
+#include <fiu-local.h>
 #include <gtest/gtest.h>
 #include <memory>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/nsg/NSGIO.h"
+#include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
 
-#include <fiu-control.h>
-#include <fiu-local.h>
 #include "unittest/utils.h"
 
 using ::testing::Combine;
@@ -79,14 +80,14 @@ TEST_F(NSGInterfaceTest, basic_test) {
     fiu_init(0);
     // untrained index
     {
-        ASSERT_ANY_THROW(index_->Search(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
         ASSERT_ANY_THROW(index_->Serialize());
     }
     // train_conf->gpu_id = knowhere::INVALID_VALUE;
     // auto model_invalid_gpu = index_->Train(base_dataset, train_conf);
     train_conf[knowhere::meta::DEVICEID] = DEVICEID;
-    auto model = index_->Train(base_dataset, train_conf);
-    auto result = index_->Search(query_dataset, search_conf);
+    index_->Train(base_dataset, train_conf);
+    auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     auto binaryset = index_->Serialize();
@@ -104,21 +105,21 @@ TEST_F(NSGInterfaceTest, basic_test) {
         fiu_disable("NSG.Load.throw_exception");
     }
 
-    auto new_result = new_index->Search(query_dataset, search_conf);
+    auto new_result = new_index->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
-    ASSERT_EQ(index_->Dimension(), dim);
+    ASSERT_EQ(index_->Dim(), dim);
     //    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
-    ASSERT_NO_THROW({
-        index_->Add(base_dataset, knowhere::Config());
-        index_->Seal();
-    });
+    // ASSERT_NO_THROW({
+    //     index_->Add(base_dataset, knowhere::Config());
+    //     index_->Seal();
+    // });
 }
 
 TEST_F(NSGInterfaceTest, comparetest) {
-    knowhere::algo::DistanceL2 distanceL2;
-    knowhere::algo::DistanceIP distanceIP;
+    knowhere::impl::DistanceL2 distanceL2;
+    knowhere::impl::DistanceIP distanceIP;
 
     knowhere::TimeRecorder tc("Compare");
     for (int i = 0; i < 1000; ++i) {

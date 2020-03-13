@@ -86,7 +86,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     GenParams(const Config& config);
 
     virtual void
-    search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
+    QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
 
  protected:
     std::mutex mutex_;

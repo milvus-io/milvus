@@ -307,8 +307,10 @@ IVF::GetBlacklist(faiss::ConcurrentBitsetPtr& list) {
 void
 IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     auto params = GenParams(config);
+    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    ivf_index->nprobe = params->nprobe;
     stdclock::time_point before = stdclock::now();
-    faiss::ivflib::search_with_parameters(index_.get(), n, (float*)data, k, distances, labels, params.get());
+    ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     KNOWHERE_LOG_DEBUG << "IVF search cost: " << search_cost

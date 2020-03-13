@@ -9,8 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "knowhere/index/vector_index/IndexNSG.h"
+#include <fiu-local.h>
 
+#include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
@@ -26,8 +27,6 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
-// #include <fiu-local.h>
-
 namespace knowhere {
 
 BinarySet
@@ -37,7 +36,7 @@ NSG::Serialize(const Config& config) {
     }
 
     try {
-        // fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
+        fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         impl::NsgIndex* index = index_.get();
 
@@ -57,7 +56,7 @@ NSG::Serialize(const Config& config) {
 void
 NSG::Load(const BinarySet& index_binary) {
     try {
-        // fiu_do_on("NSG.Load.throw_exception", throw std::exception());
+        fiu_do_on("NSG.Load.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName(IndexTypeToStr(index_type_));
 

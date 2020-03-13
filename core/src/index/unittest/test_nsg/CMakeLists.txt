@@ -12,8 +12,8 @@ else ()
     message(FATAL_ERROR "no OpenMP supprot")
 endif ()
 
-include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg)
-aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg nsg_src)
+include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg)
+aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg nsg_src)
 
 set(interface_src
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNSG.cpp

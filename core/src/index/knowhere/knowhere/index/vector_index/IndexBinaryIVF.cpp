@@ -57,7 +57,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        search_impl(rows, (uint8_t*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, config);
+        QueryImpl(rows, (uint8_t*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, config);
 
         auto ret_ds = std::make_shared<Dataset>();
         if (index_->metric_type == faiss::METRIC_Hamming) {
@@ -82,7 +82,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-BinaryIVF::search_impl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
+BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
                        const Config& config) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
