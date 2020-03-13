@@ -31,7 +31,7 @@ Milvusは特徴ベクトルにむかうオーペンソース高性能類似性�
 
 [基本紹介](https://www.milvus.io/docs/about_milvus/overview.md)を参考して詳しい情報を手に入れます。
 
-Milvus [リリースノート](https://www.milvus.io/docs/master/releases/release_notes.md)を読んで最新バージョンや更新情報を手に入れます。
+Milvus [リリースノート](https://www.milvus.io/docs/releases/release_notes.md)を読んで最新バージョンや更新情報を手に入れます。
 
 # ロードマップ
 

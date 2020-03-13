@@ -44,7 +44,7 @@ class BuildIndexJob : public Job, public server::CacheConfigHandler {
     bool
     AddToIndexFiles(const TableFileSchemaPtr& to_index_file);
 
-    Status&
+    void
     WaitBuildIndexFinish();
 
     void

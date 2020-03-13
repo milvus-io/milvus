@@ -15,11 +15,11 @@
 namespace milvus {
 namespace storage {
 
-S3IOReader::S3IOReader(const std::string& name) : IOReader(name), pos_(0) {
+void
+S3IOReader::open(const std::string& name) {
+    name_ = name;
+    pos_ = 0;
     S3ClientWrapper::GetInstance().GetObjectStr(name_, buffer_);
-}
-
-S3IOReader::~S3IOReader() {
 }
 
 void
@@ -35,6 +35,10 @@ S3IOReader::seekg(size_t pos) {
 size_t
 S3IOReader::length() {
     return buffer_.length();
+}
+
+void
+S3IOReader::close() {
 }
 
 }  // namespace storage

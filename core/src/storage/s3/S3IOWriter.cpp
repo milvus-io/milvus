@@ -15,12 +15,11 @@
 namespace milvus {
 namespace storage {
 
-S3IOWriter::S3IOWriter(const std::string& name) : IOWriter(name) {
+void
+S3IOWriter::open(const std::string& name) {
+    name_ = name;
+    len_ = 0;
     buffer_ = "";
-}
-
-S3IOWriter::~S3IOWriter() {
-    S3ClientWrapper::GetInstance().PutObjectStr(name_, buffer_);
 }
 
 void
@@ -32,6 +31,11 @@ S3IOWriter::write(void* ptr, size_t size) {
 size_t
 S3IOWriter::length() {
     return len_;
+}
+
+void
+S3IOWriter::close() {
+    S3ClientWrapper::GetInstance().PutObjectStr(name_, buffer_);
 }
 
 }  // namespace storage

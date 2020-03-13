@@ -22,8 +22,8 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-#include "storage/file/FileIOReader.h"
-#include "storage/file/FileIOWriter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "utils/Exception.h"
@@ -179,12 +179,13 @@ read_index(const std::string& location) {
 
     std::shared_ptr<storage::IOReader> reader_ptr;
     if (s3_enable) {
-        reader_ptr = std::make_shared<storage::S3IOReader>(location);
+        reader_ptr = std::make_shared<storage::S3IOReader>();
     } else {
-        reader_ptr = std::make_shared<storage::FileIOReader>(location);
+        reader_ptr = std::make_shared<storage::DiskIOReader>();
     }
 
     recorder.RecordSection("Start");
+    reader_ptr->open(location);
 
     size_t length = reader_ptr->length();
     if (length <= 0) {
@@ -226,6 +227,8 @@ read_index(const std::string& location) {
         delete[] meta;
     }
 
+    reader_ptr->close();
+
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
     STORAGE_LOG_DEBUG << "read_index(" << location << ") rate " << rate << "MB/s";
@@ -252,12 +255,13 @@ write_index(VecIndexPtr index, const std::string& location) {
 
         std::shared_ptr<storage::IOWriter> writer_ptr;
         if (s3_enable) {
-            writer_ptr = std::make_shared<storage::S3IOWriter>(location);
+            writer_ptr = std::make_shared<storage::S3IOWriter>();
         } else {
-            writer_ptr = std::make_shared<storage::FileIOWriter>(location);
+            writer_ptr = std::make_shared<storage::DiskIOWriter>();
         }
 
         recorder.RecordSection("Start");
+        writer_ptr->open(location);
 
         writer_ptr->write(&index_type, sizeof(IndexType));
 
@@ -272,6 +276,8 @@ write_index(VecIndexPtr index, const std::string& location) {
             writer_ptr->write(&binary_length, sizeof(binary_length));
             writer_ptr->write((void*)binary->data.get(), binary_length);
         }
+
+        writer_ptr->close();
 
         double span = recorder.RecordSection("End");
         double rate = writer_ptr->length() * 1000000.0 / span / 1024 / 1024;

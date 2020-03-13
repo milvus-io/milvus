@@ -15,21 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "store/Directory.h"
-
 #include <boost/filesystem.hpp>
 
+#include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
 namespace milvus {
-namespace store {
+namespace storage {
 
-Directory::Directory(const std::string& dir_path) : dir_path_(dir_path) {
+DiskOperation::DiskOperation(const std::string& dir_path) : dir_path_(dir_path) {
 }
 
 void
-Directory::Create() {
+DiskOperation::CreateDirectory() {
     if (!boost::filesystem::is_directory(dir_path_)) {
         auto ret = boost::filesystem::create_directory(dir_path_);
         if (!ret) {
@@ -40,8 +39,13 @@ Directory::Create() {
     }
 }
 
+const std::string&
+DiskOperation::GetDirectory() const {
+    return dir_path_;
+}
+
 void
-Directory::ListAll(std::vector<std::string>& file_paths) {
+DiskOperation::ListDirectory(std::vector<std::string>& file_paths) {
     boost::filesystem::path target_path(dir_path_);
     typedef boost::filesystem::directory_iterator d_it;
     d_it it_end;
@@ -54,14 +58,9 @@ Directory::ListAll(std::vector<std::string>& file_paths) {
 }
 
 bool
-Directory::DeleteFile(const std::string& file_path) {
+DiskOperation::DeleteFile(const std::string& file_path) {
     return boost::filesystem::remove(file_path);
 }
 
-const std::string&
-Directory::GetDirPath() const {
-    return dir_path_;
-}
-
-}  // namespace store
+}  // namespace storage
 }  // namespace milvus

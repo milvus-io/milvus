@@ -39,9 +39,10 @@ BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr& to_index_
                      << ", location: " << to_index_file->location_;
 
     to_index_files_[to_index_file->id_] = to_index_file;
+    return true;
 }
 
-Status&
+void
 BuildIndexJob::WaitBuildIndexFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return to_index_files_.empty(); });

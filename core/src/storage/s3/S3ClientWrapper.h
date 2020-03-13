@@ -16,12 +16,13 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "storage/IStorage.h"
+
+#include "utils/Status.h"
 
 namespace milvus {
 namespace storage {
 
-class S3ClientWrapper : public IStorage {
+class S3ClientWrapper {
  public:
     static S3ClientWrapper&
     GetInstance() {
@@ -35,23 +36,23 @@ class S3ClientWrapper : public IStorage {
     StopService();
 
     Status
-    CreateBucket() override;
+    CreateBucket();
     Status
-    DeleteBucket() override;
+    DeleteBucket();
     Status
-    PutObjectFile(const std::string& object_key, const std::string& file_path) override;
+    PutObjectFile(const std::string& object_key, const std::string& file_path);
     Status
-    PutObjectStr(const std::string& object_key, const std::string& content) override;
+    PutObjectStr(const std::string& object_key, const std::string& content);
     Status
-    GetObjectFile(const std::string& object_key, const std::string& file_path) override;
+    GetObjectFile(const std::string& object_key, const std::string& file_path);
     Status
-    GetObjectStr(const std::string& object_key, std::string& content) override;
+    GetObjectStr(const std::string& object_key, std::string& content);
     Status
-    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "") override;
+    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "");
     Status
-    DeleteObject(const std::string& object_key) override;
+    DeleteObject(const std::string& object_key);
     Status
-    DeleteObjects(const std::string& marker) override;
+    DeleteObjects(const std::string& marker);
 
  private:
     std::shared_ptr<Aws::S3::S3Client> client_ptr_;
