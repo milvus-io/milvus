@@ -4,6 +4,32 @@
 
 namespace faiss {
 
+    struct JaccardComputer8 {
+        uint64_t a0;
+
+        JaccardComputer8 () {}
+
+        JaccardComputer8 (const uint8_t *a8, int code_size) {
+            set (a8, code_size);
+        }
+
+        void set (const uint8_t *a8, int code_size) {
+            assert (code_size == 8);
+            const uint64_t *a = (uint64_t *)a8;
+            a0 = a[0];
+        }
+
+        inline float compute (const uint8_t *b8) const {
+            const uint64_t *b = (uint64_t *)b8;
+            int accu_num = popcount64 (b[0] & a0);
+            int accu_den = popcount64 (b[0] | a0);
+            if (accu_num == 0)
+                return 1.0;
+            return 1.0 - (float)(accu_num) / (float)(accu_den);
+        }
+
+    };
+
     struct JaccardComputer16 {
         uint64_t a0, a1;
 
@@ -354,6 +380,7 @@ struct JaccardComputer256 {
         JaccardComputer ## CODE_SIZE(a, CODE_SIZE) {} \
     }
 
+    SPECIALIZED_HC(8);
     SPECIALIZED_HC(16);
     SPECIALIZED_HC(32);
     SPECIALIZED_HC(64);

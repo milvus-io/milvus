@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#1635 Vectors can be returned by searching after vectors deleted if `cache_insert_data` set true
 
 ## Feature
+-   \#1603 BinaryFlat add 2 Metric: Substructure and Superstructure
 
 ## Improvement
 -   \#1537 Optimize raw vector and uids read/write

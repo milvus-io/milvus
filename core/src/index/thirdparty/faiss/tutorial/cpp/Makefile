@@ -5,7 +5,7 @@
 
 -include ../../makefile.inc
 
-CPU_TARGETS = 1-Flat 2-IVFFlat 3-IVFPQ
+CPU_TARGETS = 1-Flat 2-IVFFlat 3-IVFPQ 9-BinaryFlat
 GPU_TARGETS = 6-RUN 7-GPU 8-GPU
 
 default: cpu
