@@ -29,7 +29,7 @@ namespace server {
 
 DBWrapper::DBWrapper() {
     SetIdentity("DBWrapper");
-    AddUseBlasThresholdChanged();
+    AddUseBlasThresholdListener();
 }
 
 Status

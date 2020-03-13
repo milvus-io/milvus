@@ -25,18 +25,18 @@ class EngineConfigHandler : virtual public ConfigHandler {
 
  protected:
     virtual void
-    OnUseBlasThresholdChanged(int64_t threshold);
+    OnUseBlasThresholdChanged(int64_t threshold) {}
 
  protected:
     void
-    AddUseBlasThresholdChanged();
+    AddUseBlasThresholdListener();
 
  protected:
     void
-    RemoveUseBlasThresholdChanged();
+    RemoveUseBlasThresholdListener();
 
  protected:
-    int64_t use_blas_threshold_ = std::stol(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
+    int64_t use_blas_threshold_ = 1100;
 };
 
 }  // namespace server

@@ -28,29 +28,14 @@ CacheConfigHandler::~CacheConfigHandler() {
     RemoveCacheInsertDataListener();
 }
 
-void
-CacheConfigHandler::OnCpuCacheCapacityChanged(int64_t value) {
-    cpu_cache_capacity_ = value;
-}
-
-void
-CacheConfigHandler::OnInsertBufferSizeChanged(int64_t value) {
-    insert_buffer_size_ = value;
-}
-
-void
-CacheConfigHandler::OnCacheInsertDataChanged(bool value) {
-    cache_insert_data_ = value;
-}
-
+//////////////////////////// Listener methods //////////////////////////////////
 void
 CacheConfigHandler::AddCpuCacheCapacityListener() {
     ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         auto& config = Config::GetInstance();
-        int64_t capacity;
-        auto status = config.GetCacheConfigCpuCacheCapacity(capacity);
+        auto status = config.GetCacheConfigCpuCacheCapacity(cpu_cache_capacity_);
         if (status.ok()) {
-            OnCpuCacheCapacityChanged(capacity);
+            OnCpuCacheCapacityChanged(cpu_cache_capacity_);
         }
 
         return status;
@@ -64,10 +49,9 @@ void
 CacheConfigHandler::AddInsertBufferSizeListener() {
     ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         auto& config = Config::GetInstance();
-        int64_t size;
-        auto status = config.GetCacheConfigInsertBufferSize(size);
+        auto status = config.GetCacheConfigInsertBufferSize(insert_buffer_size_);
         if (status.ok()) {
-            OnInsertBufferSizeChanged(size);
+            OnInsertBufferSizeChanged(insert_buffer_size_);
         }
         return status;
     };
@@ -80,10 +64,9 @@ void
 CacheConfigHandler::AddCacheInsertDataListener() {
     server::ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         auto& config = Config::GetInstance();
-        bool ok;
-        auto status = config.GetCacheConfigCacheInsertData(ok);
+        auto status = config.GetCacheConfigCacheInsertData(cache_insert_data_);
         if (status.ok()) {
-            OnCacheInsertDataChanged(ok);
+            OnCacheInsertDataChanged(cache_insert_data_);
         }
         return status;
     };
