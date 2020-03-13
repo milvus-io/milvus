@@ -62,6 +62,18 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     virtual const int64_t*
     GetRawIds();
 
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config);
+
+    DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config);
+
+    void
+    SetBlacklist(faiss::ConcurrentBitsetPtr list);
+
+    void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
+
  protected:
     virtual void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&);

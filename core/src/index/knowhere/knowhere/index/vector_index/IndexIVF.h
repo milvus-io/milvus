@@ -66,6 +66,18 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     virtual void
     GenGraph(const float* data, const int64_t& k, GraphType& graph, const Config& config);
+    
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
+
+    DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config) override;
+
+    void
+    SetBlacklist(faiss::ConcurrentBitsetPtr list);
+
+    void
+    GetBlacklist(faiss::ConcurrentBitsetPtr& list);
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>

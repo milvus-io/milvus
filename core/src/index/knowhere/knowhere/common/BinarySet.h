@@ -25,6 +25,13 @@ struct Binary {
 };
 using BinaryPtr = std::shared_ptr<Binary>;
 
+inline uint8_t*
+CopyBinary(const BinaryPtr& bin) {
+    uint8_t* newdata = new uint8_t[bin->size];
+    memcpy(newdata, bin->data.get(), bin->size);
+    return newdata;
+}
+
 class BinarySet {
  public:
     BinaryPtr

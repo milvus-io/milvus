@@ -17,10 +17,10 @@ namespace knowhere {
 namespace cloner {
 
 extern VecIndexPtr
-CopyCpuToGpu(const VecIndexPtr&, const int64_t, const Config&);
+CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& config);
 
 extern VecIndexPtr
-CopyGpuToCpu(const VecIndexPtr&, const Config&);
+CopyGpuToCpu(const VecIndexPtr& index, const Config& config);
 
 }  // namespace cloner
 }  // namespace knowhere
