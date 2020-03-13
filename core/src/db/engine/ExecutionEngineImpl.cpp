@@ -467,7 +467,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                                                                                      vectors_data.data(), Config());
                 status = std::static_pointer_cast<BinBFIndex>(index_)->SetBlacklist(concurrent_bitset_ptr);
 
-                int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t);
+                int64_t index_size = vectors->GetCount() * dim_ * sizeof(uint8_t) / 8;
                 int64_t bitset_size = vectors->GetCount() / 8;
                 index_->set_size(index_size + bitset_size);
             }
