@@ -7,7 +7,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
@@ -36,7 +36,7 @@ class EngineConfigHandler : virtual public ConfigHandler {
     RemoveUseBlasThresholdListener();
 
  protected:
-    int64_t use_blas_threshold_ = 1100;
+    int64_t use_blas_threshold_ = std::stoll(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
 };
 
 }  // namespace server

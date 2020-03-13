@@ -77,8 +77,8 @@ class GpuResourceConfigHandler : virtual public ConfigHandler {
 
  protected:
     bool gpu_enable_ = true;
-    int64_t gpu_cache_capacity_ = 1 /* GiB */;
-    int64_t threshold_ = std::numeric_limits<int64_t>::max();
+    int64_t gpu_cache_capacity_ = std::stoll(CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT) /* GiB */;
+    int64_t threshold_ = std::stoll(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
     std::vector<int64_t> build_gpus_;
     std::vector<int64_t> search_gpus_;
 };
