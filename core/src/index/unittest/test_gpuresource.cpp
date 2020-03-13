@@ -20,14 +20,15 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/IndexType.h"
 
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
@@ -53,8 +54,9 @@ class GPURESTEST : public DataGen, public TestGpuIndexBase {
     }
 
  protected:
-    std::string index_type;
-    knowhere::IVFIndexPtr index_ = nullptr;
+    knowhere::IndexType index_type_;
+    knowhere::IndexMode index_mode_;
+    knowhere::IVFPtr index_ = nullptr;
 
     int64_t* ids = nullptr;
     float* dis = nullptr;
@@ -65,20 +67,19 @@ TEST_F(GPURESTEST, copyandsearch) {
     // search and copy at the same time
     printf("==================\n");
 
-    index_type = "GPUIVF";
-    index_ = IndexFactory(index_type);
+    index_type_ = knowhere::IndexType::INDEX_FAISS_IVFFLAT;
+    index_mode_ = knowhere::IndexMode::MODE_GPU;
+    index_ = IndexFactory(index_type_, index_mode_);
 
-    auto conf = ParamGenerator::GetInstance().Gen(ParameterType::ivf);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
-    auto model = index_->Train(base_dataset, conf);
-    index_->set_index_model(model);
+    auto conf = ParamGenerator::GetInstance().Gen(index_type_);
+    index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
-    auto result = index_->Search(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
 
     auto cpu_idx = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
-    cpu_idx->Seal();
+    knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<knowhere::IVF>(cpu_idx);
+    ivf_idx->Seal();
     auto search_idx = knowhere::cloner::CopyCpuToGpu(cpu_idx, DEVICEID, knowhere::Config());
 
     constexpr int64_t search_count = 50;
@@ -86,7 +87,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto search_func = [&] {
         // TimeRecorder tc("search&load");
         for (int i = 0; i < search_count; ++i) {
-            search_idx->Search(query_dataset, conf);
+            search_idx->Query(query_dataset, conf);
             // if (i > search_count - 6 || i == 0)
             //    tc.RecordSection("search once");
         }
@@ -105,7 +106,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     knowhere::TimeRecorder tc("Basic");
     knowhere::cloner::CopyCpuToGpu(cpu_idx, DEVICEID, knowhere::Config());
     tc.RecordSection("Copy to gpu once");
-    search_idx->Search(query_dataset, conf);
+    search_idx->Query(query_dataset, conf);
     tc.RecordSection("Search once");
     search_func();
     tc.RecordSection("Search total cost");
@@ -120,33 +121,29 @@ TEST_F(GPURESTEST, copyandsearch) {
 }
 
 TEST_F(GPURESTEST, trainandsearch) {
-    index_type = "GPUIVF";
-    index_ = IndexFactory(index_type);
+    index_type_ = knowhere::IndexType::INDEX_FAISS_IVFFLAT;
+    index_mode_ = knowhere::IndexMode::MODE_GPU;
+    index_ = IndexFactory(index_type_, index_mode_);
 
-    auto conf = ParamGenerator::GetInstance().Gen(ParameterType::ivf);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
-    auto model = index_->Train(base_dataset, conf);
-    auto new_index = IndexFactory(index_type);
-    new_index->set_index_model(model);
-    new_index->Add(base_dataset, conf);
-    auto cpu_idx = knowhere::cloner::CopyGpuToCpu(new_index, knowhere::Config());
-    cpu_idx->Seal();
+    auto conf = ParamGenerator::GetInstance().Gen(index_type_);
+    index_->Train(base_dataset, conf);
+    index_->Add(base_dataset, conf);
+    auto cpu_idx = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
+    knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<knowhere::IVF>(cpu_idx);
+    ivf_idx->Seal();
     auto search_idx = knowhere::cloner::CopyCpuToGpu(cpu_idx, DEVICEID, knowhere::Config());
 
     constexpr int train_count = 5;
     constexpr int search_count = 200;
     auto train_stage = [&] {
         for (int i = 0; i < train_count; ++i) {
-            auto model = index_->Train(base_dataset, conf);
-            auto test_idx = IndexFactory(index_type);
-            test_idx->set_index_model(model);
-            test_idx->Add(base_dataset, conf);
+            index_->Train(base_dataset, conf);
+            index_->Add(base_dataset, conf);
         }
     };
-    auto search_stage = [&](knowhere::VectorIndexPtr& search_idx) {
+    auto search_stage = [&](knowhere::VecIndexPtr& search_idx) {
         for (int i = 0; i < search_count; ++i) {
-            auto result = search_idx->Search(query_dataset, conf);
+            auto result = search_idx->Query(query_dataset, conf);
             AssertAnns(result, nq, k);
         }
     };

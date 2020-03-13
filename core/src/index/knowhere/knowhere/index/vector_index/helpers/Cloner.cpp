@@ -17,7 +17,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 
 namespace knowhere {
 namespace cloner {

@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "unittest/utils.h"
-#include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
 #include <math.h>

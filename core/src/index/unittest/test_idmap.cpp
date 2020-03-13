@@ -17,7 +17,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/IndexGPUIDMAP.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 #include "Helper.h"
@@ -51,18 +51,18 @@ TEST_F(IDMAPTest, idmap_basic) {
     // null faiss index
     {
         ASSERT_ANY_THROW(index_->Serialize());
-        ASSERT_ANY_THROW(index_->Search(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
         ASSERT_ANY_THROW(index_->Add(nullptr, conf));
-        ASSERT_ANY_THROW(index_->AddWithoutId(nullptr, conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
     }
 
-    index_->Train(conf);
+    index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
-    auto result = index_->Search(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     //    PrintResult(result, nq, k);
 
@@ -70,7 +70,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<knowhere::IDMAP>();
     new_index->Load(binaryset);
-    auto result2 = index_->Search(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
 
@@ -86,7 +86,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     }
     index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result_bs_1 = index_->Search(query_dataset, conf);
+    auto result_bs_1 = index_->Query(query_dataset, conf);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     auto result_bs_2 = index_->SearchById(id_dataset, conf);
@@ -110,15 +110,15 @@ TEST_F(IDMAPTest, idmap_serialize) {
 
     {
         // serialize index
-        index_->Train(conf);
+        index_->Train(base_dataset, conf);
         index_->Add(base_dataset, knowhere::Config());
-        auto re_result = index_->Search(query_dataset, conf);
+        auto re_result = index_->Query(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
         EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dimension(), dim);
+        EXPECT_EQ(index_->Dim(), dim);
         auto binaryset = index_->Serialize();
-        auto bin = binaryset.GetByName("IVF");
+        auto bin = binaryset.GetByName("IDMAP");
 
         std::string filename = "/tmp/idmap_test_serialize.bin";
         auto load_data = new uint8_t[bin->size];
@@ -127,12 +127,12 @@ TEST_F(IDMAPTest, idmap_serialize) {
         binaryset.clear();
         auto data = std::make_shared<uint8_t>();
         data.reset(load_data);
-        binaryset.Append("IVF", data, bin->size);
+        binaryset.Append("IDMAP", data, bin->size);
 
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, conf);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, k);
         //        PrintResult(result, nq, k);
     }
@@ -145,13 +145,13 @@ TEST_F(IDMAPTest, copy_test) {
     knowhere::Config conf{
         {knowhere::meta::DIM, dim}, {knowhere::meta::TOPK, k}, {knowhere::Metric::TYPE, knowhere::Metric::L2}};
 
-    index_->Train(conf);
+    index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
-    auto result = index_->Search(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
 
@@ -166,7 +166,7 @@ TEST_F(IDMAPTest, copy_test) {
         // cpu to gpu
         ASSERT_ANY_THROW(knowhere::cloner::CopyCpuToGpu(index_, -1, conf));
         auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
-        auto clone_result = clone_index->Search(query_dataset, conf);
+        auto clone_result = clone_index->Query(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
         ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
                      knowhere::KnowhereException);
@@ -180,7 +180,7 @@ TEST_F(IDMAPTest, copy_test) {
 
         auto binary = clone_index->Serialize();
         clone_index->Load(binary);
-        auto new_result = clone_index->Search(query_dataset, conf);
+        auto new_result = clone_index->Query(query_dataset, conf);
         AssertAnns(new_result, nq, k);
 
         //        auto clone_gpu_idx = clone_index->Clone();
@@ -189,7 +189,7 @@ TEST_F(IDMAPTest, copy_test) {
 
         // gpu to cpu
         auto host_index = knowhere::cloner::CopyGpuToCpu(clone_index, conf);
-        auto host_result = host_index->Search(query_dataset, conf);
+        auto host_result = host_index->Query(query_dataset, conf);
         AssertAnns(host_result, nq, k);
         ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawVectors() != nullptr);
         ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawIds() != nullptr);
@@ -198,7 +198,7 @@ TEST_F(IDMAPTest, copy_test) {
         auto device_index = knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto new_device_index =
             std::static_pointer_cast<knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(DEVICEID, conf);
-        auto device_result = new_device_index->Search(query_dataset, conf);
+        auto device_result = new_device_index->Query(query_dataset, conf);
         AssertAnns(device_result, nq, k);
     }
 }

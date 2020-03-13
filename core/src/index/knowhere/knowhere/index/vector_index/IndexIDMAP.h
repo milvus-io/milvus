@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <utility>
 
@@ -53,6 +54,9 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     int64_t
     Dim() override;
 
+    virtual void
+    Seal() {}
+
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&);
 
@@ -80,6 +84,9 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
 
  protected:
     std::mutex mutex_;
+
+ private:
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using IDMAPPtr = std::shared_ptr<IDMAP>;

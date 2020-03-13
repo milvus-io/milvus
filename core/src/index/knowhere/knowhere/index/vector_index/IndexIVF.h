@@ -91,6 +91,9 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
  protected:
     std::mutex mutex_;
+
+ private:
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using IVFPtr = std::shared_ptr<IVF>;

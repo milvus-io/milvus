@@ -17,6 +17,7 @@
 #include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/vector_index/IndexType.h"
+#include "segment/Types.h"
 
 namespace knowhere {
 
@@ -73,9 +74,33 @@ class VecIndex : public Index {
         return Count() * Dim() * sizeof(FloatType);
     }
 
+    virtual DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
+
+    virtual DatasetPtr
+    SearchById(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
+
+    virtual const std::vector<milvus::segment::doc_id_t>&
+    GetUids() const {
+        return uids_;
+    }
+
+    virtual void
+    SetUids(std::vector<milvus::segment::doc_id_t>& uids) {
+        uids_.clear();
+        uids_.swap(uids);
+    }
+
  protected:
     IndexType index_type_ = IndexType::INVALID;
     IndexMode index_mode_ = IndexMode::MODE_CPU;
+
+ private:
+    std::vector<milvus::segment::doc_id_t> uids_;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

@@ -19,6 +19,7 @@
 #include "unittest/utils.h"
 
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/vector_index/IndexType.h"
 
 class SingleIndexTest : public DataGen, public TestGpuIndexBase {
  protected:
@@ -38,26 +39,26 @@ class SingleIndexTest : public DataGen, public TestGpuIndexBase {
     }
 
  protected:
-    std::string index_type;
-    knowhere::IVFIndexPtr index_ = nullptr;
+    knowhere::IndexType index_type_;
+    knowhere::IndexMode index_mode_;
+    knowhere::IVFPtr index_ = nullptr;
 };
 
 #ifdef CUSTOMIZATION
 TEST_F(SingleIndexTest, IVFSQHybrid) {
     assert(!xb.empty());
 
-    index_type = "IVFSQHybrid";
-    index_ = IndexFactory(index_type);
-    auto conf = ParamGenerator::GetInstance().Gen(ParameterType::ivfsq);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
+    index_type_ = knowhere::IndexType::INDEX_FAISS_IVFSQ8H;
+    index_mode_ = knowhere::IndexMode::MODE_GPU;
+    index_ = IndexFactory(index_type_, index_mode_);
+
+    auto conf = ParamGenerator::GetInstance().Gen(index_type_);
 
     fiu_init(0);
-    auto model = index_->Train(base_dataset, conf);
-    index_->set_index_model(model);
+    index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
-    EXPECT_EQ(index_->Dimension(), dim);
+    EXPECT_EQ(index_->Dim(), dim);
 
     auto binaryset = index_->Serialize();
     {
@@ -68,7 +69,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         {
             for (int i = 0; i < 3; ++i) {
                 auto gpu_idx = cpu_idx->CopyCpuToGpu(DEVICEID, conf);
-                auto result = gpu_idx->Search(query_dataset, conf);
+                auto result = gpu_idx->Query(query_dataset, conf);
                 AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
                 // PrintResult(result, nq, k);
             }
@@ -85,7 +86,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         auto gpu_idx = pair.first;
         auto quantization = pair.second;
 
-        auto result = gpu_idx->Search(query_dataset, conf);
+        auto result = gpu_idx->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
         //        PrintResult(result, nq, k);
 
@@ -94,7 +95,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
             hybrid_idx->Load(binaryset);
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
-            auto result = new_idx->Search(query_dataset, conf);
+            auto result = new_idx->Query(query_dataset, conf);
             AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
         }
@@ -113,7 +114,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             hybrid_idx->Load(binaryset);
 
             hybrid_idx->SetQuantizer(quantization);
-            auto result = hybrid_idx->Search(query_dataset, conf);
+            auto result = hybrid_idx->Query(query_dataset, conf);
             AssertAnns(result, nq, conf[knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
             hybrid_idx->UnsetQuantizer();
