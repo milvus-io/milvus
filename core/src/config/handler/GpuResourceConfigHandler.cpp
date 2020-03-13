@@ -48,7 +48,8 @@ void
 GpuResourceConfigHandler::AddGpuCacheCapacityListener() {
     ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         if (!gpu_enable_) {
-            std::string msg = std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
+            std::string msg =
+                std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_CACHE_CAPACITY;
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
 
@@ -70,7 +71,8 @@ GpuResourceConfigHandler::AddGpuBuildResourcesListener() {
     auto& config = Config::GetInstance();
     ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         if (!gpu_enable_) {
-            std::string msg = std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES;
+            std::string msg =
+                std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES;
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
 
@@ -82,7 +84,7 @@ GpuResourceConfigHandler::AddGpuBuildResourcesListener() {
 
         return status;
     };
-    config.RegisterCallBack(CONFIG_GPU_RESOURCE,CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_,lambda);
+    config.RegisterCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, identity_, lambda);
 }
 
 void
@@ -91,7 +93,8 @@ GpuResourceConfigHandler::AddGpuSearchThresholdListener() {
 
     ConfigCallBackF lambda_gpu_threshold = [this](const std::string& value) -> Status {
         if (!gpu_enable_) {
-            std::string msg = std::string("GPU resources is disable. Cannot set config ") + CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
+            std::string msg =
+                std::string("GPU resources is disable. Cannot set config ") + CONFIG_ENGINE_GPU_SEARCH_THRESHOLD;
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
 
@@ -103,8 +106,7 @@ GpuResourceConfigHandler::AddGpuSearchThresholdListener() {
 
         return status;
     };
-    config.RegisterCallBack(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_,
-                            lambda_gpu_threshold);
+    config.RegisterCallBack(CONFIG_ENGINE, CONFIG_ENGINE_GPU_SEARCH_THRESHOLD, identity_, lambda_gpu_threshold);
 }
 
 void
@@ -113,7 +115,8 @@ GpuResourceConfigHandler::AddGpuSearchResourcesListener() {
 
     ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         if (!gpu_enable_) {
-            std::string msg = std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
+            std::string msg =
+                std::string("GPU resources is disable. Cannot set config ") + CONFIG_GPU_RESOURCE_SEARCH_RESOURCES;
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
 
@@ -125,8 +128,7 @@ GpuResourceConfigHandler::AddGpuSearchResourcesListener() {
 
         return status;
     };
-    config.RegisterCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_,
-                            lambda);
+    config.RegisterCallBack(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_SEARCH_RESOURCES, identity_, lambda);
 }
 
 void

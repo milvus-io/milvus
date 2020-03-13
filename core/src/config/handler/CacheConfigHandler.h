@@ -24,13 +24,16 @@ class CacheConfigHandler : virtual public ConfigHandler {
 
  protected:
     virtual void
-    OnCpuCacheCapacityChanged(int64_t value) {}
+    OnCpuCacheCapacityChanged(int64_t value) {
+    }
 
     virtual void
-    OnInsertBufferSizeChanged(int64_t value) {}
+    OnInsertBufferSizeChanged(int64_t value) {
+    }
 
     virtual void
-    OnCacheInsertDataChanged(bool value) {}
+    OnCacheInsertDataChanged(bool value) {
+    }
 
  protected:
     void

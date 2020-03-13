@@ -14,6 +14,7 @@
 #include <exception>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "config/Config.h"
 #include "config/handler/ConfigHandler.h"
@@ -29,19 +30,24 @@ class GpuResourceConfigHandler : virtual public ConfigHandler {
 
  protected:
     virtual void
-    OnGpuEnableChanged(bool enable) {}
+    OnGpuEnableChanged(bool enable) {
+    }
 
     virtual void
-    OnGpuCacheCapacityChanged(int64_t capacity) {}
+    OnGpuCacheCapacityChanged(int64_t capacity) {
+    }
 
     virtual void
-    OnGpuBuildResChanged(const std::vector<int64_t>& gpus) {}
+    OnGpuBuildResChanged(const std::vector<int64_t>& gpus) {
+    }
 
     virtual void
-    OnGpuSearchThresholdChanged(int64_t threshold) {}
+    OnGpuSearchThresholdChanged(int64_t threshold) {
+    }
 
     virtual void
-    OnGpuSearchResChanged(const std::vector<int64_t>& gpus) {}
+    OnGpuSearchResChanged(const std::vector<int64_t>& gpus) {
+    }
 
  protected:
     void

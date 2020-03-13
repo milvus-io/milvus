@@ -26,7 +26,8 @@ EngineConfigHandler::~EngineConfigHandler() {
 }
 
 //////////////////////////// Listener methods //////////////////////////////////
-void EngineConfigHandler::AddUseBlasThresholdListener() {
+void
+EngineConfigHandler::AddUseBlasThresholdListener() {
     ConfigCallBackF lambda = [this](const std::string& value) -> Status {
         auto& config = server::Config::GetInstance();
         auto status = config.GetEngineConfigUseBlasThreshold(use_blas_threshold_);
@@ -39,10 +40,10 @@ void EngineConfigHandler::AddUseBlasThresholdListener() {
 
     auto& config = Config::GetInstance();
     config.RegisterCallBack(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, identity_, lambda);
-
 }
 
-void EngineConfigHandler::RemoveUseBlasThresholdListener() {
+void
+EngineConfigHandler::RemoveUseBlasThresholdListener() {
     auto& config = Config::GetInstance();
     config.CancelCallBack(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, identity_);
 }

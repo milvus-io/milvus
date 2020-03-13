@@ -25,7 +25,8 @@ class EngineConfigHandler : virtual public ConfigHandler {
 
  protected:
     virtual void
-    OnUseBlasThresholdChanged(int64_t threshold) {}
+    OnUseBlasThresholdChanged(int64_t threshold) {
+    }
 
  protected:
     void
@@ -41,4 +42,3 @@ class EngineConfigHandler : virtual public ConfigHandler {
 
 }  // namespace server
 }  // namespace milvus
-
