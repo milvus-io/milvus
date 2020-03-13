@@ -10,17 +10,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/gpu/GpuIndexIVF.h>
+#include <faiss/index_factory.h>
+#include <fiu-local.h>
+#include <utility>
+
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-
-#include <utility>
-
-#include <faiss/gpu/GpuCloner.h>
-#include <faiss/gpu/GpuIndexIVF.h>
-#include <faiss/index_factory.h>
 
 namespace knowhere {
 
@@ -220,7 +220,7 @@ IVFSQHybrid::SerializeImpl(const IndexType& type) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    // fiu_do_on("IVFSQHybrid.SerializeImpl.zero_gpu_mode", gpu_mode = 0);
+    fiu_do_on("IVFSQHybrid.SerializeImpl.zero_gpu_mode", gpu_mode_ = 0);
     if (gpu_mode_ == 0) {
         MemoryIOWriter writer;
         faiss::write_index(index_.get(), &writer);
