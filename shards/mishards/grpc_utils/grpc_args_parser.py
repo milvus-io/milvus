@@ -1,3 +1,4 @@
+import ujson
 from milvus import Status
 from functools import wraps
 
@@ -21,14 +22,13 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_TableSchema(cls, param):
         _table_schema = {
-            'status': param.status,
-            'table_name': param.table_name,
+            'collection_name': param.table_name,
             'dimension': param.dimension,
             'index_file_size': param.index_file_size,
             'metric_type': param.metric_type
         }
 
-        return _table_schema
+        return param.status, _table_schema
 
     @classmethod
     @error_status
@@ -40,7 +40,7 @@ class GrpcArgsParser(object):
     def parse_proto_Index(cls, param):
         _index = {
             'index_type': param.index_type,
-            'nlist': param.nlist
+            'params': param.extra_params[0].value
         }
 
         return _index
@@ -49,12 +49,14 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_IndexParam(cls, param):
         _table_name = param.table_name
-        _status, _index = cls.parse_proto_Index(param.index)
+        _index_type = param.index_type
+        _index_param = {}
 
-        if not _status.OK():
-            raise Exception("Argument parse error")
+        for params in param.extra_params:
+            if params.key == 'params':
+                _index_param = ujson.loads(str(params.value))
 
-        return _table_name, _index
+        return _table_name, _index_type, _index_param
 
     @classmethod
     @error_status
