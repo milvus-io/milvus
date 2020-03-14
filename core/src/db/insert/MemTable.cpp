@@ -12,8 +12,8 @@
 #include "db/insert/MemTable.h"
 
 #include <cache/CpuCacheMgr.h>
+#include <knowhere/index/vector_index/VecIndex.h>
 #include <segment/SegmentReader.h>
-#include <wrapper/VecIndex.h>
 
 #include <algorithm>
 #include <chrono>
@@ -244,11 +244,11 @@ MemTable::ApplyDeletes() {
         }
 
         // Get all index that contains blacklist in cache
-        std::vector<VecIndexPtr> indexes;
+        std::vector<knowhere::VecIndexPtr> indexes;
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
         for (auto& file : segment_files) {
             auto index =
-                std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_));
+                std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_));
             faiss::ConcurrentBitsetPtr blacklist = nullptr;
             if (index != nullptr) {
                 index->GetBlacklist(blacklist);

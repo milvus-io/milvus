@@ -30,11 +30,16 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
-#include "wrapper/BinVecImpl.h"
-#include "wrapper/ConfAdapter.h"
-#include "wrapper/ConfAdapterMgr.h"
-#include "wrapper/VecImpl.h"
-#include "wrapper/VecIndex.h"
+//#include "knowhere/index/vector_index/BinVecImpl.h"
+#include "knowhere/index/vector_index/gpu/Quantizer.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_index/ConfAdapter.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
 
 //#define ON_SEARCH
 namespace milvus {
@@ -68,8 +73,8 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
 }
 
 bool
-IsBinaryIndexType(IndexType type) {
-    return type == IndexType::FAISS_BIN_IDMAP || type == IndexType::FAISS_BIN_IVFLAT_CPU;
+IsBinaryIndexType(knowhere::IndexType type) {
+    return type == knowhere::IndexType::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexType::INDEX_FAISS_BIN_IVFFLAT;
 }
 
 }  // namespace
@@ -112,23 +117,19 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     conf[knowhere::meta::DIM] = dimension;
     MappingMetricType(metric_type, conf);
     ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
     if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
 
-    ErrorCode ec = KNOWHERE_UNEXPECTED_ERROR;
-    if (auto bf_index = std::dynamic_pointer_cast<BFIndex>(index_)) {
-        ec = bf_index->Build(conf);
-    } else if (auto bf_bin_index = std::dynamic_pointer_cast<BinBFIndex>(index_)) {
-        ec = bf_bin_index->Build(conf);
-    }
-    if (ec != KNOWHERE_SUCCESS) {
-        throw Exception(DB_ERROR, "Build index error");
+    if (auto bf_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
+        bf_index->Train(knowhere::DatasetPtr(), conf);
+    } else if (auto bf_bin_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {
+        bf_bin_index->Train(knowhere::DatasetPtr(), conf);
     }
 }
 
-ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
+ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
                                          MetricType metric_type, const milvus::json& index_params)
     : index_(std::move(index)),
       location_(location),
@@ -137,105 +138,93 @@ ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& l
       index_params_(index_params) {
 }
 
-VecIndexPtr
+knowhere::VecIndexPtr
 ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+    knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
+    knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
     fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled", gpu_resource_enable = false);
+    if (gpu_resource_enable) {
+        mode = knowhere::IndexMode::MODE_GPU;
+    }
 #endif
 
     fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.invalid_type", type = EngineType::INVALID);
-    std::shared_ptr<VecIndex> index;
+    knowhere::VecIndexPtr index = nullptr;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
-            index = GetVecIndexFactory(IndexType::FAISS_IDMAP);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IDMAP, mode);
             break;
         }
         case EngineType::FAISS_IVFFLAT: {
-#ifdef MILVUS_GPU_VERSION
-            if (gpu_resource_enable)
-                index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
-            else
-#endif
-                index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFFLAT, mode);
+            break;
+        }
+        case EngineType::FAISS_PQ: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFPQ, mode);
             break;
         }
         case EngineType::FAISS_IVFSQ8: {
-#ifdef MILVUS_GPU_VERSION
-            if (gpu_resource_enable)
-                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
-            else
-#endif
-                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_CPU);
-            break;
-        }
-        case EngineType::NSG_MIX: {
-            index = GetVecIndexFactory(IndexType::NSG_MIX);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
 #ifdef CUSTOMIZATION
 #ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
-            if (gpu_resource_enable) {
-                index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
-            } else {
-                throw Exception(DB_ERROR, "No GPU resources for IVFSQ8H");
-            }
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_IVFSQ8H, mode);
             break;
         }
 #endif
 #endif
-        case EngineType::FAISS_PQ: {
-#ifdef MILVUS_GPU_VERSION
-            if (gpu_resource_enable)
-                index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_MIX);
-            else
-#endif
-                index = GetVecIndexFactory(IndexType::FAISS_IVFPQ_CPU);
-            break;
-        }
-        case EngineType::SPTAG_KDT: {
-            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
-            break;
-        }
-        case EngineType::SPTAG_BKT: {
-            index = GetVecIndexFactory(IndexType::SPTAG_BKT_RNT_CPU);
-            break;
-        }
-        case EngineType::HNSW: {
-            index = GetVecIndexFactory(IndexType::HNSW);
-            break;
-        }
         case EngineType::FAISS_BIN_IDMAP: {
-            index = GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_BIN_IDMAP, mode);
             break;
         }
         case EngineType::FAISS_BIN_IVFFLAT: {
-            index = GetVecIndexFactory(IndexType::FAISS_BIN_IVFLAT_CPU);
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_FAISS_BIN_IVFFLAT, mode);
+            break;
+        }
+        case EngineType::NSG_MIX: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_NSG, mode);
+            break;
+        }
+        case EngineType::SPTAG_KDT: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_SPTAG_KDT_RNT, mode);
+            break;
+        }
+        case EngineType::SPTAG_BKT: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_SPTAG_BKT_RNT, mode);
+            break;
+        }
+        case EngineType::HNSW: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexType::INDEX_HNSW, mode);
             break;
         }
         default: {
-            ENGINE_LOG_ERROR << "Unsupported index type";
+            ENGINE_LOG_ERROR << "Unsupported index type " << type;
             return nullptr;
         }
+    }
+    if (index == nullptr) {
+        std::string err_msg = "Invalid index type " + std::to_string((int)type) + " mod " + std::to_string((int)mode);
+        ENGINE_LOG_ERROR << err_msg;
+        throw Exception(DB_ERROR, err_msg);
     }
     return index;
 }
 
 void
 ExecutionEngineImpl::HybridLoad() const {
-    if (index_type_ != EngineType::FAISS_IVFSQ8H) {
-        return;
-    }
-
-    if (index_->GetType() == IndexType::FAISS_IDMAP) {
-        ENGINE_LOG_WARNING << "HybridLoad with type FAISS_IDMAP, ignore";
-        return;
-    }
-
 #ifdef MILVUS_GPU_VERSION
+    auto hybrid_index = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_);
+    if (hybrid_index == nullptr) {
+        ENGINE_LOG_WARNING << "HybridLoad only support with IVFSQHybrid";
+        return;
+    }
+
     const std::string key = location_ + ".quantizer";
 
     server::Config& config = server::Config::GetInstance();
@@ -261,7 +250,7 @@ ExecutionEngineImpl::HybridLoad() const {
         }
 
         if (device_id != NOT_FOUND) {
-            index_->SetQuantizer(quantizer);
+            hybrid_index->SetQuantizer(quantizer);
             return;
         }
     }
@@ -280,12 +269,12 @@ ExecutionEngineImpl::HybridLoad() const {
         auto best_device_id = gpus[best_index];
 
         milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
-        auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        auto quantizer = hybrid_index->LoadQuantizer(quantizer_conf);
         ENGINE_LOG_DEBUG << "Quantizer params: " << quantizer_conf.dump();
         if (quantizer == nullptr) {
             ENGINE_LOG_ERROR << "quantizer is nullptr";
         }
-        index_->SetQuantizer(quantizer);
+        hybrid_index->SetQuantizer(quantizer);
         auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
         cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
     }
@@ -410,7 +399,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                                                             : GetVecIndexFactory(IndexType::FAISS_BIN_IDMAP);
             milvus::json conf{{knowhere::meta::DEVICEID, gpu_num_}, {knowhere::meta::DIM, dim_}};
             MappingMetricType(metric_type_, conf);
-            auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+            auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
             ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
             if (!adapter->CheckTrain(conf)) {
                 throw Exception(DB_ERROR, "Illegal index params");
@@ -730,7 +719,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
     ENGINE_LOG_DEBUG << "Index params: " << conf.dump();
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type(), to_index->index_mode());
     if (!adapter->CheckTrain(conf)) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
@@ -838,9 +827,9 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
-    if (!adapter->CheckSearch(conf, index_->GetType())) {
+    if (!adapter->CheckSearch(conf, index_->index_type())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
 
@@ -849,7 +838,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 
     rc.RecordSection("search prepare");
-    auto status = index_->Search(n, data, distances, labels, conf);
+    auto status = index_->Query(n, data, distances, labels, conf);
     rc.RecordSection("search done");
 
     // map offsets to ids
@@ -880,9 +869,9 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
-    if (!adapter->CheckSearch(conf, index_->GetType())) {
+    if (!adapter->CheckSearch(conf, index_->index_type())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
 
@@ -891,7 +880,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     }
 
     rc.RecordSection("search prepare");
-    auto status = index_->Search(n, data, distances, labels, conf);
+    auto status = index_->Query(n, data, distances, labels, conf);
     rc.RecordSection("search done");
 
     // map offsets to ids
@@ -922,9 +911,9 @@ ExecutionEngineImpl::Search(int64_t n, const std::vector<int64_t>& ids, int64_t 
 
     milvus::json conf = extra_params;
     conf[knowhere::meta::TOPK] = k;
-    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type(), index_->index_mode());
     ENGINE_LOG_DEBUG << "Search params: " << conf.dump();
-    if (!adapter->CheckSearch(conf, index_->GetType())) {
+    if (!adapter->CheckSearch(conf, index_->index_type())) {
         throw Exception(DB_ERROR, "Illegal search params");
     }
 
