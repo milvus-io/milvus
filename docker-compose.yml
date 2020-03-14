@@ -40,8 +40,8 @@ services:
       - milvus
     command: &ubuntu-command >
       /bin/bash -c "
-        /milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} -l -u -c --with_fiu
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql
+        /milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} -l -u -c --with_fiu &&
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
         /milvus/ci/scripts/coverage.sh"
 
   centos-core:
@@ -61,8 +61,8 @@ services:
       - milvus
     command: &centos-command >
       /bin/bash --login -c "
-        /milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} -l -u -c --with_fiu
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql
+        /milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} -l -u -c --with_fiu &&
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
         /milvus/ci/scripts/coverage.sh"
 
 networks:
