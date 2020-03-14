@@ -17,3 +17,9 @@ RUN echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.
 RUN echo "source scl_source enable llvm-toolset-7.0" >> /etc/profile.d/llvm-toolset-7.sh
 
 ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-7.0/root/usr/bin"
+
+# use login shell to activate environment un the RUN commands
+SHELL [ "/bin/bash", "-c", "-l" ]
+
+# use login shell when running the container
+ENTRYPOINT [ "/bin/bash", "-c", "-l" ]
