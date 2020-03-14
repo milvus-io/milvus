@@ -12,6 +12,7 @@ else:
     env.read_env()
 
 
+SERVER_VERSIONS = ['0.6.0']
 DEBUG = env.bool('DEBUG', False)
 MAX_RETRY = env.int('MAX_RETRY', 3)
 
@@ -26,6 +27,7 @@ config(LOG_LEVEL, LOG_PATH, LOG_NAME, TIMEZONE)
 SERVER_PORT = env.int('SERVER_PORT', 19530)
 SERVER_TEST_PORT = env.int('SERVER_TEST_PORT', 19530)
 WOSERVER = env.str('WOSERVER')
+MAX_WORKERS = env.int('MAX_WORKERS', 50)
 
 
 class TracingConfig:

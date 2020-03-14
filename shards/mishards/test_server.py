@@ -14,6 +14,8 @@ from mishards.service_handler import ServiceHandler
 from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
 from mishards.factories import TableFilesFactory, TablesFactory, TableFiles, Tables
 from mishards.router import RouterMixin
+from mishards.connections import (ConnectionMgr, Connection,
+        ConnectionPool, ConnectionTopology, ConnectionGroup)
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +25,12 @@ BAD = Status(code=Status.PERMISSION_DENIED, message='Fail')
 
 @pytest.mark.usefixtures('started_app')
 class TestServer:
+
     @property
     def client(self):
         m = Milvus()
         m.connect(host='localhost', port=settings.SERVER_TEST_PORT)
         return m
-
-    def test_server_start(self, started_app):
-        assert started_app.conn_mgr.metas.get('WOSERVER') == settings.WOSERVER
 
     def test_cmd(self, started_app):
         ServiceHandler._get_server_version = mock.MagicMock(return_value=(OK,
@@ -228,6 +228,7 @@ class TestServer:
     def random_data(self, n, dimension):
         return [[random.random() for _ in range(dimension)] for _ in range(n)]
 
+    @pytest.mark.skip
     def test_search(self, started_app):
         table_name = inspect.currentframe().f_code.co_name
         to_index_cnt = random.randint(10, 20)
