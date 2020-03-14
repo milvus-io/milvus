@@ -29,6 +29,6 @@ extern sq_sel_func_ptr sq_sel_quantizer;
 
 extern bool support_avx512();
 
-extern std::string hook_init();
+extern bool hook_init(std::string& cpu_flag);
 
 } // namespace faiss
